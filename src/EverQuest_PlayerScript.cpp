@@ -40,19 +40,15 @@ public:
             return;
         Creature* victimCreature = victim->ToCreature();
 
-        LOG_INFO("server.loading", "1");
-
         // Grab the kill rewards, and apply any in the list
         list<CreatureOnkillReputation> onkillReputations = EverQuest->GetOnkillReputationsForCreatureTemplate(victimCreature->GetCreatureTemplate()->Entry);
         for (auto& onkillReputation : onkillReputations)
         {
-            LOG_INFO("server.loading", "2 FactionID:{}", onkillReputation.FactionID);
             float repChange = player->CalculateReputationGain(REPUTATION_SOURCE_KILL, victim->GetLevel(), static_cast<float>(onkillReputation.KillRewardValue), onkillReputation.FactionID);
 
             FactionEntry const* factionEntry = sFactionStore.LookupEntry(onkillReputation.FactionID);
             if (factionEntry && repChange != 0)
             {
-                LOG_INFO("server.loading", "3 repChange:{}", repChange);
                 player->GetReputationMgr().ModifyReputation(factionEntry, repChange, false, static_cast<ReputationRank>(7));
             }
         }
