@@ -16,17 +16,46 @@
 
 #include "Player.h"
 #include "ScriptMgr.h"
+#include "ReputationMgr.h"
+
+#include "EverQuest.h"
+
+#include <list>
+#include <map>
 
 using namespace std;
+
+
 
 class EverQuest_PlayerScript : public PlayerScript
 {
 public:
     EverQuest_PlayerScript() : PlayerScript("EverQuest_PlayerScript") {}
 
-    void OnRewardKillRewarder(Player* /*player*/, KillRewarder* /*rewarder*/, bool /*isDungeon*/, float& /*rate*/)
+    void OnRewardKillRewarder(Player* player, KillRewarder* rewarder, bool /*isDungeon*/, float& /*rate*/)
     {
+        // Skip invalid victims
+        Unit* victim = rewarder->GetVictim();
+        if (!victim || victim->IsPlayer() || victim->ToCreature()->IsReputationGainDisabled())
+            return;
+        Creature* victimCreature = victim->ToCreature();
 
+        LOG_INFO("server.loading", "1");
+
+        // Grab the kill rewards, and apply any in the list
+        list<CreatureOnkillReputation> onkillReputations = EverQuest->GetOnkillReputationsForCreatureTemplate(victimCreature->GetCreatureTemplate()->Entry);
+        for (auto& onkillReputation : onkillReputations)
+        {
+            LOG_INFO("server.loading", "2 FactionID:{}", onkillReputation.FactionID);
+            float repChange = player->CalculateReputationGain(REPUTATION_SOURCE_KILL, victim->GetLevel(), static_cast<float>(onkillReputation.KillRewardValue), onkillReputation.FactionID);
+
+            FactionEntry const* factionEntry = sFactionStore.LookupEntry(onkillReputation.FactionID);
+            if (factionEntry && repChange != 0)
+            {
+                LOG_INFO("server.loading", "3 repChange:{}", repChange);
+                player->GetReputationMgr().ModifyReputation(factionEntry, repChange, false, static_cast<ReputationRank>(7));
+            }
+        }
     }
 };
 

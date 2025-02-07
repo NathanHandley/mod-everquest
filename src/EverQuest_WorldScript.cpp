@@ -14,11 +14,25 @@
 //  You should have received a copy of the GNU General Public License
 //  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-void AddEverQuestPlayerScripts();
-void AddEverQuestWorldScripts();
+#include "Configuration/Config.h"
+#include "ScriptMgr.h"
 
-void Addmod_everquestScripts()
+#include "EverQuest.h"
+
+using namespace std;
+
+class EverQuest_WorldScript: public WorldScript
 {
-    AddEverQuestWorldScripts();
-    AddEverQuestPlayerScripts();    
+public:
+    EverQuest_WorldScript() : WorldScript("EverQuest_WorldScript") {}
+
+    void OnAfterConfigLoad(bool /*reload*/) override
+    {
+        EverQuest->LoadCreatureOnkillReputations();
+    }
+};
+
+void AddEverQuestWorldScripts()
+{
+    new EverQuest_WorldScript();
 }

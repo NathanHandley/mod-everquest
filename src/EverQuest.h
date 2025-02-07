@@ -14,11 +14,44 @@
 //  You should have received a copy of the GNU General Public License
 //  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-void AddEverQuestPlayerScripts();
-void AddEverQuestWorldScripts();
+#ifndef EVERQUEST_H
+#define EVERQUEST_H
 
-void Addmod_everquestScripts()
+#include "Common.h"
+
+#include <list>
+#include <map>
+
+using namespace std;
+
+class CreatureOnkillReputation
 {
-    AddEverQuestWorldScripts();
-    AddEverQuestPlayerScripts();    
-}
+public:
+    uint32 CreatureTemplateID;
+    uint8 SortOrder;
+    uint32 FactionID;
+    int32 KillRewardValue;
+};
+
+class EverQuestMod
+{
+private:
+    EverQuestMod();
+
+public:
+    map<uint32, list<CreatureOnkillReputation>> CreatureOnkillReputationsByCreatureTemplateID;
+
+    static EverQuestMod* instance()
+    {
+        static EverQuestMod instance;
+        return &instance;
+    }
+    ~EverQuestMod();
+
+    void LoadCreatureOnkillReputations();
+    list<CreatureOnkillReputation> GetOnkillReputationsForCreatureTemplate(uint32 creatureTemplateID);
+};
+
+#define EverQuest EverQuestMod::instance()
+
+#endif //EVERQUEST
