@@ -14,13 +14,20 @@
 //  You should have received a copy of the GNU General Public License
 //  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-void AddEverQuestPlayerScripts();
-void AddEverQuestWorldScripts();
-void AddEverQuestUnitScripts();
+#include "Unit.h"
+#include "ScriptMgr.h"
 
-void Addmod_everquestScripts()
+#include "EverQuest.h"
+
+using namespace std;
+
+class EverQuest_UnitScript : public UnitScript
 {
-    AddEverQuestWorldScripts();
-    AddEverQuestPlayerScripts();
-    AddEverQuestUnitScripts();
+public:
+    EverQuest_UnitScript() : UnitScript("EverQuest_UnitScript") {}
+};
+
+void AddEverQuestUnitScripts()
+{
+    new EverQuest_UnitScript();
 }
