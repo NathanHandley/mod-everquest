@@ -40,6 +40,7 @@ private:
 
 public:
     map<uint32, list<CreatureOnkillReputation>> CreatureOnkillReputationsByCreatureTemplateID;
+    uint32 DruidHunterFriendlyFactionTemplateID;
 
     static EverQuestMod* instance()
     {

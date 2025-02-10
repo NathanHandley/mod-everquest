@@ -14,28 +14,15 @@
 //  You should have received a copy of the GNU General Public License
 //  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-//#include "Chat.h"
-//#include "Player.h"
-//#include "StringConvert.h"
-//#include "Tokenize.h"
-//
-//#include "MultiClass.h"
-//
-//#include <set>
-//#include <list>
-
 #include "Chat.h"
 
 #include "EverQuest.h"
 
-//using namespace Acore::ChatCommands;
 using namespace std;
-
-
 
 EverQuestMod::EverQuestMod()
 {
-
+    DruidHunterFriendlyFactionTemplateID = 2301; // TODO: Put in config
 }
 
 EverQuestMod::~EverQuestMod()
