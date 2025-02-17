@@ -32,7 +32,7 @@ class EverQuest_PlayerScript : public PlayerScript
 public:
     EverQuest_PlayerScript() : PlayerScript("EverQuest_PlayerScript") {}
 
-    void OnRewardKillRewarder(Player* player, KillRewarder* rewarder, bool /*isDungeon*/, float& /*rate*/)
+    void OnPlayerRewardKillRewarder(Player* player, KillRewarder* rewarder, bool /*isDungeon*/, float& /*rate*/) override
     {
         // Skip invalid victims
         Unit* victim = rewarder->GetVictim();
