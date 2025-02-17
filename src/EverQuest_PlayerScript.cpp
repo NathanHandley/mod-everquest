@@ -36,7 +36,7 @@ public:
     {
         // Skip invalid victims
         Unit* victim = rewarder->GetVictim();
-        if (!victim || victim->IsPlayer() || victim->ToCreature()->IsReputationGainDisabled())
+        if (!victim || victim->IsPlayer() || victim->ToCreature()->IsReputationRewardDisabled())
             return;
         Creature* victimCreature = victim->ToCreature();
 
