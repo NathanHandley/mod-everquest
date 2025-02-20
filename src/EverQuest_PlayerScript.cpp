@@ -18,14 +18,14 @@
 #include "ScriptMgr.h"
 #include "ReputationMgr.h"
 
+#include "GameGraveyard.h"
+
 #include "EverQuest.h"
 
 #include <list>
 #include <map>
 
 using namespace std;
-
-
 
 class EverQuest_PlayerScript : public PlayerScript
 {
@@ -50,6 +50,25 @@ public:
             if (factionEntry && repChange != 0)
             {
                 player->GetReputationMgr().ModifyReputation(factionEntry, repChange, false, static_cast<ReputationRank>(7));
+            }
+        }
+    }
+
+    void OnPlayerBeforeChooseGraveyard(Player* player, TeamId teamId, bool nearCorpse, uint32& graveyardOverride) override
+    {
+        // If the player's corpse is in a different zone than the player, then use the player zone (by setting nearcorpse to false)
+        if (nearCorpse == true && player->HasCorpse())
+        {
+            WorldLocation playerLocation = player->GetWorldLocation();
+            WorldLocation playerCorpseLocation = player->GetCorpseLocation();
+            if (playerLocation.GetMapId() != playerCorpseLocation.GetMapId())
+            {
+                GraveyardStruct const* ClosestGrave = sGraveyard->GetClosestGraveyard(player, teamId, false);
+                if (ClosestGrave != nullptr)
+                {
+                    graveyardOverride = ClosestGrave->ID;
+                    return;
+                }
             }
         }
     }
