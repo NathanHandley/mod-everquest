@@ -64,3 +64,53 @@ list<CreatureOnkillReputation> EverQuestMod::GetOnkillReputationsForCreatureTemp
         return returnEmpty;
     }
 }
+
+void EverQuestMod::SendPlayerToEQBindHome(Player* player)
+{
+    // Pull the bind position
+    QueryResult queryResult = CharacterDatabase.Query("SELECT mapId, zoneId, posX, posY, posZ FROM mod_everquest_character_homebind WHERE guid = {}", player->GetGUID().GetCounter());
+    if (!queryResult || queryResult->GetRowCount() == 0)
+    {
+        ChatHandler(player->GetSession()).PSendSysMessage("You have no bind point in Norrath. Spell failed.");
+        return;
+    }
+
+    // Pull the fields out
+    Field* fields = queryResult->Fetch();
+    uint32 mapId = fields[0].Get<uint32>();
+    uint32 zoneId = fields[1].Get<uint32>();
+    float posX = fields[2].Get<float>();
+    float posY = fields[3].Get<float>();
+    float posZ = fields[4].Get<float>();
+
+    // Teleport the player
+    player->TeleportTo({mapId, {posX, posY, posZ, player->GetOrientation()}});
+}
+
+void EverQuestMod::SetNewBindHome(Player* player)
+{
+    // Fail if there is no map, or if the map is invalid
+    if (player->GetMap() == nullptr)
+        return;
+
+    // Set up the transaction
+    CharacterDatabaseTransaction transaction = CharacterDatabase.BeginTransaction();
+
+    // Delete the old record, if it exists
+    transaction->Append("DELETE FROM `mod_everquest_character_homebind` WHERE guid = {}", player->GetGUID().GetCounter());
+
+    // Add the new binding
+    float playerX = player->GetPosition().GetPositionX();
+    float playerY = player->GetPosition().GetPositionY();
+    float playerZ = player->GetPosition().GetPositionZ();
+    int mapID = player->GetMap()->GetId();
+    int zoneID = player->GetAreaId();
+    transaction->Append("INSERT INTO `mod_everquest_character_homebind` (`guid`, `mapId`, `zoneId`, `posX`, `posY`, `posZ`) VALUES ({}, {}, {}, {}, {}, {})",
+        player->GetGUID().GetCounter(), mapID, zoneID, playerX, playerY, playerZ);
+
+    // Commit the transaction
+    CharacterDatabase.CommitTransaction(transaction);
+
+    // Send a message to the player
+    ChatHandler(player->GetSession()).PSendSysMessage("You feel yourself bind to the area.");
+}

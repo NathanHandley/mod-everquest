@@ -14,12 +14,11 @@
 //  You should have received a copy of the GNU General Public License
 //  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-#include "Chat.h"
-#include "GameGraveyard.h"
 #include "Player.h"
-#include "ReputationMgr.h"
 #include "ScriptMgr.h"
-#include "Spell.h"
+#include "ReputationMgr.h"
+
+#include "GameGraveyard.h"
 
 #include "EverQuest.h"
 
@@ -71,28 +70,6 @@ public:
                     return;
                 }
             }
-        }
-    }
-
-    void OnPlayerSpellCast(Player* player, Spell* spell, bool skipCheck) override
-    {
-        if (spell == nullptr)
-            return;
-        else if (spell->m_spellInfo->Id == CONFIG_SPELLS_GATE_SPELLDBC_ID)
-            EverQuest->SendPlayerToEQBindHome(player);
-        else if (spell->m_spellInfo->Id == CONFIG_SPELLS_BIND_SPELLDBC_ID)
-        {
-            // Make sure it only works in EverQuest zones
-            if (player->GetMap() != nullptr)
-            {
-                uint32 mapID = player->GetMap()->GetId();
-                if (mapID < CONFIG_SPELLS_BIND_MIN_MAP_ID || mapID > CONFIG_SPELLS_BIND_MAX_MAP_ID)
-                {
-                    ChatHandler(player->GetSession()).PSendSysMessage("The spell failed, as it only works in Norrath.");
-                    return;
-                }
-            }
-            EverQuest->SetNewBindHome(player);
         }
     }
 };
