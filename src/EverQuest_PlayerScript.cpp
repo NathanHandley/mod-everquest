@@ -16,6 +16,8 @@
 
 #include "Chat.h"
 #include "GameGraveyard.h"
+#include "ObjectAccessor.h"
+#include "ObjectGuid.h"
 #include "Player.h"
 #include "ReputationMgr.h"
 #include "ScriptMgr.h"
@@ -84,19 +86,32 @@ public:
             return;
         else if (spell->m_spellInfo->Id == CONFIG_SPELLS_GATE_SPELLDBC_ID)
             EverQuest->SendPlayerToEQBindHome(player);
-        else if (spell->m_spellInfo->Id == CONFIG_SPELLS_BIND_SPELLDBC_ID)
+        else if (spell->m_spellInfo->Id == CONFIG_SPELLS_BINDSELF_SPELLDBC_ID || spell->m_spellInfo->Id == CONFIG_SPELLS_BINDANY_SPELLDBC_ID)
         {
             // Make sure it only works in EverQuest zones
-            if (player->GetMap() != nullptr)
+            if (player->GetMapId() < CONFIG_SPELLS_BIND_MIN_MAP_ID || player->GetMapId() > CONFIG_SPELLS_BIND_MAX_MAP_ID)
             {
-                uint32 mapID = player->GetMap()->GetId();
-                if (mapID < CONFIG_SPELLS_BIND_MIN_MAP_ID || mapID > CONFIG_SPELLS_BIND_MAX_MAP_ID)
-                {
-                    ChatHandler(player->GetSession()).PSendSysMessage("The spell failed, as it only works in Norrath.");
-                    return;
-                }
+                ChatHandler(player->GetSession()).PSendSysMessage("The spell failed, as it only works in Norrath.");
+                return;
             }
-            EverQuest->SetNewBindHome(player);
+
+            // Use the target if it's the any version
+            if (spell->m_spellInfo->Id == CONFIG_SPELLS_BINDANY_SPELLDBC_ID)
+            {
+                ObjectGuid const target = player->GetTarget();
+                if (target.IsPlayer())
+                {
+                    Player* targetPlayer = ObjectAccessor::GetPlayer(player->GetMap(), target);
+                    if (targetPlayer->GetGUID().GetCounter() == player->GetGUID().GetCounter())
+                        EverQuest->SetNewBindHome(player);
+                    else
+                        EverQuest->SetNewBindHome(targetPlayer);
+                }
+                else
+                    ChatHandler(player->GetSession()).PSendSysMessage("The spell failed, as it requires a target player.");
+            }
+            else if (spell->m_spellInfo->Id == CONFIG_SPELLS_BINDSELF_SPELLDBC_ID)
+                EverQuest->SetNewBindHome(player);
         }
     }
 };

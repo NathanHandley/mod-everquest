@@ -23,7 +23,8 @@
 #include <map>
 
 #define CONFIG_SPELLS_GATE_SPELLDBC_ID 86900 // TODO: put in config
-#define CONFIG_SPELLS_BIND_SPELLDBC_ID 86901 // TODO: put in config
+#define CONFIG_SPELLS_BINDSELF_SPELLDBC_ID 86901 // TODO: put in config
+#define CONFIG_SPELLS_BINDANY_SPELLDBC_ID 86902 // TODO: put in config
 #define CONFIG_SPELLS_BIND_MIN_MAP_ID 750 // TODO: put in config
 #define CONFIG_SPELLS_BIND_MAX_MAP_ID 900 // TODO: put in config
 
