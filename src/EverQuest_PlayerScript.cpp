@@ -57,6 +57,10 @@ public:
 
     void OnPlayerBeforeChooseGraveyard(Player* player, TeamId teamId, bool nearCorpse, uint32& graveyardOverride) override
     {
+        // Skip if there this isn't an EQ zone
+        if (player->GetMapId() < CONFIG_SPELLS_BIND_MIN_MAP_ID || player->GetMapId() > CONFIG_SPELLS_BIND_MAX_MAP_ID)
+            return;
+
         // If the player's corpse is in a different zone than the player, then use the player zone (by setting nearcorpse to false)
         if (nearCorpse == true && player->HasCorpse())
         {
