@@ -114,3 +114,15 @@ void EverQuestMod::SetNewBindHome(Player* player)
     // Send a message to the player
     ChatHandler(player->GetSession()).PSendSysMessage("You feel yourself bind to the area.");
 }
+
+void EverQuestMod::DeletePlayerBindHome(ObjectGuid guid)
+{
+    // Set up the transaction
+    CharacterDatabaseTransaction transaction = CharacterDatabase.BeginTransaction();
+
+    // Delete the old record, if it exists
+    transaction->Append("DELETE FROM `mod_everquest_character_homebind` WHERE guid = {}", guid.GetCounter());
+
+    // Commit the transaction
+    CharacterDatabase.CommitTransaction(transaction);
+}

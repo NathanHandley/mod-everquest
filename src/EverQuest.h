@@ -60,6 +60,7 @@ public:
 
     void SendPlayerToEQBindHome(Player* player);
     void SetNewBindHome(Player* player);
+    void DeletePlayerBindHome(ObjectGuid guid);
 };
 
 #define EverQuest EverQuestMod::instance()

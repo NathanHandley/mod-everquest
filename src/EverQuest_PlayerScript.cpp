@@ -114,6 +114,11 @@ public:
                 EverQuest->SetNewBindHome(player);
         }
     }
+
+    void OnPlayerDelete(ObjectGuid guid, uint32 /*accountId*/) override
+    {
+        EverQuest->DeletePlayerBindHome(guid);
+    }
 };
 
 void AddEverQuestPlayerScripts()
