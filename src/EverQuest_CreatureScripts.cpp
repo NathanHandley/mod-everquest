@@ -14,15 +14,27 @@
 //  You should have received a copy of the GNU General Public License
 //  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-void AddEverQuestPlayerScripts();
-void AddEverQuestWorldScripts();
-void AddEverQuestUnitScripts();
-void AddEverQuestCreatureScripts();
+#include "Player.h"
+#include "CreatureScript.h"
+#include "InstanceScript.h"
 
-void Addmod_everquestScripts()
+#include "EverQuest.h"
+
+using namespace std;
+
+class EverQuest_EastDockmaster : public CreatureScript
 {
-    AddEverQuestWorldScripts();
-    AddEverQuestPlayerScripts();
-    AddEverQuestUnitScripts();
-    AddEverQuestCreatureScripts();
+public:
+    EverQuest_EastDockmaster() : CreatureScript("eq_eastdockmaster") { }
+
+    bool OnGossipSelect(Player* player, Creature* creature, uint32 /*sender*/, uint32 /*action*/) override
+    {
+        // return false to display last windows
+        return false;
+    }
+};
+
+void AddEverQuestCreatureScripts()
+{
+    new EverQuest_EastDockmaster();
 }

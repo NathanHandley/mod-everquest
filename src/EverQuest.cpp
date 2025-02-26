@@ -126,3 +126,30 @@ void EverQuestMod::DeletePlayerBindHome(ObjectGuid guid)
     // Commit the transaction
     CharacterDatabase.CommitTransaction(transaction);
 }
+
+void EverQuestMod::TelePlayerToDockTarget(Player* player, DockmasterTeleTarget teleTarget)
+{
+    switch (teleTarget)
+    {
+    case EastFreeport:
+    {
+        player->TeleportTo(CONFIG_EASTFREEPORT_MAP_ID, -13.707930f * CONFIG_WORLD_SCALE, -1030.772949f * CONFIG_WORLD_SCALE, -55.968700f * CONFIG_WORLD_SCALE, 1.604590f);
+    } break;
+    case OceanOfTearsWest:
+    {
+        player->TeleportTo(CONFIG_OCEANOFTEARS_MAP_ID, -2089.014648f * CONFIG_WORLD_SCALE, 7545.208496f * CONFIG_WORLD_SCALE, 0.032750f * CONFIG_WORLD_SCALE, 1.590430f);
+    } break;
+    case OceanOfTearsEast:
+    {
+        player->TeleportTo(CONFIG_OCEANOFTEARS_MAP_ID, 277.529144f * CONFIG_WORLD_SCALE, -9198.161133f * CONFIG_WORLD_SCALE, 0.031590f * CONFIG_WORLD_SCALE, 0.108470f);
+    } break;
+    case Butcherblock:
+    {
+        player->TeleportTo(CONFIG_BUTCHERBLOCK_MAP_ID, 1353.937012f * CONFIG_WORLD_SCALE, 3243.884521f * CONFIG_WORLD_SCALE, 7.907880f * CONFIG_WORLD_SCALE, 4.751650f);
+    } break;
+    default:
+    {
+        // Do Nothing
+    }
+    }
+}
