@@ -18,6 +18,7 @@
 #define EVERQUEST_H
 
 #include "Common.h"
+#include "ObjectGuid.h"
 
 #include <list>
 #include <map>
