@@ -17,12 +17,10 @@
 void AddEverQuestPlayerScripts();
 void AddEverQuestWorldScripts();
 void AddEverQuestUnitScripts();
-void AddEverQuestCreatureScripts();
 
 void Addmod_everquestScripts()
 {
     AddEverQuestWorldScripts();
     AddEverQuestPlayerScripts();
     AddEverQuestUnitScripts();
-    AddEverQuestCreatureScripts();
 }
