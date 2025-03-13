@@ -21,6 +21,16 @@
 
 #include "EverQuest.h"
 
+#define LIFT_KELETHIN_NORTH_ENTRY                   279902
+#define LIFT_KELETHIN_CENTER_ENTRY                  279903
+#define LIFT_KELETHIN_EAST_ENTRY                    279904
+#define LIFT_KELETHIN_NORTH_TRIGGER_BOTTOM_ENTRY    279905
+#define LIFT_KELETHIN_NORTH_TRIGGER_TOP_ENTRY       279906
+#define LIFT_KELETHIN_CENTER_TRIGGER_BOTTOM_ENTRY   279907
+#define LIFT_KELETHIN_CENTER_TRIGGER_TOP_ENTRY      279908
+#define LIFT_KELETHIN_EAST_TRIGGER_BOTTOM_ENTRY     279909
+#define LIFT_KELETHIN_EAST_TRIGGER_TOP_ENTRY        279910
+
 using namespace std;
 
 class EverQuest_AllGameObjectScript: public AllGameObjectScript
@@ -36,9 +46,9 @@ public:
     {
         switch (go->GetEntry())
         {
-        case 279902: KelethinNorthLiftGUID = go->GetGUID(); break;
-        case 279903: KelethinCenterLiftGUID = go->GetGUID(); break;
-        case 279904: KelethinEastLiftGUID = go->GetGUID(); break;
+        case LIFT_KELETHIN_NORTH_ENTRY: KelethinNorthLiftGUID = go->GetGUID(); break;
+        case LIFT_KELETHIN_CENTER_ENTRY: KelethinCenterLiftGUID = go->GetGUID(); break;
+        case LIFT_KELETHIN_EAST_ENTRY: KelethinEastLiftGUID = go->GetGUID(); break;
         default: break;
         }   
     }
@@ -64,18 +74,18 @@ public:
 
         switch (go->GetEntry())
         {
-        case 279905: // Kelethin North Lift Button - Lower
-        case 279906: // Kelethin North Lift Button - Upper
+        case LIFT_KELETHIN_NORTH_TRIGGER_BOTTOM_ENTRY:
+        case LIFT_KELETHIN_NORTH_TRIGGER_TOP_ENTRY:
         {
             ProcessLiftTrigger(go->GetMap()->GetGameObject(KelethinNorthLiftGUID));
         } break;
-        case 279907: // Kelethin East Lift Button - Lower
-        case 279908: // Kelethin East Lift Button - Upper
+        case LIFT_KELETHIN_CENTER_TRIGGER_BOTTOM_ENTRY:
+        case LIFT_KELETHIN_CENTER_TRIGGER_TOP_ENTRY:
         {
             ProcessLiftTrigger(go->GetMap()->GetGameObject(KelethinCenterLiftGUID));
         } break;
-        case 279909: // Kelethin East Lift Button - Lower
-        case 279910: // Kelethin East Lift Button - Upper
+        case LIFT_KELETHIN_EAST_TRIGGER_BOTTOM_ENTRY:
+        case LIFT_KELETHIN_EAST_TRIGGER_TOP_ENTRY:
         {
             ProcessLiftTrigger(go->GetMap()->GetGameObject(KelethinEastLiftGUID));
         } break;
