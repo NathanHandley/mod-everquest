@@ -31,6 +31,10 @@
 #define LIFT_KELETHIN_EAST_TRIGGER_BOTTOM_ENTRY     279909
 #define LIFT_KELETHIN_EAST_TRIGGER_TOP_ENTRY        279910
 
+#define LIFT_PAINEEL_ENTRY                          279911
+#define LIFT_PAINEEL_TOP_TRIGGER_ENTRY              279912
+#define LIFT_PAINEEL_BOTTOM_TRIGGER_ENTRY           279913
+
 using namespace std;
 
 class EverQuest_AllGameObjectScript: public AllGameObjectScript
@@ -41,6 +45,9 @@ public:
     ObjectGuid KelethinNorthLiftGUID;
     ObjectGuid KelethinCenterLiftGUID;
     ObjectGuid KelethinEastLiftGUID;
+    ObjectGuid PaineelLiftGUID;
+    bool PaineelLiftTriggerTopInitialized = false;
+    bool PaineelLiftTriggerBottomInitialized = false;
 
     void OnGameObjectAddWorld(GameObject* go) override
     {
@@ -49,6 +56,7 @@ public:
         case LIFT_KELETHIN_NORTH_ENTRY: KelethinNorthLiftGUID = go->GetGUID(); break;
         case LIFT_KELETHIN_CENTER_ENTRY: KelethinCenterLiftGUID = go->GetGUID(); break;
         case LIFT_KELETHIN_EAST_ENTRY: KelethinEastLiftGUID = go->GetGUID(); break;
+        case LIFT_PAINEEL_ENTRY: PaineelLiftGUID = go->GetGUID(); break;
         default: break;
         }   
     }
@@ -69,26 +77,47 @@ public:
 
     void OnGameObjectStateChanged(GameObject* go, uint32 state) override
     {
+        // Kelethin lifts
         if (state != 0) // 0 = Pressed, 1 = Released
-            return;
+        {
+            switch (go->GetEntry())
+            {
+            case LIFT_KELETHIN_NORTH_TRIGGER_BOTTOM_ENTRY:
+            case LIFT_KELETHIN_NORTH_TRIGGER_TOP_ENTRY:
+            {
+                ProcessLiftTrigger(go->GetMap()->GetGameObject(KelethinNorthLiftGUID));
+            } break;
+            case LIFT_KELETHIN_CENTER_TRIGGER_BOTTOM_ENTRY:
+            case LIFT_KELETHIN_CENTER_TRIGGER_TOP_ENTRY:
+            {
+                ProcessLiftTrigger(go->GetMap()->GetGameObject(KelethinCenterLiftGUID));
+            } break;
+            case LIFT_KELETHIN_EAST_TRIGGER_BOTTOM_ENTRY:
+            case LIFT_KELETHIN_EAST_TRIGGER_TOP_ENTRY:
+            {
+                ProcessLiftTrigger(go->GetMap()->GetGameObject(KelethinEastLiftGUID));
+            } break;
+            default: break;
+            }
+        }
 
+        // Paineel lifts
         switch (go->GetEntry())
         {
-        case LIFT_KELETHIN_NORTH_TRIGGER_BOTTOM_ENTRY:
-        case LIFT_KELETHIN_NORTH_TRIGGER_TOP_ENTRY:
-        {
-            ProcessLiftTrigger(go->GetMap()->GetGameObject(KelethinNorthLiftGUID));
-        } break;
-        case LIFT_KELETHIN_CENTER_TRIGGER_BOTTOM_ENTRY:
-        case LIFT_KELETHIN_CENTER_TRIGGER_TOP_ENTRY:
-        {
-            ProcessLiftTrigger(go->GetMap()->GetGameObject(KelethinCenterLiftGUID));
-        } break;
-        case LIFT_KELETHIN_EAST_TRIGGER_BOTTOM_ENTRY:
-        case LIFT_KELETHIN_EAST_TRIGGER_TOP_ENTRY:
-        {
-            ProcessLiftTrigger(go->GetMap()->GetGameObject(KelethinEastLiftGUID));
-        } break;
+            case LIFT_PAINEEL_BOTTOM_TRIGGER_ENTRY:
+            {
+                if (PaineelLiftTriggerBottomInitialized == true)
+                    ProcessLiftTrigger(go->GetMap()->GetGameObject(PaineelLiftGUID));
+                else
+                    PaineelLiftTriggerBottomInitialized = true;
+            } break;
+            case LIFT_PAINEEL_TOP_TRIGGER_ENTRY:
+            {
+                if (PaineelLiftTriggerTopInitialized == true)
+                    ProcessLiftTrigger(go->GetMap()->GetGameObject(PaineelLiftGUID));
+                else
+                    PaineelLiftTriggerTopInitialized = true;
+            } break;
         default: break;
         }
     }
