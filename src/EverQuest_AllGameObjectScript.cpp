@@ -46,6 +46,8 @@ public:
     ObjectGuid KelethinCenterLiftGUID;
     ObjectGuid KelethinEastLiftGUID;
     ObjectGuid PaineelLiftGUID;
+    ObjectGuid PaineelLiftTriggerTop;
+    ObjectGuid PaineelLiftTriggerBottom;
     bool PaineelLiftTriggerTopInitialized = false;
     bool PaineelLiftTriggerBottomInitialized = false;
 
@@ -57,6 +59,8 @@ public:
         case LIFT_KELETHIN_CENTER_ENTRY: KelethinCenterLiftGUID = go->GetGUID(); break;
         case LIFT_KELETHIN_EAST_ENTRY: KelethinEastLiftGUID = go->GetGUID(); break;
         case LIFT_PAINEEL_ENTRY: PaineelLiftGUID = go->GetGUID(); break;
+        case LIFT_PAINEEL_TOP_TRIGGER_ENTRY: PaineelLiftTriggerTop = go->GetGUID(); break;
+        case LIFT_PAINEEL_BOTTOM_TRIGGER_ENTRY: PaineelLiftTriggerBottom = go->GetGUID(); break;
         default: break;
         }   
     }
@@ -78,7 +82,7 @@ public:
     void OnGameObjectStateChanged(GameObject* go, uint32 state) override
     {
         // Kelethin lifts
-        if (state != 0) // 0 = Pressed, 1 = Released
+        if (state != 0)
         {
             switch (go->GetEntry())
             {
@@ -106,15 +110,27 @@ public:
         {
             case LIFT_PAINEEL_BOTTOM_TRIGGER_ENTRY:
             {
+                LOG_INFO("server.loading", "Bottom Trigger: {}", state);
                 if (PaineelLiftTriggerBottomInitialized == true)
+                {
                     ProcessLiftTrigger(go->GetMap()->GetGameObject(PaineelLiftGUID));
+                    GameObject* topTrigger = go->GetMap()->GetGameObject(PaineelLiftTriggerTop);
+                    if (topTrigger != nullptr && topTrigger->GetGoState() != go->GetGoState())
+                        topTrigger->SetGoState(go->GetGoState());
+                }
                 else
                     PaineelLiftTriggerBottomInitialized = true;
             } break;
             case LIFT_PAINEEL_TOP_TRIGGER_ENTRY:
             {
+                LOG_INFO("server.loading", "Top Trigger: {}", state);
                 if (PaineelLiftTriggerTopInitialized == true)
+                {
                     ProcessLiftTrigger(go->GetMap()->GetGameObject(PaineelLiftGUID));
+                    GameObject* bottomTrigger = go->GetMap()->GetGameObject(PaineelLiftTriggerBottom);
+                    if (bottomTrigger != nullptr && bottomTrigger->GetGoState() != go->GetGoState())
+                        bottomTrigger->SetGoState(go->GetGoState());
+                }
                 else
                     PaineelLiftTriggerTopInitialized = true;
             } break;
