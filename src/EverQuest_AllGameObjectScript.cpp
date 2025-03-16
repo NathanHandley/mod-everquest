@@ -82,7 +82,7 @@ public:
     void OnGameObjectStateChanged(GameObject* go, uint32 state) override
     {
         // Kelethin lifts
-        if (state != 0)
+        if (state == 0)
         {
             switch (go->GetEntry())
             {
@@ -110,7 +110,6 @@ public:
         {
             case LIFT_PAINEEL_BOTTOM_TRIGGER_ENTRY:
             {
-                LOG_INFO("server.loading", "Bottom Trigger: {}", state);
                 if (PaineelLiftTriggerBottomInitialized == true)
                 {
                     ProcessLiftTrigger(go->GetMap()->GetGameObject(PaineelLiftGUID));
@@ -123,7 +122,6 @@ public:
             } break;
             case LIFT_PAINEEL_TOP_TRIGGER_ENTRY:
             {
-                LOG_INFO("server.loading", "Top Trigger: {}", state);
                 if (PaineelLiftTriggerTopInitialized == true)
                 {
                     ProcessLiftTrigger(go->GetMap()->GetGameObject(PaineelLiftGUID));
