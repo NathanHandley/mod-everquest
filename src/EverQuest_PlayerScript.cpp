@@ -119,6 +119,15 @@ public:
     {
         EverQuest->DeletePlayerBindHome(guid);
     }
+
+    void OnPlayerFirstLogin(Player* player) override
+    {
+        // If the player logged in for the first time and is in a norrath zone, set the bind
+        if (player->GetMap() != nullptr && player->GetMap()->GetId() >= CONFIG_SPELLS_BIND_MIN_MAP_ID && player->GetMap()->GetId() <= CONFIG_SPELLS_BIND_MAX_MAP_ID)
+        {
+            EverQuest->SetNewBindHome(player);
+        }
+    }
 };
 
 void AddEverQuestPlayerScripts()
