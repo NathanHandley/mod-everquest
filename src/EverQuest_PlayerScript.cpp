@@ -128,6 +128,20 @@ public:
             EverQuest->SetNewBindHome(player);
         }
     }
+
+    // Note: this is AFTER the player changes maps
+    void OnPlayerMapChanged(Player* player) override
+    {
+        // Don't do anything if not restricted, or player is a GM
+        if (CONFIG_RESTRICT_PLAYERS_TO_NORRATH == false || player->IsGameMaster() == true)
+            return;
+
+        if (player->GetMap() != nullptr && (player->GetMap()->GetId() < CONFIG_SPELLS_BIND_MIN_MAP_ID || player->GetMap()->GetId() > CONFIG_SPELLS_BIND_MAX_MAP_ID))
+        {
+            EverQuest->SendPlayerToEQBindHome(player);
+            ChatHandler(player->GetSession()).PSendSysMessage("You are not permitted to step into Azeroth.");
+        }
+    }
 };
 
 void AddEverQuestPlayerScripts()

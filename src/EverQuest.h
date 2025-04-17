@@ -31,6 +31,8 @@
 #define CONFIG_SPELLS_BIND_MIN_MAP_ID           750 // TODO: put in config
 #define CONFIG_SPELLS_BIND_MAX_MAP_ID           900 // TODO: put in config
 
+#define CONFIG_RESTRICT_PLAYERS_TO_NORRATH      true // TODO: put in a config
+
 using namespace std;
 
 class CreatureOnkillReputation
