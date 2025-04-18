@@ -142,6 +142,51 @@ public:
             ChatHandler(player->GetSession()).PSendSysMessage("You are not permitted to step into Azeroth.");
         }
     }
+
+    void OnPlayerReleasedGhost(Player* player) override
+    {
+        if (CONFIG_LOSE_EXP_ON_DEATH_RELEASE == true)
+        {
+            // Do nothing if the level is below the minimum
+            uint8 playerLevel = player->GetLevel();
+            if (playerLevel < CONFIG_LOSE_EXP_ON_DEATH_RELEASE_MIN_LEVEL)
+                return;
+
+            // Also do nothing if this isn't a Norrath map and configured to skip
+            if (CONFIG_RESTRICT_PLAYERS_TO_NORRATH == true && (player->GetMap()->GetId() < CONFIG_SPELLS_BIND_MIN_MAP_ID || player->GetMap()->GetId() > CONFIG_SPELLS_BIND_MAX_MAP_ID))
+                return;
+
+            // Calculate how much experience to lose
+            int nextLevelTotalEXP = player->GetUInt32Value(PLAYER_NEXT_LEVEL_XP);
+            int expToLose = nextLevelTotalEXP * (0.01 * CONFIG_LOSE_EXP_ON_DEATH_RELEASE_LOSS_PERCENT);
+
+            // Reduce experience
+            int curLevelEXP = player->GetUInt32Value(PLAYER_XP);
+            if (curLevelEXP > expToLose)
+            {
+                player->SetUInt32Value(PLAYER_XP, curLevelEXP - expToLose);
+                ChatHandler(player->GetSession()).PSendSysMessage("You lost|cffFF0000 {} |rexperience for releasing your spirit!", expToLose);
+            }
+            else
+            {
+                // Underflow, so drop level if above level 1                
+                if (playerLevel == 1)
+                {
+                    player->SetUInt32Value(PLAYER_XP, 0);
+                    ChatHandler(player->GetSession()).PSendSysMessage("You lost what little experience you had for releasing your spirit!");
+                    return;
+                }
+                else
+                {
+                    player->SetLevel(playerLevel - 1, true);
+                    int newExperience = player->GetUInt32Value(PLAYER_NEXT_LEVEL_XP) - (expToLose - curLevelEXP);
+                    player->SetUInt32Value(PLAYER_XP, newExperience);
+                    ChatHandler(player->GetSession()).PSendSysMessage("You lost|cffFF0000 {} |rexperience for releasing your spirit, which dropped your level to |cffFF0000{}|r!", expToLose, playerLevel - 1);
+                    return;
+                }
+            }
+        }
+    }
 };
 
 void AddEverQuestPlayerScripts()
