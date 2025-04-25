@@ -39,6 +39,7 @@
 #define CONFIG_LOSE_EXP_ON_DEATH_RELEASE_LOSS_PERCENT   15
 #define CONFIG_LOSE_EXP_ON_DEATH_RELEASE_ONLY_EQ_MAPS   true
 
+#define CONFIG_QUEST_EXP_ON_REPEAT                      true
 #define CONFIG_QUEST_ID_LOW                             30000
 #define CONFIG_QUEST_ID_HIGH                            30000
 

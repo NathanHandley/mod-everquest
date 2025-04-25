@@ -191,6 +191,9 @@ public:
     // This is done to ensure repeatable quests give EXP more than once
     void OnPlayerQuestComputeXP(Player* player, Quest const* quest, uint32& xpValue) override
     {
+        if (CONFIG_QUEST_EXP_ON_REPEAT == false)
+            return;
+
         if (quest->GetQuestId() >= CONFIG_QUEST_ID_LOW && quest->GetQuestId() <= CONFIG_QUEST_ID_HIGH)
             xpValue = player->CalculateQuestRewardXP(quest);
     }
