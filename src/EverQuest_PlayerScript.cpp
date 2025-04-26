@@ -153,7 +153,7 @@ public:
                 return;
 
             // Also do nothing if this isn't a Norrath map and configured to skip
-            if (CONFIG_RESTRICT_PLAYERS_TO_NORRATH == true && (player->GetMap()->GetId() < CONFIG_SPELLS_BIND_MIN_MAP_ID || player->GetMap()->GetId() > CONFIG_SPELLS_BIND_MAX_MAP_ID))
+            if (player->GetMap()->GetId() < CONFIG_SPELLS_BIND_MIN_MAP_ID || player->GetMap()->GetId() > CONFIG_SPELLS_BIND_MAX_MAP_ID)
                 return;
 
             // Calculate how much experience to lose
