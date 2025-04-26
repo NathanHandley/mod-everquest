@@ -26,30 +26,31 @@ class EverQuest_UnitScript : public UnitScript
 public:
     EverQuest_UnitScript() : UnitScript("EverQuest_UnitScript") {}
 
-    bool IfNormalReaction(Unit const* unit, Unit const* target, ReputationRank& repRank)
-    {
-        // Skip if the unit is a player
-        if (unit->IsPlayer() == true)
-            return true;
+    // Disable for now due to a bug where you can't interact properly with animals
+    //bool IfNormalReaction(Unit const* unit, Unit const* target, ReputationRank& repRank)
+    //{
+    //    // Skip if the unit is a player
+    //    if (unit->IsPlayer() == true)
+    //        return true;
 
-        // Skip if the target isn't a player
-        if (target->IsPlayer() == false)
-            return true;
+    //    // Skip if the target isn't a player
+    //    if (target->IsPlayer() == false)
+    //        return true;
 
-        // Always return a friendly response if it's a druid/hunter for the
-        uint32 unitFaction = 0;
-        if (unit->GetFaction() == EverQuest->DruidHunterFriendlyFactionTemplateID)
-        {
-            if (target->getClass() == CLASS_HUNTER || target->getClass() == CLASS_DRUID)
-            {
-                repRank = REP_FRIENDLY;
-                return false;
-            }
-        }
+    //    // Always return a friendly response if it's a druid/hunter for the
+    //    uint32 unitFaction = 0;
+    //    if (unit->GetFaction() == EverQuest->DruidHunterFriendlyFactionTemplateID)
+    //    {
+    //        if (target->getClass() == CLASS_HUNTER || target->getClass() == CLASS_DRUID)
+    //        {
+    //            repRank = REP_FRIENDLY;
+    //            return false;
+    //        }
+    //    }
 
-        // Do nothing special at this point
-        return true;
-    }
+    //    // Do nothing special at this point
+    //    return true;
+    //}
 };
 
 void AddEverQuestUnitScripts()
