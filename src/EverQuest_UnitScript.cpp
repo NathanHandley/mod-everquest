@@ -16,6 +16,7 @@
 
 #include "Unit.h"
 #include "ScriptMgr.h"
+#include "SpellAuras.h"
 
 #include "EverQuest.h"
 
@@ -27,7 +28,7 @@ public:
     EverQuest_UnitScript() : UnitScript("EverQuest_UnitScript") {}
 
     // Disable for now due to a bug where you can't interact properly with animals
-    //bool IfNormalReaction(Unit const* unit, Unit const* target, ReputationRank& repRank)
+    //bool IfNormalReaction(Unit const* unit, Unit const* target, ReputationRank& repRank) override
     //{
     //    // Skip if the unit is a player
     //    if (unit->IsPlayer() == true)
@@ -51,6 +52,14 @@ public:
     //    // Do nothing special at this point
     //    return true;
     //}
+
+    void OnAuraRemove(Unit* unit, AuraApplication* aurApp, AuraRemoveMode mode) override
+    {
+        if (unit->IsPlayer() == false || mode != AURA_REMOVE_BY_CANCEL)
+            return;
+        if (aurApp->GetBase()->GetId() == CONFIG_SPELLS_GATE_SPELLDBC_ID)
+            EverQuest->SendPlayerToLastGate(unit->ToPlayer());
+    }
 };
 
 void AddEverQuestUnitScripts()

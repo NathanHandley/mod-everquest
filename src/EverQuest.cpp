@@ -65,6 +65,62 @@ list<CreatureOnkillReputation> EverQuestMod::GetOnkillReputationsForCreatureTemp
     }
 }
 
+void EverQuestMod::StorePositionAsLastGate(Player* player)
+{
+    // Fail if there is no map, or if the map is invalid
+    if (player->GetMap() == nullptr)
+        return;
+
+    // Set up the transaction
+    CharacterDatabaseTransaction transaction = CharacterDatabase.BeginTransaction();
+
+    // Delete the old record, if it exists
+    transaction->Append("DELETE FROM `mod_everquest_character_lastgate` WHERE guid = {}", player->GetGUID().GetCounter());
+
+    // Add the new gate reference
+    float playerX = player->GetPosition().GetPositionX();
+    float playerY = player->GetPosition().GetPositionY();
+    float playerZ = player->GetPosition().GetPositionZ();
+    float playerOrientation = player->GetOrientation();
+    int mapID = player->GetMap()->GetId();
+    int zoneID = player->GetAreaId();
+    transaction->Append("INSERT INTO `mod_everquest_character_lastgate` (`guid`, `mapId`, `zoneId`, `posX`, `posY`, `posZ`, `orientation`) VALUES ({}, {}, {}, {}, {}, {}, {})",
+        player->GetGUID().GetCounter(), mapID, zoneID, playerX, playerY, playerZ, playerOrientation);
+
+    // Commit the transaction
+    CharacterDatabase.CommitTransaction(transaction);
+}
+
+void EverQuestMod::SendPlayerToLastGate(Player* player)
+{
+    // Fail if in combat
+    if (player->IsInCombat() == true)
+    {
+        ChatHandler(player->GetSession()).PSendSysMessage("Your gate tether broke due to being in combat!");
+        return;
+    }
+
+    // Pull the bind position
+    QueryResult queryResult = CharacterDatabase.Query("SELECT mapId, zoneId, posX, posY, posZ, orientation FROM mod_everquest_character_lastgate WHERE guid = {}", player->GetGUID().GetCounter());
+    if (!queryResult || queryResult->GetRowCount() == 0)
+    {
+        ChatHandler(player->GetSession()).PSendSysMessage("No tethered gate could be found. Spell failed.");
+        return;
+    }
+
+    // Pull the fields out
+    Field* fields = queryResult->Fetch();
+    uint32 mapId = fields[0].Get<uint32>();
+    uint32 zoneId = fields[1].Get<uint32>();
+    float posX = fields[2].Get<float>();
+    float posY = fields[3].Get<float>();
+    float posZ = fields[4].Get<float>();
+    float orientation = fields[4].Get<float>();
+
+    // Teleport the player
+    player->TeleportTo({ mapId, {posX, posY, posZ, orientation} });
+}
+
 void EverQuestMod::SendPlayerToEQBindHome(Player* player)
 {
     // Pull the bind position

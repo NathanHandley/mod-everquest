@@ -85,7 +85,10 @@ public:
         if (spell == nullptr)
             return;
         else if (spell->m_spellInfo->Id == CONFIG_SPELLS_GATE_SPELLDBC_ID)
+        {
+            EverQuest->StorePositionAsLastGate(player);
             EverQuest->SendPlayerToEQBindHome(player);
+        }
         else if (spell->m_spellInfo->Id == CONFIG_SPELLS_BINDSELF_SPELLDBC_ID || spell->m_spellInfo->Id == CONFIG_SPELLS_BINDANY_SPELLDBC_ID)
         {
             // Make sure it only works in EverQuest zones

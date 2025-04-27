@@ -43,7 +43,7 @@
 #define CONFIG_QUEST_ID_LOW                             30000
 #define CONFIG_QUEST_ID_HIGH                            30000
 
-//#define CONFIG_RELEASE_SEND_TO_BIND             true // TODO: put in a config.  If true, player doesn't go to a graveyard but rather their bind point
+#define CONFIG_GATE_RETURN_ENABLED                      true
 
 using namespace std;
 
@@ -75,6 +75,8 @@ public:
     void LoadCreatureOnkillReputations();
     list<CreatureOnkillReputation> GetOnkillReputationsForCreatureTemplate(uint32 creatureTemplateID);
 
+    void StorePositionAsLastGate(Player* player);
+    void SendPlayerToLastGate(Player* player);
     void SendPlayerToEQBindHome(Player* player);
     void SetNewBindHome(Player* player);
     void DeletePlayerBindHome(ObjectGuid guid);
