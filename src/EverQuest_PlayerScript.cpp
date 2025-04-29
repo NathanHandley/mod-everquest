@@ -177,7 +177,6 @@ public:
                 {
                     player->SetUInt32Value(PLAYER_XP, 0);
                     ChatHandler(player->GetSession()).PSendSysMessage("You lost what little experience you had for releasing your spirit!");
-                    return;
                 }
                 else
                 {
@@ -185,9 +184,12 @@ public:
                     int newExperience = player->GetUInt32Value(PLAYER_NEXT_LEVEL_XP) - (expToLose - curLevelEXP);
                     player->SetUInt32Value(PLAYER_XP, newExperience);
                     ChatHandler(player->GetSession()).PSendSysMessage("You lost|cffFF0000 {} |rexperience for releasing your spirit, which dropped your level to |cffFF0000{}|r!", expToLose, playerLevel - 1);
-                    return;
                 }
             }
+
+            // If set, give it back as rest exp
+            if (CONFIG_LOSE_EXP_ON_DEATH_RELEASE_ADD_TO_REST == true)
+                player->SetRestBonus(player->GetRestBonus() + expToLose);
         }
     }
 
