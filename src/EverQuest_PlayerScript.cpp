@@ -60,7 +60,7 @@ public:
     void OnPlayerBeforeChooseGraveyard(Player* player, TeamId teamId, bool nearCorpse, uint32& graveyardOverride) override
     {
         // Skip if there this isn't an EQ zone
-        if (player->GetMapId() < CONFIG_SPELLS_BIND_MIN_MAP_ID || player->GetMapId() > CONFIG_SPELLS_BIND_MAX_MAP_ID)
+        if (player->GetMapId() < CONFIG_EQ_MIN_MAP_ID || player->GetMapId() > CONFIG_EQ_MAX_MAP_ID)
             return;
 
         // If the player's corpse is in a different zone than the player, then use the player zone (by setting nearcorpse to false)
@@ -92,7 +92,7 @@ public:
         else if (spell->m_spellInfo->Id == CONFIG_SPELLS_BINDSELF_SPELLDBC_ID || spell->m_spellInfo->Id == CONFIG_SPELLS_BINDANY_SPELLDBC_ID)
         {
             // Make sure it only works in EverQuest zones
-            if (player->GetMapId() < CONFIG_SPELLS_BIND_MIN_MAP_ID || player->GetMapId() > CONFIG_SPELLS_BIND_MAX_MAP_ID)
+            if (player->GetMapId() < CONFIG_EQ_MIN_MAP_ID || player->GetMapId() > CONFIG_EQ_MAX_MAP_ID)
             {
                 ChatHandler(player->GetSession()).PSendSysMessage("The spell failed, as it only works in Norrath.");
                 return;
@@ -126,7 +126,7 @@ public:
     void OnPlayerFirstLogin(Player* player) override
     {
         // If the player logged in for the first time and is in a norrath zone, set the bind
-        if (player->GetMap() != nullptr && player->GetMap()->GetId() >= CONFIG_SPELLS_BIND_MIN_MAP_ID && player->GetMap()->GetId() <= CONFIG_SPELLS_BIND_MAX_MAP_ID)
+        if (player->GetMap() != nullptr && player->GetMap()->GetId() >= CONFIG_EQ_MIN_MAP_ID && player->GetMap()->GetId() <= CONFIG_EQ_MAX_MAP_ID)
         {
             EverQuest->SetNewBindHome(player);
         }
@@ -139,7 +139,7 @@ public:
         if (CONFIG_RESTRICT_PLAYERS_TO_NORRATH == false || player->IsGameMaster() == true)
             return;
 
-        if (player->GetMap() != nullptr && (player->GetMap()->GetId() < CONFIG_SPELLS_BIND_MIN_MAP_ID || player->GetMap()->GetId() > CONFIG_SPELLS_BIND_MAX_MAP_ID))
+        if (player->GetMap() != nullptr && (player->GetMap()->GetId() < CONFIG_EQ_MIN_MAP_ID || player->GetMap()->GetId() > CONFIG_EQ_MAX_MAP_ID))
         {
             EverQuest->SendPlayerToEQBindHome(player);
             ChatHandler(player->GetSession()).PSendSysMessage("You are not permitted to step into Azeroth.");
@@ -156,7 +156,7 @@ public:
                 return;
 
             // Also do nothing if this isn't a Norrath map and configured to skip
-            if (player->GetMap()->GetId() < CONFIG_SPELLS_BIND_MIN_MAP_ID || player->GetMap()->GetId() > CONFIG_SPELLS_BIND_MAX_MAP_ID)
+            if (player->GetMap()->GetId() < CONFIG_EQ_MIN_MAP_ID || player->GetMap()->GetId() > CONFIG_EQ_MAX_MAP_ID)
                 return;
 
             // Calculate how much experience to lose

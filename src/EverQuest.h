@@ -26,11 +26,12 @@
 // TODO: Put these in the config
 #define CONFIG_WORLD_SCALE                              0.29f
 
+#define CONFIG_EQ_MIN_MAP_ID                            750
+#define CONFIG_EQ_MAX_MAP_ID                            900
+
 #define CONFIG_SPELLS_GATE_SPELLDBC_ID                  86900
 #define CONFIG_SPELLS_BINDSELF_SPELLDBC_ID              86901
 #define CONFIG_SPELLS_BINDANY_SPELLDBC_ID               86902
-#define CONFIG_SPELLS_BIND_MIN_MAP_ID                   750
-#define CONFIG_SPELLS_BIND_MAX_MAP_ID                   900
 
 #define CONFIG_RESTRICT_PLAYERS_TO_NORRATH              true
 
