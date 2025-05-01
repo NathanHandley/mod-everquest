@@ -18,6 +18,7 @@ void AddEverQuestPlayerScripts();
 void AddEverQuestWorldScripts();
 void AddEverQuestUnitScripts();
 void AddEverQuestAllGameObjectScripts();
+void AddEverQuestGameEventScripts();
 
 void Addmod_everquestScripts()
 {
@@ -25,4 +26,5 @@ void Addmod_everquestScripts()
     AddEverQuestPlayerScripts();
     AddEverQuestUnitScripts();
     AddEverQuestAllGameObjectScripts();
+    AddEverQuestGameEventScripts();
 }

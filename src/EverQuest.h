@@ -45,6 +45,11 @@
 #define CONFIG_QUEST_ID_LOW                             30000
 #define CONFIG_QUEST_ID_HIGH                            30000
 
+#define CONFIG_EQ_SPELLS_AURA_DAY_PHASE_ID              86903
+#define CONFIG_EQ_SPELLS_AURA_NIGHT_PHASE_ID            86904
+#define CONFIG_EQ_EVENTS_DAY_ID                         125
+#define CONFIG_EQ_EVENTS_NIGHT_ID                       126
+
 #define CONFIG_GATE_RETURN_ENABLED                      true
 
 using namespace std;
@@ -66,6 +71,7 @@ private:
 public:
     map<uint32, list<CreatureOnkillReputation>> CreatureOnkillReputationsByCreatureTemplateID;
     uint32 DruidHunterFriendlyFactionTemplateID;
+    std::vector<Player*> AllLoadedPlayers;
 
     static EverQuestMod* instance()
     {
@@ -82,6 +88,8 @@ public:
     void SendPlayerToEQBindHome(Player* player);
     void SetNewBindHome(Player* player);
     void DeletePlayerBindHome(ObjectGuid guid);
+    void SetAllLoadedPlayersDayOrNightAura();
+    void SetPlayerDayOrNightAura(Player* player);    
 };
 
 #define EverQuest EverQuestMod::instance()

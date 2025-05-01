@@ -15,6 +15,7 @@
 //  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #include "Chat.h"
+#include "GameEventMgr.h"
 
 #include "EverQuest.h"
 
@@ -181,4 +182,54 @@ void EverQuestMod::DeletePlayerBindHome(ObjectGuid guid)
 
     // Commit the transaction
     CharacterDatabase.CommitTransaction(transaction);
+}
+
+void EverQuestMod::SetAllLoadedPlayersDayOrNightAura()
+{
+    for (std::vector<Player*>::const_iterator playerIterator = AllLoadedPlayers.begin(); playerIterator != AllLoadedPlayers.end(); ++playerIterator)
+    {
+        Player* thisPlayer = *playerIterator;
+        SetPlayerDayOrNightAura(thisPlayer);
+    }
+}
+
+void EverQuestMod::SetPlayerDayOrNightAura(Player* player)
+{
+    if (player == nullptr)
+        return;
+
+    // Set aura if it's night or day and the player is in EQ, otherwise clear it
+    if (player->GetMap() != nullptr && (player->GetMap()->GetId() >= CONFIG_EQ_MIN_MAP_ID && player->GetMap()->GetId() <= CONFIG_EQ_MAX_MAP_ID))
+    {
+        // Day
+        if (sGameEventMgr->IsActiveEvent(CONFIG_EQ_EVENTS_DAY_ID))
+        {            
+            if (player->HasAura(CONFIG_EQ_SPELLS_AURA_DAY_PHASE_ID) == false)
+                player->AddAura(CONFIG_EQ_SPELLS_AURA_DAY_PHASE_ID, player);
+        }
+        else
+        {
+            if (player->HasAura(CONFIG_EQ_SPELLS_AURA_DAY_PHASE_ID) == true)
+                player->RemoveAura(CONFIG_EQ_SPELLS_AURA_DAY_PHASE_ID);
+        }
+
+        // Night
+        if (sGameEventMgr->IsActiveEvent(CONFIG_EQ_EVENTS_NIGHT_ID))
+        {            
+            if (player->HasAura(CONFIG_EQ_SPELLS_AURA_NIGHT_PHASE_ID) == false)
+                player->AddAura(CONFIG_EQ_SPELLS_AURA_NIGHT_PHASE_ID, player);
+        }
+        else
+        {
+            if (player->HasAura(CONFIG_EQ_SPELLS_AURA_NIGHT_PHASE_ID) == true)
+                player->RemoveAura(CONFIG_EQ_SPELLS_AURA_NIGHT_PHASE_ID);
+        }
+    }
+    else
+    {
+        if (player->HasAura(CONFIG_EQ_SPELLS_AURA_DAY_PHASE_ID) == true)
+            player->RemoveAura(CONFIG_EQ_SPELLS_AURA_DAY_PHASE_ID);
+        if (player->HasAura(CONFIG_EQ_SPELLS_AURA_NIGHT_PHASE_ID) == true)
+            player->RemoveAura(CONFIG_EQ_SPELLS_AURA_NIGHT_PHASE_ID);
+    }
 }

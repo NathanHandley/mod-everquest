@@ -125,25 +125,40 @@ public:
 
     void OnPlayerFirstLogin(Player* player) override
     {
-        // If the player logged in for the first time and is in a norrath zone, set the bind
+        // If the player logged in for the first time and is in a norrath zone, set the bind and aura
         if (player->GetMap() != nullptr && player->GetMap()->GetId() >= CONFIG_EQ_MIN_MAP_ID && player->GetMap()->GetId() <= CONFIG_EQ_MAX_MAP_ID)
         {
             EverQuest->SetNewBindHome(player);
+            EverQuest->SetPlayerDayOrNightAura(player);
         }
+    }
+
+    void OnPlayerLogin(Player* player) override
+    {
+        EverQuest->AllLoadedPlayers.push_back(player);
+        EverQuest->SetPlayerDayOrNightAura(player);
+    }
+
+    void OnPlayerLogout(Player* player) override
+    {
+        EverQuest->AllLoadedPlayers.erase(std::remove(EverQuest->AllLoadedPlayers.begin(), EverQuest->AllLoadedPlayers.end(), player), EverQuest->AllLoadedPlayers.end());
     }
 
     // Note: this is AFTER the player changes maps
     void OnPlayerMapChanged(Player* player) override
     {
-        // Don't do anything if not restricted, or player is a GM
-        if (CONFIG_RESTRICT_PLAYERS_TO_NORRATH == false || player->IsGameMaster() == true)
-            return;
-
-        if (player->GetMap() != nullptr && (player->GetMap()->GetId() < CONFIG_EQ_MIN_MAP_ID || player->GetMap()->GetId() > CONFIG_EQ_MAX_MAP_ID))
+        // Restrict non-GMs to norrath if set
+        if (CONFIG_RESTRICT_PLAYERS_TO_NORRATH == true && player->IsGameMaster() == false)
         {
-            EverQuest->SendPlayerToEQBindHome(player);
-            ChatHandler(player->GetSession()).PSendSysMessage("You are not permitted to step into Azeroth.");
+            if (player->GetMap() != nullptr && (player->GetMap()->GetId() < CONFIG_EQ_MIN_MAP_ID || player->GetMap()->GetId() > CONFIG_EQ_MAX_MAP_ID))
+            {
+                EverQuest->SendPlayerToEQBindHome(player);
+                ChatHandler(player->GetSession()).PSendSysMessage("You are not permitted to step into Azeroth.");
+            }
         }
+
+        // Set aura if not set
+        EverQuest->SetPlayerDayOrNightAura(player);
     }
 
     void OnPlayerReleasedGhost(Player* player) override
