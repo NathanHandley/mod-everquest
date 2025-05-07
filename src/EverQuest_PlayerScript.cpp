@@ -22,6 +22,7 @@
 #include "ReputationMgr.h"
 #include "ScriptMgr.h"
 #include "Spell.h"
+#include "QuestDef.h"
 
 #include "EverQuest.h"
 
@@ -34,6 +35,23 @@ class EverQuest_PlayerScript : public PlayerScript
 {
 public:
     EverQuest_PlayerScript() : PlayerScript("EverQuest_PlayerScript") {}
+
+    // Called when a player completes a quest
+    void OnPlayerCompleteQuest(Player* player, Quest const* quest) override
+    {
+        // Grab the quest rewards, and apply any in the list
+        list<QuestCompletionReputation> questCompletionReputations = EverQuest->GetQuestCompletionReputationsForQuestTemplate(quest->GetQuestId());
+        for (auto& completionReputation : questCompletionReputations)
+        {
+            float repChange = player->CalculateReputationGain(REPUTATION_SOURCE_QUEST, quest->GetQuestLevel(), static_cast<float>(completionReputation.CompletionRewardValue), completionReputation.FactionID);
+
+            FactionEntry const* factionEntry = sFactionStore.LookupEntry(completionReputation.FactionID);
+            if (factionEntry && repChange != 0)
+            {
+                player->GetReputationMgr().ModifyReputation(factionEntry,  repChange, false, static_cast<ReputationRank>(7));
+            }
+        }
+    }
 
     void OnPlayerRewardKillRewarder(Player* player, KillRewarder* rewarder, bool /*isDungeon*/, float& /*rate*/) override
     {

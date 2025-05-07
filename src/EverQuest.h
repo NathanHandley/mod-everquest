@@ -63,6 +63,15 @@ public:
     int32 KillRewardValue;
 };
 
+class QuestCompletionReputation
+{
+public:
+    uint32 QuestTemplateID;
+    uint8 SortOrder;
+    uint32 FactionID;
+    int32 CompletionRewardValue;
+};
+
 class EverQuestMod
 {
 private:
@@ -70,6 +79,7 @@ private:
 
 public:
     map<uint32, list<CreatureOnkillReputation>> CreatureOnkillReputationsByCreatureTemplateID;
+    map<uint32, list<QuestCompletionReputation>> QuestCompletionReputationsByQuestTemplateID;
     uint32 DruidHunterFriendlyFactionTemplateID;
     std::vector<Player*> AllLoadedPlayers;
 
@@ -82,6 +92,8 @@ public:
 
     void LoadCreatureOnkillReputations();
     list<CreatureOnkillReputation> GetOnkillReputationsForCreatureTemplate(uint32 creatureTemplateID);
+    void LoadQuestCompletionReputations();
+    list<QuestCompletionReputation> GetQuestCompletionReputationsForQuestTemplate(uint32 questTemplateID);
 
     void StorePositionAsLastGate(Player* player);
     void SendPlayerToLastGate(Player* player);

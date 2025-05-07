@@ -29,6 +29,7 @@ public:
     void OnAfterConfigLoad(bool /*reload*/) override
     {
         EverQuest->LoadCreatureOnkillReputations();
+        EverQuest->LoadQuestCompletionReputations();
     }
 };
 

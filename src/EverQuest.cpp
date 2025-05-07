@@ -66,6 +66,41 @@ list<CreatureOnkillReputation> EverQuestMod::GetOnkillReputationsForCreatureTemp
     }
 }
 
+void EverQuestMod::LoadQuestCompletionReputations()
+{
+    QuestCompletionReputationsByQuestTemplateID.clear();
+
+    // Pulls in all the kill faction rewards
+    QueryResult queryResult = WorldDatabase.Query("SELECT QuestTemplateID, SortOrder, FactionID, CompletionRewardValue FROM mod_everquest_quest_complete_reputation ORDER BY QuestTemplateID, SortOrder;");
+    if (queryResult)
+    {
+        do
+        {
+            // Pull the data out
+            Field* fields = queryResult->Fetch();
+            QuestCompletionReputation questCompletionReputation;
+            questCompletionReputation.QuestTemplateID = fields[0].Get<uint32>();
+            questCompletionReputation.SortOrder = fields[1].Get<uint8>();
+            questCompletionReputation.FactionID = fields[2].Get<uint32>();
+            questCompletionReputation.CompletionRewardValue = fields[3].Get<int32>();
+            QuestCompletionReputationsByQuestTemplateID[questCompletionReputation.QuestTemplateID].push_back(questCompletionReputation);
+        } while (queryResult->NextRow());
+    }
+}
+
+list<QuestCompletionReputation> EverQuestMod::GetQuestCompletionReputationsForQuestTemplate(uint32 questTemplateID)
+{
+    if (QuestCompletionReputationsByQuestTemplateID.find(questTemplateID) != QuestCompletionReputationsByQuestTemplateID.end())
+    {
+        return QuestCompletionReputationsByQuestTemplateID[questTemplateID];
+    }
+    else
+    {
+        list<QuestCompletionReputation> returnEmpty;
+        return returnEmpty;
+    }
+}
+
 void EverQuestMod::StorePositionAsLastGate(Player* player)
 {
     // Fail if there is no map, or if the map is invalid
