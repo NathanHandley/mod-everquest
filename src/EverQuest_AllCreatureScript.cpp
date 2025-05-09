@@ -27,14 +27,20 @@ class EverQuest_AllCreatureScript: public AllCreatureScript
 public:
     EverQuest_AllCreatureScript() : AllCreatureScript("EverQuest_AllCreatureScript") {}
 
-    void OnCreatureAddWorld(Creature* /*creature*/) override
+    void OnCreatureAddWorld(Creature* creature) override
     {
-
+        uint32 mapID = creature->GetMap()->GetId();
+        if (mapID < CONFIG_EQ_MIN_MAP_ID || mapID > CONFIG_EQ_MAX_MAP_ID)
+            return;
+        EverQuest->AddCreatureAsLoaded(mapID, creature);
     }
 
-    void OnCreatureRemoveWorld(Creature* /*creature*/) override
+    void OnCreatureRemoveWorld(Creature* creature) override
     {
-
+        uint32 mapID = creature->GetMap()->GetId();
+        if (mapID < CONFIG_EQ_MIN_MAP_ID || mapID > CONFIG_EQ_MAX_MAP_ID)
+            return;
+        EverQuest->RemoveCreatureAsLoaded(mapID, creature);
     }
 };
 

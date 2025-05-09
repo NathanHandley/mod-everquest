@@ -16,6 +16,7 @@
 
 #include "Chat.h"
 #include "GameEventMgr.h"
+#include "CreatureData.h"
 
 #include "EverQuest.h"
 
@@ -267,4 +268,47 @@ void EverQuestMod::SetPlayerDayOrNightAura(Player* player)
         if (player->HasAura(CONFIG_EQ_SPELLS_AURA_NIGHT_PHASE_ID) == true)
             player->RemoveAura(CONFIG_EQ_SPELLS_AURA_NIGHT_PHASE_ID);
     }
+}
+
+void EverQuestMod::AddCreatureAsLoaded(int mapID, Creature* creature)
+{
+    if (AllLoadedCreaturesByMapIDThenCreatureEntryID.find(mapID) == AllLoadedCreaturesByMapIDThenCreatureEntryID.end())
+        AllLoadedCreaturesByMapIDThenCreatureEntryID[mapID];
+    std::unordered_map<int, std::vector<Creature*>>& innerMap = AllLoadedCreaturesByMapIDThenCreatureEntryID[mapID];
+    if (innerMap.find(creature->GetEntry()) != innerMap.end())
+        innerMap[creature->GetEntry()];
+    innerMap[creature->GetEntry()].push_back(creature);
+}
+
+void EverQuestMod::RemoveCreatureAsLoaded(int mapID, Creature* creature)
+{
+    if (AllLoadedCreaturesByMapIDThenCreatureEntryID.find(mapID) == AllLoadedCreaturesByMapIDThenCreatureEntryID.end())
+        return;
+    std::unordered_map<int, std::vector<Creature*>>& innerMap = AllLoadedCreaturesByMapIDThenCreatureEntryID[mapID];
+    int creatureEntryID = creature->GetEntry();
+    if (innerMap.find(creatureEntryID) == innerMap.end())
+        return;
+
+    std::vector<Creature*>& creatureVector = innerMap[creatureEntryID];
+    std::vector<Creature*>::iterator it = std::find(creatureVector.begin(), creatureVector.end(), creature);
+    if (it != creatureVector.end())
+    {
+        creatureVector.erase(it);
+        if (creatureVector.empty())
+        {
+            innerMap.erase(creatureEntryID);
+            if (innerMap.empty())
+                AllLoadedCreaturesByMapIDThenCreatureEntryID.erase(mapID);
+        }
+    }
+}
+
+vector<Creature*> EverQuestMod::GetLoadedCreaturesWithEntryID(int mapID, uint32 entryID)
+{
+    if (AllLoadedCreaturesByMapIDThenCreatureEntryID.find(mapID) == AllLoadedCreaturesByMapIDThenCreatureEntryID.end())
+        return vector<Creature*>();
+    std::unordered_map<int, std::vector<Creature*>>& innerMap = AllLoadedCreaturesByMapIDThenCreatureEntryID[mapID];
+    if (innerMap.find(entryID) == innerMap.end())
+        return vector<Creature*>();
+    return innerMap[entryID];
 }

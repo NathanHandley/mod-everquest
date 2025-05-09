@@ -19,6 +19,7 @@
 
 #include "Common.h"
 #include "ObjectGuid.h"
+#include "CreatureData.h"
 
 #include <list>
 #include <map>
@@ -82,6 +83,7 @@ public:
     map<uint32, list<QuestCompletionReputation>> QuestCompletionReputationsByQuestTemplateID;
     uint32 DruidHunterFriendlyFactionTemplateID;
     std::vector<Player*> AllLoadedPlayers;
+    std::unordered_map<int, std::unordered_map<int, std::vector<Creature*>>> AllLoadedCreaturesByMapIDThenCreatureEntryID;
 
     static EverQuestMod* instance()
     {
@@ -101,7 +103,10 @@ public:
     void SetNewBindHome(Player* player);
     void DeletePlayerBindHome(ObjectGuid guid);
     void SetAllLoadedPlayersDayOrNightAura();
-    void SetPlayerDayOrNightAura(Player* player);    
+    void SetPlayerDayOrNightAura(Player* player);
+    void AddCreatureAsLoaded(int mapID, Creature* creature);
+    void RemoveCreatureAsLoaded(int mapID, Creature* creature);
+    vector<Creature*> GetLoadedCreaturesWithEntryID(int mapID, uint32 entryID);
 };
 
 #define EverQuest EverQuestMod::instance()
