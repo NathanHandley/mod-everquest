@@ -14,19 +14,31 @@
 //  You should have received a copy of the GNU General Public License
 //  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-void AddEverQuestPlayerScripts();
-void AddEverQuestWorldScripts();
-void AddEverQuestUnitScripts();
-void AddEverQuestAllGameObjectScripts();
-void AddEverQuestGameEventScripts();
-void AddEverQuestAllCreatureScripts();
+#include "Configuration/Config.h"
+#include "ObjectMgr.h"
+#include "ScriptMgr.h"
 
-void Addmod_everquestScripts()
+#include "EverQuest.h"
+
+using namespace std;
+
+class EverQuest_AllCreatureScript: public AllCreatureScript
 {
-    AddEverQuestWorldScripts();
-    AddEverQuestPlayerScripts();
-    AddEverQuestUnitScripts();
-    AddEverQuestAllGameObjectScripts();
-    AddEverQuestGameEventScripts();
-    AddEverQuestAllCreatureScripts();
+public:
+    EverQuest_AllCreatureScript() : AllCreatureScript("EverQuest_AllCreatureScript") {}
+
+    void OnCreatureAddWorld(Creature* /*creature*/) override
+    {
+
+    }
+
+    void OnCreatureRemoveWorld(Creature* /*creature*/) override
+    {
+
+    }
+};
+
+void AddEverQuestAllCreatureScripts()
+{
+    new EverQuest_AllCreatureScript();
 }
