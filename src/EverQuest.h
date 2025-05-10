@@ -108,6 +108,7 @@ public:
     void RemoveCreatureAsLoaded(int mapID, Creature* creature);
     vector<Creature*> GetLoadedCreaturesWithEntryID(int mapID, uint32 entryID);
     void SpawnCreature(uint32 entryID, Map* map, float x, float y, float z, float orientation, bool enforceUniqueSpawn);
+    void DespawnCreature(Creature* creature, Map* map);
     void DespawnCreature(uint32 entryID, Map* map);
     void MakeCreatureAttackPlayer(uint32 entryID, Map* map, Player* player);
 };

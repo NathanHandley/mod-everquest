@@ -337,6 +337,23 @@ void EverQuestMod::SpawnCreature(uint32 entryID, Map* map, float x, float y, flo
         delete creature;
         return;
     }
+
+    creature->SaveToDB(map->GetId(), (1 << map->GetSpawnMode()), 6);
+    ObjectGuid::LowType spawnId = creature->GetSpawnId();
+
+    // Taken from .npc add in AzerothCore core: "To call _LoadGoods(); _LoadQuests(); CreateTrainerSpells(), current "creature" variable is deleted
+    // and created fresh new, otherwise old values might trigger asserts or cause undefined behavior"
+    creature->CleanupsBeforeDelete();
+    delete creature;
+    creature = new Creature();
+    if (!creature->LoadCreatureFromDB(spawnId, map, true, true))
+    {
+        LOG_ERROR("module.EverQuest", "EverQuestMod::SpawnCreature failure, as creature with entryID of {} could not be loaded from the database", entryID);
+        delete creature;
+        return;
+    }
+    sObjectMgr->AddCreatureToGrid(spawnId, sObjectMgr->GetCreatureData(spawnId));
+    creature->DeleteFromDB();
 }
 
 void EverQuestMod::DespawnCreature(uint32 entryID, Map* map)
@@ -345,6 +362,17 @@ void EverQuestMod::DespawnCreature(uint32 entryID, Map* map)
     for (Creature* creature : loadedCreatures)
         if (creature != nullptr)
             creature->DespawnOrUnsummon(0);
+}
+
+void EverQuestMod::DespawnCreature(Creature* creature, Map* map)
+{
+    vector<Creature*> loadedCreatures = GetLoadedCreaturesWithEntryID(map->GetId(), creature->GetEntry());
+    for (Creature* curCreature : loadedCreatures)
+        if (curCreature == creature)
+        {
+            curCreature->DespawnOrUnsummon(0);
+            return;
+        }
 
     if (loadedCreatures.size() > 0)
         return;
@@ -355,5 +383,11 @@ void EverQuestMod::MakeCreatureAttackPlayer(uint32 entryID, Map* map, Player* pl
     vector<Creature*> loadedCreatures = GetLoadedCreaturesWithEntryID(map->GetId(), entryID);
     for (Creature* creature : loadedCreatures)
         if (creature != nullptr)
+        {
+            creature->SetFaction(2300); // Make Kill-on-sight
+            //creature->SetReputationRewardDisabled(true); // Prevent rep hits for mobs that go good -> bad
+            creature->SetReactState(REACT_AGGRESSIVE);
+            creature->SetTarget(player->GetGUID());
             creature->Attack(player, true); // Should this be false when there is magic/ranged involved?
+        }
 }
