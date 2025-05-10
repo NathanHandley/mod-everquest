@@ -107,6 +107,9 @@ public:
     void AddCreatureAsLoaded(int mapID, Creature* creature);
     void RemoveCreatureAsLoaded(int mapID, Creature* creature);
     vector<Creature*> GetLoadedCreaturesWithEntryID(int mapID, uint32 entryID);
+    void SpawnCreature(uint32 entryID, Map* map, float x, float y, float z, float orientation, bool enforceUniqueSpawn);
+    void DespawnCreature(uint32 entryID, Map* map);
+    void MakeCreatureAttackPlayer(uint32 entryID, Map* map, Player* player);
 };
 
 #define EverQuest EverQuestMod::instance()

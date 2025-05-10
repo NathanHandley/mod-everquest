@@ -51,6 +51,19 @@ public:
                 player->GetReputationMgr().ModifyReputation(factionEntry,  repChange, false, static_cast<ReputationRank>(7));
             }
         }
+
+        // Handle quest-specific events
+        Map* map = player->GetMap();
+        float x = player->GetPositionX();
+        float y = player->GetPositionY();
+        float z = player->GetPositionZ();
+        float orientation = player->GetOrientation();
+        switch (quest->GetQuestId())
+        {
+
+
+            default: break; // Do Nothing
+        }
     }
 
     void OnPlayerRewardKillRewarder(Player* player, KillRewarder* rewarder, bool /*isDungeon*/, float& /*rate*/) override

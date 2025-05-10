@@ -16,6 +16,7 @@
 
 #include "Chat.h"
 #include "GameEventMgr.h"
+#include "Creature.h"
 #include "CreatureData.h"
 
 #include "EverQuest.h"
@@ -311,4 +312,48 @@ vector<Creature*> EverQuestMod::GetLoadedCreaturesWithEntryID(int mapID, uint32 
     if (innerMap.find(entryID) == innerMap.end())
         return vector<Creature*>();
     return innerMap[entryID];
+}
+
+void EverQuestMod::SpawnCreature(uint32 entryID, Map* map, float x, float y, float z, float orientation, bool enforceUniqueSpawn)
+{
+    if (!sObjectMgr->GetCreatureTemplate(entryID))
+    {
+        LOG_ERROR("module.EverQuest", "EverQuestMod::SpawnCreature failure, as creature with entryID of {} did not exist in creature templates", entryID);
+        return;
+    }
+
+    // Cancel out if it should be a unique spawn, and the creature exists
+    if (enforceUniqueSpawn == true)
+    {
+        vector<Creature*> loadedCreatures = GetLoadedCreaturesWithEntryID(map->GetId(), entryID);
+        if (loadedCreatures.size() > 0)
+            return;
+    }
+
+    Creature* creature = new Creature();
+    if (!creature->Create(map->GenerateLowGuid<HighGuid::Unit>(), map, 6, entryID, 0, x, y, z, orientation)) // PhaseMask of 6 is both day and night
+    {
+        LOG_ERROR("module.EverQuest", "EverQuestMod::SpawnCreature failure, error calling creature->Create with entryID of {}", entryID);
+        delete creature;
+        return;
+    }
+}
+
+void EverQuestMod::DespawnCreature(uint32 entryID, Map* map)
+{
+    vector<Creature*> loadedCreatures = GetLoadedCreaturesWithEntryID(map->GetId(), entryID);
+    for (Creature* creature : loadedCreatures)
+        if (creature != nullptr)
+            creature->DespawnOrUnsummon(0);
+
+    if (loadedCreatures.size() > 0)
+        return;
+}
+
+void EverQuestMod::MakeCreatureAttackPlayer(uint32 entryID, Map* map, Player* player)
+{
+    vector<Creature*> loadedCreatures = GetLoadedCreaturesWithEntryID(map->GetId(), entryID);
+    for (Creature* creature : loadedCreatures)
+        if (creature != nullptr)
+            creature->Attack(player, true); // Should this be false when there is magic/ranged involved?
 }
