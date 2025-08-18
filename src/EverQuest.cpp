@@ -45,7 +45,7 @@ void EverQuestMod::LoadCreatureOnkillReputations()
         {
             // Pull the data out
             Field* fields = queryResult->Fetch();
-            CreatureOnkillReputation creatureOnkillReputation;
+            EverQuestCreatureOnkillReputation creatureOnkillReputation;
             creatureOnkillReputation.CreatureTemplateID = fields[0].Get<uint32>();
             creatureOnkillReputation.SortOrder = fields[1].Get<uint8>();
             creatureOnkillReputation.FactionID = fields[2].Get<uint32>();
@@ -55,7 +55,7 @@ void EverQuestMod::LoadCreatureOnkillReputations()
     }
 }
 
-list<CreatureOnkillReputation> EverQuestMod::GetOnkillReputationsForCreatureTemplate(uint32 creatureTemplateID)
+const list<EverQuestCreatureOnkillReputation>& EverQuestMod::GetOnkillReputationsForCreatureTemplate(uint32 creatureTemplateID)
 {
     if (CreatureOnkillReputationsByCreatureTemplateID.find(creatureTemplateID) != CreatureOnkillReputationsByCreatureTemplateID.end())
     {
@@ -63,7 +63,44 @@ list<CreatureOnkillReputation> EverQuestMod::GetOnkillReputationsForCreatureTemp
     }
     else
     {
-        list<CreatureOnkillReputation> returnEmpty;
+        static const list<EverQuestCreatureOnkillReputation> returnEmpty;
+        return returnEmpty;
+    }
+}
+
+void EverQuestMod::LoadSpellData()
+{
+    SpellDataBySpellID.clear();
+
+    // Pulls in all the creature spells
+    QueryResult queryResult = WorldDatabase.Query("SELECT SpellID, AuraDurationBaseInMS, AuraDurationAddPerLevelInMS, AuraDurationMaxInMS, AuraDurationCalcMinLevel, AuraDurationCalcMaxLevel FROM mod_everquest_spell ORDER BY SpellID;");
+    if (queryResult)
+    {
+        do
+        {
+            // Pull the data out
+            Field* fields = queryResult->Fetch();
+            EverQuestSpell everQuestSpell;
+            everQuestSpell.SpellID = fields[0].Get<uint32>();
+            everQuestSpell.AuraDurationBaseInMS = fields[1].Get<uint32>();
+            everQuestSpell.AuraDurationAddPerLevelInMS = fields[2].Get<uint32>();
+            everQuestSpell.AuraDurationMaxInMS = fields[3].Get<uint32>();
+            everQuestSpell.AuraDurationCalcMinLevel = fields[4].Get<uint32>();
+            everQuestSpell.AuraDurationCalcMaxLevel = fields[5].Get<uint32>();
+            SpellDataBySpellID[everQuestSpell.SpellID] = everQuestSpell;
+        } while (queryResult->NextRow());
+    }
+}
+
+const EverQuestSpell& EverQuestMod::GetSpellDataForSpellID(uint32 spellID)
+{
+    if (SpellDataBySpellID.find(spellID) != SpellDataBySpellID.end())
+    {
+        return SpellDataBySpellID[spellID];
+    }
+    else
+    {
+        static const EverQuestSpell returnEmpty;
         return returnEmpty;
     }
 }
@@ -80,7 +117,7 @@ void EverQuestMod::LoadQuestCompletionReputations()
         {
             // Pull the data out
             Field* fields = queryResult->Fetch();
-            QuestCompletionReputation questCompletionReputation;
+            EverQuestQuestCompletionReputation questCompletionReputation;
             questCompletionReputation.QuestTemplateID = fields[0].Get<uint32>();
             questCompletionReputation.SortOrder = fields[1].Get<uint8>();
             questCompletionReputation.FactionID = fields[2].Get<uint32>();
@@ -90,7 +127,7 @@ void EverQuestMod::LoadQuestCompletionReputations()
     }
 }
 
-list<QuestCompletionReputation> EverQuestMod::GetQuestCompletionReputationsForQuestTemplate(uint32 questTemplateID)
+const list<EverQuestQuestCompletionReputation>& EverQuestMod::GetQuestCompletionReputationsForQuestTemplate(uint32 questTemplateID)
 {
     if (QuestCompletionReputationsByQuestTemplateID.find(questTemplateID) != QuestCompletionReputationsByQuestTemplateID.end())
     {
@@ -98,7 +135,7 @@ list<QuestCompletionReputation> EverQuestMod::GetQuestCompletionReputationsForQu
     }
     else
     {
-        list<QuestCompletionReputation> returnEmpty;
+        static const list<EverQuestQuestCompletionReputation> returnEmpty;
         return returnEmpty;
     }
 }
@@ -390,4 +427,12 @@ void EverQuestMod::MakeCreatureAttackPlayer(uint32 entryID, Map* map, Player* pl
             creature->SetTarget(player->GetGUID());
             creature->Attack(player, true); // Should this be false when there is magic/ranged involved?
         }
+}
+
+bool EverQuestMod::IsSpellAnEQSpell(uint32 spellID)
+{
+    if (SpellDataBySpellID.find(spellID) != SpellDataBySpellID.end())
+        return true;
+    else
+        return false;
 }

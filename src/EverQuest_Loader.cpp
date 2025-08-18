@@ -20,6 +20,7 @@ void AddEverQuestUnitScripts();
 void AddEverQuestAllGameObjectScripts();
 void AddEverQuestGameEventScripts();
 void AddEverQuestAllCreatureScripts();
+void AddEverQuestAllSpellScripts();
 
 void Addmod_everquestScripts()
 {
@@ -29,4 +30,5 @@ void Addmod_everquestScripts()
     AddEverQuestAllGameObjectScripts();
     AddEverQuestGameEventScripts();
     AddEverQuestAllCreatureScripts();
+    AddEverQuestAllSpellScripts();
 }

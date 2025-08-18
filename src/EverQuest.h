@@ -33,6 +33,8 @@
 #define CONFIG_SPELLS_GATE_SPELLDBC_ID                  86900
 #define CONFIG_SPELLS_BINDSELF_SPELLDBC_ID              86901
 #define CONFIG_SPELLS_BINDANY_SPELLDBC_ID               86902
+#define CONFIG_SPELLS_CONVERTED_SPELLDBC_ID_START       92000
+#define CONFIG_SPELLS_CONVERTED_SPELLDBC_ID_END         96049
 
 #define CONFIG_RESTRICT_PLAYERS_TO_NORRATH              true
 
@@ -55,22 +57,33 @@
 
 using namespace std;
 
-class CreatureOnkillReputation
+class EverQuestCreatureOnkillReputation
 {
 public:
-    uint32 CreatureTemplateID;
-    uint8 SortOrder;
-    uint32 FactionID;
-    int32 KillRewardValue;
+    uint32 CreatureTemplateID = 0;
+    uint8 SortOrder = 0;
+    uint32 FactionID = 0;
+    int32 KillRewardValue = 0;
 };
 
-class QuestCompletionReputation
+class EverQuestSpell
 {
 public:
-    uint32 QuestTemplateID;
-    uint8 SortOrder;
-    uint32 FactionID;
-    int32 CompletionRewardValue;
+    uint32 SpellID = 0;
+    uint32 AuraDurationBaseInMS = 0;
+    uint32 AuraDurationAddPerLevelInMS = 0;
+    uint32 AuraDurationMaxInMS = 0;
+    uint32 AuraDurationCalcMinLevel = 0;
+    uint32 AuraDurationCalcMaxLevel = 0;
+};
+
+class EverQuestQuestCompletionReputation
+{
+public:
+    uint32 QuestTemplateID = 0;
+    uint8 SortOrder = 0;
+    uint32 FactionID = 0;
+    int32 CompletionRewardValue = 0;
 };
 
 class EverQuestMod
@@ -79,8 +92,9 @@ private:
     EverQuestMod();
 
 public:
-    map<uint32, list<CreatureOnkillReputation>> CreatureOnkillReputationsByCreatureTemplateID;
-    map<uint32, list<QuestCompletionReputation>> QuestCompletionReputationsByQuestTemplateID;
+    map<uint32, list<EverQuestCreatureOnkillReputation>> CreatureOnkillReputationsByCreatureTemplateID;
+    map<uint32, EverQuestSpell> SpellDataBySpellID;
+    map<uint32, list<EverQuestQuestCompletionReputation>> QuestCompletionReputationsByQuestTemplateID;
     uint32 DruidHunterFriendlyFactionTemplateID;
     std::vector<Player*> AllLoadedPlayers;
     std::unordered_map<int, std::unordered_map<int, std::vector<Creature*>>> AllLoadedCreaturesByMapIDThenCreatureEntryID;
@@ -93,9 +107,11 @@ public:
     ~EverQuestMod();
 
     void LoadCreatureOnkillReputations();
-    list<CreatureOnkillReputation> GetOnkillReputationsForCreatureTemplate(uint32 creatureTemplateID);
+    const list<EverQuestCreatureOnkillReputation>& GetOnkillReputationsForCreatureTemplate(uint32 creatureTemplateID);
+    void LoadSpellData();
+    const EverQuestSpell& GetSpellDataForSpellID(uint32 spellID);
     void LoadQuestCompletionReputations();
-    list<QuestCompletionReputation> GetQuestCompletionReputationsForQuestTemplate(uint32 questTemplateID);
+    const list<EverQuestQuestCompletionReputation>& GetQuestCompletionReputationsForQuestTemplate(uint32 questTemplateID);
 
     void StorePositionAsLastGate(Player* player);
     void SendPlayerToLastGate(Player* player);
@@ -111,6 +127,7 @@ public:
     void DespawnCreature(Creature* creature, Map* map);
     void DespawnCreature(uint32 entryID, Map* map);
     void MakeCreatureAttackPlayer(uint32 entryID, Map* map, Player* player);
+    bool IsSpellAnEQSpell(uint32 spellID);
 };
 
 #define EverQuest EverQuestMod::instance()

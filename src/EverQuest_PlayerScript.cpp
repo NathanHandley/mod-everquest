@@ -40,7 +40,7 @@ public:
     void OnPlayerCompleteQuest(Player* player, Quest const* quest) override
     {
         // Grab the quest rewards, and apply any in the list
-        list<QuestCompletionReputation> questCompletionReputations = EverQuest->GetQuestCompletionReputationsForQuestTemplate(quest->GetQuestId());
+        const list<EverQuestQuestCompletionReputation>& questCompletionReputations = EverQuest->GetQuestCompletionReputationsForQuestTemplate(quest->GetQuestId());
         for (auto& completionReputation : questCompletionReputations)
         {
             float repChange = player->CalculateReputationGain(REPUTATION_SOURCE_QUEST, quest->GetQuestLevel(), static_cast<float>(completionReputation.CompletionRewardValue), completionReputation.FactionID);
@@ -878,7 +878,7 @@ public:
         case 31267: // kaladimb - Kinlo_Strongarm
         case 36267: // Fallthrough - Repeat Quest
         {
-            EverQuest->SpawnCreature(50561, map, 100.57, -54.96, 0.52, 0.8467574, false);
+            EverQuest->SpawnCreature(50561, map, 100.57, -54.96, -2, 0.8467574, false);
         }break;
         case 31271: // kaladimb - Nella_Stonebraids
         case 36271: // Fallthrough - Repeat Quest
@@ -1676,8 +1676,8 @@ public:
         Creature* victimCreature = victim->ToCreature();
 
         // Grab the kill rewards, and apply any in the list
-        list<CreatureOnkillReputation> onkillReputations = EverQuest->GetOnkillReputationsForCreatureTemplate(victimCreature->GetCreatureTemplate()->Entry);
-        for (auto& onkillReputation : onkillReputations)
+        const list<EverQuestCreatureOnkillReputation>& onkillReputations = EverQuest->GetOnkillReputationsForCreatureTemplate(victimCreature->GetCreatureTemplate()->Entry);
+        for (const auto& onkillReputation : onkillReputations)
         {
             float repChange = player->CalculateReputationGain(REPUTATION_SOURCE_KILL, victim->GetLevel(), static_cast<float>(onkillReputation.KillRewardValue), onkillReputation.FactionID);
 
