@@ -30,13 +30,12 @@
 #define CONFIG_EQ_MIN_MAP_ID                            750
 #define CONFIG_EQ_MAX_MAP_ID                            900
 
-#define CONFIG_SPELLS_GATE_SPELLDBC_ID                  86900
-#define CONFIG_SPELLS_BINDSELF_SPELLDBC_ID              86901
-#define CONFIG_SPELLS_BINDANY_SPELLDBC_ID               86902
+#define CONFIG_SPELLS_EQ_SPELLDBC_ID_MIN                86900
+#define CONFIG_SPELLS_EQ_SPELLDBC_ID_MAX                99999
 #define CONFIG_SPELLS_CONVERTED_SPELLDBC_ID_START       92000
 #define CONFIG_SPELLS_CONVERTED_SPELLDBC_ID_END         96049
 
-#define CONFIG_RESTRICT_PLAYERS_TO_NORRATH              true
+#define CONFIG_RESTRICT_PLAYERS_TO_NORRATH              false
 
 #define CONFIG_LOSE_EXP_ON_DEATH_RELEASE                true
 #define CONFIG_LOSE_EXP_ON_DEATH_RELEASE_MIN_LEVEL      5

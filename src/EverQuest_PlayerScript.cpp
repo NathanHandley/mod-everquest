@@ -1716,23 +1716,27 @@ public:
     {
         if (spell == nullptr)
             return;
-        else if (spell->m_spellInfo->Id == CONFIG_SPELLS_GATE_SPELLDBC_ID)
+        else if (spell->m_spellInfo->Id < CONFIG_SPELLS_EQ_SPELLDBC_ID_MIN || spell->m_spellInfo->Id > CONFIG_SPELLS_EQ_SPELLDBC_ID_MAX)
+            return;
+        else if (spell->m_spellInfo->Effects[EFFECT_0].Effect == SPELL_EFFECT_DUMMY ||
+            (spell->m_spellInfo->Effects[EFFECT_0].Effect == SPELL_EFFECT_APPLY_AURA && spell->m_spellInfo->Effects[EFFECT_0].ApplyAuraName == SPELL_AURA_DUMMY))
         {
-            EverQuest->StorePositionAsLastGate(player);
-            EverQuest->SendPlayerToEQBindHome(player);
-        }
-        else if (spell->m_spellInfo->Id == CONFIG_SPELLS_BINDSELF_SPELLDBC_ID || spell->m_spellInfo->Id == CONFIG_SPELLS_BINDANY_SPELLDBC_ID)
-        {
-            // Make sure it only works in EverQuest zones
-            if (player->GetMapId() < CONFIG_EQ_MIN_MAP_ID || player->GetMapId() > CONFIG_EQ_MAX_MAP_ID)
+            if (spell->m_spellInfo->Effects[EFFECT_0].MiscValue == 1) // Bind Self
             {
-                ChatHandler(player->GetSession()).PSendSysMessage("The spell failed, as it only works in Norrath.");
-                return;
+                if (player->GetMapId() < CONFIG_EQ_MIN_MAP_ID || player->GetMapId() > CONFIG_EQ_MAX_MAP_ID)
+                {
+                    ChatHandler(player->GetSession()).PSendSysMessage("The spell failed, as it only works in Norrath.");
+                    return;
+                }
+                EverQuest->SetNewBindHome(player);
             }
-
-            // Use the target if it's the any version
-            if (spell->m_spellInfo->Id == CONFIG_SPELLS_BINDANY_SPELLDBC_ID)
+            else if (spell->m_spellInfo->Effects[EFFECT_0].MiscValue == 2) // Bind Any
             {
+                if (player->GetMapId() < CONFIG_EQ_MIN_MAP_ID || player->GetMapId() > CONFIG_EQ_MAX_MAP_ID)
+                {
+                    ChatHandler(player->GetSession()).PSendSysMessage("The spell failed, as it only works in Norrath.");
+                    return;
+                }
                 ObjectGuid const target = player->GetTarget();
                 if (target.IsPlayer())
                 {
@@ -1744,9 +1748,13 @@ public:
                 }
                 else
                     ChatHandler(player->GetSession()).PSendSysMessage("The spell failed, as it requires a target player.");
+
             }
-            else if (spell->m_spellInfo->Id == CONFIG_SPELLS_BINDSELF_SPELLDBC_ID)
-                EverQuest->SetNewBindHome(player);
+            else if (spell->m_spellInfo->Effects[EFFECT_0].MiscValue == 3) // Gate
+            {
+                EverQuest->StorePositionAsLastGate(player);
+                EverQuest->SendPlayerToEQBindHome(player);
+            }
         }
     }
 

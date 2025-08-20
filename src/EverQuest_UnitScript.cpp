@@ -17,6 +17,7 @@
 #include "Unit.h"
 #include "ScriptMgr.h"
 #include "SpellAuras.h"
+#include "SpellAuraEffects.h"
 
 #include "EverQuest.h"
 
@@ -31,8 +32,13 @@ public:
     {
         if (unit->IsPlayer())
         {
+            if (aurApp->GetBase()->GetId() < CONFIG_SPELLS_EQ_SPELLDBC_ID_MIN || aurApp->GetBase()->GetId() > CONFIG_SPELLS_EQ_SPELLDBC_ID_MAX)
+                return;
+            if (aurApp->GetBase()->GetEffect(0)->GetAuraType() != SPELL_AURA_DUMMY)
+                return;
+
             // Handle gate recall
-            if (aurApp->GetBase()->GetId() == CONFIG_SPELLS_GATE_SPELLDBC_ID && mode == AURA_REMOVE_BY_CANCEL)
+            if (mode == AURA_REMOVE_BY_CANCEL && aurApp->GetBase()->GetEffect(0)->GetMiscValue() == 3)
             {
                 EverQuest->SendPlayerToLastGate(unit->ToPlayer());
                 return;
