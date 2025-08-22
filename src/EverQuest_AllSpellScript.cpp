@@ -17,6 +17,8 @@
 #include "Configuration/Config.h"
 #include "ObjectMgr.h"
 #include "ScriptMgr.h"
+#include "SpellMgr.h"
+#include "Spell.h"
 #include "SpellAuras.h"
 #include "Unit.h"
 
@@ -31,8 +33,13 @@ public:
 
     void OnCalcMaxDuration(Aura const* aura, int32& maxDuration) override
     {
+        if (aura == nullptr)
+            return;
+
         // Skip any non EQ spells
         uint32 spellID = aura->GetId();
+        if (spellID < CONFIG_SPELLS_EQ_SPELLDBC_ID_MIN || spellID > CONFIG_SPELLS_EQ_SPELLDBC_ID_MAX)
+            return;
         if (EverQuest->IsSpellAnEQSpell(spellID) == false)
             return;
 
@@ -74,6 +81,56 @@ public:
             maxDuration = (int32)(curSpell.AuraDurationBaseInMS + (curSpell.AuraDurationAddPerLevelInMS * levelDiff));
             return;
         }
+    }
+
+    void OnSpellCast(Spell* spell, Unit* caster , SpellInfo const* spellInfo, bool /*skipCheck*/) override
+    {
+        // Verify it's an EQ spell that is mapped
+        if (spell == nullptr)
+            return;
+        if (spellInfo == nullptr)
+            return;
+        if (spellInfo->Id < CONFIG_SPELLS_EQ_SPELLDBC_ID_MIN || spellInfo->Id > CONFIG_SPELLS_EQ_SPELLDBC_ID_MAX)
+            return;
+        if (EverQuest->IsSpellAnEQSpell(spellInfo->Id) == false)
+            return;
+        EverQuestSpell curSpell = EverQuest->GetSpellDataForSpellID(spellInfo->Id);
+
+        // Handle any recourse
+        if (curSpell.RecourseSpellID != 0)
+        {
+            const SpellInfo* recourseSpellInfo = sSpellMgr->GetSpellInfo(curSpell.RecourseSpellID);
+            if (recourseSpellInfo == nullptr)
+                return;
+
+            // Calculate the target
+            Unit* target = nullptr;
+            if (recourseSpellInfo->Targets & TARGET_FLAG_UNIT)
+            {
+                target = spell->m_targets.GetUnitTarget();
+                if (!target)
+                    target = caster;
+            }
+            else if (recourseSpellInfo->Targets & TARGET_FLAG_DEST_LOCATION)
+            {
+                if (WorldLocation const* dest = spell->m_targets.GetDstPos())
+                {
+                    caster->CastSpell(dest->GetPositionX(), dest->GetPositionY(), dest->GetPositionZ(), curSpell.RecourseSpellID, true);
+                    return;
+                }
+                else
+                {
+                    caster->CastSpell(caster->GetPositionX(), caster->GetPositionY(), caster->GetPositionZ(), curSpell.RecourseSpellID, true);
+                    return;
+                }
+            }
+            else
+                target = caster;
+
+            // Cast on the target
+            if (target)
+                caster->CastSpell(target, curSpell.RecourseSpellID, true);
+        }       
     }
 };
 

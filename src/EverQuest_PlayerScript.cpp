@@ -1712,7 +1712,7 @@ public:
         }
     }
 
-    void OnPlayerSpellCast(Player* player, Spell* spell, bool skipCheck) override
+    void OnPlayerSpellCast(Player* player, Spell* spell, bool /*skipCheck*/) override
     {
         if (spell == nullptr)
             return;

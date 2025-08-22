@@ -73,7 +73,7 @@ void EverQuestMod::LoadSpellData()
     SpellDataBySpellID.clear();
 
     // Pulls in all the creature spells
-    QueryResult queryResult = WorldDatabase.Query("SELECT SpellID, AuraDurationBaseInMS, AuraDurationAddPerLevelInMS, AuraDurationMaxInMS, AuraDurationCalcMinLevel, AuraDurationCalcMaxLevel FROM mod_everquest_spell ORDER BY SpellID;");
+    QueryResult queryResult = WorldDatabase.Query("SELECT SpellID, AuraDurationBaseInMS, AuraDurationAddPerLevelInMS, AuraDurationMaxInMS, AuraDurationCalcMinLevel, AuraDurationCalcMaxLevel, RecourseSpellID FROM mod_everquest_spell ORDER BY SpellID;");
     if (queryResult)
     {
         do
@@ -87,6 +87,7 @@ void EverQuestMod::LoadSpellData()
             everQuestSpell.AuraDurationMaxInMS = fields[3].Get<uint32>();
             everQuestSpell.AuraDurationCalcMinLevel = fields[4].Get<uint32>();
             everQuestSpell.AuraDurationCalcMaxLevel = fields[5].Get<uint32>();
+            everQuestSpell.RecourseSpellID = fields[6].Get<uint32>();
             SpellDataBySpellID[everQuestSpell.SpellID] = everQuestSpell;
         } while (queryResult->NextRow());
     }

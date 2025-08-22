@@ -3,7 +3,8 @@ CREATE TABLE IF NOT EXISTS `mod_everquest_spell` (
 	`AuraDurationBaseInMS` INT(10) UNSIGNED NOT NULL DEFAULT '0',
 	`AuraDurationAddPerLevelInMS` INT(10) UNSIGNED NOT NULL DEFAULT '0',
 	`AuraDurationMaxInMS` INT(10) UNSIGNED NOT NULL DEFAULT '0',
-   `AuraDurationCalcMinLevel` INT(10) UNSIGNED NOT NULL DEFAULT '0',
+	`AuraDurationCalcMinLevel` INT(10) UNSIGNED NOT NULL DEFAULT '0',
 	`AuraDurationCalcMaxLevel` INT(10) UNSIGNED NOT NULL DEFAULT '0',
+	`RecourseSpellID` INT(10) UNSIGNED NOT NULL DEFAULT '0',
 	PRIMARY KEY (`SpellID`) USING BTREE
 );

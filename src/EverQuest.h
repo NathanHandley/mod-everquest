@@ -74,6 +74,7 @@ public:
     uint32 AuraDurationMaxInMS = 0;
     uint32 AuraDurationCalcMinLevel = 0;
     uint32 AuraDurationCalcMaxLevel = 0;
+    uint32 RecourseSpellID = 0;
 };
 
 class EverQuestQuestCompletionReputation
