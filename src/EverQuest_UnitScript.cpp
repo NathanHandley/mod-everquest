@@ -30,9 +30,17 @@ public:
 
     void OnAuraRemove(Unit* unit, AuraApplication* aurApp, AuraRemoveMode mode) override
     {
+        if (unit == nullptr)
+            return;
         if (unit->IsPlayer())
         {
+            if (aurApp == nullptr)
+                return;
+            if (aurApp->GetBase() == nullptr)
+                return;
             if (aurApp->GetBase()->GetId() < CONFIG_SPELLS_EQ_SPELLDBC_ID_MIN || aurApp->GetBase()->GetId() > CONFIG_SPELLS_EQ_SPELLDBC_ID_MAX)
+                return;
+            if (aurApp->GetBase()->GetEffect(0) == nullptr)
                 return;
             if (aurApp->GetBase()->GetEffect(0)->GetAuraType() != SPELL_AURA_DUMMY)
                 return;
