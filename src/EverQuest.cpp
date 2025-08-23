@@ -187,7 +187,7 @@ void EverQuestMod::SendPlayerToLastGate(Player* player)
     // Pull the fields out
     Field* fields = queryResult->Fetch();
     uint32 mapId = fields[0].Get<uint32>();
-    uint32 zoneId = fields[1].Get<uint32>();
+    //uint32 zoneId = fields[1].Get<uint32>();
     float posX = fields[2].Get<float>();
     float posY = fields[3].Get<float>();
     float posZ = fields[4].Get<float>();
