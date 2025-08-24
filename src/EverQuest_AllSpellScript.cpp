@@ -49,7 +49,7 @@ public:
             return;
 
         // Skip any EQ spells with no duration
-        EverQuestSpell curSpell = EverQuest->GetSpellDataForSpellID(spellID);
+        const EverQuestSpell& curSpell = EverQuest->GetSpellDataForSpellID(spellID);
         if (curSpell.AuraDurationMaxInMS == 0)
             return;
 

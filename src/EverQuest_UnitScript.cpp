@@ -53,6 +53,37 @@ public:
             }
         }
     }
+
+    void ModifyMeleeDamage(Unit* target, Unit* attacker, uint32& damage) override
+    {
+        if (target == nullptr)
+            return;
+        if (attacker == nullptr)
+            return;
+        if (damage <= 0)
+            return;
+
+        // Check auras for any melee attacker behavior
+        Unit::AuraApplicationMap& auraMap = target->GetAppliedAuras();
+        for (Unit::AuraApplicationMap::iterator iter = auraMap.begin(); iter != auraMap.end(); ++iter)
+        {
+            AuraApplication* aurApp = iter->second;
+            if (aurApp == nullptr)
+                continue;
+            Aura* aura = aurApp->GetBase();
+            if (aura == nullptr)
+                continue;
+            uint32 spellID = aura->GetId();
+            if (spellID < CONFIG_SPELLS_EQ_SPELLDBC_ID_MIN || spellID > CONFIG_SPELLS_EQ_SPELLDBC_ID_MAX)
+                continue;
+            if (EverQuest->IsSpellAnEQSpell(spellID) == false)
+                continue;
+            const EverQuestSpell& curSpell = EverQuest->GetSpellDataForSpellID(spellID);
+            if (curSpell.SpellIDCastOnMeleeAttacker == 0)
+                continue;
+            attacker->CastSpell(attacker, curSpell.SpellIDCastOnMeleeAttacker);
+        }
+    }
 };
 
 void AddEverQuestUnitScripts()
