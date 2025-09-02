@@ -1,0 +1,5 @@
+CREATE TABLE IF NOT EXISTS `mod_everquest_pet` (
+	`CreatingSpellID` INT(10) UNSIGNED NOT NULL DEFAULT '0',
+	`NamingType` INT(10) UNSIGNED NOT NULL DEFAULT '0',
+	PRIMARY KEY (`CreatingSpellID`) USING BTREE
+);
