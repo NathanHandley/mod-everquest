@@ -38,7 +38,7 @@ public:
 
         // Skip any non EQ spells
         uint32 spellID = aura->GetId();
-        if (spellID < CONFIG_SPELLS_EQ_SPELLDBC_ID_MIN || spellID > CONFIG_SPELLS_EQ_SPELLDBC_ID_MAX)
+        if (spellID < EverQuest->ConfigSystemSpellDBCIDMin || spellID > EverQuest->ConfigSystemSpellDBCIDMax)
             return;
         if (EverQuest->IsSpellAnEQSpell(spellID) == false)
             return;
@@ -90,7 +90,7 @@ public:
             return;
         if (spellInfo == nullptr)
             return;
-        if (spellInfo->Id < CONFIG_SPELLS_EQ_SPELLDBC_ID_MIN || spellInfo->Id > CONFIG_SPELLS_EQ_SPELLDBC_ID_MAX)
+        if (spellInfo->Id < EverQuest->ConfigSystemSpellDBCIDMin || spellInfo->Id > EverQuest->ConfigSystemSpellDBCIDMax)
             return;
         if (EverQuest->IsSpellAnEQSpell(spellInfo->Id) == false)
             return;

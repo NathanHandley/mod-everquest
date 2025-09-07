@@ -1692,7 +1692,7 @@ public:
     void OnPlayerBeforeChooseGraveyard(Player* player, TeamId teamId, bool nearCorpse, uint32& graveyardOverride) override
     {
         // Skip if there this isn't an EQ zone
-        if (player->GetMapId() < CONFIG_EQ_MIN_MAP_ID || player->GetMapId() > CONFIG_EQ_MAX_MAP_ID)
+        if (player->GetMapId() < EverQuest->ConfigSystemMapDBCIDMin || player->GetMapId() > EverQuest->ConfigSystemMapDBCIDMax)
             return;
 
         // If the player's corpse is in a different zone than the player, then use the player zone (by setting nearcorpse to false)
@@ -1716,14 +1716,14 @@ public:
     {
         if (spell == nullptr)
             return;
-        else if (spell->m_spellInfo->Id < CONFIG_SPELLS_EQ_SPELLDBC_ID_MIN || spell->m_spellInfo->Id > CONFIG_SPELLS_EQ_SPELLDBC_ID_MAX)
+        else if (spell->m_spellInfo->Id < EverQuest->ConfigSystemSpellDBCIDMin || spell->m_spellInfo->Id > EverQuest->ConfigSystemSpellDBCIDMax)
             return;
         else if (spell->m_spellInfo->Effects[EFFECT_0].Effect == SPELL_EFFECT_DUMMY ||
             (spell->m_spellInfo->Effects[EFFECT_0].Effect == SPELL_EFFECT_APPLY_AURA && spell->m_spellInfo->Effects[EFFECT_0].ApplyAuraName == SPELL_AURA_DUMMY))
         {
             if (spell->m_spellInfo->Effects[EFFECT_0].MiscValue == 1) // Bind Self
             {
-                if (player->GetMapId() < CONFIG_EQ_MIN_MAP_ID || player->GetMapId() > CONFIG_EQ_MAX_MAP_ID)
+                if (player->GetMapId() < EverQuest->ConfigSystemMapDBCIDMin || player->GetMapId() > EverQuest->ConfigSystemMapDBCIDMax)
                 {
                     ChatHandler(player->GetSession()).PSendSysMessage("The spell failed, as it only works in Norrath.");
                     return;
@@ -1732,7 +1732,7 @@ public:
             }
             else if (spell->m_spellInfo->Effects[EFFECT_0].MiscValue == 2) // Bind Any
             {
-                if (player->GetMapId() < CONFIG_EQ_MIN_MAP_ID || player->GetMapId() > CONFIG_EQ_MAX_MAP_ID)
+                if (player->GetMapId() < EverQuest->ConfigSystemMapDBCIDMin || player->GetMapId() > EverQuest->ConfigSystemMapDBCIDMax)
                 {
                     ChatHandler(player->GetSession()).PSendSysMessage("The spell failed, as it only works in Norrath.");
                     return;
@@ -1766,7 +1766,7 @@ public:
     void OnPlayerFirstLogin(Player* player) override
     {
         // If the player logged in for the first time and is in a norrath zone, set the bind and aura
-        if (player->GetMap() != nullptr && player->GetMap()->GetId() >= CONFIG_EQ_MIN_MAP_ID && player->GetMap()->GetId() <= CONFIG_EQ_MAX_MAP_ID)
+        if (player->GetMap() != nullptr && player->GetMap()->GetId() >= EverQuest->ConfigSystemMapDBCIDMin && player->GetMap()->GetId() <= EverQuest->ConfigSystemMapDBCIDMax)
         {
             EverQuest->SetNewBindHome(player);
             EverQuest->SetPlayerDayOrNightAura(player);
@@ -1790,7 +1790,7 @@ public:
         // Restrict non-GMs to norrath if set
         if (EverQuest->ConfigMapRestrictPlayersToNorrath == true && player->IsGameMaster() == false)
         {
-            if (player->GetMap() != nullptr && (player->GetMap()->GetId() < CONFIG_EQ_MIN_MAP_ID || player->GetMap()->GetId() > CONFIG_EQ_MAX_MAP_ID))
+            if (player->GetMap() != nullptr && (player->GetMap()->GetId() < EverQuest->ConfigSystemMapDBCIDMin || player->GetMap()->GetId() > EverQuest->ConfigSystemMapDBCIDMax))
             {
                 EverQuest->SendPlayerToEQBindHome(player);
                 ChatHandler(player->GetSession()).PSendSysMessage("You are not permitted to step into Azeroth.");
@@ -1811,7 +1811,7 @@ public:
                 return;
 
             // Also do nothing if this isn't a Norrath map and configured to skip
-            if (player->GetMap()->GetId() < CONFIG_EQ_MIN_MAP_ID || player->GetMap()->GetId() > CONFIG_EQ_MAX_MAP_ID)
+            if (player->GetMap()->GetId() < EverQuest->ConfigSystemMapDBCIDMin || player->GetMap()->GetId() > EverQuest->ConfigSystemMapDBCIDMax)
                 return;
 
             // Calculate how much experience to lose
@@ -1854,7 +1854,7 @@ public:
         if (EverQuest->ConfigQuestGrantExpOnRepeatCompletion == false)
             return;
 
-        if (quest->GetQuestId() >= CONFIG_QUEST_ID_LOW && quest->GetQuestId() <= CONFIG_QUEST_ID_HIGH)
+        if (quest->GetQuestId() >= EverQuest->ConfigSystemQuestSQLIDMin && quest->GetQuestId() <= EverQuest->ConfigSystemQuestSQLIDMax)
             xpValue = player->CalculateQuestRewardXP(quest);
     }
 };

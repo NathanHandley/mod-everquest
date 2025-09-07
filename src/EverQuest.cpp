@@ -24,8 +24,17 @@
 using namespace std;
 
 EverQuestMod::EverQuestMod() :
-    ConfigMapRestrictPlayersToNorrath(false),
-    ConfigSpellGateTetherEnabled(true),
+    ConfigSystemDayEventID(0),
+    ConfigSystemNightEventID(0),
+    ConfigSystemMapDBCIDMin(0),
+    ConfigSystemMapDBCIDMax(0),
+    ConfigSystemSpellDBCIDMin(0),
+    ConfigSystemSpellDBCIDMax(0),
+    ConfigSystemSpellDBCIDDayPhaseAura(0),
+    ConfigSystemSpellDBCIDNightPhaseAura(0),
+    ConfigSystemQuestSQLIDMin(0),
+    ConfigSystemQuestSQLIDMax(0),
+    ConfigMapRestrictPlayersToNorrath(false),    
     ConfigQuestGrantExpOnRepeatCompletion(true),
     ConfigExpLossOnDeathEnabled(true),
     ConfigExpLossOnDeathMinLevel(5),
@@ -39,13 +48,49 @@ EverQuestMod::~EverQuestMod()
 
 }
 
-void EverQuestMod::LoadConfiguration()
+void EverQuestMod::LoadConfigurationSystemDataFromDB()
+{
+    QueryResult queryResult = WorldDatabase.Query("SELECT `Key`, `Value` FROM `mod_everquest_systemconfigs`;");
+    if (queryResult)
+    {
+        do
+        {
+            // Pull the data out and assign to configs
+            Field* fields = queryResult->Fetch();
+            string key = fields[0].Get<string>();
+            string value = fields[1].Get<string>();
+            if (key == "DayEventID")
+                ConfigSystemDayEventID = std::atoi(value.c_str());
+            else if (key == "NightEventID")
+                ConfigSystemNightEventID = std::atoi(value.c_str());
+            else if (key == "MapDBCIDMin")
+                ConfigSystemMapDBCIDMin = std::atoi(value.c_str());
+            else if (key == "MapDBCIDMax")
+                ConfigSystemMapDBCIDMax = std::atoi(value.c_str());
+            else if (key == "SpellDBCIDMin")
+                ConfigSystemSpellDBCIDMin = std::atoi(value.c_str());
+            else if (key == "SpellDBCIDMax")
+                ConfigSystemSpellDBCIDMax = std::atoi(value.c_str());
+            else if (key == "SpellDBCIDDayPhaseAura")
+                ConfigSystemSpellDBCIDDayPhaseAura = std::atoi(value.c_str());
+            else if (key == "SpellDBCIDNightPhaseAura")
+                ConfigSystemSpellDBCIDNightPhaseAura = std::atoi(value.c_str());
+            else if (key == "QuestSQLIDMin")
+                ConfigSystemQuestSQLIDMin = std::atoi(value.c_str());
+            else if (key == "QuestSQLIDMax")
+                ConfigSystemQuestSQLIDMax = std::atoi(value.c_str());
+            else
+            {
+                LOG_ERROR("module.EverQuest", "EverQuestMod::LoadConfigurationSystemDataFromDB error, unhandled key of {} with value {}", key, value);
+            }
+        } while (queryResult->NextRow());
+    }
+}
+
+void EverQuestMod::LoadConfigurationFile()
 {
     // Map
     ConfigMapRestrictPlayersToNorrath = sConfigMgr->GetOption<bool>("EverQuest.Map.RestrictPlayersToNorrath", false);
-
-    // Spell
-    ConfigSpellGateTetherEnabled = sConfigMgr->GetOption<bool>("EverQuest.Spell.GateTetherEnabled", true);
 
     // Quest
     ConfigQuestGrantExpOnRepeatCompletion = sConfigMgr->GetOption<bool>("EverQuest.Quest.GrantExpOnRepeatCompletion", true);
@@ -300,38 +345,38 @@ void EverQuestMod::SetPlayerDayOrNightAura(Player* player)
         return;
 
     // Set aura if it's night or day and the player is in EQ, otherwise clear it
-    if (player->GetMap() != nullptr && (player->GetMap()->GetId() >= CONFIG_EQ_MIN_MAP_ID && player->GetMap()->GetId() <= CONFIG_EQ_MAX_MAP_ID))
+    if (player->GetMap() != nullptr && (player->GetMap()->GetId() >= ConfigSystemMapDBCIDMin && player->GetMap()->GetId() <= ConfigSystemMapDBCIDMax))
     {
         // Day
-        if (sGameEventMgr->IsActiveEvent(CONFIG_EQ_EVENTS_DAY_ID))
+        if (sGameEventMgr->IsActiveEvent(ConfigSystemDayEventID))
         {            
-            if (player->HasAura(CONFIG_EQ_SPELLS_AURA_DAY_PHASE_ID) == false)
-                player->AddAura(CONFIG_EQ_SPELLS_AURA_DAY_PHASE_ID, player);
+            if (player->HasAura(ConfigSystemSpellDBCIDDayPhaseAura) == false)
+                player->AddAura(ConfigSystemSpellDBCIDDayPhaseAura, player);
         }
         else
         {
-            if (player->HasAura(CONFIG_EQ_SPELLS_AURA_DAY_PHASE_ID) == true)
-                player->RemoveAura(CONFIG_EQ_SPELLS_AURA_DAY_PHASE_ID);
+            if (player->HasAura(ConfigSystemSpellDBCIDDayPhaseAura) == true)
+                player->RemoveAura(ConfigSystemSpellDBCIDDayPhaseAura);
         }
 
         // Night
-        if (sGameEventMgr->IsActiveEvent(CONFIG_EQ_EVENTS_NIGHT_ID))
+        if (sGameEventMgr->IsActiveEvent(ConfigSystemNightEventID))
         {            
-            if (player->HasAura(CONFIG_EQ_SPELLS_AURA_NIGHT_PHASE_ID) == false)
-                player->AddAura(CONFIG_EQ_SPELLS_AURA_NIGHT_PHASE_ID, player);
+            if (player->HasAura(ConfigSystemSpellDBCIDNightPhaseAura) == false)
+                player->AddAura(ConfigSystemSpellDBCIDNightPhaseAura, player);
         }
         else
         {
-            if (player->HasAura(CONFIG_EQ_SPELLS_AURA_NIGHT_PHASE_ID) == true)
-                player->RemoveAura(CONFIG_EQ_SPELLS_AURA_NIGHT_PHASE_ID);
+            if (player->HasAura(ConfigSystemSpellDBCIDNightPhaseAura) == true)
+                player->RemoveAura(ConfigSystemSpellDBCIDNightPhaseAura);
         }
     }
     else
     {
-        if (player->HasAura(CONFIG_EQ_SPELLS_AURA_DAY_PHASE_ID) == true)
-            player->RemoveAura(CONFIG_EQ_SPELLS_AURA_DAY_PHASE_ID);
-        if (player->HasAura(CONFIG_EQ_SPELLS_AURA_NIGHT_PHASE_ID) == true)
-            player->RemoveAura(CONFIG_EQ_SPELLS_AURA_NIGHT_PHASE_ID);
+        if (player->HasAura(ConfigSystemSpellDBCIDDayPhaseAura) == true)
+            player->RemoveAura(ConfigSystemSpellDBCIDDayPhaseAura);
+        if (player->HasAura(ConfigSystemSpellDBCIDNightPhaseAura) == true)
+            player->RemoveAura(ConfigSystemSpellDBCIDNightPhaseAura);
     }
 }
 

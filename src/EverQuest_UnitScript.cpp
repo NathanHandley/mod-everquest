@@ -38,7 +38,7 @@ public:
                 return;
             if (aurApp->GetBase() == nullptr)
                 return;
-            if (aurApp->GetBase()->GetId() < CONFIG_SPELLS_EQ_SPELLDBC_ID_MIN || aurApp->GetBase()->GetId() > CONFIG_SPELLS_EQ_SPELLDBC_ID_MAX)
+            if (aurApp->GetBase()->GetId() < EverQuest->ConfigSystemSpellDBCIDMin || aurApp->GetBase()->GetId() > EverQuest->ConfigSystemSpellDBCIDMax)
                 return;
             if (aurApp->GetBase()->GetEffect(0) == nullptr)
                 return;
@@ -74,7 +74,7 @@ public:
             if (aura == nullptr)
                 continue;
             uint32 spellID = aura->GetId();
-            if (spellID < CONFIG_SPELLS_EQ_SPELLDBC_ID_MIN || spellID > CONFIG_SPELLS_EQ_SPELLDBC_ID_MAX)
+            if (spellID < EverQuest->ConfigSystemSpellDBCIDMin || spellID > EverQuest->ConfigSystemSpellDBCIDMax)
                 continue;
             if (EverQuest->IsSpellAnEQSpell(spellID) == false)
                 continue;

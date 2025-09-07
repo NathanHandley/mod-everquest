@@ -28,7 +28,8 @@ public:
 
     void OnAfterConfigLoad(bool /*reload*/) override
     {
-        EverQuest->LoadConfiguration();
+        EverQuest->LoadConfigurationSystemDataFromDB();
+        EverQuest->LoadConfigurationFile();
         EverQuest->LoadCreatureOnkillReputations();
         EverQuest->LoadSpellData();
         EverQuest->LoadQuestCompletionReputations();

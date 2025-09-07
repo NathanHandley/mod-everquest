@@ -30,7 +30,7 @@ public:
     void OnCreatureAddWorld(Creature* creature) override
     {
         uint32 mapID = creature->GetMap()->GetId();
-        if (mapID < CONFIG_EQ_MIN_MAP_ID || mapID > CONFIG_EQ_MAX_MAP_ID)
+        if (mapID < EverQuest->ConfigSystemMapDBCIDMin || mapID > EverQuest->ConfigSystemMapDBCIDMax)
             return;
         EverQuest->AddCreatureAsLoaded(mapID, creature);
     }
@@ -38,7 +38,7 @@ public:
     void OnCreatureRemoveWorld(Creature* creature) override
     {
         uint32 mapID = creature->GetMap()->GetId();
-        if (mapID < CONFIG_EQ_MIN_MAP_ID || mapID > CONFIG_EQ_MAX_MAP_ID)
+        if (mapID < EverQuest->ConfigSystemMapDBCIDMin || mapID > EverQuest->ConfigSystemMapDBCIDMax)
             return;
         EverQuest->RemoveCreatureAsLoaded(mapID, creature);
     }

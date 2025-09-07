@@ -24,18 +24,6 @@
 #include <list>
 #include <map>
 
-// TODO: Move to database
-#define CONFIG_EQ_EVENTS_DAY_ID                         125
-#define CONFIG_EQ_EVENTS_NIGHT_ID                       126
-#define CONFIG_EQ_MIN_MAP_ID                            750
-#define CONFIG_EQ_MAX_MAP_ID                            900
-#define CONFIG_SPELLS_EQ_SPELLDBC_ID_MIN                86900
-#define CONFIG_SPELLS_EQ_SPELLDBC_ID_MAX                99999
-#define CONFIG_EQ_SPELLS_AURA_DAY_PHASE_ID              86903
-#define CONFIG_EQ_SPELLS_AURA_NIGHT_PHASE_ID            86904
-#define CONFIG_QUEST_ID_LOW                             30000
-#define CONFIG_QUEST_ID_HIGH                            40000
-
 using namespace std;
 
 class EverQuestCreatureOnkillReputation
@@ -76,8 +64,20 @@ private:
     EverQuestMod();
 
 public:
+    // Configs (from database)
+    int ConfigSystemDayEventID;
+    int ConfigSystemNightEventID;
+    int ConfigSystemMapDBCIDMin;
+    int ConfigSystemMapDBCIDMax;
+    int ConfigSystemSpellDBCIDMin;
+    int ConfigSystemSpellDBCIDMax;
+    int ConfigSystemSpellDBCIDDayPhaseAura;
+    int ConfigSystemSpellDBCIDNightPhaseAura;
+    int ConfigSystemQuestSQLIDMin;
+    int ConfigSystemQuestSQLIDMax;
+
+    // Configs (from server file)
     bool ConfigMapRestrictPlayersToNorrath;
-    bool ConfigSpellGateTetherEnabled;
     bool ConfigQuestGrantExpOnRepeatCompletion;
     bool ConfigExpLossOnDeathEnabled;
     int ConfigExpLossOnDeathMinLevel;
@@ -97,7 +97,8 @@ public:
     }
     ~EverQuestMod();
 
-    void LoadConfiguration();
+    void LoadConfigurationSystemDataFromDB();
+    void LoadConfigurationFile();
     void LoadCreatureOnkillReputations();
     const list<EverQuestCreatureOnkillReputation>& GetOnkillReputationsForCreatureTemplate(uint32 creatureTemplateID);
     void LoadSpellData();

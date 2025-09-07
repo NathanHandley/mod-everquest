@@ -29,14 +29,14 @@ public:
     // Runs on start event
     void OnStart(uint16 EventID) override
     {
-        if (EventID == CONFIG_EQ_EVENTS_DAY_ID || EventID == CONFIG_EQ_EVENTS_NIGHT_ID)
+        if (EventID == EverQuest->ConfigSystemDayEventID || EventID == EverQuest->ConfigSystemNightEventID)
             EverQuest->SetAllLoadedPlayersDayOrNightAura();
     }
 
     // Runs on stop event
     void OnStop(uint16 EventID) override
     {
-        if (EventID == CONFIG_EQ_EVENTS_DAY_ID || EventID == CONFIG_EQ_EVENTS_NIGHT_ID)
+        if (EventID == EverQuest->ConfigSystemDayEventID || EventID == EverQuest->ConfigSystemNightEventID)
             EverQuest->SetAllLoadedPlayersDayOrNightAura();
     }
 };

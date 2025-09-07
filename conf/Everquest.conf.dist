@@ -12,28 +12,14 @@ EverQuest.Map.RestrictPlayersToNorrath = 0
 
 ###################################################################################################
 #
-# 	EverQuest.Spell.GateTetherEnabled
-#		Enable/Disable the 'gate tether return' which is somewhat like a town portal. The way it
-#        works is that after a gate, you can return to where you gated from if you click off the
-#        buff within a define time (default 30 min) It's not EQ-like
-#       NOTE: This will only function if the config value in the EQ Generator also has the
-#        Gate Tether enabled
-#	Default 1 (enabled, you can click off a gate buff to return to where you gated from)
-#
-###################################################################################################
-
-EverQuest.Spell.GateTetherEnabled = 1
-
-###################################################################################################
-#
-# 	EverQuest.Quest.QuestExpOnRepeat
+# 	EverQuest.Quest.GrantExpOnRepeatCompletion
 #		If true, repeat quests will give exp like the first did. This is EQ-like, but not WOW-like
 #       NOTE: This will only impact EverQuest IDs (range defined in this config)
 #	Default 1 (enabled, you get exp for repeat turnins)
 #
 ###################################################################################################
 
-EverQuest.Quest.QuestExpOnRepeat = 1
+EverQuest.Quest.GrantExpOnRepeatCompletion = 1
 
 ###################################################################################################
 # EXP Loss on Death Settings
@@ -49,7 +35,7 @@ EverQuest.Quest.QuestExpOnRepeat = 1
 #	Default 5 (players 4 and under do not lose exp on death release)
 #
 # 	EverQuest.ExpLossOnDeath.LossPercent
-#		Amount of experience to lose on death. Must be 0-100, whole numbers only
+#		Amount of experience to lose on death (0 - 100)
 #	Default 10 (10% of experience is lost on death)
 #
 # 	EverQuest.ExpLossOnDeath.AddLostExpToRestExp
