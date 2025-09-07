@@ -1,0 +1,65 @@
+[worldserver]
+
+###################################################################################################
+#
+# 	EverQuest.Map.RestrictPlayersToNorrath
+#		Enable/Disable force keeping players in norrath. Doesn't apply to GM accounts
+#	Default 0 (disabled, characters can move between Norrath and Azeroth)
+#
+###################################################################################################
+
+EverQuest.Map.RestrictPlayersToNorrath = 0
+
+###################################################################################################
+#
+# 	EverQuest.Spell.GateTetherEnabled
+#		Enable/Disable the 'gate tether return' which is somewhat like a town portal. The way it
+#        works is that after a gate, you can return to where you gated from if you click off the
+#        buff within a define time (default 30 min) It's not EQ-like
+#       NOTE: This will only function if the config value in the EQ Generator also has the
+#        Gate Tether enabled
+#	Default 1 (enabled, you can click off a gate buff to return to where you gated from)
+#
+###################################################################################################
+
+EverQuest.Spell.GateTetherEnabled = 1
+
+###################################################################################################
+#
+# 	EverQuest.Quest.QuestExpOnRepeat
+#		If true, repeat quests will give exp like the first did. This is EQ-like, but not WOW-like
+#       NOTE: This will only impact EverQuest IDs (range defined in this config)
+#	Default 1 (enabled, you get exp for repeat turnins)
+#
+###################################################################################################
+
+EverQuest.Quest.QuestExpOnRepeat = 1
+
+###################################################################################################
+# EXP Loss on Death Settings
+#
+# 	EverQuest.ExpLossOnDeath.Enabled
+#		If true, you will lose experience when you release your spirit on death.  Reviving before
+#        release will not cause exp loss.  Settings in this section depend on this being true.
+#       NOTE: You will only lose exp if you are in a Norrath / EverQuest map
+#	Default 1 (enabled, lose exp when you release your body after death, if in EverQuest areas)
+#
+# 	EverQuest.ExpLossOnDeath.MinLevel
+#		Minimum level the player needs to be before they begin losing experience
+#	Default 5 (players 4 and under do not lose exp on death release)
+#
+# 	EverQuest.ExpLossOnDeath.LossPercent
+#		Amount of experience to lose on death. Must be 0-100, whole numbers only
+#	Default 10 (10% of experience is lost on death)
+#
+# 	EverQuest.ExpLossOnDeath.AddLostExpToRestExp
+#		If true, experience lost will be added to rest experience.  This allows the player to not
+#        lose net progress as long as they don't overfill their rest experience bar
+#	Default 1 (enabled, experience lost is put into rest experience)
+#
+###################################################################################################
+
+EverQuest.ExpLossOnDeath.Enabled = 1
+EverQuest.ExpLossOnDeath.MinLevel = 5
+EverQuest.ExpLossOnDeath.LossPercent = 10
+EverQuest.ExpLossOnDeath.AddLostExpToRestExp = 1

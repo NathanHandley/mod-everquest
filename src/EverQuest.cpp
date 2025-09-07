@@ -23,14 +23,38 @@
 
 using namespace std;
 
-EverQuestMod::EverQuestMod()
+EverQuestMod::EverQuestMod() :
+    ConfigMapRestrictPlayersToNorrath(false),
+    ConfigSpellGateTetherEnabled(true),
+    ConfigQuestGrantExpOnRepeatCompletion(true),
+    ConfigExpLossOnDeathEnabled(true),
+    ConfigExpLossOnDeathMinLevel(5),
+    ConfigExpLossOnDeathLossPercent(10),
+    ConfigExpLossOnDeathAddLostExpToRestExp(true)
 {
-    DruidHunterFriendlyFactionTemplateID = 2301; // TODO: Put in config
 }
 
 EverQuestMod::~EverQuestMod()
 {
 
+}
+
+void EverQuestMod::LoadConfiguration()
+{
+    // Map
+    ConfigMapRestrictPlayersToNorrath = sConfigMgr->GetOption<bool>("EverQuest.Map.RestrictPlayersToNorrath", false);
+
+    // Spell
+    ConfigSpellGateTetherEnabled = sConfigMgr->GetOption<bool>("EverQuest.Spell.GateTetherEnabled", true);
+
+    // Quest
+    ConfigQuestGrantExpOnRepeatCompletion = sConfigMgr->GetOption<bool>("EverQuest.Quest.GrantExpOnRepeatCompletion", true);
+
+    // Exp Loss on Death
+    ConfigExpLossOnDeathEnabled = sConfigMgr->GetOption<bool>("EverQuest.ExpLossOnDeath.Enabled", true);
+    ConfigExpLossOnDeathMinLevel = sConfigMgr->GetOption<uint32>("EverQuest.ExpLossOnDeath.MinLevel", 5);
+    ConfigExpLossOnDeathLossPercent = sConfigMgr->GetOption<float>("EverQuest.ExpLossOnDeath.LossPercent", 10);
+    ConfigExpLossOnDeathAddLostExpToRestExp = sConfigMgr->GetOption<bool>("EverQuest.ExpLossOnDeath.AddLostExpToRestExp", true);
 }
 
 void EverQuestMod::LoadCreatureOnkillReputations()

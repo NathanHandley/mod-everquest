@@ -24,35 +24,17 @@
 #include <list>
 #include <map>
 
-// TODO: Put these in the config
-#define CONFIG_WORLD_SCALE                              0.29f
-
-#define CONFIG_EQ_MIN_MAP_ID                            750
-#define CONFIG_EQ_MAX_MAP_ID                            900
-
-#define CONFIG_SPELLS_EQ_SPELLDBC_ID_MIN                86900
-#define CONFIG_SPELLS_EQ_SPELLDBC_ID_MAX                99999
-#define CONFIG_SPELLS_CONVERTED_SPELLDBC_ID_START       92000
-#define CONFIG_SPELLS_CONVERTED_SPELLDBC_ID_END         96049
-
-#define CONFIG_RESTRICT_PLAYERS_TO_NORRATH              false
-
-#define CONFIG_LOSE_EXP_ON_DEATH_RELEASE                true
-#define CONFIG_LOSE_EXP_ON_DEATH_RELEASE_MIN_LEVEL      5
-#define CONFIG_LOSE_EXP_ON_DEATH_RELEASE_LOSS_PERCENT   10
-#define CONFIG_LOSE_EXP_ON_DEATH_RELEASE_ONLY_EQ_MAPS   true
-#define CONFIG_LOSE_EXP_ON_DEATH_RELEASE_ADD_TO_REST    true
-
-#define CONFIG_QUEST_EXP_ON_REPEAT                      true
-#define CONFIG_QUEST_ID_LOW                             30000
-#define CONFIG_QUEST_ID_HIGH                            30000
-
-#define CONFIG_EQ_SPELLS_AURA_DAY_PHASE_ID              86903
-#define CONFIG_EQ_SPELLS_AURA_NIGHT_PHASE_ID            86904
+// TODO: Move to database
 #define CONFIG_EQ_EVENTS_DAY_ID                         125
 #define CONFIG_EQ_EVENTS_NIGHT_ID                       126
-
-#define CONFIG_GATE_RETURN_ENABLED                      true
+#define CONFIG_EQ_MIN_MAP_ID                            750
+#define CONFIG_EQ_MAX_MAP_ID                            900
+#define CONFIG_SPELLS_EQ_SPELLDBC_ID_MIN                86900
+#define CONFIG_SPELLS_EQ_SPELLDBC_ID_MAX                99999
+#define CONFIG_EQ_SPELLS_AURA_DAY_PHASE_ID              86903
+#define CONFIG_EQ_SPELLS_AURA_NIGHT_PHASE_ID            86904
+#define CONFIG_QUEST_ID_LOW                             30000
+#define CONFIG_QUEST_ID_HIGH                            40000
 
 using namespace std;
 
@@ -94,10 +76,17 @@ private:
     EverQuestMod();
 
 public:
+    bool ConfigMapRestrictPlayersToNorrath;
+    bool ConfigSpellGateTetherEnabled;
+    bool ConfigQuestGrantExpOnRepeatCompletion;
+    bool ConfigExpLossOnDeathEnabled;
+    int ConfigExpLossOnDeathMinLevel;
+    float ConfigExpLossOnDeathLossPercent;
+    bool ConfigExpLossOnDeathAddLostExpToRestExp;
+
     map<uint32, list<EverQuestCreatureOnkillReputation>> CreatureOnkillReputationsByCreatureTemplateID;
     map<uint32, EverQuestSpell> SpellDataBySpellID;
     map<uint32, list<EverQuestQuestCompletionReputation>> QuestCompletionReputationsByQuestTemplateID;
-    uint32 DruidHunterFriendlyFactionTemplateID;
     std::vector<Player*> AllLoadedPlayers;
     std::unordered_map<int, std::unordered_map<int, std::vector<Creature*>>> AllLoadedCreaturesByMapIDThenCreatureEntryID;
 
@@ -108,6 +97,7 @@ public:
     }
     ~EverQuestMod();
 
+    void LoadConfiguration();
     void LoadCreatureOnkillReputations();
     const list<EverQuestCreatureOnkillReputation>& GetOnkillReputationsForCreatureTemplate(uint32 creatureTemplateID);
     void LoadSpellData();

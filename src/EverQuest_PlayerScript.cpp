@@ -1788,7 +1788,7 @@ public:
     void OnPlayerMapChanged(Player* player) override
     {
         // Restrict non-GMs to norrath if set
-        if (CONFIG_RESTRICT_PLAYERS_TO_NORRATH == true && player->IsGameMaster() == false)
+        if (EverQuest->ConfigMapRestrictPlayersToNorrath == true && player->IsGameMaster() == false)
         {
             if (player->GetMap() != nullptr && (player->GetMap()->GetId() < CONFIG_EQ_MIN_MAP_ID || player->GetMap()->GetId() > CONFIG_EQ_MAX_MAP_ID))
             {
@@ -1803,11 +1803,11 @@ public:
 
     void OnPlayerReleasedGhost(Player* player) override
     {
-        if (CONFIG_LOSE_EXP_ON_DEATH_RELEASE == true)
+        if (EverQuest->ConfigExpLossOnDeathEnabled == true)
         {
             // Do nothing if the level is below the minimum
             uint8 playerLevel = player->GetLevel();
-            if (playerLevel < CONFIG_LOSE_EXP_ON_DEATH_RELEASE_MIN_LEVEL)
+            if (playerLevel < EverQuest->ConfigExpLossOnDeathMinLevel)
                 return;
 
             // Also do nothing if this isn't a Norrath map and configured to skip
@@ -1816,7 +1816,7 @@ public:
 
             // Calculate how much experience to lose
             int nextLevelTotalEXP = player->GetUInt32Value(PLAYER_NEXT_LEVEL_XP);
-            int expToLose = nextLevelTotalEXP * (0.01 * CONFIG_LOSE_EXP_ON_DEATH_RELEASE_LOSS_PERCENT);
+            int expToLose = (int)((float)nextLevelTotalEXP * (0.01 * EverQuest->ConfigExpLossOnDeathLossPercent));
 
             // Reduce experience
             int curLevelEXP = player->GetUInt32Value(PLAYER_XP);
@@ -1843,7 +1843,7 @@ public:
             }
 
             // If set, give it back as rest exp
-            if (CONFIG_LOSE_EXP_ON_DEATH_RELEASE_ADD_TO_REST == true)
+            if (EverQuest->ConfigExpLossOnDeathAddLostExpToRestExp == true)
                 player->SetRestBonus(player->GetRestBonus() + expToLose);
         }
     }
@@ -1851,7 +1851,7 @@ public:
     // This is done to ensure repeatable quests give EXP more than once
     void OnPlayerQuestComputeXP(Player* player, Quest const* quest, uint32& xpValue) override
     {
-        if (CONFIG_QUEST_EXP_ON_REPEAT == false)
+        if (EverQuest->ConfigQuestGrantExpOnRepeatCompletion == false)
             return;
 
         if (quest->GetQuestId() >= CONFIG_QUEST_ID_LOW && quest->GetQuestId() <= CONFIG_QUEST_ID_HIGH)
