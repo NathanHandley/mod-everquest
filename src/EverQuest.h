@@ -46,7 +46,6 @@ public:
     uint32 AuraDurationCalcMaxLevel = 0;
     uint32 RecourseSpellID = 0;
     uint32 SpellIDCastOnMeleeAttacker = 0;
-    uint32 SpellFocusCategory = 0;
 };
 
 class EverQuestQuestCompletionReputation

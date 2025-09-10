@@ -7,6 +7,5 @@ CREATE TABLE IF NOT EXISTS `mod_everquest_spell` (
 	`AuraDurationCalcMaxLevel` INT(10) UNSIGNED NOT NULL DEFAULT '0',
 	`RecourseSpellID` INT(10) UNSIGNED NOT NULL DEFAULT '0',
 	`SpellIDCastOnMeleeAttacker` INT(10) UNSIGNED NOT NULL DEFAULT '0',
-	`FocusCategory` INT(10) UNSIGNED NOT NULL DEFAULT '0',
 	PRIMARY KEY (`SpellID`) USING BTREE
 );
