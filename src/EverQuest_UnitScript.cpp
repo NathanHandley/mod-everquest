@@ -46,7 +46,7 @@ public:
                 return;
 
             // Handle gate recall
-            if (mode == AURA_REMOVE_BY_CANCEL && aurApp->GetBase()->GetEffect(0)->GetMiscValue() == 3)
+            if (mode == AURA_REMOVE_BY_CANCEL && aurApp->GetBase()->GetEffect(0)->GetMiscValue() == EQ_SPELLDUMMYTYPE_GATE)
             {
                 EverQuest->SendPlayerToLastGate(unit->ToPlayer());
                 return;

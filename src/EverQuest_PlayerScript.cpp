@@ -1721,7 +1721,7 @@ public:
         else if (spell->m_spellInfo->Effects[EFFECT_0].Effect == SPELL_EFFECT_DUMMY ||
             (spell->m_spellInfo->Effects[EFFECT_0].Effect == SPELL_EFFECT_APPLY_AURA && spell->m_spellInfo->Effects[EFFECT_0].ApplyAuraName == SPELL_AURA_DUMMY))
         {
-            if (spell->m_spellInfo->Effects[EFFECT_0].MiscValue == 1) // Bind Self
+            if (spell->m_spellInfo->Effects[EFFECT_0].MiscValue == EQ_SPELLDUMMYTYPE_BINDSELF) // Bind Self
             {
                 if (player->GetMapId() < EverQuest->ConfigSystemMapDBCIDMin || player->GetMapId() > EverQuest->ConfigSystemMapDBCIDMax)
                 {
@@ -1730,7 +1730,7 @@ public:
                 }
                 EverQuest->SetNewBindHome(player);
             }
-            else if (spell->m_spellInfo->Effects[EFFECT_0].MiscValue == 2) // Bind Any
+            else if (spell->m_spellInfo->Effects[EFFECT_0].MiscValue == EQ_SPELLDUMMYTYPE_BINDANY) // Bind Any
             {
                 if (player->GetMapId() < EverQuest->ConfigSystemMapDBCIDMin || player->GetMapId() > EverQuest->ConfigSystemMapDBCIDMax)
                 {
@@ -1750,7 +1750,7 @@ public:
                     ChatHandler(player->GetSession()).PSendSysMessage("The spell failed, as it requires a target player.");
 
             }
-            else if (spell->m_spellInfo->Effects[EFFECT_0].MiscValue == 3) // Gate
+            else if (spell->m_spellInfo->Effects[EFFECT_0].MiscValue == EQ_SPELLDUMMYTYPE_GATE) // Gate
             {
                 EverQuest->StorePositionAsLastGate(player);
                 EverQuest->SendPlayerToEQBindHome(player);

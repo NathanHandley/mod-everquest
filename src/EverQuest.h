@@ -26,6 +26,15 @@
 
 using namespace std;
 
+#define EQ_SPELLDUMMYTYPE_BINDSELF              1
+#define EQ_SPELLDUMMYTYPE_BINDANY               2
+#define EQ_SPELLDUMMYTYPE_GATE                  3
+#define EQ_SPELLDUMMYTYPE_BARDFOCUSBRASS        4
+#define EQ_SPELLDUMMYTYPE_BARDFOCUSSTRING       5
+#define EQ_SPELLDUMMYTYPE_BARDFOCUSWIND         6
+#define EQ_SPELLDUMMYTYPE_BARDFOCUSPERCUSSION   7
+#define EQ_SPELLDUMMYTYPE_BARDFOCUSALL          8
+
 class EverQuestCreatureOnkillReputation
 {
 public:
