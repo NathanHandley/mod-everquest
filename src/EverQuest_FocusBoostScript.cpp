@@ -28,16 +28,19 @@ class EverQuest_FocusBoostScript: public AuraScript
 
     void CalculateAmount(AuraEffect const* /*aurEff*/, int32& amount, bool& /*canBeRecalculated*/)
     {
-        // Note: Don't need to check for EQ spells since this is script driven
-        uint32 spellID = GetId(); // Needed?
-
-        // Calculate the boost amount
-        uint32 boostPercent = 0;
-
-        // Operate based on caster's focus auras
+        // Invalid casters need to be skipped
         Unit* caster = GetCaster();
         if (caster == nullptr)
             return;
+
+        // Grab the spell
+        uint32 spellID = GetId();
+        if (EverQuest->IsSpellAnEQSpell(spellID) == false)
+            return;
+        EverQuestSpell curSpell = EverQuest->GetSpellDataForSpellID(spellID);
+                
+        // Calculate the boost amount based on caster's auras
+        uint32 boostPercent = 0;
         Unit::AuraMap const& auras = caster->GetOwnedAuras();
         for (auto const& aurIter : auras)
         {
@@ -45,17 +48,44 @@ class EverQuest_FocusBoostScript: public AuraScript
             SpellInfo const* auraInfo = aura->GetSpellInfo();
             for (uint8 effIndex = 0; effIndex < MAX_SPELL_EFFECTS; ++effIndex)
             {
+                // Focus auras are always dummy
+                if (auraInfo->Effects[effIndex].ApplyAuraName != SPELL_AURA_DUMMY)
+                    continue;
+                int auraDummyType = auraInfo->Effects[effIndex].MiscValue;
 
-
-
-
+                // Match up focus types and add the boost
+                if (curSpell.FocusBoostType == EQ_SPELLFOCUSBOOSTTYPE_BARDBRASS && (auraDummyType == EQ_SPELLDUMMYTYPE_BARDFOCUSBRASS || auraDummyType == EQ_SPELLDUMMYTYPE_BARDFOCUSALL))
+                {
+                    boostPercent += auraInfo->Effects[effIndex].MiscValueB;
+                    continue;
+                }
+                else if (curSpell.FocusBoostType == EQ_SPELLFOCUSBOOSTTYPE_BARDSTRINGED && (auraDummyType == EQ_SPELLDUMMYTYPE_BARDFOCUSSTRING || auraDummyType == EQ_SPELLDUMMYTYPE_BARDFOCUSALL))
+                {
+                    boostPercent += auraInfo->Effects[effIndex].MiscValueB;
+                    continue;
+                }
+                else if (curSpell.FocusBoostType == EQ_SPELLFOCUSBOOSTTYPE_BARDWIND && (auraDummyType == EQ_SPELLDUMMYTYPE_BARDFOCUSWIND || auraDummyType == EQ_SPELLDUMMYTYPE_BARDFOCUSALL))
+                {
+                    boostPercent += auraInfo->Effects[effIndex].MiscValueB;
+                    continue;
+                }
+                else if (curSpell.FocusBoostType == EQ_SPELLFOCUSBOOSTTYPE_BARDPERCUSSION && (auraDummyType == EQ_SPELLDUMMYTYPE_BARDFOCUSPERCUSSION || auraDummyType == EQ_SPELLDUMMYTYPE_BARDFOCUSALL))
+                {
+                    boostPercent += auraInfo->Effects[effIndex].MiscValueB;
+                    continue;
+                }
+                else if (curSpell.FocusBoostType == EQ_SPELLFOCUSBOOSTTYPE_BARDSINGING && auraDummyType == EQ_SPELLDUMMYTYPE_BARDFOCUSALL)
+                {
+                    boostPercent += auraInfo->Effects[effIndex].MiscValueB;
+                    continue;
+                }
             }
         }
 
-        if (boostPercent)
+        if (boostPercent != 0)
         {
-            // Boost the amount multiplicatively
-            amount = int32(amount * (1.0f + (float)boostPercent / 100.0f));
+            // Boost the amount multiplicatively (always round up)
+            amount = int32(std::ceil((float)amount * (1.0f + (float)boostPercent / 100.0f)));
         }
     }
 

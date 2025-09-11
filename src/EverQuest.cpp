@@ -142,7 +142,7 @@ void EverQuestMod::LoadSpellData()
     SpellDataBySpellID.clear();
 
     // Pulls in all the creature spells
-    QueryResult queryResult = WorldDatabase.Query("SELECT SpellID, AuraDurationBaseInMS, AuraDurationAddPerLevelInMS, AuraDurationMaxInMS, AuraDurationCalcMinLevel, AuraDurationCalcMaxLevel, RecourseSpellID, SpellIDCastOnMeleeAttacker FROM mod_everquest_spell ORDER BY SpellID;");
+    QueryResult queryResult = WorldDatabase.Query("SELECT SpellID, AuraDurationBaseInMS, AuraDurationAddPerLevelInMS, AuraDurationMaxInMS, AuraDurationCalcMinLevel, AuraDurationCalcMaxLevel, RecourseSpellID, SpellIDCastOnMeleeAttacker, FocusBoostType FROM mod_everquest_spell ORDER BY SpellID;");
     if (queryResult)
     {
         do
@@ -158,6 +158,7 @@ void EverQuestMod::LoadSpellData()
             everQuestSpell.AuraDurationCalcMaxLevel = fields[5].Get<uint32>();
             everQuestSpell.RecourseSpellID = fields[6].Get<uint32>();
             everQuestSpell.SpellIDCastOnMeleeAttacker = fields[7].Get<uint32>();
+            everQuestSpell.FocusBoostType = fields[8].Get<uint32>();
             SpellDataBySpellID[everQuestSpell.SpellID] = everQuestSpell;
         } while (queryResult->NextRow());
     }

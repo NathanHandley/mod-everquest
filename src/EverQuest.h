@@ -35,6 +35,12 @@ using namespace std;
 #define EQ_SPELLDUMMYTYPE_BARDFOCUSPERCUSSION   7
 #define EQ_SPELLDUMMYTYPE_BARDFOCUSALL          8
 
+#define EQ_SPELLFOCUSBOOSTTYPE_BARDPERCUSSION   1
+#define EQ_SPELLFOCUSBOOSTTYPE_BARDBRASS        2
+#define EQ_SPELLFOCUSBOOSTTYPE_BARDSINGING      3
+#define EQ_SPELLFOCUSBOOSTTYPE_BARDSTRINGED     4
+#define EQ_SPELLFOCUSBOOSTTYPE_BARDWIND         5
+
 class EverQuestCreatureOnkillReputation
 {
 public:
@@ -55,6 +61,7 @@ public:
     uint32 AuraDurationCalcMaxLevel = 0;
     uint32 RecourseSpellID = 0;
     uint32 SpellIDCastOnMeleeAttacker = 0;
+    uint32 FocusBoostType = 0;
 };
 
 class EverQuestQuestCompletionReputation
