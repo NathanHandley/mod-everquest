@@ -22,24 +22,15 @@
 
 using namespace std;
 
-class EverQuest_FocusBoostScript: public AuraScript
+class EverQuest_FocusBoostScript: public AuraScript, public SpellScript
 {
     PrepareAuraScript(EverQuest_FocusBoostScript);
+    PrepareSpellScript(EverQuest_FocusBoostScript);
 
-    void CalculateAmount(AuraEffect const* /*aurEff*/, int32& amount, bool& /*canBeRecalculated*/)
+    uint32 CalculateBoostPercent(Unit* caster, uint32 spellID)
     {
-        // Invalid casters need to be skipped
-        Unit* caster = GetCaster();
-        if (caster == nullptr)
-            return;
-
-        // Grab the spell
-        uint32 spellID = GetId();
-        if (EverQuest->IsSpellAnEQSpell(spellID) == false)
-            return;
-        EverQuestSpell curSpell = EverQuest->GetSpellDataForSpellID(spellID);
-                
         // Calculate the boost amount based on caster's auras
+        EverQuestSpell curSpell = EverQuest->GetSpellDataForSpellID(spellID);
         uint32 boostPercent = 0;
         Unit::AuraMap const& auras = caster->GetOwnedAuras();
         for (auto const& aurIter : auras)
@@ -81,17 +72,84 @@ class EverQuest_FocusBoostScript: public AuraScript
                 }
             }
         }
+        return boostPercent;
+    }
 
-        if (boostPercent != 0)
+    // Handle non-aura effects (e.g., direct damage, heals)
+    void HandleEffectHitTarget(SpellEffIndex effIndex)
+    {
+        // Invalid casters need to be skipped
+        Unit* caster = SpellScript::GetCaster();
+        if (caster == nullptr)
+            return;
+
+        // Only EQ spells
+        uint32 spellID = GetId();
+        if (EverQuest->IsSpellAnEQSpell(spellID) == false)
+            return;
+
+        // Skip unsupported types
+        uint32 effect = SpellScript::GetSpellInfo()->Effects[effIndex].Effect;
+        if (effect != SPELL_EFFECT_SCHOOL_DAMAGE &&
+            effect != SPELL_EFFECT_WEAPON_DAMAGE &&
+            effect != SPELL_EFFECT_HEAL &&
+            effect != SPELL_EFFECT_NORMALIZED_WEAPON_DMG &&
+            effect != SPELL_EFFECT_ENERGIZE)
         {
-            // Boost the amount multiplicatively (always round up)
-            amount = int32(std::ceil((float)amount * (1.0f + (float)boostPercent / 100.0f)));
+            return;
         }
+
+        uint32 boostPercent = CalculateBoostPercent(caster, spellID);
+        if (effect == SPELL_EFFECT_HEAL)
+        {
+            int32 healAmount = GetHitHeal();
+            if (healAmount != 0)
+                SetHitHeal(int32(std::ceil((float)healAmount * (1.0f + (float)boostPercent / 100.0f))));
+        }
+        else
+        {
+            int32 damageAmount = GetHitDamage();
+            if (damageAmount != 0)
+                SetHitDamage(int32(std::ceil((float)damageAmount * (1.0f + (float)boostPercent / 100.0f))));
+        }
+    }
+
+    void CalculateAmount(AuraEffect const* /*aurEff*/, int32& amount, bool& /*canBeRecalculated*/)
+    {
+        // Invalid casters need to be skipped
+        Unit* caster = AuraScript::GetCaster();
+        if (caster == nullptr)
+            return;
+
+        // Only EQ spells
+        uint32 spellID = GetId();
+        if (EverQuest->IsSpellAnEQSpell(spellID) == false)
+            return;
+
+        uint32 boostPercent = CalculateBoostPercent(caster, spellID);
+
+        // Always round up
+        if (boostPercent != 0)
+            amount = int32(std::ceil((float)amount * (1.0f + (float)boostPercent / 100.0f)));
     }
 
     void Register() override
     {
-        DoEffectCalcAmount += AuraEffectCalcAmountFn(EverQuest_FocusBoostScript::CalculateAmount, EFFECT_ALL, SPELL_AURA_ANY);
+        SpellInfo const* spellInfo = SpellScript::GetSpellInfo();
+        bool isAura = false;
+        bool isNonAura = false;
+        for (uint8 effIndex = 0; effIndex < MAX_SPELL_EFFECTS; ++effIndex)
+        {
+            if (spellInfo->Effects[effIndex].IsAura() == true)
+                isAura = true;
+            else if (spellInfo->Effects[effIndex].IsEffect() == true)
+                isNonAura = true;
+        }
+
+        if (isAura == true)
+            DoEffectCalcAmount += AuraEffectCalcAmountFn(EverQuest_FocusBoostScript::CalculateAmount, EFFECT_ALL, SPELL_AURA_ANY);
+        if (isNonAura == true)
+            OnEffectHitTarget += SpellEffectFn(EverQuest_FocusBoostScript::HandleEffectHitTarget, EFFECT_ALL, SPELL_EFFECT_ANY);
     }
 };
 
