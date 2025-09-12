@@ -136,6 +136,7 @@ public:
     void DespawnCreature(uint32 entryID, Map* map);
     void MakeCreatureAttackPlayer(uint32 entryID, Map* map, Player* player);
     bool IsSpellAnEQSpell(uint32 spellID);
+    uint32 CalculateSpellFocusBoostValue(Unit* caster, uint32 spellID);
 };
 
 #define EverQuest EverQuestMod::instance()

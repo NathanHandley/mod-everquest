@@ -508,3 +508,55 @@ bool EverQuestMod::IsSpellAnEQSpell(uint32 spellID)
     else
         return false;
 }
+
+
+uint32 EverQuestMod::CalculateSpellFocusBoostValue(Unit* caster, uint32 spellID)
+{
+    if (caster == nullptr)
+        return 0;
+
+    // Calculate the boost amount based on caster's auras
+    EverQuestSpell curSpell = EverQuest->GetSpellDataForSpellID(spellID);
+    uint32 boostValue = 0;
+    Unit::AuraMap const& auras = caster->GetOwnedAuras();
+    for (auto const& aurIter : auras)
+    {
+        Aura* aura = aurIter.second;
+        SpellInfo const* auraInfo = aura->GetSpellInfo();
+        for (uint8 effIndex = 0; effIndex < MAX_SPELL_EFFECTS; ++effIndex)
+        {
+            // Focus auras are always dummy
+            if (auraInfo->Effects[effIndex].ApplyAuraName != SPELL_AURA_DUMMY)
+                continue;
+            int auraDummyType = auraInfo->Effects[effIndex].MiscValue;
+
+            // Match up focus types and add the boost
+            if (curSpell.FocusBoostType == EQ_SPELLFOCUSBOOSTTYPE_BARDBRASS && (auraDummyType == EQ_SPELLDUMMYTYPE_BARDFOCUSBRASS || auraDummyType == EQ_SPELLDUMMYTYPE_BARDFOCUSALL))
+            {
+                boostValue += auraInfo->Effects[effIndex].MiscValueB;
+                continue;
+            }
+            else if (curSpell.FocusBoostType == EQ_SPELLFOCUSBOOSTTYPE_BARDSTRINGED && (auraDummyType == EQ_SPELLDUMMYTYPE_BARDFOCUSSTRING || auraDummyType == EQ_SPELLDUMMYTYPE_BARDFOCUSALL))
+            {
+                boostValue += auraInfo->Effects[effIndex].MiscValueB;
+                continue;
+            }
+            else if (curSpell.FocusBoostType == EQ_SPELLFOCUSBOOSTTYPE_BARDWIND && (auraDummyType == EQ_SPELLDUMMYTYPE_BARDFOCUSWIND || auraDummyType == EQ_SPELLDUMMYTYPE_BARDFOCUSALL))
+            {
+                boostValue += auraInfo->Effects[effIndex].MiscValueB;
+                continue;
+            }
+            else if (curSpell.FocusBoostType == EQ_SPELLFOCUSBOOSTTYPE_BARDPERCUSSION && (auraDummyType == EQ_SPELLDUMMYTYPE_BARDFOCUSPERCUSSION || auraDummyType == EQ_SPELLDUMMYTYPE_BARDFOCUSALL))
+            {
+                boostValue += auraInfo->Effects[effIndex].MiscValueB;
+                continue;
+            }
+            else if (curSpell.FocusBoostType == EQ_SPELLFOCUSBOOSTTYPE_BARDSINGING && auraDummyType == EQ_SPELLDUMMYTYPE_BARDFOCUSALL)
+            {
+                boostValue += auraInfo->Effects[effIndex].MiscValueB;
+                continue;
+            }
+        }
+    }
+    return boostValue;
+}
