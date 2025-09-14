@@ -34,6 +34,8 @@ using namespace std;
 #define EQ_SPELLDUMMYTYPE_BARDFOCUSWIND         6
 #define EQ_SPELLDUMMYTYPE_BARDFOCUSPERCUSSION   7
 #define EQ_SPELLDUMMYTYPE_BARDFOCUSALL          8
+#define EQ_SPELLDUMMYTYPE_BARDSONGENEMY         9
+#define EQ_SPELLDUMMYTYPE_BARDSONGFRIENDLY      10
 
 #define EQ_SPELLFOCUSBOOSTTYPE_BARDPERCUSSION   1
 #define EQ_SPELLFOCUSBOOSTTYPE_BARDBRASS        2
@@ -62,6 +64,8 @@ public:
     uint32 RecourseSpellID = 0;
     uint32 SpellIDCastOnMeleeAttacker = 0;
     uint32 FocusBoostType = 0;
+    uint32 PeriodicAuraSpellID = 0;
+    uint32 PeriodicAuraSpellRadius = 0;
 };
 
 class EverQuestQuestCompletionReputation
