@@ -165,7 +165,7 @@ class EverQuest_BardSongAuraScript: public AuraScript
 
         // Cast the spell
         for (Unit* target : validTargets)
-            caster->CastSpell(target, effectSpellID);
+            caster->CastSpell(target, effectSpellID, true);
     }
 
     void Register() override
