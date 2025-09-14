@@ -120,7 +120,6 @@ class EverQuest_BardSongAuraScript: public AuraScript
 
     void CastTriggerSpellOnTargets(Unit* caster, AuraEffect const* aurEff)
     {
-        LOG_ERROR("module.EverQuest", "Boop");
         if (!caster->IsPlayer())
             return;
         if (aurEff == nullptr)
@@ -131,6 +130,7 @@ class EverQuest_BardSongAuraScript: public AuraScript
 
         // Get spell details
         uint32 spellID = GetId();
+        LOG_ERROR("module.EverQuest", "Debug: {} Tick", spellID);
         EverQuestSpell curSpell = EverQuest->GetSpellDataForSpellID(spellID);
         if (curSpell.SpellID == 0)
         {
@@ -150,9 +150,8 @@ class EverQuest_BardSongAuraScript: public AuraScript
 
     void Register() override
     {
-        LOG_ERROR("module.EverQuest", "Beep");
-        OnEffectApply += AuraEffectApplyFn(EverQuest_BardSongAuraScript::HandleOnApply, EFFECT_0, SPELL_AURA_DUMMY, AURA_EFFECT_HANDLE_REAL);
-        OnEffectPeriodic += AuraEffectPeriodicFn(EverQuest_BardSongAuraScript::HandlePeriodic, EFFECT_0, SPELL_AURA_DUMMY);
+        OnEffectApply += AuraEffectApplyFn(EverQuest_BardSongAuraScript::HandleOnApply, EFFECT_0, SPELL_AURA_PERIODIC_DUMMY, AURA_EFFECT_HANDLE_REAL);
+        OnEffectPeriodic += AuraEffectPeriodicFn(EverQuest_BardSongAuraScript::HandlePeriodic, EFFECT_0, SPELL_AURA_PERIODIC_DUMMY);
     }
 };
 
