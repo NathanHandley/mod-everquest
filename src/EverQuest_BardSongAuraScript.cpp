@@ -76,38 +76,24 @@ class EverQuest_BardSongAuraScript: public AuraScript
 
                 uint32 factionTemplateId = target->GetFaction();
                 FactionTemplateEntry const* ftEntry = sFactionTemplateStore.LookupEntry(factionTemplateId);
-                if (!ftEntry)
+                if (ftEntry == nullptr)
                 {
                     validTargets.push_back(target);
                     continue;
                 }
 
                 FactionEntry const* fEntry = sFactionStore.LookupEntry(ftEntry->faction);
-                if (!fEntry)
+                if (fEntry->reputationListID == -1)
                 {
                     validTargets.push_back(target);
                     continue;
                 }
 
-                bool isRepFaction = (fEntry->reputationListID != 0);
-                if (isRepFaction)
-                {
-                    if (player->GetReputationMgr().IsAtWar(fEntry->ID) || player->GetReputationRank(fEntry->ID) <= REP_HOSTILE)
-                        validTargets.push_back(target);
-                }
-                else
+                if (player->GetReputationMgr().IsAtWar(fEntry->ID) == true || player->GetReputationRank(fEntry->ID) <= REP_HOSTILE)
                     validTargets.push_back(target);
             }
         }
         return validTargets;
-    }
-
-    void HandleOnApply(AuraEffect const* aurEff, AuraEffectHandleModes /*mode*/)
-    {
-        Unit* caster = GetCaster();
-        if (caster == nullptr)
-            return;
-        CastTriggerSpellOnTargets(caster, aurEff);
     }
 
     void HandlePeriodic(AuraEffect const* aurEff)
@@ -130,7 +116,6 @@ class EverQuest_BardSongAuraScript: public AuraScript
 
         // Get spell details
         uint32 spellID = GetId();
-        LOG_ERROR("module.EverQuest", "Debug: {} Tick", spellID);
         EverQuestSpell curSpell = EverQuest->GetSpellDataForSpellID(spellID);
         if (curSpell.SpellID == 0)
         {
@@ -150,7 +135,6 @@ class EverQuest_BardSongAuraScript: public AuraScript
 
     void Register() override
     {
-        OnEffectApply += AuraEffectApplyFn(EverQuest_BardSongAuraScript::HandleOnApply, EFFECT_0, SPELL_AURA_PERIODIC_DUMMY, AURA_EFFECT_HANDLE_REAL);
         OnEffectPeriodic += AuraEffectPeriodicFn(EverQuest_BardSongAuraScript::HandlePeriodic, EFFECT_0, SPELL_AURA_PERIODIC_DUMMY);
     }
 };
