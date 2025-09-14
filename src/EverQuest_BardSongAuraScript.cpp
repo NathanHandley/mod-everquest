@@ -33,9 +33,33 @@ class EverQuest_BardSongAuraScript: public AuraScript
 {
     PrepareAuraScript(EverQuest_BardSongAuraScript);
 
-    list<Unit*> GetTargets(Unit* caster, bool isFriendly, uint32 radius)
+    list<Unit*> GetTargets(Unit* caster, int bardTargetType, uint32 radius)
     {
         Player* player = caster->ToPlayer();
+        std::list<Unit*> validTargets;
+
+        // Do self and single target first since they are faster
+        if (bardTargetType == EQ_BARDSONGAURATARGET_SELF)
+        {
+            validTargets.push_back(caster);
+            return validTargets;
+        }
+        else if (bardTargetType == EQ_BARDSONGAURATARGET_ENEMYSINGLE)
+        {
+            Unit* currentTarget = player->GetSelectedUnit();
+            if (currentTarget != nullptr && caster->IsWithinLOSInMap(currentTarget) && caster->IsValidAttackTarget(currentTarget) && currentTarget->IsAlive())
+                validTargets.push_back(currentTarget);
+            return validTargets;
+        }
+        else if (bardTargetType == EQ_BARDSONGAURATARGET_FRIENDLYSINGLE)
+        {
+            Unit* currentTarget = player->GetSelectedUnit();
+            if (currentTarget != nullptr && caster->IsWithinLOSInMap(currentTarget) && (caster->IsValidAttackTarget(currentTarget) == false) && currentTarget->IsAlive())
+                validTargets.push_back(currentTarget);
+            return validTargets;
+        }
+
+        // Do large groups otherwise
         std::list<Unit*> targetCandidates;
         Acore::AnyUnitInObjectRangeCheck u_check(caster, radius);
         Acore::UnitListSearcher<Acore::AnyUnitInObjectRangeCheck> searcher(caster, targetCandidates, u_check);
@@ -44,9 +68,8 @@ class EverQuest_BardSongAuraScript: public AuraScript
         float y = caster->GetPositionY();
         CellCoord cellCoord = Acore::ComputeCellCoord(x, y);
         Cell cell(cellCoord);
-        caster->GetMap()->Visit(cell, visitor);
-        std::list<Unit*> validTargets;
-        if (isFriendly == true)
+        caster->GetMap()->Visit(cell, visitor);        
+        if (bardTargetType == EQ_BARDSONGAURATARGET_FRIENDLYPARTY)
         {
             // Always include self
             if (caster->IsAlive())
@@ -65,7 +88,7 @@ class EverQuest_BardSongAuraScript: public AuraScript
                     validTargets.push_back(targetPlayer);
             }
         }
-        else
+        else if (bardTargetType == EQ_BARDSONGAURATARGET_ENEMYAREA)
         {
             for (Unit* target : targetCandidates)
             {
@@ -110,9 +133,21 @@ class EverQuest_BardSongAuraScript: public AuraScript
             return;
         if (aurEff == nullptr)
             return;
-        bool isFriendly = true;
-        if (aurEff->GetMiscValue() == EQ_SPELLDUMMYTYPE_BARDSONGENEMY)
-            isFriendly = false;
+
+        int targetType = 0;
+        switch (aurEff->GetMiscValue())
+        {
+            case EQ_SPELLDUMMYTYPE_BARDSONGENEMYAREA:       targetType = EQ_BARDSONGAURATARGET_ENEMYAREA;       break;
+            case EQ_SPELLDUMMYTYPE_BARDSONGFRIENDLYPARTY:   targetType = EQ_BARDSONGAURATARGET_FRIENDLYPARTY;   break;
+            case EQ_SPELLDUMMYTYPE_BARDSONGSELF:            targetType = EQ_BARDSONGAURATARGET_SELF;            break;
+            case EQ_SPELLDUMMYTYPE_BARDSONGENEMYSINGLE:     targetType = EQ_BARDSONGAURATARGET_ENEMYSINGLE;     break;
+            case EQ_SPELLDUMMYTYPE_BARDSONGFRIENDLYSINGLE:  targetType = EQ_BARDSONGAURATARGET_FRIENDLYSINGLE;  break;
+            default:
+            {
+                LOG_ERROR("module.EverQuest", "EverQuest_BardSongAuraScript::CastTriggerSpellOnTargets failure, unhandled EQ_SPELLDUMMYTYPE_ of ", aurEff->GetMiscValue());
+                return;
+            }
+        }
 
         // Get spell details
         uint32 spellID = GetId();
@@ -125,7 +160,7 @@ class EverQuest_BardSongAuraScript: public AuraScript
 
         // Grab valid targets
         uint32 radius = curSpell.PeriodicAuraSpellRadius;
-        list<Unit*> validTargets = GetTargets(caster, isFriendly, radius);        
+        list<Unit*> validTargets = GetTargets(caster, targetType, radius);        
         uint32 effectSpellID = curSpell.PeriodicAuraSpellID;
 
         // Cast the spell
