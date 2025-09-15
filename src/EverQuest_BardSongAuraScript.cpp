@@ -33,6 +33,50 @@ class EverQuest_BardSongAuraScript: public AuraScript
 {
     PrepareAuraScript(EverQuest_BardSongAuraScript);
 
+    bool IsUnitAnEnemyInLOS(Unit* caster, Unit* target)
+    {
+        Player* player = caster->ToPlayer();
+        if (target->IsAlive() == false || target == caster || caster->IsWithinLOSInMap(target) == false)
+            return false;
+        if (!caster->IsValidAttackTarget(target))
+            return false;
+
+        uint32 factionTemplateId = target->GetFaction();
+        FactionTemplateEntry const* ftEntry = sFactionTemplateStore.LookupEntry(factionTemplateId);
+        if (ftEntry == nullptr)
+            return true;
+
+        FactionEntry const* fEntry = sFactionStore.LookupEntry(ftEntry->faction);
+        if (fEntry->reputationListID == -1)
+            return true;
+        if (player->GetReputationMgr().IsAtWar(fEntry->ID) == true || player->GetReputationRank(fEntry->ID) <= REP_HOSTILE)
+            return true;
+        return false;
+    }
+
+    bool IsUnitAFriendlyInLOS(Unit* caster, Unit* target)
+    {
+        Player* player = caster->ToPlayer();
+        if (caster == target)
+            return true;
+        if (target->IsAlive() == false || caster->IsWithinLOSInMap(target) == false)
+            return false;
+        if (caster->IsValidAttackTarget(target) == false)
+            return true;
+
+        uint32 factionTemplateId = target->GetFaction();
+        FactionTemplateEntry const* ftEntry = sFactionTemplateStore.LookupEntry(factionTemplateId);
+        if (ftEntry == nullptr)
+            return true;
+
+        FactionEntry const* fEntry = sFactionStore.LookupEntry(ftEntry->faction);
+        if (fEntry->reputationListID == -1)
+            return true;
+        if (player->GetReputationMgr().IsAtWar(fEntry->ID) == false || player->GetReputationRank(fEntry->ID) > REP_HOSTILE)
+            return true;
+        return false;
+    }
+
     list<Unit*> GetTargets(Unit* caster, int bardTargetType, uint32 radius)
     {
         Player* player = caster->ToPlayer();
@@ -44,17 +88,28 @@ class EverQuest_BardSongAuraScript: public AuraScript
             validTargets.push_back(caster);
             return validTargets;
         }
+        else if (bardTargetType == EQ_BARDSONGAURATARGET_ANY)
+        {
+            Unit* currentTarget = player->GetSelectedUnit();
+            if (currentTarget == caster)
+                validTargets.push_back(caster);
+            else if (IsUnitAnEnemyInLOS(caster, currentTarget) == true)
+                validTargets.push_back(currentTarget);
+            else if (IsUnitAFriendlyInLOS(caster, currentTarget) == true)
+                validTargets.push_back(currentTarget);
+            return validTargets;
+        }
         else if (bardTargetType == EQ_BARDSONGAURATARGET_ENEMYSINGLE)
         {
             Unit* currentTarget = player->GetSelectedUnit();
-            if (currentTarget != nullptr && caster->IsWithinLOSInMap(currentTarget) && caster->IsValidAttackTarget(currentTarget) && currentTarget->IsAlive())
+            if (IsUnitAnEnemyInLOS(caster, currentTarget) == true)
                 validTargets.push_back(currentTarget);
             return validTargets;
         }
         else if (bardTargetType == EQ_BARDSONGAURATARGET_FRIENDLYSINGLE)
         {
             Unit* currentTarget = player->GetSelectedUnit();
-            if (currentTarget != nullptr && caster->IsWithinLOSInMap(currentTarget) && (caster->IsValidAttackTarget(currentTarget) == false) && currentTarget->IsAlive())
+            if (IsUnitAFriendlyInLOS(caster, currentTarget) == true)
                 validTargets.push_back(currentTarget);
             return validTargets;
         }
@@ -92,27 +147,7 @@ class EverQuest_BardSongAuraScript: public AuraScript
         {
             for (Unit* target : targetCandidates)
             {
-                if (!target->IsCreature() || !target->IsAlive() || target == caster || !caster->IsWithinLOSInMap(target))
-                    continue;
-                if (!caster->IsValidAttackTarget(target))
-                    continue;
-
-                uint32 factionTemplateId = target->GetFaction();
-                FactionTemplateEntry const* ftEntry = sFactionTemplateStore.LookupEntry(factionTemplateId);
-                if (ftEntry == nullptr)
-                {
-                    validTargets.push_back(target);
-                    continue;
-                }
-
-                FactionEntry const* fEntry = sFactionStore.LookupEntry(ftEntry->faction);
-                if (fEntry->reputationListID == -1)
-                {
-                    validTargets.push_back(target);
-                    continue;
-                }
-
-                if (player->GetReputationMgr().IsAtWar(fEntry->ID) == true || player->GetReputationRank(fEntry->ID) <= REP_HOSTILE)
+                if (IsUnitAnEnemyInLOS(caster, target) == true)
                     validTargets.push_back(target);
             }
         }
@@ -142,6 +177,7 @@ class EverQuest_BardSongAuraScript: public AuraScript
             case EQ_SPELLDUMMYTYPE_BARDSONGSELF:            targetType = EQ_BARDSONGAURATARGET_SELF;            break;
             case EQ_SPELLDUMMYTYPE_BARDSONGENEMYSINGLE:     targetType = EQ_BARDSONGAURATARGET_ENEMYSINGLE;     break;
             case EQ_SPELLDUMMYTYPE_BARDSONGFRIENDLYSINGLE:  targetType = EQ_BARDSONGAURATARGET_FRIENDLYSINGLE;  break;
+            case EQ_SPELLDUMMYTYPE_BARDSONGANY:             targetType = EQ_BARDSONGAURATARGET_ANY;             break;
             default:
             {
                 LOG_ERROR("module.EverQuest", "EverQuest_BardSongAuraScript::CastTriggerSpellOnTargets failure, unhandled EQ_SPELLDUMMYTYPE_ of ", aurEff->GetMiscValue());
