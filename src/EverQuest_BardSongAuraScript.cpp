@@ -35,6 +35,8 @@ class EverQuest_BardSongAuraScript: public AuraScript
 
     bool IsUnitAnEnemyInLOS(Unit* caster, Unit* target)
     {
+        if (target == nullptr)
+            return false;
         Player* player = caster->ToPlayer();
         if (target->IsAlive() == false || target == caster || caster->IsWithinLOSInMap(target) == false)
             return false;
@@ -56,6 +58,8 @@ class EverQuest_BardSongAuraScript: public AuraScript
 
     bool IsUnitAFriendlyInLOS(Unit* caster, Unit* target)
     {
+        if (target == nullptr)
+            return false;
         Player* player = caster->ToPlayer();
         if (caster == target)
             return true;
@@ -67,11 +71,21 @@ class EverQuest_BardSongAuraScript: public AuraScript
         uint32 factionTemplateId = target->GetFaction();
         FactionTemplateEntry const* ftEntry = sFactionTemplateStore.LookupEntry(factionTemplateId);
         if (ftEntry == nullptr)
-            return true;
+        {
+            if (caster->IsValidAttackTarget(target) == true)
+                return false;
+            else
+                return true;
+        }
 
         FactionEntry const* fEntry = sFactionStore.LookupEntry(ftEntry->faction);
         if (fEntry->reputationListID == -1)
-            return true;
+        {
+            if (caster->IsValidAttackTarget(target) == true)
+                return false;
+            else
+                return true;
+        }
         if (player->GetReputationMgr().IsAtWar(fEntry->ID) == false || player->GetReputationRank(fEntry->ID) > REP_HOSTILE)
             return true;
         return false;
@@ -91,6 +105,8 @@ class EverQuest_BardSongAuraScript: public AuraScript
         else if (bardTargetType == EQ_BARDSONGAURATARGET_ANY)
         {
             Unit* currentTarget = player->GetSelectedUnit();
+            if (currentTarget == nullptr)
+                return validTargets;
             if (currentTarget == caster)
                 validTargets.push_back(caster);
             else if (IsUnitAnEnemyInLOS(caster, currentTarget) == true)
@@ -102,6 +118,8 @@ class EverQuest_BardSongAuraScript: public AuraScript
         else if (bardTargetType == EQ_BARDSONGAURATARGET_ENEMYSINGLE)
         {
             Unit* currentTarget = player->GetSelectedUnit();
+            if (currentTarget == nullptr)
+                return validTargets;
             if (IsUnitAnEnemyInLOS(caster, currentTarget) == true)
                 validTargets.push_back(currentTarget);
             return validTargets;
@@ -109,6 +127,8 @@ class EverQuest_BardSongAuraScript: public AuraScript
         else if (bardTargetType == EQ_BARDSONGAURATARGET_FRIENDLYSINGLE)
         {
             Unit* currentTarget = player->GetSelectedUnit();
+            if (currentTarget == nullptr)
+                return validTargets;
             if (IsUnitAFriendlyInLOS(caster, currentTarget) == true)
                 validTargets.push_back(currentTarget);
             return validTargets;
