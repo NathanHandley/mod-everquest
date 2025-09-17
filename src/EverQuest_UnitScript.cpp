@@ -70,7 +70,7 @@ public:
                 return;
             if (aurApp->GetBase()->GetEffect(0) == nullptr)
                 return;
-            if (aurApp->GetBase()->GetEffect(0)->GetAuraType() != SPELL_AURA_DUMMY)
+            if (aurApp->GetBase()->GetEffect(0)->GetAuraType() != SPELL_AURA_DUMMY && aurApp->GetBase()->GetEffect(0)->GetAuraType() != SPELL_AURA_PERIODIC_DUMMY)
                 return;
 
             // Handle gate recall
@@ -82,13 +82,19 @@ public:
 
             // Handle bard songs
             uint32 spellID = aurApp->GetBase()->GetId();
-            if (EverQuest->IsSpellAnEQBardSong(spellID) == true && EverQuest->ConfigBardMaxConcurrentSongs != 0)
+            if (EverQuest->IsSpellAnEQBardSong(spellID) == true)
             {
                 Player* player = unit->ToPlayer();
-                auto& queue = EverQuest->PlayerCasterConcurrentBardSongs[player->GetGUID()];
-                auto it = std::find(queue.begin(), queue.end(), spellID);
-                if (it != queue.end())
-                    queue.erase(it);
+
+                // Concurrence restrict                
+                if (EverQuest->ConfigBardMaxConcurrentSongs != 0)
+                {
+                    
+                    auto& queue = EverQuest->PlayerCasterConcurrentBardSongs[player->GetGUID()];
+                    auto it = std::find(queue.begin(), queue.end(), spellID);
+                    if (it != queue.end())
+                        queue.erase(it);
+                }
             }
         }
     }
