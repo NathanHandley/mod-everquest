@@ -1779,21 +1779,25 @@ public:
         EverQuest->SetPlayerDayOrNightAura(player);
 
         // Grab any cast bard songs for the player
-        auto& queue = EverQuest->PlayerCasterConcurrentBardSongs[player->GetGUID()];
-        queue.clear();
-        for (auto const& itr : player->GetAppliedAuras())
+        if (EverQuest->ConfigBardMaxConcurrentSongs != 0)
         {
-            AuraApplication const* aurApp = itr.second;
-            uint32 spellID = aurApp->GetBase()->GetId();
-            if (EverQuest->IsSpellAnEQBardSong(spellID) == true)
-                queue.push_back(spellID);
+            auto& queue = EverQuest->PlayerCasterConcurrentBardSongs[player->GetGUID()];
+            queue.clear();
+            for (auto const& itr : player->GetAppliedAuras())
+            {
+                AuraApplication const* aurApp = itr.second;
+                uint32 spellID = aurApp->GetBase()->GetId();
+                if (EverQuest->IsSpellAnEQBardSong(spellID) == true)
+                    queue.push_back(spellID);
+            }
         }
     }
 
     void OnPlayerLogout(Player* player) override
     {
         EverQuest->AllLoadedPlayers.erase(std::remove(EverQuest->AllLoadedPlayers.begin(), EverQuest->AllLoadedPlayers.end(), player), EverQuest->AllLoadedPlayers.end());
-        EverQuest->PlayerCasterConcurrentBardSongs[player->GetGUID()].clear();
+        if (EverQuest->ConfigBardMaxConcurrentSongs != 0)
+            EverQuest->PlayerCasterConcurrentBardSongs[player->GetGUID()].clear();
     }
 
     // Note: this is AFTER the player changes maps

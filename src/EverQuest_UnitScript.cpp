@@ -36,7 +36,7 @@ public:
 
         Player* player = unit->ToPlayer();
         uint32 spellID = aura->GetId();
-        if (EverQuest->IsSpellAnEQBardSong(spellID) == true)
+        if (EverQuest->IsSpellAnEQBardSong(spellID) == true && EverQuest->ConfigBardMaxConcurrentSongs != 0)
         {
             auto& queue = EverQuest->PlayerCasterConcurrentBardSongs[player->GetGUID()];
 
@@ -82,7 +82,7 @@ public:
 
             // Handle bard songs
             uint32 spellID = aurApp->GetBase()->GetId();
-            if (EverQuest->IsSpellAnEQBardSong(spellID) == true)
+            if (EverQuest->IsSpellAnEQBardSong(spellID) == true && EverQuest->ConfigBardMaxConcurrentSongs != 0)
             {
                 Player* player = unit->ToPlayer();
                 auto& queue = EverQuest->PlayerCasterConcurrentBardSongs[player->GetGUID()];
