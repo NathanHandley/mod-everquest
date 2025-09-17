@@ -18,6 +18,7 @@
 #include "GameEventMgr.h"
 #include "Creature.h"
 #include "CreatureData.h"
+#include "SpellMgr.h"
 
 #include "EverQuest.h"
 
@@ -59,7 +60,9 @@ void EverQuestMod::LoadConfigurationSystemDataFromDB()
             Field* fields = queryResult->Fetch();
             string key = fields[0].Get<string>();
             string value = fields[1].Get<string>();
-            if (key == "DayEventID")
+            if (key == "BardMaxConcurrentSongs")
+                ConfigBardMaxConcurrentSongs = std::atoi(value.c_str());
+            else if (key == "DayEventID")
                 ConfigSystemDayEventID = std::atoi(value.c_str());
             else if (key == "NightEventID")
                 ConfigSystemNightEventID = std::atoi(value.c_str());
@@ -511,6 +514,23 @@ bool EverQuestMod::IsSpellAnEQSpell(uint32 spellID)
         return false;
 }
 
+bool EverQuestMod::IsSpellAnEQBardSong(uint32 spellID)
+{
+    if (SpellDataBySpellID.find(spellID) != SpellDataBySpellID.end())
+    {
+        SpellInfo const* spellInfo = sSpellMgr->GetSpellInfo(spellID);
+        if (!spellInfo)
+            return false;
+        for (uint8 i = 0; i < MAX_SPELL_EFFECTS; ++i)
+        {
+            if (spellInfo->Effects[i].ApplyAuraName != SPELL_AURA_PERIODIC_DUMMY)
+                continue;
+            if (spellInfo->Effects[i].MiscValue >= EQ_SPELLDUMMYTYPE_BARDSONGENEMYAREA && spellInfo->Effects[i].MiscValue <= EQ_SPELLDUMMYTYPE_BARDSONGANY)
+                return true;
+        }
+    }
+    return false;
+}
 
 uint32 EverQuestMod::CalculateSpellFocusBoostValue(Unit* caster, uint32 spellID)
 {

@@ -14,6 +14,7 @@
 //  You should have received a copy of the GNU General Public License
 //  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+#include "Player.h"
 #include "Unit.h"
 #include "ScriptMgr.h"
 #include "SpellAuras.h"
@@ -27,6 +28,33 @@ class EverQuest_UnitScript : public UnitScript
 {
 public:
     EverQuest_UnitScript() : UnitScript("EverQuest_UnitScript") {}
+
+    void OnAuraApply(Unit* unit, Aura* aura) override
+    {
+        if (!unit->IsPlayer())
+            return;
+
+        Player* player = unit->ToPlayer();
+        uint32 spellID = aura->GetId();
+        if (EverQuest->IsSpellAnEQBardSong(spellID) == true)
+        {
+            auto& queue = EverQuest->PlayerCasterConcurrentBardSongs[player->GetGUID()];
+
+            // Refresh the cast
+            auto it = std::find(queue.begin(), queue.end(), spellID);
+            if (it != queue.end())
+                queue.erase(it);
+            queue.push_back(spellID);
+
+            // Enforce a limit
+            while (queue.size() > EverQuest->ConfigBardMaxConcurrentSongs)
+            {
+                uint32 oldest = queue.front();
+                queue.pop_front();
+                player->RemoveAurasDueToSpell(oldest);
+            }
+        }
+    }
 
     void OnAuraRemove(Unit* unit, AuraApplication* aurApp, AuraRemoveMode mode) override
     {
@@ -50,6 +78,17 @@ public:
             {
                 EverQuest->SendPlayerToLastGate(unit->ToPlayer());
                 return;
+            }
+
+            // Handle bard songs
+            uint32 spellID = aurApp->GetBase()->GetId();
+            if (EverQuest->IsSpellAnEQBardSong(spellID) == true)
+            {
+                Player* player = unit->ToPlayer();
+                auto& queue = EverQuest->PlayerCasterConcurrentBardSongs[player->GetGUID()];
+                auto it = std::find(queue.begin(), queue.end(), spellID);
+                if (it != queue.end())
+                    queue.erase(it);
             }
         }
     }

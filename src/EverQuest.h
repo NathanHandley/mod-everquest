@@ -95,6 +95,7 @@ private:
 
 public:
     // Configs (from database)
+    int ConfigBardMaxConcurrentSongs;
     int ConfigSystemDayEventID;
     int ConfigSystemNightEventID;
     int ConfigSystemMapDBCIDMin;
@@ -119,6 +120,7 @@ public:
     map<uint32, list<EverQuestQuestCompletionReputation>> QuestCompletionReputationsByQuestTemplateID;
     std::vector<Player*> AllLoadedPlayers;
     std::unordered_map<int, std::unordered_map<int, std::vector<Creature*>>> AllLoadedCreaturesByMapIDThenCreatureEntryID;
+    std::unordered_map<ObjectGuid, std::deque<uint32>> PlayerCasterConcurrentBardSongs;
 
     static EverQuestMod* instance()
     {
@@ -151,6 +153,7 @@ public:
     void DespawnCreature(uint32 entryID, Map* map);
     void MakeCreatureAttackPlayer(uint32 entryID, Map* map, Player* player);
     bool IsSpellAnEQSpell(uint32 spellID);
+    bool IsSpellAnEQBardSong(uint32 spellID);
     uint32 CalculateSpellFocusBoostValue(Unit* caster, uint32 spellID);
 };
 
