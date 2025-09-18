@@ -192,17 +192,17 @@ class EverQuest_BardSongAuraScript: public AuraScript
         int targetType = 0;
         switch (aurEff->GetMiscValue())
         {
-            case EQ_SPELLDUMMYTYPE_BARDSONGENEMYAREA:       targetType = EQ_BARDSONGAURATARGET_ENEMYAREA;       break;
-            case EQ_SPELLDUMMYTYPE_BARDSONGFRIENDLYPARTY:   targetType = EQ_BARDSONGAURATARGET_FRIENDLYPARTY;   break;
-            case EQ_SPELLDUMMYTYPE_BARDSONGSELF:            targetType = EQ_BARDSONGAURATARGET_SELF;            break;
-            case EQ_SPELLDUMMYTYPE_BARDSONGENEMYSINGLE:     targetType = EQ_BARDSONGAURATARGET_ENEMYSINGLE;     break;
-            case EQ_SPELLDUMMYTYPE_BARDSONGFRIENDLYSINGLE:  targetType = EQ_BARDSONGAURATARGET_FRIENDLYSINGLE;  break;
-            case EQ_SPELLDUMMYTYPE_BARDSONGANY:             targetType = EQ_BARDSONGAURATARGET_ANY;             break;
-            default:
-            {
-                LOG_ERROR("module.EverQuest", "EverQuest_BardSongAuraScript::CastTriggerSpellOnTargets failure, unhandled EQ_SPELLDUMMYTYPE_ of ", aurEff->GetMiscValue());
-                return;
-            }
+        case EQ_SPELLDUMMYTYPE_BARDSONGENEMYAREA:       targetType = EQ_BARDSONGAURATARGET_ENEMYAREA;       break;
+        case EQ_SPELLDUMMYTYPE_BARDSONGFRIENDLYPARTY:   targetType = EQ_BARDSONGAURATARGET_FRIENDLYPARTY;   break;
+        case EQ_SPELLDUMMYTYPE_BARDSONGSELF:            targetType = EQ_BARDSONGAURATARGET_SELF;            break;
+        case EQ_SPELLDUMMYTYPE_BARDSONGENEMYSINGLE:     targetType = EQ_BARDSONGAURATARGET_ENEMYSINGLE;     break;
+        case EQ_SPELLDUMMYTYPE_BARDSONGFRIENDLYSINGLE:  targetType = EQ_BARDSONGAURATARGET_FRIENDLYSINGLE;  break;
+        case EQ_SPELLDUMMYTYPE_BARDSONGANY:             targetType = EQ_BARDSONGAURATARGET_ANY;             break;
+        default:
+        {
+            LOG_ERROR("module.EverQuest", "EverQuest_BardSongAuraScript::CastTriggerSpellOnTargets failure, unhandled EQ_SPELLDUMMYTYPE_ of ", aurEff->GetMiscValue());
+            return;
+        }
         }
 
         // Get spell details
@@ -216,12 +216,15 @@ class EverQuest_BardSongAuraScript: public AuraScript
 
         // Grab valid targets
         uint32 radius = curSpell.PeriodicAuraSpellRadius;
-        list<Unit*> validTargets = GetTargets(caster, targetType, radius);        
+        list<Unit*> validTargets = GetTargets(caster, targetType, radius);
         uint32 effectSpellID = curSpell.PeriodicAuraSpellID;
 
         // Cast the spell
         for (Unit* target : validTargets)
+        {
+            target->RemoveAurasDueToSpell(effectSpellID);
             caster->CastSpell(target, effectSpellID, true);
+        }
     }
 
     void Register() override
