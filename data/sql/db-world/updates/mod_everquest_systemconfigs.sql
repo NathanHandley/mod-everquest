@@ -1,5 +1,0 @@
-CREATE TABLE IF NOT EXISTS `mod_everquest_systemconfigs` (
-	`Key` VARCHAR(100) NOT NULL DEFAULT '',
-	`Value` VARCHAR(100) NOT NULL DEFAULT '',
-	PRIMARY KEY (`Key`) USING BTREE
-);
