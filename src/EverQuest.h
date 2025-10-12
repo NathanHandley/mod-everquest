@@ -40,6 +40,7 @@ using namespace std;
 #define EQ_SPELLDUMMYTYPE_BARDSONGENEMYSINGLE       12
 #define EQ_SPELLDUMMYTYPE_BARDSONGFRIENDLYSINGLE    13
 #define EQ_SPELLDUMMYTYPE_BARDSONGANY               14
+#define EQ_SPELLDUMMYTYPE_ILLUSIONPARENT            15
 
 #define EQ_BARDSONGAURATARGET_ENEMYAREA             1
 #define EQ_BARDSONGAURATARGET_FRIENDLYPARTY         2
@@ -77,6 +78,8 @@ public:
     uint32 FocusBoostType = 0;
     uint32 PeriodicAuraSpellID = 0;
     uint32 PeriodicAuraSpellRadius = 0;
+    uint32 MaleFormSpellID = 0;
+    uint32 FemaleFormSpellID = 0;
 };
 
 class EverQuestQuestCompletionReputation
