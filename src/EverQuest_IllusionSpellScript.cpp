@@ -26,7 +26,7 @@ class EverQuest_IllusionSpellScript: public SpellScript
 {
     PrepareSpellScript(EverQuest_IllusionSpellScript);
 
-    void HandleOnHit()
+    void HandleOnHit(SpellEffIndex /*effIndex*/)
     {
         // Only EQ spells
         uint32 spellID = GetSpellInfo()->Id;
@@ -41,15 +41,13 @@ class EverQuest_IllusionSpellScript: public SpellScript
         Unit* caster = GetCaster();
         if (caster == nullptr)
             return;
-
-        // BUG: getGender is always zero, why? (only male shows)
         uint32 illusionSpellID = (hitUnit->getGender() == GENDER_MALE) ? eqSpellData.MaleFormSpellID : eqSpellData.FemaleFormSpellID;
         caster->CastSpell(hitUnit, illusionSpellID, true);
     }
 
     void Register() override
     {
-        OnHit += SpellHitFn(EverQuest_IllusionSpellScript::HandleOnHit);
+        OnEffectHitTarget += SpellEffectFn(EverQuest_IllusionSpellScript::HandleOnHit, EFFECT_0, SPELL_EFFECT_ANY);
     }
 };
 
