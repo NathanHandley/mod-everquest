@@ -477,7 +477,7 @@ void EverQuestMod::DespawnCreature(uint32 entryID, Map* map)
     vector<Creature*> loadedCreatures = GetLoadedCreaturesWithEntryID(map->GetId(), entryID);
     for (Creature* creature : loadedCreatures)
         if (creature != nullptr)
-            creature->DespawnOrUnsummon(0);
+            creature->DespawnOrUnsummon(0ms);
 }
 
 void EverQuestMod::DespawnCreature(Creature* creature, Map* map)
@@ -486,7 +486,7 @@ void EverQuestMod::DespawnCreature(Creature* creature, Map* map)
     for (Creature* curCreature : loadedCreatures)
         if (curCreature == creature)
         {
-            curCreature->DespawnOrUnsummon(0);
+            curCreature->DespawnOrUnsummon(0ms);
             return;
         }
 
