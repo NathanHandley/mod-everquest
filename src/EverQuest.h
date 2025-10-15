@@ -82,6 +82,13 @@ public:
     uint32 FemaleFormSpellID = 0;
 };
 
+class EverQuestPet
+{
+public:
+    uint32 CreatingSpellID = 0;
+    uint32 NamingType = 0;
+};
+
 class EverQuestQuestCompletionReputation
 {
 public:
@@ -121,6 +128,7 @@ public:
     map<uint32, list<EverQuestCreatureOnkillReputation>> CreatureOnkillReputationsByCreatureTemplateID;
     map<uint32, EverQuestSpell> SpellDataBySpellID;
     map<uint32, list<EverQuestQuestCompletionReputation>> QuestCompletionReputationsByQuestTemplateID;
+    map<uint32, EverQuestPet> PetDataByCreatingSpellID;
     std::vector<Player*> AllLoadedPlayers;
     std::unordered_map<int, std::unordered_map<int, std::vector<Creature*>>> AllLoadedCreaturesByMapIDThenCreatureEntryID;
     std::unordered_map<ObjectGuid, std::deque<uint32>> PlayerCasterConcurrentBardSongs;
@@ -140,6 +148,7 @@ public:
     const EverQuestSpell& GetSpellDataForSpellID(uint32 spellID);
     void LoadQuestCompletionReputations();
     const list<EverQuestQuestCompletionReputation>& GetQuestCompletionReputationsForQuestTemplate(uint32 questTemplateID);
+    void LoadPetData();
 
     void StorePositionAsLastGate(Player* player);
     void SendPlayerToLastGate(Player* player);

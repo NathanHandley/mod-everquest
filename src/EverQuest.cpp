@@ -25,6 +25,7 @@
 using namespace std;
 
 EverQuestMod::EverQuestMod() :
+    ConfigBardMaxConcurrentSongs(1),
     ConfigSystemDayEventID(0),
     ConfigSystemNightEventID(0),
     ConfigSystemMapDBCIDMin(0),
@@ -143,8 +144,6 @@ const list<EverQuestCreatureOnkillReputation>& EverQuestMod::GetOnkillReputation
 void EverQuestMod::LoadSpellData()
 {
     SpellDataBySpellID.clear();
-
-    // Pulls in all the creature spells
     QueryResult queryResult = WorldDatabase.Query("SELECT SpellID, AuraDurationBaseInMS, AuraDurationAddPerLevelInMS, AuraDurationMaxInMS, AuraDurationCalcMinLevel, AuraDurationCalcMaxLevel, RecourseSpellID, SpellIDCastOnMeleeAttacker, FocusBoostType, PeriodicAuraSpellID, PeriodicAuraSpellRadius, MaleFormSpellID, FemaleFormSpellID FROM mod_everquest_spell ORDER BY SpellID;");
     if (queryResult)
     {
@@ -187,8 +186,6 @@ const EverQuestSpell& EverQuestMod::GetSpellDataForSpellID(uint32 spellID)
 void EverQuestMod::LoadQuestCompletionReputations()
 {
     QuestCompletionReputationsByQuestTemplateID.clear();
-
-    // Pulls in all the kill faction rewards
     QueryResult queryResult = WorldDatabase.Query("SELECT QuestTemplateID, SortOrder, FactionID, CompletionRewardValue FROM mod_everquest_quest_complete_reputation ORDER BY QuestTemplateID, SortOrder;");
     if (queryResult)
     {
@@ -202,6 +199,24 @@ void EverQuestMod::LoadQuestCompletionReputations()
             questCompletionReputation.FactionID = fields[2].Get<uint32>();
             questCompletionReputation.CompletionRewardValue = fields[3].Get<int32>();
             QuestCompletionReputationsByQuestTemplateID[questCompletionReputation.QuestTemplateID].push_back(questCompletionReputation);
+        } while (queryResult->NextRow());
+    }
+}
+
+void EverQuestMod::LoadPetData()
+{
+    PetDataByCreatingSpellID.clear();
+    QueryResult queryResult = WorldDatabase.Query("SELECT CreatingSpellID, NamingType FROM mod_everquest_pet ORDER BY CreatingSpellID;");
+    if (queryResult)
+    {
+        do
+        {
+            // Pull the data out
+            Field* fields = queryResult->Fetch();
+            EverQuestPet everQuestPet;
+            everQuestPet.CreatingSpellID = fields[0].Get<uint32>();
+            everQuestPet.NamingType = fields[1].Get<uint32>();
+            PetDataByCreatingSpellID[everQuestPet.CreatingSpellID] = everQuestPet;
         } while (queryResult->NextRow());
     }
 }

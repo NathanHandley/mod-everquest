@@ -33,6 +33,7 @@ public:
         EverQuest->LoadCreatureOnkillReputations();
         EverQuest->LoadSpellData();
         EverQuest->LoadQuestCompletionReputations();
+        EverQuest->LoadPetData();
     }
 };
 
