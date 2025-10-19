@@ -209,7 +209,7 @@ void EverQuestMod::LoadQuestCompletionReputations()
 void EverQuestMod::LoadPetData()
 {
     PetDataByCreatingSpellID.clear();
-    QueryResult queryResult = WorldDatabase.Query("SELECT CreatingSpellID, NamingType FROM mod_everquest_pet ORDER BY CreatingSpellID;");
+    QueryResult queryResult = WorldDatabase.Query("SELECT CreatingSpellID, NamingType, CreatureTemplateID, SummonPropertiesID FROM mod_everquest_pet ORDER BY CreatingSpellID;");
     if (queryResult)
     {
         do
@@ -217,8 +217,10 @@ void EverQuestMod::LoadPetData()
             // Pull the data out
             Field* fields = queryResult->Fetch();
             EverQuestPet everQuestPet;
-            everQuestPet.CreatingSpellID = fields[0].Get<uint32>();
-            everQuestPet.NamingType = fields[1].Get<uint32>();
+            everQuestPet.CreatingSpellID = fields[0].Get<int32>();
+            everQuestPet.NamingType = fields[1].Get<int32>();
+            everQuestPet.CreatureTemplateID = fields[2].Get<int32>();
+            everQuestPet.SummonPropertiesID = fields[3].Get<int32>();
             PetDataByCreatingSpellID[everQuestPet.CreatingSpellID] = everQuestPet;
         } while (queryResult->NextRow());
     }
