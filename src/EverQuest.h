@@ -153,6 +153,8 @@ public:
     void LoadQuestCompletionReputations();
     const list<EverQuestQuestCompletionReputation>& GetQuestCompletionReputationsForQuestTemplate(uint32 questTemplateID);
     void LoadPetData();
+    bool HasPetDataForSpell(uint32 spellID);
+    const EverQuestPet& GetPetDataForSpell(uint32 spellID);
 
     void StorePositionAsLastGate(Player* player);
     void SendPlayerToLastGate(Player* player);

@@ -226,6 +226,27 @@ void EverQuestMod::LoadPetData()
     }
 }
 
+bool EverQuestMod::HasPetDataForSpell(uint32 spellID)
+{
+    if (PetDataByCreatingSpellID.find(spellID) != PetDataByCreatingSpellID.end())
+        return true;
+    else
+        return false;
+}
+
+const EverQuestPet& EverQuestMod::GetPetDataForSpell(uint32 spellID)
+{
+    if (PetDataByCreatingSpellID.find(spellID) != PetDataByCreatingSpellID.end())
+    {
+        return PetDataByCreatingSpellID[spellID];
+    }
+    else
+    {
+        static const EverQuestPet returnEmpty;
+        return returnEmpty;
+    }
+}
+
 const list<EverQuestQuestCompletionReputation>& EverQuestMod::GetQuestCompletionReputationsForQuestTemplate(uint32 questTemplateID)
 {
     if (QuestCompletionReputationsByQuestTemplateID.find(questTemplateID) != QuestCompletionReputationsByQuestTemplateID.end())
