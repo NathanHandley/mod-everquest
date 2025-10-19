@@ -19,6 +19,8 @@
 #include "SpellScript.h"
 #include "TemporarySummon.h"
 #include "Pet.h"
+#include "Player.h"
+#include "GameTime.h"
 
 #include "EverQuest.h"
 
@@ -30,6 +32,10 @@ class EverQuest_SummonPetScript : public SpellScript
 
     void HandleEffect(SpellEffIndex /*effIndex*/)
     {
+        // Only work for players
+        if (GetCaster() == nullptr || GetCaster()->IsPlayer() == false)
+            return;
+
         // Only EQ spells
         uint32 spellID = GetSpellInfo()->Id;
         if (EverQuest->IsSpellAnEQSpell(spellID) == false)
@@ -41,33 +47,33 @@ class EverQuest_SummonPetScript : public SpellScript
         }
         EverQuestPet petData = EverQuest->GetPetDataForSpell(spellID);
 
-        // Get position / target
-        WorldLocation const* explicitTarget = GetExplTargetDest();
-        Position pos;
-        if (explicitTarget != nullptr)
-            pos = *explicitTarget;
-        else
-            pos = GetCaster()->GetPosition();
-
-        // Try to summon the creature
-        TempSummon* summon = GetCaster()->GetMap()->SummonCreature(petData.CreatureTemplateID, pos, nullptr, 0, GetCaster());
-        if (summon == nullptr)
+        // Summon the pet for the player
+        Player* castingPlayer = GetCaster()->ToPlayer();
+        Position pos = GetCaster()->GetPosition();
+        Pet* summonedPet = castingPlayer->SummonPet(petData.CreatureTemplateID, pos.GetPositionX(), pos.GetPositionY(), pos.GetPositionZ(),
+            0, SUMMON_PET, 0ms, 100);
+        if (!summonedPet)
         {
-            LOG_ERROR("module.EverQuest", "EverQuest_SummonPetScript::HandleEffect failure, could not summon a pet with SpellID {} and CreatureTemplateID {}", spellID, petData.CreatureTemplateID);
+            LOG_ERROR("module.EverQuest", "EverQuest_SummonPetScript::HandleEffect failure, could not summon pet with SpellID {} and CreatureTemplateID {}", spellID, petData.CreatureTemplateID);
             return;
         }
-        Pet* pet = summon->ToPet();
-        if (pet == nullptr)
-        {
-            LOG_ERROR("module.EverQuest", "EverQuest_SummonPetScript::HandleEffect failure, could not cast summon to pet with SpellID {} and CreatureTemplateID {}", spellID, petData.CreatureTemplateID);
-            return;
-        }
-        pet->InitPetCreateSpells();
-        pet->SetOwnerGUID(GetCaster()->GetGUID());
-        pet->SetFaction(GetCaster()->GetFaction());       
 
         // Set a test name
-        summon->SetName("Test");
+        summonedPet->SetName("Test");
+        summonedPet->UpdateObjectVisibility(true);
+        castingPlayer->SetGroupUpdateFlag(GROUP_UPDATE_FLAG_PET_NAME);
+
+
+        //CharacterDatabasePreparedStatement* stmt = CharacterDatabase.GetPreparedStatement(CHAR_UPD_CHAR_PET_NAME);
+        //stmt->SetData(0, "Test");
+        //stmt->SetData(1, castingPlayer->GetGUID().GetCounter());
+        //stmt->SetData(2, summonedPet->GetCharmInfo()->GetPetNumber());
+        //CharacterDatabaseTransaction trans = CharacterDatabase.BeginTransaction();
+        //trans->Append(stmt);
+
+        //CharacterDatabase.CommitTransaction(trans);
+
+        //summonedPet->SetUInt32Value(UNIT_FIELD_PET_NAME_TIMESTAMP, uint32(GameTime::GetGameTime().count())); // cast can't be helped
     }
 
     void Register() override
