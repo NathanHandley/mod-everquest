@@ -200,7 +200,7 @@ class EverQuest_BardSongAuraScript: public AuraScript
         case EQ_SPELLDUMMYTYPE_BARDSONGANY:             targetType = EQ_BARDSONGAURATARGET_ANY;             break;
         default:
         {
-            LOG_ERROR("module.EverQuest", "EverQuest_BardSongAuraScript::CastTriggerSpellOnTargets failure, unhandled EQ_SPELLDUMMYTYPE_ of ", aurEff->GetMiscValue());
+            LOG_ERROR("module.EverQuest", "EverQuest_BardSongAuraScript::CastTriggerSpellOnTargets failure, unhandled EQ_SPELLDUMMYTYPE_ of {}", aurEff->GetMiscValue());
             return;
         }
         }

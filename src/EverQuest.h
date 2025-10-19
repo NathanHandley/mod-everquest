@@ -88,7 +88,7 @@ class EverQuestPet
 public:
     int32 CreatingSpellID = 0;
     int32 NamingType = 0;
-    int32 CreatureTemplateID = 0;
+    uint32 CreatureTemplateID = 0;
     int32 SummonPropertiesID = 0;
 };
 
