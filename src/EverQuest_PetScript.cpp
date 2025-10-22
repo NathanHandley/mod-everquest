@@ -16,35 +16,25 @@
 
 #include "Configuration/Config.h"
 #include "ObjectMgr.h"
+#include "Pet.h"
 #include "ScriptMgr.h"
 
 #include "EverQuest.h"
 
 using namespace std;
 
-class EverQuest_AllCreatureScript: public AllCreatureScript
+class EverQuest_PetScript : public PetScript
 {
 public:
-    EverQuest_AllCreatureScript() : AllCreatureScript("EverQuest_AllCreatureScript") {}
+    EverQuest_PetScript() : PetScript("EverQuest_PetScript") {}
 
-    void OnCreatureAddWorld(Creature* creature) override
+    void OnPetAddToWorld(Pet* pet) override
     {
-        // Store EverQuest creatures on the tracker
-        uint32 mapID = creature->GetMap()->GetId();
-        if (mapID >= EverQuest->ConfigSystemMapDBCIDMin && mapID <= EverQuest->ConfigSystemMapDBCIDMax)
-            EverQuest->AddCreatureAsLoaded(mapID, creature);
-    }
-
-    void OnCreatureRemoveWorld(Creature* creature) override
-    {
-        // Remove EverQuest creatures from the tracker
-        uint32 mapID = creature->GetMap()->GetId();
-        if (mapID >= EverQuest->ConfigSystemMapDBCIDMin && mapID <= EverQuest->ConfigSystemMapDBCIDMax)
-            EverQuest->RemoveCreatureAsLoaded(mapID, creature);
+        pet->SetName("Test Name");
     }
 };
 
-void AddEverQuestAllCreatureScripts()
+void AddEverQuestPetScripts()
 {
-    new EverQuest_AllCreatureScript();
+    new EverQuest_PetScript();
 }
