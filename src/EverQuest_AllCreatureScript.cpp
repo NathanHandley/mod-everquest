@@ -29,10 +29,11 @@ public:
 
     void OnCreatureAddWorld(Creature* creature) override
     {
+        // Store EverQuest creatures on the tracker
         uint32 mapID = creature->GetMap()->GetId();
-        if (mapID < EverQuest->ConfigSystemMapDBCIDMin || mapID > EverQuest->ConfigSystemMapDBCIDMax)
-            return;
-        EverQuest->AddCreatureAsLoaded(mapID, creature);
+        if (mapID >= EverQuest->ConfigSystemMapDBCIDMin && mapID <= EverQuest->ConfigSystemMapDBCIDMax)
+            EverQuest->AddCreatureAsLoaded(mapID, creature);
+
     }
 
     void OnCreatureRemoveWorld(Creature* creature) override

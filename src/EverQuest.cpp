@@ -30,7 +30,7 @@ EverQuestMod::EverQuestMod() :
     ConfigSystemNightEventID(0),
     ConfigSystemMapDBCIDMin(0),
     ConfigSystemMapDBCIDMax(0),
-    ConfigSystemPetsUseEQLevelAndBehavior(0),
+    //ConfigSystemPetsUseEQLevelAndBehavior(0),
     ConfigSystemSpellDBCIDMin(0),
     ConfigSystemSpellDBCIDMax(0),
     ConfigSystemSpellDBCIDDayPhaseAura(0),
@@ -80,8 +80,8 @@ void EverQuestMod::LoadConfigurationSystemDataFromDB()
                 ConfigSystemSpellDBCIDDayPhaseAura = std::atoi(value.c_str());
             else if (key == "SpellDBCIDNightPhaseAura")
                 ConfigSystemSpellDBCIDNightPhaseAura = std::atoi(value.c_str());
-            else if (key == "PetsUseEQLevelAndBehavior")
-                ConfigSystemPetsUseEQLevelAndBehavior = std::atoi(value.c_str());
+            //else if (key == "PetsUseEQLevelAndBehavior")
+            //    ConfigSystemPetsUseEQLevelAndBehavior = std::atoi(value.c_str());
             else if (key == "QuestSQLIDMin")
                 ConfigSystemQuestSQLIDMin = std::atoi(value.c_str());
             else if (key == "QuestSQLIDMax")
