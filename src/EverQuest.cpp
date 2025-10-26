@@ -208,7 +208,7 @@ void EverQuestMod::LoadQuestCompletionReputations()
 
 void EverQuestMod::LoadPetData()
 {
-    PetDataByCreatingSpellID.clear();
+    PetDataByCreatureTemplateID.clear();
     QueryResult queryResult = WorldDatabase.Query("SELECT CreatingSpellID, NamingType, CreatureTemplateID, SummonPropertiesID FROM mod_everquest_pet ORDER BY CreatingSpellID;");
     if (queryResult)
     {
@@ -221,24 +221,24 @@ void EverQuestMod::LoadPetData()
             everQuestPet.NamingType = fields[1].Get<int32>();
             everQuestPet.CreatureTemplateID = fields[2].Get<uint32>();
             everQuestPet.SummonPropertiesID = fields[3].Get<int32>();
-            PetDataByCreatingSpellID[everQuestPet.CreatingSpellID] = everQuestPet;
+            PetDataByCreatureTemplateID[everQuestPet.CreatureTemplateID] = everQuestPet;
         } while (queryResult->NextRow());
     }
 }
 
-bool EverQuestMod::HasPetDataForSpell(uint32 spellID)
+bool EverQuestMod::HasPetDataForCreatureTemplateID(uint32 creatureTemplateID)
 {
-    if (PetDataByCreatingSpellID.find(spellID) != PetDataByCreatingSpellID.end())
+    if (PetDataByCreatureTemplateID.find(creatureTemplateID) != PetDataByCreatureTemplateID.end())
         return true;
     else
         return false;
 }
 
-const EverQuestPet& EverQuestMod::GetPetDataForSpell(uint32 spellID)
+const EverQuestPet& EverQuestMod::GetPetDataForCreatureTemplateID(uint32 creatureTemplateID)
 {
-    if (PetDataByCreatingSpellID.find(spellID) != PetDataByCreatingSpellID.end())
+    if (PetDataByCreatureTemplateID.find(creatureTemplateID) != PetDataByCreatureTemplateID.end())
     {
-        return PetDataByCreatingSpellID[spellID];
+        return PetDataByCreatureTemplateID[creatureTemplateID];
     }
     else
     {

@@ -55,6 +55,11 @@ using namespace std;
 #define EQ_SPELLFOCUSBOOSTTYPE_BARDSTRINGED         4
 #define EQ_SPELLFOCUSBOOSTTYPE_BARDWIND             5
 
+#define EQ_PET_NAMING_TYPE_PET                      0
+#define EQ_PET_NAMING_TYPE_FAMILIAR                 1
+#define EQ_PET_NAMING_TYPE_WARDER                   2
+#define EQ_PET_NAMING_TYPE_RANDOM                   3
+
 class EverQuestCreatureOnkillReputation
 {
 public:
@@ -131,7 +136,7 @@ public:
     map<uint32, list<EverQuestCreatureOnkillReputation>> CreatureOnkillReputationsByCreatureTemplateID;
     map<uint32, EverQuestSpell> SpellDataBySpellID;
     map<uint32, list<EverQuestQuestCompletionReputation>> QuestCompletionReputationsByQuestTemplateID;
-    map<uint32, EverQuestPet> PetDataByCreatingSpellID;
+    map<uint32, EverQuestPet> PetDataByCreatureTemplateID;
     std::vector<Player*> AllLoadedPlayers;
     std::unordered_map<int, std::unordered_map<int, std::vector<Creature*>>> AllLoadedCreaturesByMapIDThenCreatureEntryID;
     std::unordered_map<ObjectGuid, std::deque<uint32>> PlayerCasterConcurrentBardSongs;
@@ -152,8 +157,8 @@ public:
     void LoadQuestCompletionReputations();
     const list<EverQuestQuestCompletionReputation>& GetQuestCompletionReputationsForQuestTemplate(uint32 questTemplateID);
     void LoadPetData();
-    bool HasPetDataForSpell(uint32 spellID);
-    const EverQuestPet& GetPetDataForSpell(uint32 spellID);
+    bool HasPetDataForCreatureTemplateID(uint32 creatureTemplateID);
+    const EverQuestPet& GetPetDataForCreatureTemplateID(uint32 creatureTemplateID);
 
     void StorePositionAsLastGate(Player* player);
     void SendPlayerToLastGate(Player* player);

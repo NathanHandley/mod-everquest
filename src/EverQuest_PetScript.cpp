@@ -30,7 +30,13 @@ public:
 
     void OnPetAddToWorld(Pet* pet) override
     {
-        pet->SetName("Test Name");
+        // Handle pets that have random names
+        if (EverQuest->HasPetDataForCreatureTemplateID(pet->GetCreatureTemplate()->Entry) == false)
+            return;
+        EverQuestPet petData = EverQuest->GetPetDataForCreatureTemplateID(pet->GetCreatureTemplate()->Entry);
+        if (petData.NamingType != EQ_PET_NAMING_TYPE_RANDOM)
+            return;
+        pet->SetName(sObjectMgr->GeneratePetName(pet->GetCreatureTemplate()->Entry));
     }
 };
 
