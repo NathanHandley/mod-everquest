@@ -20,8 +20,9 @@
 #include "Chat.h"
 #include "ScriptMgr.h"
 #include "CommandScript.h"
-//
 #include "boost/algorithm/string.hpp"
+
+#include <iomanip>
 
 using namespace Acore::ChatCommands;
 using namespace std;
