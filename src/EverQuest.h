@@ -112,12 +112,12 @@ private:
 
 public:
     // Configs (from database)
+    float ConfigWorldScale;
     int ConfigBardMaxConcurrentSongs;
     int ConfigSystemDayEventID;
     int ConfigSystemNightEventID;
     int ConfigSystemMapDBCIDMin;
     int ConfigSystemMapDBCIDMax;
-    //int ConfigSystemPetsUseEQLevelAndBehavior;
     int ConfigSystemSpellDBCIDMin;
     int ConfigSystemSpellDBCIDMax;
     int ConfigSystemSpellDBCIDDayPhaseAura;
