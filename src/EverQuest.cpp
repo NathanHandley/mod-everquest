@@ -69,13 +69,13 @@ void EverQuestMod::LoadConfigurationSystemDataFromDB()
             else if (key == "NightEventID")
                 ConfigSystemNightEventID = std::atoi(value.c_str());
             else if (key == "MapDBCIDMin")
-                ConfigSystemMapDBCIDMin = std::atoi(value.c_str());
+                ConfigSystemMapDBCIDMin = (uint32)std::atoi(value.c_str());
             else if (key == "MapDBCIDMax")
-                ConfigSystemMapDBCIDMax = std::atoi(value.c_str());
+                ConfigSystemMapDBCIDMax = (uint32)std::atoi(value.c_str());
             else if (key == "SpellDBCIDMin")
-                ConfigSystemSpellDBCIDMin = std::atoi(value.c_str());
+                ConfigSystemSpellDBCIDMin = (uint32)std::atoi(value.c_str());
             else if (key == "SpellDBCIDMax")
-                ConfigSystemSpellDBCIDMax = std::atoi(value.c_str());
+                ConfigSystemSpellDBCIDMax = (uint32)std::atoi(value.c_str());
             else if (key == "SpellDBCIDDayPhaseAura")
                 ConfigSystemSpellDBCIDDayPhaseAura = std::atoi(value.c_str());
             else if (key == "SpellDBCIDNightPhaseAura")

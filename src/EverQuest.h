@@ -116,10 +116,10 @@ public:
     int ConfigBardMaxConcurrentSongs;
     int ConfigSystemDayEventID;
     int ConfigSystemNightEventID;
-    int ConfigSystemMapDBCIDMin;
-    int ConfigSystemMapDBCIDMax;
-    int ConfigSystemSpellDBCIDMin;
-    int ConfigSystemSpellDBCIDMax;
+    uint32 ConfigSystemMapDBCIDMin;
+    uint32 ConfigSystemMapDBCIDMax;
+    uint32 ConfigSystemSpellDBCIDMin;
+    uint32 ConfigSystemSpellDBCIDMax;
     int ConfigSystemSpellDBCIDDayPhaseAura;
     int ConfigSystemSpellDBCIDNightPhaseAura;
     int ConfigSystemQuestSQLIDMin;

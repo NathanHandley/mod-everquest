@@ -17,22 +17,11 @@
 */
 
 #include "EverQuest.h"
-//#include "Cell.h"
 #include "Chat.h"
 #include "ScriptMgr.h"
 #include "CommandScript.h"
-//#include "Opcodes.h"
-//#include "Player.h"
-//#include "DetourNavMeshQuery.h"
-//#include "MapMgr.h"
-//
-//#include <vector>
-//#include <cstdio>
-//#include <iostream>
-//#include <fstream>
 //
 #include "boost/algorithm/string.hpp"
-//#include <regex>
 
 using namespace Acore::ChatCommands;
 using namespace std;
