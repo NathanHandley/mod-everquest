@@ -113,7 +113,7 @@ private:
 public:
     // Configs (from database)
     float ConfigWorldScale;
-    int ConfigBardMaxConcurrentSongs;
+    uint32 ConfigBardMaxConcurrentSongs;
     int ConfigSystemDayEventID;
     int ConfigSystemNightEventID;
     uint32 ConfigSystemMapDBCIDMin;
@@ -122,8 +122,8 @@ public:
     uint32 ConfigSystemSpellDBCIDMax;
     int ConfigSystemSpellDBCIDDayPhaseAura;
     int ConfigSystemSpellDBCIDNightPhaseAura;
-    int ConfigSystemQuestSQLIDMin;
-    int ConfigSystemQuestSQLIDMax;
+    uint32 ConfigSystemQuestSQLIDMin;
+    uint32 ConfigSystemQuestSQLIDMax;
 
     // Configs (from server file)
     bool ConfigMapRestrictPlayersToNorrath;

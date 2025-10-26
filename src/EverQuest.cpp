@@ -63,7 +63,7 @@ void EverQuestMod::LoadConfigurationSystemDataFromDB()
             string key = fields[0].Get<string>();
             string value = fields[1].Get<string>();
             if (key == "BardMaxConcurrentSongs")
-                ConfigBardMaxConcurrentSongs = std::atoi(value.c_str());
+                ConfigBardMaxConcurrentSongs = (uint32)std::atoi(value.c_str());
             else if (key == "DayEventID")
                 ConfigSystemDayEventID = std::atoi(value.c_str());
             else if (key == "NightEventID")
@@ -81,9 +81,9 @@ void EverQuestMod::LoadConfigurationSystemDataFromDB()
             else if (key == "SpellDBCIDNightPhaseAura")
                 ConfigSystemSpellDBCIDNightPhaseAura = std::atoi(value.c_str());
             else if (key == "QuestSQLIDMin")
-                ConfigSystemQuestSQLIDMin = std::atoi(value.c_str());
+                ConfigSystemQuestSQLIDMin = (uint32)std::atoi(value.c_str());
             else if (key == "QuestSQLIDMax")
-                ConfigSystemQuestSQLIDMax = std::atoi(value.c_str());
+                ConfigSystemQuestSQLIDMax = (uint32)std::atoi(value.c_str());
             else if (key == "WorldScale")
                 ConfigWorldScale = std::atof(value.c_str());
             else
