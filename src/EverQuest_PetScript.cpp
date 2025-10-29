@@ -30,13 +30,20 @@ public:
 
     void OnPetAddToWorld(Pet* pet) override
     {
-        // Handle pets that have random names
+        // Skip non-EQ pets
         if (EverQuest->HasPetDataForCreatureTemplateID(pet->GetCreatureTemplate()->Entry) == false)
             return;
+
+        // Random pet names
         EverQuestPet petData = EverQuest->GetPetDataForCreatureTemplateID(pet->GetCreatureTemplate()->Entry);
-        if (petData.NamingType != EQ_PET_NAMING_TYPE_RANDOM)
-            return;
-        pet->SetName(sObjectMgr->GeneratePetName(pet->GetCreatureTemplate()->Entry));
+        if (petData.NamingType == EQ_PET_NAMING_TYPE_RANDOM)
+            pet->SetName(sObjectMgr->GeneratePetName(pet->GetCreatureTemplate()->Entry));
+
+        // Pet equipment
+        if (petData.MainhandItemTemplateID != 0)
+            pet->SetUInt32Value(UNIT_VIRTUAL_ITEM_SLOT_ID + 0, petData.MainhandItemTemplateID);
+        if (petData.OffhandItemTemplateID != 0)
+            pet->SetUInt32Value(UNIT_VIRTUAL_ITEM_SLOT_ID + 1, petData.OffhandItemTemplateID);
     }
 };
 

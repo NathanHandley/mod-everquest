@@ -94,6 +94,8 @@ public:
     int32 NamingType = 0;
     uint32 CreatureTemplateID = 0;
     int32 SummonPropertiesID = 0;
+    uint32 MainhandItemTemplateID = 0;
+    uint32 OffhandItemTemplateID = 0;
 };
 
 class EverQuestQuestCompletionReputation
