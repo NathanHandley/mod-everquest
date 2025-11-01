@@ -87,6 +87,14 @@ public:
     uint32 FemaleFormSpellID = 0;
 };
 
+class EverQuestCreature
+{
+public:
+    uint32 CreatureTemplateID = 0;
+    uint32 MainhandHeldItemTemplateID = 0;
+    uint32 OffhandHeldItemTemplateID = 0;
+};
+
 class EverQuestPet
 {
 public:
@@ -135,13 +143,14 @@ public:
     float ConfigExpLossOnDeathLossPercent;
     bool ConfigExpLossOnDeathAddLostExpToRestExp;
 
+    map<uint32, EverQuestCreature> CreaturesByTemplateID;
     map<uint32, list<EverQuestCreatureOnkillReputation>> CreatureOnkillReputationsByCreatureTemplateID;
     map<uint32, EverQuestSpell> SpellDataBySpellID;
     map<uint32, list<EverQuestQuestCompletionReputation>> QuestCompletionReputationsByQuestTemplateID;
     map<uint32, EverQuestPet> PetDataByCreatureTemplateID;
-    std::vector<Player*> AllLoadedPlayers;
-    std::unordered_map<int, std::unordered_map<int, std::vector<Creature*>>> AllLoadedCreaturesByMapIDThenCreatureEntryID;
-    std::unordered_map<ObjectGuid, std::deque<uint32>> PlayerCasterConcurrentBardSongs;
+    vector<Player*> AllLoadedPlayers;
+    unordered_map<int, unordered_map<int, vector<Creature*>>> AllLoadedCreaturesByMapIDThenCreatureEntryID;
+    unordered_map<ObjectGuid, deque<uint32>> PlayerCasterConcurrentBardSongs;
 
     static EverQuestMod* instance()
     {
@@ -152,6 +161,9 @@ public:
 
     void LoadConfigurationSystemDataFromDB();
     void LoadConfigurationFile();
+    void LoadCreatureData();
+    bool HasCreatureDataForCreatureTemplateID(uint32 creatureTemplateID);
+    const EverQuestCreature& GetCreatureDataForCreatureTemplateID(uint32 creatureTemplateID);
     void LoadCreatureOnkillReputations();
     const list<EverQuestCreatureOnkillReputation>& GetOnkillReputationsForCreatureTemplate(uint32 creatureTemplateID);
     void LoadSpellData();

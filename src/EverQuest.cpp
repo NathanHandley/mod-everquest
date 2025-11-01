@@ -63,29 +63,29 @@ void EverQuestMod::LoadConfigurationSystemDataFromDB()
             string key = fields[0].Get<string>();
             string value = fields[1].Get<string>();
             if (key == "BardMaxConcurrentSongs")
-                ConfigBardMaxConcurrentSongs = (uint32)std::atoi(value.c_str());
+                ConfigBardMaxConcurrentSongs = (uint32)atoi(value.c_str());
             else if (key == "DayEventID")
-                ConfigSystemDayEventID = std::atoi(value.c_str());
+                ConfigSystemDayEventID = atoi(value.c_str());
             else if (key == "NightEventID")
-                ConfigSystemNightEventID = std::atoi(value.c_str());
+                ConfigSystemNightEventID = atoi(value.c_str());
             else if (key == "MapDBCIDMin")
-                ConfigSystemMapDBCIDMin = (uint32)std::atoi(value.c_str());
+                ConfigSystemMapDBCIDMin = (uint32)atoi(value.c_str());
             else if (key == "MapDBCIDMax")
-                ConfigSystemMapDBCIDMax = (uint32)std::atoi(value.c_str());
+                ConfigSystemMapDBCIDMax = (uint32)atoi(value.c_str());
             else if (key == "SpellDBCIDMin")
-                ConfigSystemSpellDBCIDMin = (uint32)std::atoi(value.c_str());
+                ConfigSystemSpellDBCIDMin = (uint32)atoi(value.c_str());
             else if (key == "SpellDBCIDMax")
-                ConfigSystemSpellDBCIDMax = (uint32)std::atoi(value.c_str());
+                ConfigSystemSpellDBCIDMax = (uint32)atoi(value.c_str());
             else if (key == "SpellDBCIDDayPhaseAura")
-                ConfigSystemSpellDBCIDDayPhaseAura = std::atoi(value.c_str());
+                ConfigSystemSpellDBCIDDayPhaseAura = atoi(value.c_str());
             else if (key == "SpellDBCIDNightPhaseAura")
-                ConfigSystemSpellDBCIDNightPhaseAura = std::atoi(value.c_str());
+                ConfigSystemSpellDBCIDNightPhaseAura = atoi(value.c_str());
             else if (key == "QuestSQLIDMin")
-                ConfigSystemQuestSQLIDMin = (uint32)std::atoi(value.c_str());
+                ConfigSystemQuestSQLIDMin = (uint32)atoi(value.c_str());
             else if (key == "QuestSQLIDMax")
-                ConfigSystemQuestSQLIDMax = (uint32)std::atoi(value.c_str());
+                ConfigSystemQuestSQLIDMax = (uint32)atoi(value.c_str());
             else if (key == "WorldScale")
-                ConfigWorldScale = std::atof(value.c_str());
+                ConfigWorldScale = atof(value.c_str());
             else
             {
                 LOG_ERROR("module.EverQuest", "EverQuestMod::LoadConfigurationSystemDataFromDB error, unhandled key of {} with value {}", key, value);
@@ -107,6 +107,46 @@ void EverQuestMod::LoadConfigurationFile()
     ConfigExpLossOnDeathMinLevel = sConfigMgr->GetOption<uint32>("EverQuest.ExpLossOnDeath.MinLevel", 5);
     ConfigExpLossOnDeathLossPercent = sConfigMgr->GetOption<float>("EverQuest.ExpLossOnDeath.LossPercent", 10);
     ConfigExpLossOnDeathAddLostExpToRestExp = sConfigMgr->GetOption<bool>("EverQuest.ExpLossOnDeath.AddLostExpToRestExp", true);
+}
+
+void EverQuestMod::LoadCreatureData()
+{
+    CreaturesByTemplateID.clear();
+    QueryResult queryResult = WorldDatabase.Query("SELECT CreatureTemplateID, MainhandHeldItemTemplateID, OffhandHeldItemTemplateID FROM mod_everquest_creature ORDER BY CreatureTemplateID;");
+    if (queryResult)
+    {
+        do
+        {
+            // Pull the data out
+            Field* fields = queryResult->Fetch();
+            EverQuestCreature everQuestCreature;
+            everQuestCreature.CreatureTemplateID = fields[0].Get<uint32>();
+            everQuestCreature.MainhandHeldItemTemplateID = fields[1].Get<uint32>();
+            everQuestCreature.OffhandHeldItemTemplateID = fields[2].Get<uint32>();
+            CreaturesByTemplateID[everQuestCreature.CreatureTemplateID] = everQuestCreature;
+        } while (queryResult->NextRow());
+    }
+}
+
+bool EverQuestMod::HasCreatureDataForCreatureTemplateID(uint32 creatureTemplateID)
+{
+    if (CreaturesByTemplateID.find(creatureTemplateID) != CreaturesByTemplateID.end())
+        return true;
+    else
+        return false;
+}
+
+const EverQuestCreature& EverQuestMod::GetCreatureDataForCreatureTemplateID(uint32 creatureTemplateID)
+{
+    if (CreaturesByTemplateID.find(creatureTemplateID) != CreaturesByTemplateID.end())
+    {
+        return CreaturesByTemplateID[creatureTemplateID];
+    }
+    else
+    {
+        static const EverQuestCreature returnEmpty;
+        return returnEmpty;
+    }
 }
 
 void EverQuestMod::LoadCreatureOnkillReputations()
@@ -382,7 +422,7 @@ void EverQuestMod::DeletePlayerBindHome(ObjectGuid guid)
 
 void EverQuestMod::SetAllLoadedPlayersDayOrNightAura()
 {
-    for (std::vector<Player*>::const_iterator playerIterator = AllLoadedPlayers.begin(); playerIterator != AllLoadedPlayers.end(); ++playerIterator)
+    for (vector<Player*>::const_iterator playerIterator = AllLoadedPlayers.begin(); playerIterator != AllLoadedPlayers.end(); ++playerIterator)
     {
         Player* thisPlayer = *playerIterator;
         SetPlayerDayOrNightAura(thisPlayer);
@@ -434,7 +474,7 @@ void EverQuestMod::AddCreatureAsLoaded(int mapID, Creature* creature)
 {
     if (AllLoadedCreaturesByMapIDThenCreatureEntryID.find(mapID) == AllLoadedCreaturesByMapIDThenCreatureEntryID.end())
         AllLoadedCreaturesByMapIDThenCreatureEntryID[mapID];
-    std::unordered_map<int, std::vector<Creature*>>& innerMap = AllLoadedCreaturesByMapIDThenCreatureEntryID[mapID];
+    unordered_map<int, vector<Creature*>>& innerMap = AllLoadedCreaturesByMapIDThenCreatureEntryID[mapID];
     if (innerMap.find(creature->GetEntry()) != innerMap.end())
         innerMap[creature->GetEntry()];
     innerMap[creature->GetEntry()].push_back(creature);
@@ -444,13 +484,13 @@ void EverQuestMod::RemoveCreatureAsLoaded(int mapID, Creature* creature)
 {
     if (AllLoadedCreaturesByMapIDThenCreatureEntryID.find(mapID) == AllLoadedCreaturesByMapIDThenCreatureEntryID.end())
         return;
-    std::unordered_map<int, std::vector<Creature*>>& innerMap = AllLoadedCreaturesByMapIDThenCreatureEntryID[mapID];
+    unordered_map<int, vector<Creature*>>& innerMap = AllLoadedCreaturesByMapIDThenCreatureEntryID[mapID];
     int creatureEntryID = creature->GetEntry();
     if (innerMap.find(creatureEntryID) == innerMap.end())
         return;
 
-    std::vector<Creature*>& creatureVector = innerMap[creatureEntryID];
-    std::vector<Creature*>::iterator it = std::find(creatureVector.begin(), creatureVector.end(), creature);
+    vector<Creature*>& creatureVector = innerMap[creatureEntryID];
+    vector<Creature*>::iterator it = find(creatureVector.begin(), creatureVector.end(), creature);
     if (it != creatureVector.end())
     {
         creatureVector.erase(it);
@@ -467,7 +507,7 @@ vector<Creature*> EverQuestMod::GetLoadedCreaturesWithEntryID(int mapID, uint32 
 {
     if (AllLoadedCreaturesByMapIDThenCreatureEntryID.find(mapID) == AllLoadedCreaturesByMapIDThenCreatureEntryID.end())
         return vector<Creature*>();
-    std::unordered_map<int, std::vector<Creature*>>& innerMap = AllLoadedCreaturesByMapIDThenCreatureEntryID[mapID];
+    unordered_map<int, vector<Creature*>>& innerMap = AllLoadedCreaturesByMapIDThenCreatureEntryID[mapID];
     if (innerMap.find(entryID) == innerMap.end())
         return vector<Creature*>();
     return innerMap[entryID];

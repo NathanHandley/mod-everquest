@@ -30,6 +30,7 @@ public:
     {
         EverQuest->LoadConfigurationSystemDataFromDB();
         EverQuest->LoadConfigurationFile();
+        EverQuest->LoadCreatureData();
         EverQuest->LoadCreatureOnkillReputations();
         EverQuest->LoadSpellData();
         EverQuest->LoadQuestCompletionReputations();

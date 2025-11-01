@@ -17,6 +17,7 @@
 #include "Configuration/Config.h"
 #include "ObjectMgr.h"
 #include "ScriptMgr.h"
+#include "LootMgr.h"
 
 #include "EverQuest.h"
 
@@ -33,11 +34,23 @@ public:
         uint32 mapID = creature->GetMap()->GetId();
         if (mapID >= EverQuest->ConfigSystemMapDBCIDMin && mapID <= EverQuest->ConfigSystemMapDBCIDMax)
             EverQuest->AddCreatureAsLoaded(mapID, creature);
+
+        // Add visual information
+        if (EverQuest->HasCreatureDataForCreatureTemplateID(creature->GetEntry()) == true)
+        {
+            EverQuestCreature eqCreature = EverQuest->GetCreatureDataForCreatureTemplateID(creature->GetEntry());
+            if (eqCreature.MainhandHeldItemTemplateID > 0)
+                creature->SetUInt32Value(UNIT_VIRTUAL_ITEM_SLOT_ID + 0, eqCreature.MainhandHeldItemTemplateID);
+            if (eqCreature.OffhandHeldItemTemplateID > 0)
+                creature->SetUInt32Value(UNIT_VIRTUAL_ITEM_SLOT_ID + 1, eqCreature.OffhandHeldItemTemplateID);
+            if (eqCreature.MainhandHeldItemTemplateID > 0 || eqCreature.OffhandHeldItemTemplateID > 0)
+                creature->SetSheath(SHEATH_STATE_MELEE);
+        }
     }
 
     void OnCreatureRemoveWorld(Creature* creature) override
     {
-        // Remove EverQuest creatures from the tracker
+        // Remove EverQuest creatures from the trackers
         uint32 mapID = creature->GetMap()->GetId();
         if (mapID >= EverQuest->ConfigSystemMapDBCIDMin && mapID <= EverQuest->ConfigSystemMapDBCIDMax)
             EverQuest->RemoveCreatureAsLoaded(mapID, creature);
