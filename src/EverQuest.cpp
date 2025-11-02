@@ -66,6 +66,10 @@ void EverQuestMod::LoadConfigurationSystemDataFromDB()
                 ConfigBardMaxConcurrentSongs = (uint32)atoi(value.c_str());
             else if (key == "DayEventID")
                 ConfigSystemDayEventID = atoi(value.c_str());
+            else if (key == "CreatureTemplateIDMin")
+                ConfigSystemCreatureTemplateIDMin = (uint32)atoi(value.c_str());
+            else if (key == "CreatureTemplateIDMax")
+                ConfigSystemCreatureTemplateIDMax = (uint32)atoi(value.c_str());
             else if (key == "NightEventID")
                 ConfigSystemNightEventID = atoi(value.c_str());
             else if (key == "MapDBCIDMin")
@@ -112,7 +116,7 @@ void EverQuestMod::LoadConfigurationFile()
 void EverQuestMod::LoadCreatureData()
 {
     CreaturesByTemplateID.clear();
-    QueryResult queryResult = WorldDatabase.Query("SELECT CreatureTemplateID, MainhandHeldItemTemplateID, OffhandHeldItemTemplateID FROM mod_everquest_creature ORDER BY CreatureTemplateID;");
+    QueryResult queryResult = WorldDatabase.Query("SELECT CreatureTemplateID, CanShowHeldLootItems, MainhandHeldItemTemplateID, OffhandHeldItemTemplateID FROM mod_everquest_creature ORDER BY CreatureTemplateID;");
     if (queryResult)
     {
         do
@@ -121,8 +125,9 @@ void EverQuestMod::LoadCreatureData()
             Field* fields = queryResult->Fetch();
             EverQuestCreature everQuestCreature;
             everQuestCreature.CreatureTemplateID = fields[0].Get<uint32>();
-            everQuestCreature.MainhandHeldItemTemplateID = fields[1].Get<uint32>();
-            everQuestCreature.OffhandHeldItemTemplateID = fields[2].Get<uint32>();
+            everQuestCreature.CanShowHeldLootItems = fields[1].Get<uint32>();
+            everQuestCreature.MainhandHeldItemTemplateID = fields[2].Get<uint32>();
+            everQuestCreature.OffhandHeldItemTemplateID = fields[3].Get<uint32>();
             CreaturesByTemplateID[everQuestCreature.CreatureTemplateID] = everQuestCreature;
         } while (queryResult->NextRow());
     }
@@ -286,6 +291,29 @@ const EverQuestPet& EverQuestMod::GetPetDataForCreatureTemplateID(uint32 creatur
     {
         static const EverQuestPet returnEmpty;
         return returnEmpty;
+    }
+}
+
+void EverQuestMod::LoadLootTemplateRows()
+{
+    LootTemplateRowsByEntryID.clear();
+    QueryResult queryResult = WorldDatabase.Query("SELECT Entry, Item, Chance, QuestRequired, GroupId, MinCount, MaxCount FROM creature_loot_template WHERE Entry > {} AND Entry < {}",
+        ConfigSystemCreatureTemplateIDMin, ConfigSystemCreatureTemplateIDMax);
+    if (queryResult)
+    {
+        do
+        {
+            Field* fields = queryResult->Fetch();
+            EverQuestLootTemplateRow lootRow;
+            lootRow.Entry = fields[0].Get<uint32>();
+            lootRow.ItemTemplateID = fields[1].Get<uint32>();
+            lootRow.Chance = fields[2].Get<float>();
+            lootRow.QuestRequired = fields[3].Get<bool>();
+            lootRow.GroupID = fields[4].Get<uint8>();
+            lootRow.MinCount = fields[5].Get<int32>();
+            lootRow.MaxCount = fields[6].Get<int32>();
+            LootTemplateRowsByEntryID[lootRow.Entry].push_back(lootRow);
+        } while (queryResult->NextRow());
     }
 }
 

@@ -91,6 +91,7 @@ class EverQuestCreature
 {
 public:
     uint32 CreatureTemplateID = 0;
+    uint32 CanShowHeldLootItems = 0;
     uint32 MainhandHeldItemTemplateID = 0;
     uint32 OffhandHeldItemTemplateID = 0;
 };
@@ -115,6 +116,18 @@ public:
     int32 CompletionRewardValue = 0;
 };
 
+class EverQuestLootTemplateRow
+{
+public:
+    uint32 Entry = 0;
+    uint32 ItemTemplateID = 0;
+    float Chance = 0;
+    bool QuestRequired = 0;
+    uint8 GroupID = 0;
+    int32 MinCount = 0;
+    int32 MaxCount = 0;
+};
+
 class EverQuestMod
 {
 private:
@@ -134,6 +147,8 @@ public:
     int ConfigSystemSpellDBCIDNightPhaseAura;
     uint32 ConfigSystemQuestSQLIDMin;
     uint32 ConfigSystemQuestSQLIDMax;
+    uint32 ConfigSystemCreatureTemplateIDMin;
+    uint32 ConfigSystemCreatureTemplateIDMax;
 
     // Configs (from server file)
     bool ConfigMapRestrictPlayersToNorrath;
@@ -151,6 +166,7 @@ public:
     vector<Player*> AllLoadedPlayers;
     unordered_map<int, unordered_map<int, vector<Creature*>>> AllLoadedCreaturesByMapIDThenCreatureEntryID;
     unordered_map<ObjectGuid, deque<uint32>> PlayerCasterConcurrentBardSongs;
+    unordered_map<uint32, vector<EverQuestLootTemplateRow>> LootTemplateRowsByEntryID;
 
     static EverQuestMod* instance()
     {
@@ -173,6 +189,7 @@ public:
     void LoadPetData();
     bool HasPetDataForCreatureTemplateID(uint32 creatureTemplateID);
     const EverQuestPet& GetPetDataForCreatureTemplateID(uint32 creatureTemplateID);
+    void LoadLootTemplateRows();
 
     void StorePositionAsLastGate(Player* player);
     void SendPlayerToLastGate(Player* player);
