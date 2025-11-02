@@ -70,7 +70,7 @@ public:
                         else if (itemTemplate->InventoryType == INVTYPE_WEAPONMAINHAND || itemTemplate->InventoryType == INVTYPE_WEAPONOFFHAND || itemTemplate->InventoryType == INVTYPE_WEAPON)
                             oneHandWeapons.push_back(itemTemplate);
                     }
-                    else if (itemTemplate->Class == ITEM_CLASS_ARMOR && itemTemplate->InventoryType == INVTYPE_SHIELD)
+                    else if (eqCreature.CanShowHeldLootShields == true && itemTemplate->Class == ITEM_CLASS_ARMOR && itemTemplate->InventoryType == INVTYPE_SHIELD)
                         shields.push_back(itemTemplate);
                     else if (itemTemplate->InventoryType == INVTYPE_HOLDABLE)
                         heldItems.push_back(itemTemplate);

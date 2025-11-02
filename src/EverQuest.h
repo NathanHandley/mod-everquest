@@ -91,9 +91,8 @@ class EverQuestCreature
 {
 public:
     uint32 CreatureTemplateID = 0;
-    uint32 CanShowHeldLootItems = 0;
-    uint32 MainhandHeldItemTemplateID = 0;
-    uint32 OffhandHeldItemTemplateID = 0;
+    bool CanShowHeldLootItems = 0;
+    bool CanShowHeldLootShields = 0;
 };
 
 class EverQuestPet

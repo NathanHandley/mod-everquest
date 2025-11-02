@@ -116,7 +116,7 @@ void EverQuestMod::LoadConfigurationFile()
 void EverQuestMod::LoadCreatureData()
 {
     CreaturesByTemplateID.clear();
-    QueryResult queryResult = WorldDatabase.Query("SELECT CreatureTemplateID, CanShowHeldLootItems, MainhandHeldItemTemplateID, OffhandHeldItemTemplateID FROM mod_everquest_creature ORDER BY CreatureTemplateID;");
+    QueryResult queryResult = WorldDatabase.Query("SELECT CreatureTemplateID, CanShowHeldLootItems, CanShowHeldLootShields FROM mod_everquest_creature ORDER BY CreatureTemplateID;");
     if (queryResult)
     {
         do
@@ -125,9 +125,8 @@ void EverQuestMod::LoadCreatureData()
             Field* fields = queryResult->Fetch();
             EverQuestCreature everQuestCreature;
             everQuestCreature.CreatureTemplateID = fields[0].Get<uint32>();
-            everQuestCreature.CanShowHeldLootItems = fields[1].Get<uint32>();
-            everQuestCreature.MainhandHeldItemTemplateID = fields[2].Get<uint32>();
-            everQuestCreature.OffhandHeldItemTemplateID = fields[3].Get<uint32>();
+            everQuestCreature.CanShowHeldLootItems = fields[1].Get<bool>();
+            everQuestCreature.CanShowHeldLootShields = fields[2].Get<bool>();
             CreaturesByTemplateID[everQuestCreature.CreatureTemplateID] = everQuestCreature;
         } while (queryResult->NextRow());
     }
