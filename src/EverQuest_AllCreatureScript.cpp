@@ -103,8 +103,13 @@ public:
                         creature->SetUInt32Value(UNIT_VIRTUAL_ITEM_SLOT_ID + 0, mainHandItem->ItemId);
                     if (offHandItem != nullptr)
                         creature->SetUInt32Value(UNIT_VIRTUAL_ITEM_SLOT_ID + 1, offHandItem->ItemId);
+
+                    // Update combat posture
                     if (mainHandItem != nullptr || offHandItem != nullptr)
                         creature->SetSheath(SHEATH_STATE_MELEE);
+
+                    // Reset combat type
+                    creature->UpdateDamagePhysical(BASE_ATTACK);
                 }
             }
         }
