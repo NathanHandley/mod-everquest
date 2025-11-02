@@ -22,6 +22,8 @@
 
 #include "EverQuest.h"
 
+#include <random>
+
 using namespace std;
 
 EverQuestMod::EverQuestMod() :
@@ -601,8 +603,14 @@ void EverQuestMod::RollLootItemsForCreature(ObjectGuid creatureGUID, uint32 crea
         PreloadedLootItemIDsByCreatureGUID.erase(creatureGUID);
 
     // Rolls are by group
-    for (const auto& lootTemplateRowsByGroup : creatureLootItems->second)
+    for (auto& lootTemplateRowsByGroup : creatureLootItems->second)
     {
+        // Shuffle the items so it's more random
+        random_device randomDevice;
+        mt19937 seed(randomDevice());
+        shuffle(lootTemplateRowsByGroup.second.begin(), lootTemplateRowsByGroup.second.end(), randomDevice);
+
+        // Process a roll for each item until max hits are made
         uint16 groupIterationsLeft = uint16(sWorld->getRate(RATE_DROP_ITEM_GROUP_AMOUNT));
         for (const auto& lootRow : lootTemplateRowsByGroup.second)
         {
