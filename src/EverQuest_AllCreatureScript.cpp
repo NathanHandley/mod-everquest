@@ -43,7 +43,7 @@ public:
             creature->SetUInt32Value(UNIT_VIRTUAL_ITEM_SLOT_ID + 1, 0);
 
             EverQuestCreature eqCreature = EverQuest->GetCreatureDataForCreatureTemplateID(creature->GetEntry());
-            if (eqCreature.CanShowHeldLootItems > 0 && EverQuest->HasPreloadedLootItemIDsForCreatureGUID(creature->GetGUID()))
+            if (eqCreature.CanShowHeldLootItems == true && EverQuest->HasPreloadedLootItemIDsForCreatureGUID(creature->GetGUID()))
             {
                 // Prioritize what items to show as worn
                 vector<ItemTemplate const*> oneHandWeapons;
