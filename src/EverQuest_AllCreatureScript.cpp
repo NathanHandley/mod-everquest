@@ -53,7 +53,8 @@ public:
                 vector<ItemTemplate const*> fishingPoles;
                 for (uint32 itemTemplateID : EverQuest->GetPreloadedLootIDsForCreatureGUID(creature->GetGUID()))
                 {
-                    ItemTemplate const* itemTemplate = sObjectMgr->GetItemTemplate(itemTemplateID);
+                    uint32 itemTemplateForNPCEquipID = EverQuest->GetNPCEquipItemTemplateIDForItemTemplate(itemTemplateID);
+                    ItemTemplate const* itemTemplate = sObjectMgr->GetItemTemplate(itemTemplateForNPCEquipID);
                     if (!itemTemplate)
                     {
                         LOG_ERROR("module.EverQuest", "EverQuestMod::OnCreatureAddWorld failure, as item template ID {} could not be found", itemTemplateID);

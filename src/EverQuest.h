@@ -95,6 +95,13 @@ public:
     bool CanShowHeldLootShields = 0;
 };
 
+class EverQuestItemTemplate
+{
+public:
+    uint32 ItemTemplateEntryID = 0;
+    uint32 ItemTemplateEntryIDForNPCEquip = 0;
+};
+
 class EverQuestPet
 {
 public:
@@ -159,6 +166,7 @@ public:
 
     map<uint32, EverQuestCreature> CreaturesByTemplateID;
     map<uint32, list<EverQuestCreatureOnkillReputation>> CreatureOnkillReputationsByCreatureTemplateID;
+    unordered_map<uint32, EverQuestItemTemplate> ItemTemplatesByEntryID;
     map<uint32, EverQuestSpell> SpellDataBySpellID;
     map<uint32, list<EverQuestQuestCompletionReputation>> QuestCompletionReputationsByQuestTemplateID;
     map<uint32, EverQuestPet> PetDataByCreatureTemplateID;
@@ -182,6 +190,8 @@ public:
     const EverQuestCreature& GetCreatureDataForCreatureTemplateID(uint32 creatureTemplateID);
     void LoadCreatureOnkillReputations();
     const list<EverQuestCreatureOnkillReputation>& GetOnkillReputationsForCreatureTemplate(uint32 creatureTemplateID);
+    void LoadItemTemplateData();
+    uint32 GetNPCEquipItemTemplateIDForItemTemplate(uint32 itemTemplateID);
     void LoadSpellData();
     const EverQuestSpell& GetSpellDataForSpellID(uint32 spellID);
     void LoadQuestCompletionReputations();

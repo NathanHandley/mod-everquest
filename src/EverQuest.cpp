@@ -190,6 +190,32 @@ const list<EverQuestCreatureOnkillReputation>& EverQuestMod::GetOnkillReputation
     }
 }
 
+void EverQuestMod::LoadItemTemplateData()
+{
+    ItemTemplatesByEntryID.clear();
+    QueryResult queryResult = WorldDatabase.Query("SELECT ItemTemplateID, NPCEquipItemTemplateID FROM mod_everquest_item_template ORDER BY ItemTemplateID;");
+    if (queryResult)
+    {
+        do
+        {
+            // Pull the data out
+            Field* fields = queryResult->Fetch();
+            EverQuestItemTemplate everQuestItemTemplate;
+            everQuestItemTemplate.ItemTemplateEntryID = fields[0].Get<uint32>();
+            everQuestItemTemplate.ItemTemplateEntryIDForNPCEquip = fields[1].Get<uint32>();
+            ItemTemplatesByEntryID[everQuestItemTemplate.ItemTemplateEntryID] = everQuestItemTemplate;
+        } while (queryResult->NextRow());
+    }
+}
+
+uint32 EverQuestMod::GetNPCEquipItemTemplateIDForItemTemplate(uint32 itemTemplateID)
+{
+    if (ItemTemplatesByEntryID.find(itemTemplateID) == ItemTemplatesByEntryID.end())
+        return itemTemplateID;
+    else
+        return ItemTemplatesByEntryID[itemTemplateID].ItemTemplateEntryIDForNPCEquip;
+}
+
 void EverQuestMod::LoadSpellData()
 {
     SpellDataBySpellID.clear();

@@ -32,6 +32,7 @@ public:
         EverQuest->LoadConfigurationFile();
         EverQuest->LoadCreatureData();
         EverQuest->LoadCreatureOnkillReputations();
+        EverQuest->LoadItemTemplateData();
         EverQuest->LoadSpellData();
         EverQuest->LoadQuestCompletionReputations();
         EverQuest->LoadPetData();
