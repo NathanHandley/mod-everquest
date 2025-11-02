@@ -192,9 +192,9 @@ public:
     const EverQuestPet& GetPetDataForCreatureTemplateID(uint32 creatureTemplateID);
     void LoadLootTemplateRows();
     bool HasLootTemplateRowsByCreatureTemplateEntryID(uint32 creatureTemplateEntryID);
-    bool HasLootItemIDsForCreatureGUID(ObjectGuid creatureGUID);
-    const vector<uint32>& GetLootIDsForCreatureGUID(ObjectGuid creatureGUID);
-    void ClearLootIDsForCreatureGUID(ObjectGuid creatureGUID);
+    bool HasPreloadedLootItemIDsForCreatureGUID(ObjectGuid creatureGUID);
+    const vector<uint32>& GetPreloadedLootIDsForCreatureGUID(ObjectGuid creatureGUID);
+    void ClearPreloadedLootIDsForCreatureGUID(ObjectGuid creatureGUID);
 
     void StorePositionAsLastGate(Player* player);
     void SendPlayerToLastGate(Player* player);

@@ -324,7 +324,7 @@ bool EverQuestMod::HasLootTemplateRowsByCreatureTemplateEntryID(uint32 creatureT
     return true;
 }
 
-bool EverQuestMod::HasLootItemIDsForCreatureGUID(ObjectGuid creatureGUID)
+bool EverQuestMod::HasPreloadedLootItemIDsForCreatureGUID(ObjectGuid creatureGUID)
 {
     if (PreloadedLootItemIDsByCreatureGUID.find(creatureGUID) != PreloadedLootItemIDsByCreatureGUID.end())
         return true;
@@ -332,7 +332,7 @@ bool EverQuestMod::HasLootItemIDsForCreatureGUID(ObjectGuid creatureGUID)
         return false;
 }
 
-const vector<uint32>& EverQuestMod::GetLootIDsForCreatureGUID(ObjectGuid creatureGUID)
+const vector<uint32>& EverQuestMod::GetPreloadedLootIDsForCreatureGUID(ObjectGuid creatureGUID)
 {
     if (PreloadedLootItemIDsByCreatureGUID.find(creatureGUID) != PreloadedLootItemIDsByCreatureGUID.end())
     {
@@ -345,7 +345,7 @@ const vector<uint32>& EverQuestMod::GetLootIDsForCreatureGUID(ObjectGuid creatur
     }
 }
 
-void EverQuestMod::ClearLootIDsForCreatureGUID(ObjectGuid creatureGUID)
+void EverQuestMod::ClearPreloadedLootIDsForCreatureGUID(ObjectGuid creatureGUID)
 {
     if (PreloadedLootItemIDsByCreatureGUID.find(creatureGUID) != PreloadedLootItemIDsByCreatureGUID.end())
     {
