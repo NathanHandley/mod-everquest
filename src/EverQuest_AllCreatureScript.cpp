@@ -35,6 +35,10 @@ public:
         if (mapID >= EverQuest->ConfigSystemMapDBCIDMin && mapID <= EverQuest->ConfigSystemMapDBCIDMax)
             EverQuest->AddCreatureAsLoaded(mapID, creature);
 
+        // Roll items
+        if (EverQuest->HasLootTemplateRowsByCreatureTemplateEntryID(creature->GetEntry()))
+            EverQuest->RollLootItemsForCreature(creature->GetGUID(), creature->GetEntry());
+
         // Add visual information
         if (EverQuest->HasCreatureDataForCreatureTemplateID(creature->GetEntry()) == true)
         {

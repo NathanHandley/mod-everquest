@@ -296,7 +296,7 @@ const EverQuestPet& EverQuestMod::GetPetDataForCreatureTemplateID(uint32 creatur
 
 void EverQuestMod::LoadLootTemplateRows()
 {
-    LootTemplateRowsByEntryID.clear();
+    LootTemplateRowsInGroupByEntryID.clear();
     QueryResult queryResult = WorldDatabase.Query("SELECT Entry, Item, Chance, QuestRequired, GroupId, MinCount, MaxCount FROM creature_loot_template WHERE Entry > {} AND Entry < {}",
         ConfigSystemCreatureTemplateIDMin, ConfigSystemCreatureTemplateIDMax);
     if (queryResult)
@@ -312,8 +312,44 @@ void EverQuestMod::LoadLootTemplateRows()
             lootRow.GroupID = fields[4].Get<uint8>();
             lootRow.MinCount = fields[5].Get<int32>();
             lootRow.MaxCount = fields[6].Get<int32>();
-            LootTemplateRowsByEntryID[lootRow.Entry].push_back(lootRow);
+            LootTemplateRowsInGroupByEntryID[lootRow.Entry][lootRow.GroupID].push_back(lootRow);
         } while (queryResult->NextRow());
+    }
+}
+
+bool EverQuestMod::HasLootTemplateRowsByCreatureTemplateEntryID(uint32 creatureTemplateEntryID)
+{
+    if (LootTemplateRowsInGroupByEntryID.find(creatureTemplateEntryID) == LootTemplateRowsInGroupByEntryID.end())
+        return false;
+    return true;
+}
+
+bool EverQuestMod::HasLootItemIDsForCreatureGUID(ObjectGuid creatureGUID)
+{
+    if (PreloadedLootItemIDsByCreatureGUID.find(creatureGUID) != PreloadedLootItemIDsByCreatureGUID.end())
+        return true;
+    else
+        return false;
+}
+
+const vector<uint32>& EverQuestMod::GetLootIDsForCreatureGUID(ObjectGuid creatureGUID)
+{
+    if (PreloadedLootItemIDsByCreatureGUID.find(creatureGUID) != PreloadedLootItemIDsByCreatureGUID.end())
+    {
+        return PreloadedLootItemIDsByCreatureGUID[creatureGUID];
+    }
+    else
+    {
+        static vector<uint32> returnEmpty;
+        return returnEmpty;
+    }
+}
+
+void EverQuestMod::ClearLootIDsForCreatureGUID(ObjectGuid creatureGUID)
+{
+    if (PreloadedLootItemIDsByCreatureGUID.find(creatureGUID) != PreloadedLootItemIDsByCreatureGUID.end())
+    {
+        PreloadedLootItemIDsByCreatureGUID.erase(creatureGUID);
     }
 }
 
@@ -539,6 +575,62 @@ vector<Creature*> EverQuestMod::GetLoadedCreaturesWithEntryID(int mapID, uint32 
     if (innerMap.find(entryID) == innerMap.end())
         return vector<Creature*>();
     return innerMap[entryID];
+}
+
+void EverQuestMod::RollLootItemsForCreature(ObjectGuid creatureGUID, uint32 creatureTemplateEntryID)
+{
+    // Skip empty loot tables
+    auto creatureLootItems = LootTemplateRowsInGroupByEntryID.find(creatureTemplateEntryID);
+    if (creatureLootItems == LootTemplateRowsInGroupByEntryID.end())
+        return;
+
+    // Clear old
+    if (PreloadedLootItemIDsByCreatureGUID.find(creatureGUID) != PreloadedLootItemIDsByCreatureGUID.end())
+        PreloadedLootItemIDsByCreatureGUID.erase(creatureGUID);
+
+    // Rolls are by group
+    for (const auto& lootTemplateRowsByGroup : creatureLootItems->second)
+    {
+        //uint32_t groupID = lootTemplateRowsByGroup.first;
+        uint16 groupIterationsLeft = uint16(sWorld->getRate(RATE_DROP_ITEM_GROUP_AMOUNT));
+        for (const auto& lootRow : lootTemplateRowsByGroup.second)
+        {
+            // Calculate roll chance using the configuration modifiers
+            ItemTemplate const* itemTemplate = sObjectMgr->GetItemTemplate(lootRow.ItemTemplateID);
+            if (!itemTemplate)
+            {
+                LOG_ERROR("module.EverQuest", "EverQuestMod::RollLootItemsForCreature failure, as item template ID {} could not be found", lootRow.ItemTemplateID);
+                continue;
+            }
+
+            float rollChance = lootRow.Chance;
+            switch (itemTemplate->Quality)
+            {
+                case ITEM_QUALITY_POOR: rollChance *= sWorld->getRate(RATE_DROP_ITEM_POOR); break;
+                case ITEM_QUALITY_NORMAL: rollChance *= sWorld->getRate(RATE_DROP_ITEM_NORMAL); break;
+                case ITEM_QUALITY_UNCOMMON: rollChance *= sWorld->getRate(RATE_DROP_ITEM_UNCOMMON); break;
+                case ITEM_QUALITY_RARE: rollChance *= sWorld->getRate(RATE_DROP_ITEM_RARE); break;
+                case ITEM_QUALITY_EPIC: rollChance *= sWorld->getRate(RATE_DROP_ITEM_EPIC); break;
+                case ITEM_QUALITY_LEGENDARY: rollChance *= sWorld->getRate(RATE_DROP_ITEM_LEGENDARY); break;
+                case ITEM_QUALITY_ARTIFACT: rollChance *= sWorld->getRate(RATE_DROP_ITEM_ARTIFACT); break;
+                default: break;
+            }
+
+            // Roll the item
+            bool rollResult = roll_chance_f(rollChance);
+            
+            // Add hits and step down group iterations, otherwise move to the next
+            if (rollResult == true)
+            {
+                PreloadedLootItemIDsByCreatureGUID[creatureGUID].push_back(lootRow.ItemTemplateID);
+
+                if (lootTemplateRowsByGroup.first != 0) // 0 doesn't follow group restrictions
+                    groupIterationsLeft--;
+                if (groupIterationsLeft <= 0)
+                    break;
+            }
+        }
+    }
 }
 
 void EverQuestMod::SpawnCreature(uint32 entryID, Map* map, float x, float y, float z, float orientation, bool enforceUniqueSpawn)

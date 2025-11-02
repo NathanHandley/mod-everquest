@@ -166,7 +166,8 @@ public:
     vector<Player*> AllLoadedPlayers;
     unordered_map<int, unordered_map<int, vector<Creature*>>> AllLoadedCreaturesByMapIDThenCreatureEntryID;
     unordered_map<ObjectGuid, deque<uint32>> PlayerCasterConcurrentBardSongs;
-    unordered_map<uint32, vector<EverQuestLootTemplateRow>> LootTemplateRowsByEntryID;
+    unordered_map<uint32, unordered_map<uint32, vector<EverQuestLootTemplateRow>>> LootTemplateRowsInGroupByEntryID;
+    unordered_map<ObjectGuid, vector<uint32>> PreloadedLootItemIDsByCreatureGUID;
 
     static EverQuestMod* instance()
     {
@@ -190,6 +191,10 @@ public:
     bool HasPetDataForCreatureTemplateID(uint32 creatureTemplateID);
     const EverQuestPet& GetPetDataForCreatureTemplateID(uint32 creatureTemplateID);
     void LoadLootTemplateRows();
+    bool HasLootTemplateRowsByCreatureTemplateEntryID(uint32 creatureTemplateEntryID);
+    bool HasLootItemIDsForCreatureGUID(ObjectGuid creatureGUID);
+    const vector<uint32>& GetLootIDsForCreatureGUID(ObjectGuid creatureGUID);
+    void ClearLootIDsForCreatureGUID(ObjectGuid creatureGUID);
 
     void StorePositionAsLastGate(Player* player);
     void SendPlayerToLastGate(Player* player);
@@ -201,6 +206,7 @@ public:
     void AddCreatureAsLoaded(int mapID, Creature* creature);
     void RemoveCreatureAsLoaded(int mapID, Creature* creature);
     vector<Creature*> GetLoadedCreaturesWithEntryID(int mapID, uint32 entryID);
+    void RollLootItemsForCreature(ObjectGuid creatureGUID, uint32 creatureTemplateEntryID);
     void SpawnCreature(uint32 entryID, Map* map, float x, float y, float z, float orientation, bool enforceUniqueSpawn);
     void DespawnCreature(Creature* creature, Map* map);
     void DespawnCreature(uint32 entryID, Map* map);
