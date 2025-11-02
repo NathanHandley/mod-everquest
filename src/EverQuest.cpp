@@ -332,6 +332,19 @@ bool EverQuestMod::HasPreloadedLootItemIDsForCreatureGUID(ObjectGuid creatureGUI
         return false;
 }
 
+bool EverQuestMod::HasPreloadedLootItemIDForCreatureGUID(ObjectGuid creatureGUID, uint32 itemTemplateID)
+{
+    if (HasPreloadedLootItemIDsForCreatureGUID(creatureGUID) == false)
+        return false;
+
+    for (uint32 preloadedLootItemTemplateID : EverQuest->GetPreloadedLootIDsForCreatureGUID(creatureGUID))
+    {
+        if (preloadedLootItemTemplateID == itemTemplateID)
+            return true;
+    }
+    return false;
+}
+
 const vector<uint32>& EverQuestMod::GetPreloadedLootIDsForCreatureGUID(ObjectGuid creatureGUID)
 {
     if (PreloadedLootItemIDsByCreatureGUID.find(creatureGUID) != PreloadedLootItemIDsByCreatureGUID.end())
@@ -591,7 +604,6 @@ void EverQuestMod::RollLootItemsForCreature(ObjectGuid creatureGUID, uint32 crea
     // Rolls are by group
     for (const auto& lootTemplateRowsByGroup : creatureLootItems->second)
     {
-        //uint32_t groupID = lootTemplateRowsByGroup.first;
         uint16 groupIterationsLeft = uint16(sWorld->getRate(RATE_DROP_ITEM_GROUP_AMOUNT));
         for (const auto& lootRow : lootTemplateRowsByGroup.second)
         {

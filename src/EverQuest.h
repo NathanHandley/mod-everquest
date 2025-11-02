@@ -193,6 +193,7 @@ public:
     void LoadLootTemplateRows();
     bool HasLootTemplateRowsByCreatureTemplateEntryID(uint32 creatureTemplateEntryID);
     bool HasPreloadedLootItemIDsForCreatureGUID(ObjectGuid creatureGUID);
+    bool HasPreloadedLootItemIDForCreatureGUID(ObjectGuid creatureGUID, uint32 itemTemplateID);
     const vector<uint32>& GetPreloadedLootIDsForCreatureGUID(ObjectGuid creatureGUID);
     void ClearPreloadedLootIDsForCreatureGUID(ObjectGuid creatureGUID);
 

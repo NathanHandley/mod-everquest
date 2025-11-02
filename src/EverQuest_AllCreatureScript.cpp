@@ -29,13 +29,8 @@ class EverQuest_AllCreatureScript: public AllCreatureScript
 public:
     EverQuest_AllCreatureScript() : AllCreatureScript("EverQuest_AllCreatureScript") {}
 
-    void OnCreatureAddWorld(Creature* creature) override
+    void OnCreatureSelectLevel(const CreatureTemplate* /*cinfo*/, Creature* creature) override
     {
-        // Store EverQuest creatures on the tracker
-        uint32 mapID = creature->GetMap()->GetId();
-        if (mapID >= EverQuest->ConfigSystemMapDBCIDMin && mapID <= EverQuest->ConfigSystemMapDBCIDMax)
-            EverQuest->AddCreatureAsLoaded(mapID, creature);
-
         // Roll items
         if (EverQuest->HasLootTemplateRowsByCreatureTemplateEntryID(creature->GetEntry()))
             EverQuest->RollLootItemsForCreature(creature->GetGUID(), creature->GetEntry());
@@ -43,6 +38,10 @@ public:
         // Add visual information
         if (EverQuest->HasCreatureDataForCreatureTemplateID(creature->GetEntry()) == true)
         {
+            // Reset the held visuals
+            creature->SetUInt32Value(UNIT_VIRTUAL_ITEM_SLOT_ID + 0, 0);
+            creature->SetUInt32Value(UNIT_VIRTUAL_ITEM_SLOT_ID + 1, 0);
+
             EverQuestCreature eqCreature = EverQuest->GetCreatureDataForCreatureTemplateID(creature->GetEntry());
             if (eqCreature.CanShowHeldLootItems > 0 && EverQuest->HasPreloadedLootItemIDsForCreatureGUID(creature->GetGUID()))
             {
@@ -52,7 +51,7 @@ public:
                 vector<ItemTemplate const*> shields;
                 vector<ItemTemplate const*> heldItems;
                 vector<ItemTemplate const*> fishingPoles;
-                for(uint32 itemTemplateID : EverQuest->GetPreloadedLootIDsForCreatureGUID(creature->GetGUID()))
+                for (uint32 itemTemplateID : EverQuest->GetPreloadedLootIDsForCreatureGUID(creature->GetGUID()))
                 {
                     ItemTemplate const* itemTemplate = sObjectMgr->GetItemTemplate(itemTemplateID);
                     if (!itemTemplate)
@@ -107,9 +106,16 @@ public:
                     if (mainHandItem != nullptr || offHandItem != nullptr)
                         creature->SetSheath(SHEATH_STATE_MELEE);
                 }
-
             }
         }
+    }
+
+    void OnCreatureAddWorld(Creature* creature) override
+    {
+        // Store EverQuest creatures on the tracker
+        uint32 mapID = creature->GetMap()->GetId();
+        if (mapID >= EverQuest->ConfigSystemMapDBCIDMin && mapID <= EverQuest->ConfigSystemMapDBCIDMax)
+            EverQuest->AddCreatureAsLoaded(mapID, creature);        
     }
 
     void OnCreatureRemoveWorld(Creature* creature) override
