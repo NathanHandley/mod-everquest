@@ -1873,6 +1873,11 @@ public:
         if (quest->GetQuestId() >= EverQuest->ConfigSystemQuestSQLIDMin && quest->GetQuestId() <= EverQuest->ConfigSystemQuestSQLIDMax)
             xpValue = player->CalculateQuestRewardXP(quest);
     }
+
+    void OnPlayerLootItem(Player* player, Item* item, uint32 /*count*/, ObjectGuid lootguid) override
+    {
+        EverQuest->RemoveVisualEquippedItemForCreatureGUIDIfExists(player->GetMap(), lootguid, item->GetTemplate()->ItemId);
+    }
 };
 
 void AddEverQuestPlayerScripts()

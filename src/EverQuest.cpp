@@ -393,6 +393,39 @@ void EverQuestMod::ClearPreloadedLootIDsForCreatureGUID(ObjectGuid creatureGUID)
     }
 }
 
+void EverQuestMod::TrackVisualEquippedItemsForCreatureGUID(ObjectGuid creatureGUID, uint32 mainhandItemID, uint32 offhandItemID)
+{
+    VisualEquippedItemsByCreatureGUID[creatureGUID].MainhandItemID = mainhandItemID;
+    VisualEquippedItemsByCreatureGUID[creatureGUID].OffhandItemID = offhandItemID;
+}
+
+void EverQuestMod::RemoveVisualEquippedItemForCreatureGUIDIfExists(Map* map, ObjectGuid creatureGUID, uint32 itemTemplateID)
+{
+    if (VisualEquippedItemsByCreatureGUID.find(creatureGUID) == VisualEquippedItemsByCreatureGUID.end())
+        return;
+
+    Creature* creature = map->GetCreature(creatureGUID);
+    if (!creature)
+    {
+        LOG_ERROR("module.EverQuest", "EverQuestMod::RemoveVisualEquippedItemForCreatureGUIDIfExists failure, as creature with GUID could not be found in the map");
+        return;
+    }
+
+    uint32 npcItemTemplateID = EverQuest->GetNPCEquipItemTemplateIDForItemTemplate(itemTemplateID);
+
+    // Mainhand first, then offhand
+    if (VisualEquippedItemsByCreatureGUID[creatureGUID].MainhandItemID == npcItemTemplateID)
+    {
+        creature->SetUInt32Value(UNIT_VIRTUAL_ITEM_SLOT_ID + 0, 0);
+        VisualEquippedItemsByCreatureGUID[creatureGUID].MainhandItemID = 0;
+    }
+    else if (VisualEquippedItemsByCreatureGUID[creatureGUID].OffhandItemID == npcItemTemplateID)
+    {
+        creature->SetUInt32Value(UNIT_VIRTUAL_ITEM_SLOT_ID + 1, 0);
+        VisualEquippedItemsByCreatureGUID[creatureGUID].OffhandItemID = 0;
+    }
+}
+
 const list<EverQuestQuestCompletionReputation>& EverQuestMod::GetQuestCompletionReputationsForQuestTemplate(uint32 questTemplateID)
 {
     if (QuestCompletionReputationsByQuestTemplateID.find(questTemplateID) != QuestCompletionReputationsByQuestTemplateID.end())
@@ -605,6 +638,10 @@ void EverQuestMod::RemoveCreatureAsLoaded(int mapID, Creature* creature)
                 AllLoadedCreaturesByMapIDThenCreatureEntryID.erase(mapID);
         }
     }
+    if (EverQuest->PreloadedLootItemIDsByCreatureGUID.find(creature->GetGUID()) != EverQuest->PreloadedLootItemIDsByCreatureGUID.end())
+        EverQuest->PreloadedLootItemIDsByCreatureGUID.erase(creature->GetGUID());
+    if (EverQuest->VisualEquippedItemsByCreatureGUID.find(creature->GetGUID()) != EverQuest->VisualEquippedItemsByCreatureGUID.end())
+        EverQuest->VisualEquippedItemsByCreatureGUID.erase(creature->GetGUID());
 }
 
 vector<Creature*> EverQuestMod::GetLoadedCreaturesWithEntryID(int mapID, uint32 entryID)

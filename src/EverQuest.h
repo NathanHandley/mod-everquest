@@ -95,6 +95,13 @@ public:
     bool CanShowHeldLootShields = 0;
 };
 
+class EverQuestLoadedCreatureEquippedVisualItems
+{
+public:
+    uint32 MainhandItemID = 0;
+    uint32 OffhandItemID = 0;
+};
+
 class EverQuestItemTemplate
 {
 public:
@@ -175,6 +182,7 @@ public:
     unordered_map<ObjectGuid, deque<uint32>> PlayerCasterConcurrentBardSongs;
     unordered_map<uint32, unordered_map<uint32, vector<EverQuestLootTemplateRow>>> LootTemplateRowsInGroupByEntryID;
     unordered_map<ObjectGuid, vector<uint32>> PreloadedLootItemIDsByCreatureGUID;
+    unordered_map<ObjectGuid, EverQuestLoadedCreatureEquippedVisualItems> VisualEquippedItemsByCreatureGUID;
 
     static EverQuestMod* instance()
     {
@@ -205,6 +213,8 @@ public:
     bool HasPreloadedLootItemIDForCreatureGUID(ObjectGuid creatureGUID, uint32 itemTemplateID);
     const vector<uint32>& GetPreloadedLootIDsForCreatureGUID(ObjectGuid creatureGUID);
     void ClearPreloadedLootIDsForCreatureGUID(ObjectGuid creatureGUID);
+    void TrackVisualEquippedItemsForCreatureGUID(ObjectGuid creatureGUID, uint32 mainhandItemID, uint32 offhandItemID);
+    void RemoveVisualEquippedItemForCreatureGUIDIfExists(Map* map, ObjectGuid creatureGUID, uint32 itemTemplateID);
 
     void StorePositionAsLastGate(Player* player);
     void SendPlayerToLastGate(Player* player);

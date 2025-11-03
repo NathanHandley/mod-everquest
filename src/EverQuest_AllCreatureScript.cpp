@@ -100,14 +100,25 @@ public:
                     }
 
                     // Show needed visuals
+                    uint32 mainhandItemID = 0;
                     if (mainHandItem != nullptr)
+                    {
                         creature->SetUInt32Value(UNIT_VIRTUAL_ITEM_SLOT_ID + 0, mainHandItem->ItemId);
+                        mainhandItemID = mainHandItem->ItemId;
+                    }
+                    uint32 offhandItemID = 0;
                     if (offHandItem != nullptr)
+                    {
                         creature->SetUInt32Value(UNIT_VIRTUAL_ITEM_SLOT_ID + 1, offHandItem->ItemId);
+                        offhandItemID = offHandItem->ItemId;
+                    }
 
-                    // Update combat posture
+                    // Update combat posture and equipped visual tracking
                     if (mainHandItem != nullptr || offHandItem != nullptr)
+                    {
                         creature->SetSheath(SHEATH_STATE_MELEE);
+                        EverQuest->TrackVisualEquippedItemsForCreatureGUID(creature->GetGUID(), mainhandItemID, offhandItemID);
+                    }
 
                     // Reset combat type
                     creature->UpdateDamagePhysical(BASE_ATTACK);
