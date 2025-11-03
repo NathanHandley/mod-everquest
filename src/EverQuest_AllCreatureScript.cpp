@@ -31,6 +31,29 @@ public:
 
     void OnCreatureSelectLevel(const CreatureTemplate* /*cinfo*/, Creature* creature) override
     {
+        SetVisualEquipment(creature);
+    }
+
+    void OnCreatureAddWorld(Creature* creature) override
+    {
+        // Store EverQuest creatures on the tracker
+        uint32 mapID = creature->GetMap()->GetId();
+        if (mapID >= EverQuest->ConfigSystemMapDBCIDMin && mapID <= EverQuest->ConfigSystemMapDBCIDMax)
+            EverQuest->AddCreatureAsLoaded(mapID, creature);
+        SetVisualEquipment(creature);
+    }
+
+    void OnCreatureRemoveWorld(Creature* creature) override
+    {
+        // Remove EverQuest creatures from the trackers
+        uint32 mapID = creature->GetMap()->GetId();
+        if (mapID >= EverQuest->ConfigSystemMapDBCIDMin && mapID <= EverQuest->ConfigSystemMapDBCIDMax)
+            EverQuest->RemoveCreatureAsLoaded(mapID, creature);
+    }
+
+private:
+    void SetVisualEquipment(Creature* creature)
+    {
         // Roll items
         if (EverQuest->HasLootTemplateRowsByCreatureTemplateEntryID(creature->GetEntry()))
             EverQuest->RollLootItemsForCreature(creature->GetGUID(), creature->GetEntry());
@@ -38,10 +61,6 @@ public:
         // Add visual information
         if (EverQuest->HasCreatureDataForCreatureTemplateID(creature->GetEntry()) == true)
         {
-            // Reset the held visuals
-            creature->SetUInt32Value(UNIT_VIRTUAL_ITEM_SLOT_ID + 0, 0);
-            creature->SetUInt32Value(UNIT_VIRTUAL_ITEM_SLOT_ID + 1, 0);
-
             EverQuestCreature eqCreature = EverQuest->GetCreatureDataForCreatureTemplateID(creature->GetEntry());
             if (eqCreature.CanShowHeldLootItems == true && EverQuest->HasPreloadedLootItemIDsForCreatureGUID(creature->GetGUID()))
             {
@@ -106,12 +125,17 @@ public:
                         creature->SetUInt32Value(UNIT_VIRTUAL_ITEM_SLOT_ID + 0, mainHandItem->ItemId);
                         mainhandItemID = mainHandItem->ItemId;
                     }
+                    else
+                        creature->SetUInt32Value(UNIT_VIRTUAL_ITEM_SLOT_ID + 0, 0);
+                        
                     uint32 offhandItemID = 0;
                     if (offHandItem != nullptr)
                     {
                         creature->SetUInt32Value(UNIT_VIRTUAL_ITEM_SLOT_ID + 1, offHandItem->ItemId);
                         offhandItemID = offHandItem->ItemId;
                     }
+                    else
+                        creature->SetUInt32Value(UNIT_VIRTUAL_ITEM_SLOT_ID + 1, 0);
 
                     // Update combat posture and equipped visual tracking
                     if (mainHandItem != nullptr || offHandItem != nullptr)
@@ -125,22 +149,6 @@ public:
                 }
             }
         }
-    }
-
-    void OnCreatureAddWorld(Creature* creature) override
-    {
-        // Store EverQuest creatures on the tracker
-        uint32 mapID = creature->GetMap()->GetId();
-        if (mapID >= EverQuest->ConfigSystemMapDBCIDMin && mapID <= EverQuest->ConfigSystemMapDBCIDMax)
-            EverQuest->AddCreatureAsLoaded(mapID, creature);
-    }
-
-    void OnCreatureRemoveWorld(Creature* creature) override
-    {
-        // Remove EverQuest creatures from the trackers
-        uint32 mapID = creature->GetMap()->GetId();
-        if (mapID >= EverQuest->ConfigSystemMapDBCIDMin && mapID <= EverQuest->ConfigSystemMapDBCIDMax)
-            EverQuest->RemoveCreatureAsLoaded(mapID, creature);
     }
 };
 
