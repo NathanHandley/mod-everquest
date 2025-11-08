@@ -26,6 +26,8 @@
 
 using namespace std;
 
+#define EQ_MOD_VERSION                              1
+
 #define EQ_SPELLDUMMYTYPE_BINDSELF                  1
 #define EQ_SPELLDUMMYTYPE_BINDANY                   2
 #define EQ_SPELLDUMMYTYPE_GATE                      3
@@ -193,7 +195,7 @@ public:
     }
     ~EverQuestMod();
 
-    void LoadConfigurationSystemDataFromDB();
+    bool LoadConfigurationSystemDataFromDB();
     void LoadConfigurationFile();
     void LoadCreatureData();
     bool HasCreatureDataForCreatureTemplateID(uint32 creatureTemplateID);

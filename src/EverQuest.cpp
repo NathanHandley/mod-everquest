@@ -40,6 +40,8 @@ EverQuestMod::EverQuestMod() :
     ConfigSystemSpellDBCIDNightPhaseAura(0),
     ConfigSystemQuestSQLIDMin(0),
     ConfigSystemQuestSQLIDMax(0),
+    ConfigSystemCreatureTemplateIDMin(0),
+    ConfigSystemCreatureTemplateIDMax(0),
     ConfigMapRestrictPlayersToNorrath(false),    
     ConfigQuestGrantExpOnRepeatCompletion(true),
     ConfigExpLossOnDeathEnabled(true),
@@ -54,18 +56,33 @@ EverQuestMod::~EverQuestMod()
 
 }
 
-void EverQuestMod::LoadConfigurationSystemDataFromDB()
+bool EverQuestMod::LoadConfigurationSystemDataFromDB()
 {
-    QueryResult queryResult = WorldDatabase.Query("SELECT `Key`, `Value` FROM `mod_everquest_systemconfigs`;");
-    if (queryResult)
+    // Fail if no config table even exists
+    QueryResult configTableExistsQueryResult = WorldDatabase.Query("SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'mod_everquest_systemconfigs') AS table_exists;");
+    if (!configTableExistsQueryResult)
+        return false;
+    else
+    {
+        Field* fields = configTableExistsQueryResult->Fetch();
+        int value = fields[0].Get<int>();
+        if (value != 1)
+            return false;
+    }
+
+    QueryResult configValuesQueryResult = WorldDatabase.Query("SELECT `Key`, `Value` FROM `mod_everquest_systemconfigs`;");
+    int configModVersion = 0;
+    if (configValuesQueryResult)
     {
         do
         {
             // Pull the data out and assign to configs
-            Field* fields = queryResult->Fetch();
+            Field* fields = configValuesQueryResult->Fetch();
             string key = fields[0].Get<string>();
             string value = fields[1].Get<string>();
-            if (key == "BardMaxConcurrentSongs")
+            if (key == "ModVersion")
+                configModVersion = atoi(value.c_str());
+            else if (key == "BardMaxConcurrentSongs")
                 ConfigBardMaxConcurrentSongs = (uint32)atoi(value.c_str());
             else if (key == "DayEventID")
                 ConfigSystemDayEventID = atoi(value.c_str());
@@ -92,13 +109,17 @@ void EverQuestMod::LoadConfigurationSystemDataFromDB()
             else if (key == "QuestSQLIDMax")
                 ConfigSystemQuestSQLIDMax = (uint32)atoi(value.c_str());
             else if (key == "WorldScale")
-                ConfigWorldScale = atof(value.c_str());
+                ConfigWorldScale = (float)atof(value.c_str());
             else
             {
                 LOG_ERROR("module.EverQuest", "EverQuestMod::LoadConfigurationSystemDataFromDB error, unhandled key of {} with value {}", key, value);
             }
-        } while (queryResult->NextRow());
+        } while (configValuesQueryResult->NextRow());
     }
+    if (configModVersion != EQ_MOD_VERSION)
+        return false;
+
+    return true;
 }
 
 void EverQuestMod::LoadConfigurationFile()
@@ -107,7 +128,7 @@ void EverQuestMod::LoadConfigurationFile()
     IsEnabled = sConfigMgr->GetOption<bool>("EverQuest.Enabled", true);
     if (IsEnabled == false)
     {
-        LOG_INFO("module.EverQuest", "EverQuestMod::LoadConfigurationFile has EverQuest.Enabled as false, so the module is deactivated");
+        LOG_ERROR("module.EverQuest", "EverQuestMod::LoadConfigurationFile has EverQuest.Enabled as false, so the module is deactivated");
         return;
     }
 

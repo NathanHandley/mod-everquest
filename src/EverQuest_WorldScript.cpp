@@ -31,7 +31,12 @@ public:
         EverQuest->LoadConfigurationFile();
         if (EverQuest->IsEnabled == false)
             return;
-        EverQuest->LoadConfigurationSystemDataFromDB();        
+        if (EverQuest->LoadConfigurationSystemDataFromDB() == false)
+        {
+            int neededVersion = EQ_MOD_VERSION;
+            LOG_ERROR("module.EverQuest", "EverQuestMod is disabled, as the mod version is not {} or the mod_everquest_systemconfigs sql table cannot be found. Ensure you have built and deployed the most recent EverQuest converted content from the EQWOWConverter utility.", neededVersion);
+            EverQuest->IsEnabled = false;
+        }
         EverQuest->LoadCreatureData();
         EverQuest->LoadCreatureOnkillReputations();
         EverQuest->LoadItemTemplateData();
