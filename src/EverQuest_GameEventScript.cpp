@@ -29,6 +29,9 @@ public:
     // Runs on start event
     void OnStart(uint16 EventID) override
     {
+        if (EverQuest->IsEnabled == false)
+            return;
+
         if (EventID == EverQuest->ConfigSystemDayEventID || EventID == EverQuest->ConfigSystemNightEventID)
             EverQuest->SetAllLoadedPlayersDayOrNightAura();
     }
@@ -36,6 +39,9 @@ public:
     // Runs on stop event
     void OnStop(uint16 EventID) override
     {
+        if (EverQuest->IsEnabled == false)
+            return;
+
         if (EventID == EverQuest->ConfigSystemDayEventID || EventID == EverQuest->ConfigSystemNightEventID)
             EverQuest->SetAllLoadedPlayersDayOrNightAura();
     }

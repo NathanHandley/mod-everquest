@@ -176,6 +176,9 @@ class EverQuest_BardSongAuraScript: public AuraScript
 
     void HandlePeriodic(AuraEffect const* aurEff)
     {
+        if (EverQuest->IsEnabled == false)
+            return;
+
         Unit* caster = GetCaster();
         if (caster == nullptr)
             return;

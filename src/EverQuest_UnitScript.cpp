@@ -31,6 +31,8 @@ public:
 
     void OnAuraApply(Unit* unit, Aura* aura) override
     {
+        if (EverQuest->IsEnabled == false)
+            return;
         if (!unit->IsPlayer())
             return;
 
@@ -58,6 +60,8 @@ public:
 
     void OnAuraRemove(Unit* unit, AuraApplication* aurApp, AuraRemoveMode mode) override
     {
+        if (EverQuest->IsEnabled == false)
+            return;
         if (unit == nullptr)
             return;
         if (unit->IsPlayer())
@@ -101,6 +105,8 @@ public:
 
     void ModifyMeleeDamage(Unit* target, Unit* attacker, uint32& damage) override
     {
+        if (EverQuest->IsEnabled == false)
+            return;
         if (target == nullptr)
             return;
         if (attacker == nullptr)

@@ -31,11 +31,15 @@ public:
 
     void OnCreatureSelectLevel(const CreatureTemplate* /*cinfo*/, Creature* creature) override
     {
+        if (EverQuest->IsEnabled == false)
+            return;
         SetVisualEquipment(creature);
     }
 
     void OnCreatureAddWorld(Creature* creature) override
     {
+        if (EverQuest->IsEnabled == false)
+            return;
         // Store EverQuest creatures on the tracker
         uint32 mapID = creature->GetMap()->GetId();
         if (mapID >= EverQuest->ConfigSystemMapDBCIDMin && mapID <= EverQuest->ConfigSystemMapDBCIDMax)
@@ -45,6 +49,8 @@ public:
 
     void OnCreatureRemoveWorld(Creature* creature) override
     {
+        if (EverQuest->IsEnabled == false)
+            return;
         // Remove EverQuest creatures from the trackers
         uint32 mapID = creature->GetMap()->GetId();
         if (mapID >= EverQuest->ConfigSystemMapDBCIDMin && mapID <= EverQuest->ConfigSystemMapDBCIDMax)

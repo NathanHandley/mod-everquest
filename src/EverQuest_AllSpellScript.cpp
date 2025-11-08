@@ -33,6 +33,9 @@ public:
 
     void OnCalcMaxDuration(Aura const* aura, int32& maxDuration) override
     {
+        if (EverQuest->IsEnabled == false)
+            return;
+
         if (aura == nullptr)
             return;
 
@@ -85,6 +88,9 @@ public:
 
     void OnSpellCast(Spell* spell, Unit* caster , SpellInfo const* spellInfo, bool /*skipCheck*/) override
     {
+        if (EverQuest->IsEnabled == false)
+            return;
+
         // Verify it's an EQ spell that is mapped
         if (spell == nullptr)
             return;

@@ -27,6 +27,9 @@ public:
 
     bool OnItemRoll(Player const* /*player*/, LootStoreItem const* lootStoreItem, float& chance, Loot& loot, LootStore const& /*lootStore*/) override
     {
+        if (EverQuest->IsEnabled == false)
+            return true;
+
         // For any items that are on prerolled creatures, restrict drops to align to what was prerolled
         if (EverQuest->HasPreloadedLootItemIDsForCreatureGUID(loot.sourceWorldObjectGUID) == false)
             return true;

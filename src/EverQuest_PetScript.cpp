@@ -30,6 +30,9 @@ public:
 
     void OnPetAddToWorld(Pet* pet) override
     {
+        if (EverQuest->IsEnabled == false)
+            return;
+
         // Skip non-EQ pets
         if (EverQuest->HasPetDataForCreatureTemplateID(pet->GetCreatureTemplate()->Entry) == false)
             return;

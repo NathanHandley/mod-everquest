@@ -39,6 +39,9 @@ public:
     // Called when a player completes a quest
     void OnPlayerCompleteQuest(Player* player, Quest const* quest) override
     {
+        if (EverQuest->IsEnabled == false)
+            return;
+
         // Grab the quest rewards, and apply any in the list
         const list<EverQuestQuestCompletionReputation>& questCompletionReputations = EverQuest->GetQuestCompletionReputationsForQuestTemplate(quest->GetQuestId());
         for (auto& completionReputation : questCompletionReputations)
@@ -1669,6 +1672,9 @@ public:
 
     void OnPlayerRewardKillRewarder(Player* player, KillRewarder* rewarder, bool /*isDungeon*/, float& /*rate*/) override
     {
+        if (EverQuest->IsEnabled == false)
+            return;
+
         // Skip invalid victims
         Unit* victim = rewarder->GetVictim();
         if (!victim || victim->IsPlayer() || victim->ToCreature()->IsReputationRewardDisabled())
@@ -1691,6 +1697,9 @@ public:
 
     void OnPlayerBeforeChooseGraveyard(Player* player, TeamId teamId, bool nearCorpse, uint32& graveyardOverride) override
     {
+        if (EverQuest->IsEnabled == false)
+            return;
+
         // Skip if there this isn't an EQ zone
         if (player->GetMapId() < EverQuest->ConfigSystemMapDBCIDMin || player->GetMapId() > EverQuest->ConfigSystemMapDBCIDMax)
             return;
@@ -1714,6 +1723,9 @@ public:
 
     void OnPlayerSpellCast(Player* player, Spell* spell, bool /*skipCheck*/) override
     {
+        if (EverQuest->IsEnabled == false)
+            return;
+
         if (spell == nullptr)
             return;
         else if (spell->m_spellInfo->Id < EverQuest->ConfigSystemSpellDBCIDMin || spell->m_spellInfo->Id > EverQuest->ConfigSystemSpellDBCIDMax)
@@ -1760,11 +1772,17 @@ public:
 
     void OnPlayerDelete(ObjectGuid guid, uint32 /*accountId*/) override
     {
+        if (EverQuest->IsEnabled == false)
+            return;
+
         EverQuest->DeletePlayerBindHome(guid);
     }
 
     void OnPlayerFirstLogin(Player* player) override
     {
+        if (EverQuest->IsEnabled == false)
+            return;
+
         // If the player logged in for the first time and is in a norrath zone, set the bind and aura
         if (player->GetMap() != nullptr && player->GetMap()->GetId() >= EverQuest->ConfigSystemMapDBCIDMin && player->GetMap()->GetId() <= EverQuest->ConfigSystemMapDBCIDMax)
         {
@@ -1775,6 +1793,9 @@ public:
 
     void OnPlayerLogin(Player* player) override
     {
+        if (EverQuest->IsEnabled == false)
+            return;
+
         EverQuest->AllLoadedPlayers.push_back(player);
         EverQuest->SetPlayerDayOrNightAura(player);
 
@@ -1795,6 +1816,9 @@ public:
 
     void OnPlayerLogout(Player* player) override
     {
+        if (EverQuest->IsEnabled == false)
+            return;
+
         EverQuest->AllLoadedPlayers.erase(std::remove(EverQuest->AllLoadedPlayers.begin(), EverQuest->AllLoadedPlayers.end(), player), EverQuest->AllLoadedPlayers.end());
         if (EverQuest->ConfigBardMaxConcurrentSongs != 0)
             EverQuest->PlayerCasterConcurrentBardSongs[player->GetGUID()].clear();
@@ -1803,6 +1827,9 @@ public:
     // Note: this is AFTER the player changes maps
     void OnPlayerMapChanged(Player* player) override
     {
+        if (EverQuest->IsEnabled == false)
+            return;
+
         // Restrict non-GMs to norrath if set
         if (EverQuest->ConfigMapRestrictPlayersToNorrath == true && player->IsGameMaster() == false)
         {
@@ -1819,6 +1846,9 @@ public:
 
     void OnPlayerReleasedGhost(Player* player) override
     {
+        if (EverQuest->IsEnabled == false)
+            return;
+
         if (EverQuest->ConfigExpLossOnDeathEnabled == true)
         {
             // Do nothing if the level is below the minimum
@@ -1867,6 +1897,9 @@ public:
     // This is done to ensure repeatable quests give EXP more than once
     void OnPlayerQuestComputeXP(Player* player, Quest const* quest, uint32& xpValue) override
     {
+        if (EverQuest->IsEnabled == false)
+            return;
+
         if (EverQuest->ConfigQuestGrantExpOnRepeatCompletion == false)
             return;
 
@@ -1876,6 +1909,9 @@ public:
 
     void OnPlayerLootItem(Player* player, Item* item, uint32 /*count*/, ObjectGuid lootguid) override
     {
+        if (EverQuest->IsEnabled == false)
+            return;
+
         EverQuest->RemoveVisualEquippedItemForCreatureGUIDIfExists(player->GetMap(), lootguid, item->GetTemplate()->ItemId);
     }
 };

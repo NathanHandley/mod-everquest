@@ -27,6 +27,7 @@
 using namespace std;
 
 EverQuestMod::EverQuestMod() :
+    IsEnabled(true),
     ConfigWorldScale(1),
     ConfigBardMaxConcurrentSongs(1),
     ConfigSystemDayEventID(0),
@@ -102,6 +103,14 @@ void EverQuestMod::LoadConfigurationSystemDataFromDB()
 
 void EverQuestMod::LoadConfigurationFile()
 {
+    // Enabled
+    IsEnabled = sConfigMgr->GetOption<bool>("EverQuest.Enabled", true);
+    if (IsEnabled == false)
+    {
+        LOG_INFO("module.EverQuest", "EverQuestMod::LoadConfigurationFile has EverQuest.Enabled as false, so the module is deactivated");
+        return;
+    }
+
     // Map
     ConfigMapRestrictPlayersToNorrath = sConfigMgr->GetOption<bool>("EverQuest.Map.RestrictPlayersToNorrath", false);
 

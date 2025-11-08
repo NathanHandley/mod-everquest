@@ -28,6 +28,9 @@ class EverQuest_FocusBoostAuraScript: public AuraScript
 
     void CalculateAmount(AuraEffect const* /*aurEff*/, int32& amount, bool& /*canBeRecalculated*/)
     {
+        if (EverQuest->IsEnabled == false)
+            return;
+
         // Invalid casters need to be skipped
         Unit* caster = AuraScript::GetCaster();
         if (caster == nullptr)

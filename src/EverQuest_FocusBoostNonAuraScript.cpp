@@ -29,6 +29,9 @@ class EverQuest_FocusBoostNonAuraScript: public SpellScript
     // Handle non-aura effects (e.g., direct damage, heals)
     void HandleEffectHitTarget(SpellEffIndex effIndex)
     {
+        if (EverQuest->IsEnabled == false)
+            return;
+
         // Invalid casters need to be skipped
         Unit* caster = GetCaster();
         if (caster == nullptr)

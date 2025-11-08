@@ -53,6 +53,9 @@ public:
 
     void OnGameObjectAddWorld(GameObject* go) override
     {
+        if (EverQuest->IsEnabled == false)
+            return;
+
         switch (go->GetEntry())
         {
         case LIFT_KELETHIN_NORTH_ENTRY: KelethinNorthLiftGUID = go->GetGUID(); break;
@@ -81,6 +84,9 @@ public:
 
     void OnGameObjectStateChanged(GameObject* go, uint32 state) override
     {
+        if (EverQuest->IsEnabled == false)
+            return;
+
         // Kelethin lifts
         if (state == 0)
         {

@@ -28,8 +28,10 @@ public:
 
     void OnAfterConfigLoad(bool /*reload*/) override
     {
-        EverQuest->LoadConfigurationSystemDataFromDB();
         EverQuest->LoadConfigurationFile();
+        if (EverQuest->IsEnabled == false)
+            return;
+        EverQuest->LoadConfigurationSystemDataFromDB();        
         EverQuest->LoadCreatureData();
         EverQuest->LoadCreatureOnkillReputations();
         EverQuest->LoadItemTemplateData();

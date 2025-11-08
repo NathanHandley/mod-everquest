@@ -2,24 +2,34 @@
 
 ###################################################################################################
 #
-# 	EverQuest.Map.RestrictPlayersToNorrath
-#		Enable/Disable force keeping players in norrath. Doesn't apply to GM accounts
-#	Default 0 (disabled, characters can move between Norrath and Azeroth)
+# 	EverQuest.Enabled
+#		Enable/Disables the mod as a whole, overriding any other property or setting
+#	Default: True (enabled)
 #
 ###################################################################################################
 
-EverQuest.Map.RestrictPlayersToNorrath = 0
+EverQuest.Enabled = True
+
+###################################################################################################
+#
+# 	EverQuest.Map.RestrictPlayersToNorrath
+#		Enable/Disable force keeping players in norrath. Doesn't apply to GM accounts
+#	Default: False (disabled, characters can move between Norrath and Azeroth)
+#
+###################################################################################################
+
+EverQuest.Map.RestrictPlayersToNorrath = False
 
 ###################################################################################################
 #
 # 	EverQuest.Quest.GrantExpOnRepeatCompletion
 #		If true, repeat quests will give exp like the first did. This is EQ-like, but not WOW-like
 #       NOTE: This will only impact EverQuest IDs (range defined in this config)
-#	Default 1 (enabled, you get exp for repeat turnins)
+#	Default: True (enabled, you get exp for repeat turnins)
 #
 ###################################################################################################
 
-EverQuest.Quest.GrantExpOnRepeatCompletion = 1
+EverQuest.Quest.GrantExpOnRepeatCompletion = True
 
 ###################################################################################################
 # EXP Loss on Death Settings
@@ -28,24 +38,24 @@ EverQuest.Quest.GrantExpOnRepeatCompletion = 1
 #		If true, you will lose experience when you release your spirit on death.  Reviving before
 #        release will not cause exp loss.  Settings in this section depend on this being true.
 #       NOTE: You will only lose exp if you are in a Norrath / EverQuest map
-#	Default 1 (enabled, lose exp when you release your body after death, if in EverQuest areas)
+#	Default: True (enabled, lose exp when you release your body after death, if in EverQuest areas)
 #
 # 	EverQuest.ExpLossOnDeath.MinLevel
 #		Minimum level the player needs to be before they begin losing experience
-#	Default 5 (players 4 and under do not lose exp on death release)
+#	Default: 5 (players 4 and under do not lose exp on death release)
 #
 # 	EverQuest.ExpLossOnDeath.LossPercent
 #		Amount of experience to lose on death (0 - 100)
-#	Default 10 (10% of experience is lost on death)
+#	Default: 10 (10% of experience is lost on death)
 #
 # 	EverQuest.ExpLossOnDeath.AddLostExpToRestExp
 #		If true, experience lost will be added to rest experience.  This allows the player to not
 #        lose net progress as long as they don't overfill their rest experience bar
-#	Default 1 (enabled, experience lost is put into rest experience)
+#	Default: True (enabled, experience lost is put into rest experience)
 #
 ###################################################################################################
 
-EverQuest.ExpLossOnDeath.Enabled = 1
+EverQuest.ExpLossOnDeath.Enabled = True
 EverQuest.ExpLossOnDeath.MinLevel = 5
 EverQuest.ExpLossOnDeath.LossPercent = 10
-EverQuest.ExpLossOnDeath.AddLostExpToRestExp = 1
+EverQuest.ExpLossOnDeath.AddLostExpToRestExp = True

@@ -28,6 +28,9 @@ class EverQuest_IllusionSpellScript: public SpellScript
 
     void HandleOnHit(SpellEffIndex /*effIndex*/)
     {
+        if (EverQuest->IsEnabled == false)
+            return;
+
         // Only EQ spells
         uint32 spellID = GetSpellInfo()->Id;
         if (EverQuest->IsSpellAnEQSpell(spellID) == false)

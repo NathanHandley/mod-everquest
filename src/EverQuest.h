@@ -147,6 +147,8 @@ private:
     EverQuestMod();
 
 public:
+    bool IsEnabled;
+
     // Configs (from database)
     float ConfigWorldScale;
     uint32 ConfigBardMaxConcurrentSongs;
