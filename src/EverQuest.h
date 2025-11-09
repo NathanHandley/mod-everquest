@@ -26,7 +26,7 @@
 
 using namespace std;
 
-#define EQ_MOD_VERSION                              1
+#define EQ_MOD_VERSION                              2
 
 #define EQ_SPELLDUMMYTYPE_BINDSELF                  1
 #define EQ_SPELLDUMMYTYPE_BINDANY                   2
@@ -61,6 +61,15 @@ using namespace std;
 #define EQ_PET_NAMING_TYPE_FAMILIAR                 1
 #define EQ_PET_NAMING_TYPE_WARDER                   2
 #define EQ_PET_NAMING_TYPE_RANDOM                   3
+
+#define EQ_QUEST_REACTION_UNKNOWN                   0
+#define EQ_QUEST_REACTION_ATTACKPLAYER              1
+#define EQ_QUEST_REACTION_DESPAWN                   2
+#define EQ_QUEST_REACTION_EMOTE                     3
+#define EQ_QUEST_REACTION_SAY                       4
+#define EQ_QUEST_REACTION_SPAWN                     5
+#define EQ_QUEST_REACTION_SPAWNUNIQUE               6
+#define EQ_QUEST_REACTION_YELL                      7
 
 class EverQuestCreatureOnkillReputation
 {
@@ -131,6 +140,25 @@ public:
     int32 CompletionRewardValue = 0;
 };
 
+class EverQuestQuestReaction
+{
+public:
+    uint32 ID = 0;
+    uint32 QuestTemplateID = 0;
+    int ReactionType = 0;
+    bool UsePlayerX = false;
+    bool UsePlayerY = false;
+    bool UsePlayerZ = false;
+    float AddedPlayerX = 0;
+    float AddedPlayerY = 0;
+    bool UsePlayerOrientation = false;
+    float PositionX = 0;
+    float PositionY = 0;
+    float PositionZ = 0;
+    float Orientation = 0;    
+    uint32 CreatureTemplateID = 0;
+};
+
 class EverQuestLootTemplateRow
 {
 public:
@@ -175,13 +203,14 @@ public:
     float ConfigExpLossOnDeathLossPercent;
     bool ConfigExpLossOnDeathAddLostExpToRestExp;
 
-    map<uint32, EverQuestCreature> CreaturesByTemplateID;
-    map<uint32, list<EverQuestCreatureOnkillReputation>> CreatureOnkillReputationsByCreatureTemplateID;
-    unordered_map<uint32, EverQuestItemTemplate> ItemTemplatesByEntryID;
-    map<uint32, EverQuestSpell> SpellDataBySpellID;
-    map<uint32, list<EverQuestQuestCompletionReputation>> QuestCompletionReputationsByQuestTemplateID;
-    map<uint32, EverQuestPet> PetDataByCreatureTemplateID;
     vector<Player*> AllLoadedPlayers;
+    unordered_map<uint32, EverQuestCreature> CreaturesByTemplateID;
+    unordered_map<uint32, list<EverQuestCreatureOnkillReputation>> CreatureOnkillReputationsByCreatureTemplateID;
+    unordered_map<uint32, EverQuestItemTemplate> ItemTemplatesByEntryID;
+    unordered_map<uint32, EverQuestSpell> SpellDataBySpellID;
+    unordered_map<uint32, list<EverQuestQuestCompletionReputation>> QuestCompletionReputationsByQuestTemplateID;
+    unordered_map<uint32, list<EverQuestQuestReaction>> QuestReactionListByQuestTemplateID;
+    unordered_map<uint32, EverQuestPet> PetDataByCreatureTemplateID;
     unordered_map<int, unordered_map<int, vector<Creature*>>> AllLoadedCreaturesByMapIDThenCreatureEntryID;
     unordered_map<ObjectGuid, deque<uint32>> PlayerCasterConcurrentBardSongs;
     unordered_map<uint32, unordered_map<uint32, vector<EverQuestLootTemplateRow>>> LootTemplateRowsInGroupByEntryID;
@@ -208,6 +237,8 @@ public:
     const EverQuestSpell& GetSpellDataForSpellID(uint32 spellID);
     void LoadQuestCompletionReputations();
     const list<EverQuestQuestCompletionReputation>& GetQuestCompletionReputationsForQuestTemplate(uint32 questTemplateID);
+    void LoadQuestReactions();
+    const list<EverQuestQuestReaction>& GetQuestReactions(uint32 questTemplateID);
     void LoadPetData();
     bool HasPetDataForCreatureTemplateID(uint32 creatureTemplateID);
     const EverQuestPet& GetPetDataForCreatureTemplateID(uint32 creatureTemplateID);
@@ -232,7 +263,6 @@ public:
     vector<Creature*> GetLoadedCreaturesWithEntryID(int mapID, uint32 entryID);
     void RollLootItemsForCreature(ObjectGuid creatureGUID, uint32 creatureTemplateEntryID);
     void SpawnCreature(uint32 entryID, Map* map, float x, float y, float z, float orientation, bool enforceUniqueSpawn);
-    void DespawnCreature(Creature* creature, Map* map);
     void DespawnCreature(uint32 entryID, Map* map);
     void MakeCreatureAttackPlayer(uint32 entryID, Map* map, Player* player);
     bool IsSpellAnEQSpell(uint32 spellID);

@@ -308,6 +308,48 @@ void EverQuestMod::LoadQuestCompletionReputations()
     }
 }
 
+void EverQuestMod::LoadQuestReactions()
+{
+    QuestReactionListByQuestTemplateID.clear();
+    QueryResult queryResult = WorldDatabase.Query("SELECT QuestTemplateID, ReactionType, UsePlayerX, UsePlayerY, UsePlayerZ, AddedPlayerX, AddedPlayerY, UsePlayerOrientation, PositionX, PositionY, PositionZ, Orientation, CreatureTemplateID FROM mod_everquest_quest_reaction;");
+    if (queryResult)
+    {
+        do
+        {
+            // Pull the data out
+            Field* fields = queryResult->Fetch();
+            EverQuestQuestReaction everQuestQuestReaction;
+            everQuestQuestReaction.QuestTemplateID = fields[0].Get<uint32>();
+            everQuestQuestReaction.ReactionType = fields[1].Get<int32>();
+            everQuestQuestReaction.UsePlayerX = fields[2].Get<bool>();
+            everQuestQuestReaction.UsePlayerY = fields[3].Get<bool>();
+            everQuestQuestReaction.UsePlayerZ = fields[4].Get<bool>();
+            everQuestQuestReaction.AddedPlayerX = fields[5].Get<float>();
+            everQuestQuestReaction.AddedPlayerY = fields[6].Get<float>();
+            everQuestQuestReaction.UsePlayerOrientation = fields[7].Get<bool>();
+            everQuestQuestReaction.PositionX = fields[8].Get<float>();
+            everQuestQuestReaction.PositionY = fields[9].Get<float>();
+            everQuestQuestReaction.PositionZ = fields[10].Get<float>();
+            everQuestQuestReaction.Orientation = fields[11].Get<float>();
+            everQuestQuestReaction.CreatureTemplateID = fields[12].Get<uint32>();
+            QuestReactionListByQuestTemplateID[everQuestQuestReaction.QuestTemplateID].push_back(everQuestQuestReaction);
+        } while (queryResult->NextRow());
+    }
+}
+
+const list<EverQuestQuestReaction>& EverQuestMod::GetQuestReactions(uint32 questTemplateID)
+{
+    if (QuestReactionListByQuestTemplateID.find(questTemplateID) != QuestReactionListByQuestTemplateID.end())
+    {
+        return QuestReactionListByQuestTemplateID[questTemplateID];
+    }
+    else
+    {
+        static const list<EverQuestQuestReaction> returnEmpty;
+        return returnEmpty;
+    }
+}
+
 void EverQuestMod::LoadPetData()
 {
     PetDataByCreatureTemplateID.clear();
@@ -793,20 +835,6 @@ void EverQuestMod::DespawnCreature(uint32 entryID, Map* map)
     for (Creature* creature : loadedCreatures)
         if (creature != nullptr)
             creature->DespawnOrUnsummon(0ms);
-}
-
-void EverQuestMod::DespawnCreature(Creature* creature, Map* map)
-{
-    vector<Creature*> loadedCreatures = GetLoadedCreaturesWithEntryID(map->GetId(), creature->GetEntry());
-    for (Creature* curCreature : loadedCreatures)
-        if (curCreature == creature)
-        {
-            curCreature->DespawnOrUnsummon(0ms);
-            return;
-        }
-
-    if (loadedCreatures.size() > 0)
-        return;
 }
 
 void EverQuestMod::MakeCreatureAttackPlayer(uint32 entryID, Map* map, Player* player)

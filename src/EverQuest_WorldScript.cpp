@@ -42,6 +42,7 @@ public:
         EverQuest->LoadItemTemplateData();
         EverQuest->LoadSpellData();
         EverQuest->LoadQuestCompletionReputations();
+        EverQuest->LoadQuestReactions();
         EverQuest->LoadPetData();
         EverQuest->LoadLootTemplateRows();
     }
