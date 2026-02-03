@@ -90,12 +90,20 @@ bool EverQuestMod::LoadConfigurationSystemDataFromDB()
                 ConfigSystemCreatureTemplateIDMin = (uint32)atoi(value.c_str());
             else if (key == "CreatureTemplateIDMax")
                 ConfigSystemCreatureTemplateIDMax = (uint32)atoi(value.c_str());
+            else if (key == "GameObjectTemplateIDMin")
+                ConfigSystemGameObjectTemplateIDMin = (uint32)atoi(value.c_str());
+            else if (key == "GameObjectTemplateIDMax")
+                ConfigSystemGameObjectTemplateIDMax = (uint32)atoi(value.c_str());
             else if (key == "NightEventID")
                 ConfigSystemNightEventID = atoi(value.c_str());
             else if (key == "MapDBCIDMin")
                 ConfigSystemMapDBCIDMin = (uint32)atoi(value.c_str());
             else if (key == "MapDBCIDMax")
                 ConfigSystemMapDBCIDMax = (uint32)atoi(value.c_str());
+            else if (key == "ShipEntryTemplateIDMin")
+                ConfigSystemShipEntryTemplateIDMin = (uint32)atoi(value.c_str());
+            else if (key == "ShipEntryTemplateIDMax")
+                ConfigSystemShipEntryTemplateIDMax = (uint32)atoi(value.c_str());
             else if (key == "SpellDBCIDMin")
                 ConfigSystemSpellDBCIDMin = (uint32)atoi(value.c_str());
             else if (key == "SpellDBCIDMax")
@@ -495,6 +503,41 @@ void EverQuestMod::RemoveVisualEquippedItemForCreatureGUIDIfExists(Map* map, Obj
     {
         creature->SetUInt32Value(UNIT_VIRTUAL_ITEM_SLOT_ID + 1, 0);
         VisualEquippedItemsByCreatureGUID[creatureGUID].OffhandItemID = 0;
+    }
+}
+
+void EverQuestMod::LoadShipTriggerData()
+{
+    ShipTriggersByTriggeringGameObjectTemplateEntryID.clear();
+
+    // Pulls in all the kill faction rewards
+    QueryResult queryResult = WorldDatabase.Query("SELECT TriggeringShipEntryID, TriggeredShipEntryID, TriggeringNodeID, TriggeredActivateNodeID FROM mod_everquest_transport_trigger;");
+    if (queryResult)
+    {
+        do
+        {
+            // Pull the data out
+            Field* fields = queryResult->Fetch();
+            EverQuestTransportShipTrigger shipTrigger;
+            shipTrigger.TriggeringShipGameObjectEntryTemplateID = fields[0].Get<uint32>();
+            shipTrigger.TriggeredShipGameObjectTemplateEntryID = fields[1].Get<uint32>();
+            shipTrigger.TriggeringNodeID = fields[2].Get<uint32>();
+            shipTrigger.TriggerActivateNodeID = fields[3].Get<int32>();
+            ShipTriggersByTriggeringGameObjectTemplateEntryID[shipTrigger.TriggeringShipGameObjectEntryTemplateID].push_back(shipTrigger);
+        } while (queryResult->NextRow());
+    }
+}
+
+const vector<EverQuestTransportShipTrigger>& EverQuestMod::GetShipTriggersForShip(int triggeringGameObjectTemplateEntryID)
+{
+    if (ShipTriggersByTriggeringGameObjectTemplateEntryID.find(triggeringGameObjectTemplateEntryID) != ShipTriggersByTriggeringGameObjectTemplateEntryID.end())
+    {
+        return ShipTriggersByTriggeringGameObjectTemplateEntryID[triggeringGameObjectTemplateEntryID];
+    }
+    else
+    {
+        static const vector<EverQuestTransportShipTrigger> returnEmpty;
+        return returnEmpty;
     }
 }
 

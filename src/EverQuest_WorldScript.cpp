@@ -45,6 +45,7 @@ public:
         EverQuest->LoadQuestReactions();
         EverQuest->LoadPetData();
         EverQuest->LoadLootTemplateRows();
+        EverQuest->LoadShipTriggerData();
     }
 };
 

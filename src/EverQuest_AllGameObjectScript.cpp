@@ -55,7 +55,13 @@ public:
     {
         if (EverQuest->IsEnabled == false)
             return;
+        if (go->GetEntry() < EverQuest->ConfigSystemGameObjectTemplateIDMin &&
+            go->GetEntry() > EverQuest->ConfigSystemGameObjectTemplateIDMax)
+        {
+            return;
+        }
 
+        // Capture lifts
         switch (go->GetEntry())
         {
         case LIFT_KELETHIN_NORTH_ENTRY: KelethinNorthLiftGUID = go->GetGUID(); break;
@@ -65,7 +71,14 @@ public:
         case LIFT_PAINEEL_TOP_TRIGGER_ENTRY: PaineelLiftTriggerTop = go->GetGUID(); break;
         case LIFT_PAINEEL_BOTTOM_TRIGGER_ENTRY: PaineelLiftTriggerBottom = go->GetGUID(); break;
         default: break;
-        }   
+        }
+
+        // Capture ships
+        if (go->GetEntry() >= EverQuest->ConfigSystemShipEntryTemplateIDMin &&
+            go->GetEntry() <= EverQuest->ConfigSystemShipEntryTemplateIDMax)
+        {
+            EverQuest->ShipGameObjectsByTemplateEntryID[go->GetEntry()] = go;
+        }
     }
 
     void ProcessLiftTrigger(GameObject* platformGameObject)
@@ -86,6 +99,11 @@ public:
     {
         if (EverQuest->IsEnabled == false)
             return;
+        if (go->GetEntry() < EverQuest->ConfigSystemGameObjectTemplateIDMin &&
+            go->GetEntry() > EverQuest->ConfigSystemGameObjectTemplateIDMax)
+        {
+            return;
+        }
 
         // Kelethin lifts
         if (state == 0)

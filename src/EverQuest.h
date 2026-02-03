@@ -18,6 +18,7 @@
 #define EVERQUEST_H
 
 #include "Common.h"
+#include "GameObject.h"
 #include "ObjectGuid.h"
 #include "CreatureData.h"
 
@@ -26,7 +27,7 @@
 
 using namespace std;
 
-#define EQ_MOD_VERSION                              2
+#define EQ_MOD_VERSION                              3
 
 #define EQ_SPELLDUMMYTYPE_BINDSELF                  1
 #define EQ_SPELLDUMMYTYPE_BINDANY                   2
@@ -171,6 +172,15 @@ public:
     int32 MaxCount = 0;
 };
 
+class EverQuestTransportShipTrigger
+{
+public:
+    uint32 TriggeringShipGameObjectEntryTemplateID = 0;
+    uint32 TriggeredShipGameObjectTemplateEntryID = 0;
+    uint32 TriggeringNodeID = 0;
+    uint32 TriggerActivateNodeID = 0;
+};
+
 class EverQuestMod
 {
 private:
@@ -194,6 +204,10 @@ public:
     uint32 ConfigSystemQuestSQLIDMax;
     uint32 ConfigSystemCreatureTemplateIDMin;
     uint32 ConfigSystemCreatureTemplateIDMax;
+    uint32 ConfigSystemGameObjectTemplateIDMin;
+    uint32 ConfigSystemGameObjectTemplateIDMax;
+    uint32 ConfigSystemShipEntryTemplateIDMin;
+    uint32 ConfigSystemShipEntryTemplateIDMax;
 
     // Configs (from server file)
     bool ConfigMapRestrictPlayersToNorrath;
@@ -216,6 +230,8 @@ public:
     unordered_map<uint32, unordered_map<uint32, vector<EverQuestLootTemplateRow>>> LootTemplateRowsInGroupByEntryID;
     unordered_map<ObjectGuid, vector<uint32>> PreloadedLootItemIDsByCreatureGUID;
     unordered_map<ObjectGuid, EverQuestLoadedCreatureEquippedVisualItems> VisualEquippedItemsByCreatureGUID;
+    unordered_map<uint32, vector<EverQuestTransportShipTrigger>> ShipTriggersByTriggeringGameObjectTemplateEntryID;
+    unordered_map<uint32, GameObject*> ShipGameObjectsByTemplateEntryID;
 
     static EverQuestMod* instance()
     {
@@ -250,6 +266,8 @@ public:
     void ClearPreloadedLootIDsForCreatureGUID(ObjectGuid creatureGUID);
     void TrackVisualEquippedItemsForCreatureGUID(ObjectGuid creatureGUID, uint32 mainhandItemID, uint32 offhandItemID);
     void RemoveVisualEquippedItemForCreatureGUIDIfExists(Map* map, ObjectGuid creatureGUID, uint32 itemTemplateID);
+    void LoadShipTriggerData();
+    const vector<EverQuestTransportShipTrigger>& GetShipTriggersForShip(int triggeringGameObjectTemplateEntryID);
 
     void StorePositionAsLastGate(Player* player);
     void SendPlayerToLastGate(Player* player);
