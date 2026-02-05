@@ -17,16 +17,21 @@
 #include "ScriptMgr.h"
 #include "Transport.h"
 
+#include "MapReference.h"
+
 #include "EverQuest.h"
 
 using namespace std;
 
 class EverQuest_TransportScript : public TransportScript
 {
+private:
+    std::set<uint32> _initializedTransports;  // Track which we've already handled
+
 public:
     EverQuest_TransportScript() : TransportScript("EverQuest_TransportScript") {}
 
-    void OnRelocate(Transport* transport, uint32 waypointId, uint32 mapId, float /*x*/, float /*y*/, float /*z*/) override
+    void OnRelocate(Transport* transport, uint32 waypointId, uint32 /*mapId*/, float /*x*/, float /*y*/, float /*z*/) override
     {
         if (EverQuest->IsEnabled == false)
             return;
@@ -34,14 +39,9 @@ public:
         // Trigger any dependent ships
         for (EverQuestTransportShipTrigger shipTrigger : EverQuest->GetShipTriggersForShip(transport->GetEntry()))
         {
-            // TEMP
-            LOG_ERROR("module.EverQuest", "EverQuestMod::TransportTest {} - {}", transport->GetEntry(), waypointId);
-
             // Only trigger if a trigger point was reached
             if (waypointId != shipTrigger.TriggeringNodeID)
                 continue;
-
-            LOG_ERROR("module.EverQuest", "EverQuestMod::A");
 
             // Get the triggered ship, respawning if needed
             GameObject* triggeredShipGameObject = EverQuest->ShipGameObjectsByTemplateEntryID[shipTrigger.TriggeredShipGameObjectTemplateEntryID];
@@ -49,8 +49,6 @@ public:
             if (triggerShipTransport->IsInWorld() == false)
                 triggerShipTransport->Respawn();
             MotionTransport* triggerShipMotionTransport = dynamic_cast<MotionTransport*>(triggerShipTransport);
-
-            LOG_ERROR("module.EverQuest", "EverQuestMod::B TriggeredID {}, Node {}", triggeredShipGameObject->GetEntry(), shipTrigger.TriggerActivateNodeID);
 
             // Jump the timer to the node required
             auto& frames = triggerShipMotionTransport->GetKeyFrames();
@@ -62,7 +60,6 @@ public:
                 {
                     jumpTime = frame.DepartureTime;
                     foundNodeTime = true;
-                    LOG_ERROR("module.EverQuest", "EverQuestMod::C");
                     break;
                 }
             }
@@ -70,8 +67,15 @@ public:
             {
                 triggerShipMotionTransport->SetPathProgress(jumpTime);
                 triggerShipMotionTransport->EnableMovement(true);
-                triggerShipMotionTransport->Update(1);
-                LOG_ERROR("module.EverQuest", "EverQuestMod::D jumpTime {} - PathProgress() {}", jumpTime, triggerShipMotionTransport->GetPathProgress());
+
+                // Clients need a resync to see the server-modified timer
+                Map::PlayerList const& players = triggerShipMotionTransport->GetMap()->GetPlayers();
+                for (auto playerItr = players.begin(); playerItr != players.end(); ++playerItr)
+                {
+                    Player* player = playerItr->GetSource();
+                    triggerShipMotionTransport->DestroyForPlayer(player);
+                    triggerShipMotionTransport->SendUpdateToPlayer(player);
+                }
             }
             else
                 LOG_ERROR("module.EverQuest", "Ship Trigger: Could not find node {} for ship entry {}", shipTrigger.TriggerActivateNodeID, transport->GetEntry());
