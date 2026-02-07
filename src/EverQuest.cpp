@@ -524,6 +524,7 @@ void EverQuestMod::LoadShipTriggerData()
             shipTrigger.TriggeringNodeID = fields[2].Get<uint32>();
             shipTrigger.TriggerActivateNodeID = fields[3].Get<int32>();
             ShipTriggersByTriggeringGameObjectTemplateEntryID[shipTrigger.TriggeringShipGameObjectEntryTemplateID].push_back(shipTrigger);
+            ShipWaitNodesByGameObjectTemplateEntryID[shipTrigger.TriggeredShipGameObjectTemplateEntryID] = shipTrigger.TriggerActivateNodeID;
         } while (queryResult->NextRow());
     }
 }

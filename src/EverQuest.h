@@ -231,6 +231,7 @@ public:
     unordered_map<ObjectGuid, vector<uint32>> PreloadedLootItemIDsByCreatureGUID;
     unordered_map<ObjectGuid, EverQuestLoadedCreatureEquippedVisualItems> VisualEquippedItemsByCreatureGUID;
     unordered_map<uint32, vector<EverQuestTransportShipTrigger>> ShipTriggersByTriggeringGameObjectTemplateEntryID;
+    unordered_map<uint32, int> ShipWaitNodesByGameObjectTemplateEntryID;
     unordered_map<uint32, GameObject*> ShipGameObjectsByTemplateEntryID;
 
     static EverQuestMod* instance()
