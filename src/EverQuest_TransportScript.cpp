@@ -15,6 +15,7 @@
 //  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #include "ScriptMgr.h"
+#include "Player.h"
 #include "Transport.h"
 
 #include "MapReference.h"
@@ -25,6 +26,22 @@ using namespace std;
 
 class EverQuest_TransportScript : public TransportScript
 {
+private:
+    std::map<uint32, GOState> PendingResync;
+    void ForceTransportResyncToPlayers(Transport* transport)
+    {
+        // Force updates with client so that players see the server values set
+        Map::PlayerList const& players = transport->GetMap()->GetPlayers();
+        for (Map::PlayerList::const_iterator itr = players.begin(); itr != players.end(); ++itr)
+        {
+            if (Player* player = itr->GetSource())
+            {
+                transport->DestroyForPlayer(player);
+                transport->SendUpdateToPlayer(player);
+            }
+        }
+    }
+
 public:
     EverQuest_TransportScript() : TransportScript("EverQuest_TransportScript") {}
 
@@ -42,6 +59,7 @@ public:
                 Transport* triggerShipTransport = triggeredShipGameObject->ToTransport();
                 MotionTransport* triggerShipMotionTransport = dynamic_cast<MotionTransport*>(triggerShipTransport);
                 triggerShipMotionTransport->EnableMovement(false);
+                PendingResync[transport->GetEntry()] = GO_STATE_READY;
             }
         }
 
@@ -61,7 +79,19 @@ public:
 
             // Restart movement
             triggerShipMotionTransport->EnableMovement(true);
+            PendingResync[shipTrigger.TriggeredShipGameObjectTemplateEntryID] = GO_STATE_ACTIVE;
         }          
+    }
+
+    void OnUpdate(Transport* transport, uint32 /*diff*/) override
+    {
+        // Force any needed client states
+        auto it = PendingResync.find(transport->GetEntry());
+        if (it != PendingResync.end() && transport->GetGoState() == it->second)
+        {
+            ForceTransportResyncToPlayers(transport);
+            PendingResync.erase(it);
+        }
     }
 };
 
