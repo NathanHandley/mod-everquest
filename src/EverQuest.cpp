@@ -124,8 +124,17 @@ bool EverQuestMod::LoadConfigurationSystemDataFromDB()
             }
         } while (configValuesQueryResult->NextRow());
     }
-    if (configModVersion != EQ_MOD_VERSION)
+    int expectedVersion = EQ_MOD_VERSION;
+    if (configModVersion < expectedVersion)
+    {
+        LOG_ERROR("module.EverQuest", "Module version expected database data of version {} but found version {}. Update and rerun EQWOWConverter.", configModVersion, expectedVersion);
         return false;
+    }
+    else if (configModVersion > expectedVersion)
+    {
+        LOG_ERROR("module.EverQuest", "Module version expected database data of version {} but found version {}. Update the mod-everquest project.", configModVersion, expectedVersion);
+        return false;
+    }
 
     return true;
 }
