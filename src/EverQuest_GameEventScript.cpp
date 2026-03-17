@@ -31,9 +31,6 @@ public:
     {
         if (EverQuest->IsEnabled == false)
             return;
-
-        if (EventID == EverQuest->ConfigSystemDayEventID || EventID == EverQuest->ConfigSystemNightEventID)
-            EverQuest->SetAllLoadedPlayersDayOrNightAura();
     }
 
     // Runs on stop event
@@ -41,9 +38,6 @@ public:
     {
         if (EverQuest->IsEnabled == false)
             return;
-
-        if (EventID == EverQuest->ConfigSystemDayEventID || EventID == EverQuest->ConfigSystemNightEventID)
-            EverQuest->SetAllLoadedPlayersDayOrNightAura();
     }
 };
 

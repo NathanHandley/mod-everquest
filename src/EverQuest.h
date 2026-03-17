@@ -27,7 +27,7 @@
 
 using namespace std;
 
-#define EQ_MOD_VERSION                              3
+#define EQ_MOD_VERSION                              4
 
 #define EQ_SPELLDUMMYTYPE_BINDSELF                  1
 #define EQ_SPELLDUMMYTYPE_BINDANY                   2
@@ -192,14 +192,10 @@ public:
     // Configs (from database)
     float ConfigWorldScale;
     uint32 ConfigBardMaxConcurrentSongs;
-    int ConfigSystemDayEventID;
-    int ConfigSystemNightEventID;
     uint32 ConfigSystemMapDBCIDMin;
     uint32 ConfigSystemMapDBCIDMax;
     uint32 ConfigSystemSpellDBCIDMin;
     uint32 ConfigSystemSpellDBCIDMax;
-    int ConfigSystemSpellDBCIDDayPhaseAura;
-    int ConfigSystemSpellDBCIDNightPhaseAura;
     uint32 ConfigSystemQuestSQLIDMin;
     uint32 ConfigSystemQuestSQLIDMax;
     uint32 ConfigSystemCreatureTemplateIDMin;
@@ -275,8 +271,6 @@ public:
     void SendPlayerToEQBindHome(Player* player);
     void SetNewBindHome(Player* player);
     void DeletePlayerBindHome(ObjectGuid guid);
-    void SetAllLoadedPlayersDayOrNightAura();
-    void SetPlayerDayOrNightAura(Player* player);
     void AddCreatureAsLoaded(int mapID, Creature* creature);
     void RemoveCreatureAsLoaded(int mapID, Creature* creature);
     vector<Creature*> GetLoadedCreaturesWithEntryID(int mapID, uint32 entryID);

@@ -216,7 +216,6 @@ public:
         if (player->GetMap() != nullptr && player->GetMap()->GetId() >= EverQuest->ConfigSystemMapDBCIDMin && player->GetMap()->GetId() <= EverQuest->ConfigSystemMapDBCIDMax)
         {
             EverQuest->SetNewBindHome(player);
-            EverQuest->SetPlayerDayOrNightAura(player);
         }
     }
 
@@ -226,7 +225,6 @@ public:
             return;
 
         EverQuest->AllLoadedPlayers.push_back(player);
-        EverQuest->SetPlayerDayOrNightAura(player);
 
         // Grab any cast bard songs for the player
         if (EverQuest->ConfigBardMaxConcurrentSongs != 0)
@@ -268,9 +266,6 @@ public:
                 ChatHandler(player->GetSession()).PSendSysMessage("You are not permitted to step into Azeroth.");
             }
         }
-
-        // Set aura if not set
-        EverQuest->SetPlayerDayOrNightAura(player);
     }
 
     void OnPlayerReleasedGhost(Player* player) override

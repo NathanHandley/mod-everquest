@@ -30,14 +30,10 @@ EverQuestMod::EverQuestMod() :
     IsEnabled(true),
     ConfigWorldScale(1),
     ConfigBardMaxConcurrentSongs(1),
-    ConfigSystemDayEventID(0),
-    ConfigSystemNightEventID(0),
     ConfigSystemMapDBCIDMin(0),
     ConfigSystemMapDBCIDMax(0),
     ConfigSystemSpellDBCIDMin(0),
     ConfigSystemSpellDBCIDMax(0),
-    ConfigSystemSpellDBCIDDayPhaseAura(0),
-    ConfigSystemSpellDBCIDNightPhaseAura(0),
     ConfigSystemQuestSQLIDMin(0),
     ConfigSystemQuestSQLIDMax(0),
     ConfigSystemCreatureTemplateIDMin(0),
@@ -84,8 +80,6 @@ bool EverQuestMod::LoadConfigurationSystemDataFromDB()
                 configModVersion = atoi(value.c_str());
             else if (key == "BardMaxConcurrentSongs")
                 ConfigBardMaxConcurrentSongs = (uint32)atoi(value.c_str());
-            else if (key == "DayEventID")
-                ConfigSystemDayEventID = atoi(value.c_str());
             else if (key == "CreatureTemplateIDMin")
                 ConfigSystemCreatureTemplateIDMin = (uint32)atoi(value.c_str());
             else if (key == "CreatureTemplateIDMax")
@@ -94,8 +88,6 @@ bool EverQuestMod::LoadConfigurationSystemDataFromDB()
                 ConfigSystemGameObjectTemplateIDMin = (uint32)atoi(value.c_str());
             else if (key == "GameObjectTemplateIDMax")
                 ConfigSystemGameObjectTemplateIDMax = (uint32)atoi(value.c_str());
-            else if (key == "NightEventID")
-                ConfigSystemNightEventID = atoi(value.c_str());
             else if (key == "MapDBCIDMin")
                 ConfigSystemMapDBCIDMin = (uint32)atoi(value.c_str());
             else if (key == "MapDBCIDMax")
@@ -108,10 +100,6 @@ bool EverQuestMod::LoadConfigurationSystemDataFromDB()
                 ConfigSystemSpellDBCIDMin = (uint32)atoi(value.c_str());
             else if (key == "SpellDBCIDMax")
                 ConfigSystemSpellDBCIDMax = (uint32)atoi(value.c_str());
-            else if (key == "SpellDBCIDDayPhaseAura")
-                ConfigSystemSpellDBCIDDayPhaseAura = atoi(value.c_str());
-            else if (key == "SpellDBCIDNightPhaseAura")
-                ConfigSystemSpellDBCIDNightPhaseAura = atoi(value.c_str());
             else if (key == "QuestSQLIDMin")
                 ConfigSystemQuestSQLIDMin = (uint32)atoi(value.c_str());
             else if (key == "QuestSQLIDMax")
@@ -680,56 +668,6 @@ void EverQuestMod::DeletePlayerBindHome(ObjectGuid guid)
 
     // Commit the transaction
     CharacterDatabase.CommitTransaction(transaction);
-}
-
-void EverQuestMod::SetAllLoadedPlayersDayOrNightAura()
-{
-    for (vector<Player*>::const_iterator playerIterator = AllLoadedPlayers.begin(); playerIterator != AllLoadedPlayers.end(); ++playerIterator)
-    {
-        Player* thisPlayer = *playerIterator;
-        SetPlayerDayOrNightAura(thisPlayer);
-    }
-}
-
-void EverQuestMod::SetPlayerDayOrNightAura(Player* player)
-{
-    if (player == nullptr)
-        return;
-
-    // Set aura if it's night or day and the player is in EQ, otherwise clear it
-    if (player->GetMap() != nullptr && (player->GetMap()->GetId() >= ConfigSystemMapDBCIDMin && player->GetMap()->GetId() <= ConfigSystemMapDBCIDMax))
-    {
-        // Day
-        if (sGameEventMgr->IsActiveEvent(ConfigSystemDayEventID))
-        {            
-            if (player->HasAura(ConfigSystemSpellDBCIDDayPhaseAura) == false)
-                player->AddAura(ConfigSystemSpellDBCIDDayPhaseAura, player);
-        }
-        else
-        {
-            if (player->HasAura(ConfigSystemSpellDBCIDDayPhaseAura) == true)
-                player->RemoveAura(ConfigSystemSpellDBCIDDayPhaseAura);
-        }
-
-        // Night
-        if (sGameEventMgr->IsActiveEvent(ConfigSystemNightEventID))
-        {            
-            if (player->HasAura(ConfigSystemSpellDBCIDNightPhaseAura) == false)
-                player->AddAura(ConfigSystemSpellDBCIDNightPhaseAura, player);
-        }
-        else
-        {
-            if (player->HasAura(ConfigSystemSpellDBCIDNightPhaseAura) == true)
-                player->RemoveAura(ConfigSystemSpellDBCIDNightPhaseAura);
-        }
-    }
-    else
-    {
-        if (player->HasAura(ConfigSystemSpellDBCIDDayPhaseAura) == true)
-            player->RemoveAura(ConfigSystemSpellDBCIDDayPhaseAura);
-        if (player->HasAura(ConfigSystemSpellDBCIDNightPhaseAura) == true)
-            player->RemoveAura(ConfigSystemSpellDBCIDNightPhaseAura);
-    }
 }
 
 void EverQuestMod::AddCreatureAsLoaded(int mapID, Creature* creature)
