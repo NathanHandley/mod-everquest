@@ -398,6 +398,52 @@ const EverQuestPet& EverQuestMod::GetPetDataForCreatureTemplateID(uint32 creatur
     }
 }
 
+void EverQuestMod::LoadCreatePlayerData()
+{
+    PlayerCreateInfoByRaceIDThenClassID.clear();
+    QueryResult queryResult = WorldDatabase.Query("SELECT race, class, map, zone, position_x, position_y, position_z, orientation FROM mod_everquest_playercreateinfo;");
+    if (queryResult)
+    {
+        do
+        {
+            // Pull the data out
+            Field* fields = queryResult->Fetch();
+            EverQuestPlayerCreateInfo everQuestPlayerCreateInfo;
+            everQuestPlayerCreateInfo.RaceID = fields[0].Get<uint8>();
+            everQuestPlayerCreateInfo.ClassID = fields[1].Get<uint8>();
+            everQuestPlayerCreateInfo.MapID = fields[2].Get<uint32>();
+            everQuestPlayerCreateInfo.ZoneID = fields[3].Get<uint32>();
+            everQuestPlayerCreateInfo.PositionX = fields[4].Get<float>();
+            everQuestPlayerCreateInfo.PositionY = fields[5].Get<float>();
+            everQuestPlayerCreateInfo.PositionZ = fields[6].Get<float>();
+            everQuestPlayerCreateInfo.Orientation = fields[7].Get<float>();
+            PlayerCreateInfoByRaceIDThenClassID[everQuestPlayerCreateInfo.RaceID][everQuestPlayerCreateInfo.ClassID] = everQuestPlayerCreateInfo;
+        } while (queryResult->NextRow());
+    }
+}
+
+bool EverQuestMod::HasCreatePlayerData(uint8 raceID, uint8 classID)
+{
+    if (PlayerCreateInfoByRaceIDThenClassID.find(raceID) == PlayerCreateInfoByRaceIDThenClassID.end())
+        return false;
+    else if (PlayerCreateInfoByRaceIDThenClassID[raceID].find(classID) == PlayerCreateInfoByRaceIDThenClassID[raceID].end())
+        return false;
+    else
+        return true;
+}
+
+const EverQuestPlayerCreateInfo& EverQuestMod::GetPlayerCreateInfo(uint8 raceID, uint8 classID)
+{
+    if (PlayerCreateInfoByRaceIDThenClassID.find(raceID) != PlayerCreateInfoByRaceIDThenClassID.end())
+    {
+        if (PlayerCreateInfoByRaceIDThenClassID[raceID].find(classID) != PlayerCreateInfoByRaceIDThenClassID[raceID].end())
+            return PlayerCreateInfoByRaceIDThenClassID[raceID][classID];
+    }
+
+    static const EverQuestPlayerCreateInfo returnEmpty;
+    return returnEmpty;
+}
+
 void EverQuestMod::LoadLootTemplateRows()
 {
     LootTemplateRowsInGroupByEntryID.clear();

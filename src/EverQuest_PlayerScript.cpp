@@ -212,6 +212,13 @@ public:
         if (EverQuest->IsEnabled == false)
             return;
 
+        // If there is create data, move the player to the related zone
+        if (EverQuest->HasCreatePlayerData(player->getRace(), player->getClass()) == true)
+        {
+            EverQuestPlayerCreateInfo createInfo = EverQuest->GetPlayerCreateInfo(player->getRace(), player->getClass());
+            player->TeleportTo(createInfo.MapID, createInfo.PositionX, createInfo.PositionY, createInfo.PositionZ, createInfo.Orientation);
+        }
+
         // If the player logged in for the first time and is in a norrath zone, set the bind and aura
         if (player->GetMap() != nullptr && player->GetMap()->GetId() >= EverQuest->ConfigSystemMapDBCIDMin && player->GetMap()->GetId() <= EverQuest->ConfigSystemMapDBCIDMax)
         {

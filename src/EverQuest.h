@@ -27,7 +27,7 @@
 
 using namespace std;
 
-#define EQ_MOD_VERSION                              4
+#define EQ_MOD_VERSION                              5
 
 #define EQ_SPELLDUMMYTYPE_BINDSELF                  1
 #define EQ_SPELLDUMMYTYPE_BINDANY                   2
@@ -132,6 +132,19 @@ public:
     uint32 OffhandItemTemplateID = 0;
 };
 
+class EverQuestPlayerCreateInfo
+{
+public:
+    uint8 RaceID = 0;
+    uint8 ClassID = 0;
+    uint32 MapID = 0;
+    uint32 ZoneID = 0;
+    float PositionX = 0;
+    float PositionY = 0;
+    float PositionZ = 0;
+    float Orientation = 0;
+};
+
 class EverQuestQuestCompletionReputation
 {
 public:
@@ -221,6 +234,7 @@ public:
     unordered_map<uint32, list<EverQuestQuestCompletionReputation>> QuestCompletionReputationsByQuestTemplateID;
     unordered_map<uint32, list<EverQuestQuestReaction>> QuestReactionListByQuestTemplateID;
     unordered_map<uint32, EverQuestPet> PetDataByCreatureTemplateID;
+    unordered_map<uint8, unordered_map<uint8, EverQuestPlayerCreateInfo>> PlayerCreateInfoByRaceIDThenClassID;
     unordered_map<int, unordered_map<int, vector<Creature*>>> AllLoadedCreaturesByMapIDThenCreatureEntryID;
     unordered_map<ObjectGuid, deque<uint32>> PlayerCasterConcurrentBardSongs;
     unordered_map<uint32, unordered_map<uint32, vector<EverQuestLootTemplateRow>>> LootTemplateRowsInGroupByEntryID;
@@ -255,6 +269,9 @@ public:
     void LoadPetData();
     bool HasPetDataForCreatureTemplateID(uint32 creatureTemplateID);
     const EverQuestPet& GetPetDataForCreatureTemplateID(uint32 creatureTemplateID);
+    void LoadCreatePlayerData();
+    bool HasCreatePlayerData(uint8 raceID, uint8 classID);
+    const EverQuestPlayerCreateInfo& GetPlayerCreateInfo(uint8 raceID, uint8 classID);
     void LoadLootTemplateRows();
     bool HasLootTemplateRowsByCreatureTemplateEntryID(uint32 creatureTemplateEntryID);
     bool HasPreloadedLootItemIDsForCreatureGUID(ObjectGuid creatureGUID);
