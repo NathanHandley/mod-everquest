@@ -27,7 +27,7 @@
 
 using namespace std;
 
-#define EQ_MOD_VERSION                              5
+#define EQ_MOD_VERSION                              6
 
 #define EQ_SPELLDUMMYTYPE_BINDSELF                  1
 #define EQ_SPELLDUMMYTYPE_BINDANY                   2
@@ -194,6 +194,33 @@ public:
     uint32 TriggerActivateNodeID = 0;
 };
 
+class EverQuestCreatureInstance
+{
+public:
+    uint32 CreatureGUID = 0;
+    int8 WanderType = 0;
+    int8 PauseType = 0;
+    uint32 MapID = 0;
+    uint32 WaypointID = 0;
+    bool DoesRoam = false;
+    float RoamMinX = 0;
+    float RoamMaxX = 0;
+    float RoamMinY = 0;
+    float RoamMaxY = 0;
+};
+
+class EverQuestCreatureWaypoint
+{
+public:
+    uint32 MapID = 0;
+    uint32 WaypointID = 0;
+    uint32 Number = 0;
+    float X = 0;
+    float Y = 0;
+    float Z = 0;
+    uint32 PauseInSec = 0;
+};
+
 class EverQuestMod
 {
 private:
@@ -243,6 +270,8 @@ public:
     unordered_map<uint32, vector<EverQuestTransportShipTrigger>> ShipTriggersByTriggeringGameObjectTemplateEntryID;
     unordered_map<uint32, int> ShipWaitNodesByGameObjectTemplateEntryID;
     unordered_map<uint32, GameObject*> ShipGameObjectsByTemplateEntryID;
+    unordered_map<uint32, EverQuestCreatureInstance> CreatureInstancesByCreatureGUID;
+    unordered_map<uint32, unordered_map<uint32, EverQuestCreatureWaypoint>> CreatureWaypointsByMapIDAndWaypointID;
 
     static EverQuestMod* instance()
     {
@@ -282,6 +311,8 @@ public:
     void RemoveVisualEquippedItemForCreatureGUIDIfExists(Map* map, ObjectGuid creatureGUID, uint32 itemTemplateID);
     void LoadShipTriggerData();
     const vector<EverQuestTransportShipTrigger>& GetShipTriggersForShip(int triggeringGameObjectTemplateEntryID);
+    void LoadCreatureInstanceData();
+    void LoadCreatureWaypointData();
 
     void StorePositionAsLastGate(Player* player);
     void SendPlayerToLastGate(Player* player);

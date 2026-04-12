@@ -48,6 +48,8 @@ public:
         EverQuest->LoadCreatePlayerData();
         EverQuest->LoadLootTemplateRows();
         EverQuest->LoadShipTriggerData();
+        EverQuest->LoadCreatureInstanceData();
+        EverQuest->LoadCreatureWaypointData();
     }
 };
 
