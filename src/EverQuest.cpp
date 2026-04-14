@@ -602,7 +602,7 @@ void EverQuestMod::LoadCreatureInstanceData()
 {
     CreatureInstancesByCreatureGUID.clear();
 
-    QueryResult queryResult = WorldDatabase.Query("SELECT CreatureGUID, WanderType, PauseType, MapID, WaypointID, DoesRoam, RoamMinX, RoamMaxX, RoamMinY, RoamMaxY FROM mod_everquest_creature_instance;");
+    QueryResult queryResult = WorldDatabase.Query("SELECT CreatureGUID, WanderType, PauseType, MapID, WaypointListID, DoesRoam, RoamMinX, RoamMaxX, RoamMinY, RoamMaxY FROM mod_everquest_creature_instance;");
     if (queryResult)
     {
         do
@@ -613,7 +613,7 @@ void EverQuestMod::LoadCreatureInstanceData()
             creatureInstance.WanderType = fields[1].Get<int8>();
             creatureInstance.PauseType = fields[2].Get<int8>();
             creatureInstance.MapID = fields[3].Get<uint32>();
-            creatureInstance.WaypointID = fields[4].Get<uint32>();
+            creatureInstance.WaypointListID = fields[4].Get<uint32>();
             creatureInstance.DoesRoam = fields[5].Get<int8>() == 1 ? true : false;
             creatureInstance.RoamMinX = fields[6].Get<float>();
             creatureInstance.RoamMaxX = fields[7].Get<float>();
@@ -624,11 +624,24 @@ void EverQuestMod::LoadCreatureInstanceData()
     }
 }
 
+const EverQuestCreatureInstance& EverQuestMod::GetCreatureInstanceData(uint32 creatureInstanceGUID)
+{
+    if (CreatureInstancesByCreatureGUID.find(creatureInstanceGUID) != CreatureInstancesByCreatureGUID.end())
+    {
+        return CreatureInstancesByCreatureGUID[creatureInstanceGUID];
+    }
+    else
+    {
+        static const EverQuestCreatureInstance returnEmpty;
+        return returnEmpty;
+    }
+}
+
 void EverQuestMod::LoadCreatureWaypointData()
 {
     CreatureWaypointsByMapIDAndWaypointID.clear();
 
-    QueryResult queryResult = WorldDatabase.Query("SELECT MapID, WaypointID, Number, X, Y, Z, PauseInSec FROM mod_everquest_creature_waypoint;");
+    QueryResult queryResult = WorldDatabase.Query("SELECT MapID, WaypointListID, Number, X, Y, Z, PauseInSec FROM mod_everquest_creature_waypoint;");
     if (queryResult)
     {
         do
@@ -642,9 +655,21 @@ void EverQuestMod::LoadCreatureWaypointData()
             creatureWaypoint.Y = fields[4].Get<float>();
             creatureWaypoint.Z = fields[5].Get<float>();
             creatureWaypoint.PauseInSec = fields[6].Get<uint32>();
-            CreatureWaypointsByMapIDAndWaypointID[creatureWaypoint.MapID][creatureWaypoint.WaypointID] = creatureWaypoint;
+            CreatureWaypointsByMapIDAndWaypointID[creatureWaypoint.MapID][creatureWaypoint.WaypointID].push_back(creatureWaypoint);
         } while (queryResult->NextRow());
     }
+}
+
+const vector<EverQuestCreatureWaypoint> EverQuestMod::GetWaypoints(uint32 mapID, uint32 waypointListID)
+{
+    auto outerIt = CreatureWaypointsByMapIDAndWaypointID.find(mapID);
+    if (outerIt == CreatureWaypointsByMapIDAndWaypointID.end())
+        return {};
+    const unordered_map<uint32, vector<EverQuestCreatureWaypoint>>& innerMap = outerIt->second;
+    if (innerMap.find(waypointListID) == innerMap.end())
+        return {};
+
+    return innerMap.at(waypointListID);
 }
 
 void EverQuestMod::StorePositionAsLastGate(Player* player)

@@ -72,6 +72,20 @@ using namespace std;
 #define EQ_QUEST_REACTION_SPAWNUNIQUE               6
 #define EQ_QUEST_REACTION_YELL                      7
 
+#define EQ_NONE                                     -1
+#define EQ_GRID_CIRCULAR                            0
+#define EQ_GRID_RANDOM_10                           1
+#define EQ_GRID_RANDOM                              2
+#define EQ_GRID_PATROL                              3
+#define EQ_GRID_ONE_WAY_REPOP                       4
+#define EQ_GRID_RAND_5_LOS                          5
+#define EQ_GRID_ONE_WAY_DEPOP                       6
+#define EQ_GRID_CENTER_POINT                        7
+#define EQ_GRID_RANDOM_CENTER_POINT                 8
+#define EQ_GRID_RANDOM_PATH                         9
+
+#define EQ_MOVE_RETURN_TO_AGRO_ID                   99999
+
 class EverQuestCreatureOnkillReputation
 {
 public:
@@ -201,7 +215,7 @@ public:
     int8 WanderType = 0;
     int8 PauseType = 0;
     uint32 MapID = 0;
-    uint32 WaypointID = 0;
+    uint32 WaypointListID = -1;
     bool DoesRoam = false;
     float RoamMinX = 0;
     float RoamMaxX = 0;
@@ -271,7 +285,7 @@ public:
     unordered_map<uint32, int> ShipWaitNodesByGameObjectTemplateEntryID;
     unordered_map<uint32, GameObject*> ShipGameObjectsByTemplateEntryID;
     unordered_map<uint32, EverQuestCreatureInstance> CreatureInstancesByCreatureGUID;
-    unordered_map<uint32, unordered_map<uint32, EverQuestCreatureWaypoint>> CreatureWaypointsByMapIDAndWaypointID;
+    unordered_map<uint32, unordered_map<uint32, vector<EverQuestCreatureWaypoint>>> CreatureWaypointsByMapIDAndWaypointID;
 
     static EverQuestMod* instance()
     {
@@ -312,7 +326,9 @@ public:
     void LoadShipTriggerData();
     const vector<EverQuestTransportShipTrigger>& GetShipTriggersForShip(int triggeringGameObjectTemplateEntryID);
     void LoadCreatureInstanceData();
+    const EverQuestCreatureInstance& GetCreatureInstanceData(uint32 creatureInstanceGUID);
     void LoadCreatureWaypointData();
+    const vector<EverQuestCreatureWaypoint> GetWaypoints(uint32 mapID, uint32 waypointListID);
 
     void StorePositionAsLastGate(Player* player);
     void SendPlayerToLastGate(Player* player);
