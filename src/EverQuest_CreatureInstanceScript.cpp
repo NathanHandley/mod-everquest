@@ -76,7 +76,8 @@ public:
 
             LoadCustomData();
 
-            StartWanderMovement();
+            if (CreatureInstanceData.WanderType != EQ_NONE)
+                StartWanderMovement();
         }
 
         void StartWanderMovement()
@@ -343,31 +344,18 @@ public:
         {
             ScriptedAI::EnterEvadeMode(why);
 
-            if (me->GetDistance(AgroPosition) > 3.0f)
-            {
-                float x = AgroPosition.GetPositionX();
-                float y = AgroPosition.GetPositionY();
-                float z = AgroPosition.GetPositionZ() + 8.0f;
+            float x = AgroPosition.GetPositionX();
+            float y = AgroPosition.GetPositionY();
+            float z = AgroPosition.GetPositionZ() + 8.0f;
 
-                // Cast twice to better handle steep ground
-                me->UpdateGroundPositionZ(x, y, z);
-                z += 3.0f;
-                me->UpdateGroundPositionZ(x, y, z);
+            // Cast twice to better handle steep ground
+            me->UpdateGroundPositionZ(x, y, z);
+            z += 3.0f;
+            me->UpdateGroundPositionZ(x, y, z);
 
-                me->SetCanFly(false);
-                me->SetDisableGravity(false);
-                me->SetHover(false);
-                me->SetUnitMovementFlags(MOVEMENTFLAG_WALKING);
+            me->SetUnitMovementFlags(MOVEMENTFLAG_WALKING);
 
-                me->GetMotionMaster()->MovePoint(EQ_MOVE_RETURN_TO_AGRO_ID, x, y, z);
-            }
-            else
-            {
-                if (CreatureInstanceData.WanderType != EQ_NONE)
-                    StartWanderMovement();
-                else
-                    StartMovingToNextWaypoint();
-            }
+            me->GetMotionMaster()->MovePoint(EQ_MOVE_RETURN_TO_AGRO_ID, x, y, z);
         }
     };
 
