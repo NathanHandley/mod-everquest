@@ -19,7 +19,11 @@
 #include "ScriptedCreature.h"
 #include "EventMap.h"
 #include "MotionMaster.h"
+
 #include "EverQuest.h"
+
+#include <algorithm>
+#include <random>
 
 using namespace std;
 
@@ -38,6 +42,10 @@ public:
         Position AgroPosition;
         Position CurrentTargetPos;
         bool IsMovingToWaypoint = false;
+
+        // For EQ_GRID_RANDOM_10
+        vector<uint32> Random10Indices;
+        uint32 Random10Current = 0;
 
         enum Events
         {
@@ -60,26 +68,152 @@ public:
             events.Reset();
             CurrentWaypointIndex = 0;
             IsMovingToWaypoint = false;
+            Random10Indices.clear();
+            Random10Current = 0;
 
             me->SetWalk(false); // true = walk
             me->SetUnitMovementFlags(MOVEMENTFLAG_WALKING);
 
             LoadCustomData();
-            if (CreatureWaypoints.empty() == false)
-                StartMovingToNextWaypoint();
+
+            StartWanderMovement();
+        }
+
+        void StartWanderMovement()
+        {
+            if (CreatureWaypoints.empty())
+                return;
+
+            switch (CreatureInstanceData.WanderType)
+            {
+            case EQ_GRID_RANDOM_10:
+            {
+                GenerateRandom10Indices();
+                Random10Current = 0;
+                GoToRandom10Point();
+            } break;
+            case EQ_GRID_RANDOM:
+            case EQ_GRID_RANDOM_CENTER_POINT:
+            case EQ_GRID_RANDOM_PATH:
+            {
+                PickAndGoToRandomWaypoint();
+            } break;
+            case EQ_GRID_RAND_5_LOS:
+            {
+                PickRandomFrom5ClosestWithLOS();
+            } break;
+            default:
+            {
+                PickAndGoToRandomWaypoint();
+            } break;
+            }
+        }
+
+        void GenerateRandom10Indices()
+        {
+            Random10Indices.clear();
+            vector<uint32> allIndices;
+            for (uint32 i = 0; i < CreatureWaypoints.size(); ++i)
+                allIndices.push_back(i);
+
+            static mt19937 rng(random_device{}());
+            shuffle(allIndices.begin(), allIndices.end(), rng);
+
+            uint32 count = min<uint32>(10u, allIndices.size());
+            Random10Indices.assign(allIndices.begin(), allIndices.begin() + count);
+        }
+
+        void GoToRandom10Point()
+        {
+            if (Random10Indices.empty())
+            {
+                PickAndGoToRandomWaypoint();
+                return;
+            }
+
+            CurrentWaypointIndex = Random10Indices[Random10Current];
+            Random10Current = (Random10Current + 1) % Random10Indices.size();
+
+            const EverQuestCreatureWaypoint& wp = CreatureWaypoints[CurrentWaypointIndex];
+            CurrentTargetPos = Position(wp.X, wp.Y, wp.Z);
+
+            IsMovingToWaypoint = true;
+            events.ScheduleEvent(EVENT_NEXT_SMALL_STEP, 100ms);
+        }
+
+        void PickAndGoToRandomWaypoint()
+        {
+            if (CreatureWaypoints.empty())
+                return;
+
+            CurrentWaypointIndex = urand(0, CreatureWaypoints.size() - 1);
+
+            const EverQuestCreatureWaypoint& wp = CreatureWaypoints[CurrentWaypointIndex];
+            CurrentTargetPos = Position(wp.X, wp.Y, wp.Z);
+
+            IsMovingToWaypoint = true;
+            events.ScheduleEvent(EVENT_NEXT_SMALL_STEP, 100ms);
+        }
+
+        void PickRandomFrom5ClosestWithLOS()
+        {
+            if (CreatureWaypoints.empty())
+            {
+                PickAndGoToRandomWaypoint();
+                return;
+            }
+
+            // Collect all waypoints with their distance
+            vector<pair<float, uint32>> distList;
+            for (uint32 i = 0; i < CreatureWaypoints.size(); ++i)
+            {
+                const auto& wp = CreatureWaypoints[i];
+                float dist = me->GetExactDist(wp.X, wp.Y, wp.Z);
+                distList.emplace_back(dist, i);
+            }
+
+            // Sort by distance (closest first)
+            sort(distList.begin(), distList.end());
+
+            // Take up to 5 closest
+            vector<uint32> candidates;
+            uint32 maxCandidates = min<uint32>(5u, distList.size());
+            for (uint32 i = 0; i < maxCandidates; ++i)
+            {
+                uint32 idx = distList[i].second;
+                const auto& wp = CreatureWaypoints[idx];
+
+                // Check Line of Sight
+                if (me->IsWithinLOS(wp.X, wp.Y, wp.Z))
+                    candidates.push_back(idx);
+            }
+
+            // If no LOS candidates, fall back to fully random
+            if (candidates.empty())
+            {
+                PickAndGoToRandomWaypoint();
+                return;
+            }
+
+            // Pick one randomly from the valid LOS candidates
+            uint32 chosen = candidates[urand(0, candidates.size() - 1)];
+            CurrentWaypointIndex = chosen;
+
+            const EverQuestCreatureWaypoint& wp = CreatureWaypoints[CurrentWaypointIndex];
+            CurrentTargetPos = Position(wp.X, wp.Y, wp.Z);
+
+            IsMovingToWaypoint = true;
+            events.ScheduleEvent(EVENT_NEXT_SMALL_STEP, 100ms);
         }
 
         void StartMovingToNextWaypoint()
         {
             if (CreatureWaypoints.empty())
                 return;
-
             if (CurrentWaypointIndex >= CreatureWaypoints.size())
                 CurrentWaypointIndex = 0;
-
             const EverQuestCreatureWaypoint& wp = CreatureWaypoints[CurrentWaypointIndex];
             CurrentTargetPos = Position(wp.X, wp.Y, wp.Z);
-
             IsMovingToWaypoint = true;
             events.ScheduleEvent(EVENT_NEXT_SMALL_STEP, 100ms);
         }
@@ -131,8 +265,18 @@ public:
             }
             else
             {
-                CurrentWaypointIndex++;
-                StartMovingToNextWaypoint();
+                if (CreatureInstanceData.WanderType != EQ_NONE)
+                {
+                    if (CreatureInstanceData.WanderType == EQ_GRID_RANDOM_10)
+                        GoToRandom10Point();
+                    else
+                        StartWanderMovement();
+                }
+                else
+                {
+                    CurrentWaypointIndex++;
+                    StartMovingToNextWaypoint();
+                }
             }
         }
 
@@ -143,14 +287,15 @@ public:
 
             if (id == EQ_MOVE_RETURN_TO_AGRO_ID)
             {
-                StartMovingToNextWaypoint();
+                if (CreatureInstanceData.WanderType != EQ_NONE)
+                    StartWanderMovement();
+                else
+                    StartMovingToNextWaypoint();
                 return;
             }
 
             if (id == EQ_MOVE_SMALL_TERRAIN_MOVE_ID && IsMovingToWaypoint)
-            {
                 events.ScheduleEvent(EVENT_NEXT_SMALL_STEP, 50ms);
-            }
         }
 
         void UpdateAI(uint32 diff) override
@@ -160,8 +305,18 @@ public:
             {
                 if (eventId == EVENT_PAUSE_DONE)
                 {
-                    CurrentWaypointIndex++;
-                    StartMovingToNextWaypoint();
+                    if (CreatureInstanceData.WanderType != EQ_NONE)
+                    {
+                        if (CreatureInstanceData.WanderType == EQ_GRID_RANDOM_10)
+                            GoToRandom10Point();
+                        else
+                            StartWanderMovement();
+                    }
+                    else
+                    {
+                        CurrentWaypointIndex++;
+                        StartMovingToNextWaypoint();
+                    }
                 }
                 else if (eventId == EVENT_NEXT_SMALL_STEP)
                 {
@@ -171,6 +326,7 @@ public:
 
             if (UpdateVictim() == false)
                 return;
+
             DoMeleeAttackIfReady();
         }
 
@@ -207,7 +363,10 @@ public:
             }
             else
             {
-                StartMovingToNextWaypoint();
+                if (CreatureInstanceData.WanderType != EQ_NONE)
+                    StartWanderMovement();
+                else
+                    StartMovingToNextWaypoint();
             }
         }
     };
