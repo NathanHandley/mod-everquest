@@ -19,7 +19,6 @@
 #include "ScriptedCreature.h"
 #include "EventMap.h"
 #include "MotionMaster.h"
-
 #include "EverQuest.h"
 
 using namespace std;
@@ -35,22 +34,22 @@ public:
 
         vector<EverQuestCreatureWaypoint> CreatureWaypoints;
         EverQuestCreatureInstance CreatureInstanceData;
-
-        uint32 CurrentWaypointIndex = 0; 
+        uint32 CurrentWaypointIndex = 0;
         Position AgroPosition;
-        Position TargetWaypointPosition;
+        Position CurrentTargetPos;
+        bool IsMovingToWaypoint = false;
 
         enum Events
         {
-            EVENT_PAUSE_DONE = 1
+            EVENT_PAUSE_DONE = 1,
+            EVENT_NEXT_SMALL_STEP = 2
         };
         EventMap events;
 
         void LoadCustomData()
         {
             CreatureWaypoints.clear();
-
-            uint32 creatureGUID = me->GetGUID().GetCounter();
+            uint32 creatureGUID = me->GetSpawnId();
             CreatureInstanceData = EverQuest->GetCreatureInstanceData(creatureGUID);
             if (CreatureInstanceData.WaypointListID != -1)
                 CreatureWaypoints = EverQuest->GetWaypoints(CreatureInstanceData.MapID, CreatureInstanceData.WaypointListID);
@@ -60,27 +59,81 @@ public:
         {
             events.Reset();
             CurrentWaypointIndex = 0;
+            IsMovingToWaypoint = false;
+
+            me->SetWalk(false); // true = walk
+            me->SetUnitMovementFlags(MOVEMENTFLAG_WALKING);
 
             LoadCustomData();
-
             if (CreatureWaypoints.empty() == false)
-                MoveToNextWaypoint();
+                StartMovingToNextWaypoint();
         }
 
-        void MoveToNextWaypoint()
+        void StartMovingToNextWaypoint()
         {
             if (CreatureWaypoints.empty())
                 return;
 
-            // Loop back to start after last waypoint
             if (CurrentWaypointIndex >= CreatureWaypoints.size())
                 CurrentWaypointIndex = 0;
 
             const EverQuestCreatureWaypoint& wp = CreatureWaypoints[CurrentWaypointIndex];
-            TargetWaypointPosition = Position(wp.X, wp.Y, wp.Z);
+            CurrentTargetPos = Position(wp.X, wp.Y, wp.Z);
 
-            // Motion with collision detection and environment contouring
-            me->GetMotionMaster()->MovePoint(10000 + CurrentWaypointIndex, TargetWaypointPosition);
+            IsMovingToWaypoint = true;
+            events.ScheduleEvent(EVENT_NEXT_SMALL_STEP, 100ms);
+        }
+
+        // Added this since not taking mini-steps caused a flying/floating issue over gaps and through mountains
+        void TakeNextSmallStep()
+        {
+            if (!IsMovingToWaypoint)
+                return;
+
+            float dx = CurrentTargetPos.GetPositionX() - me->GetPositionX();
+            float dy = CurrentTargetPos.GetPositionY() - me->GetPositionY();
+            float dist = sqrt(dx * dx + dy * dy);
+
+            if (dist < 5.0f)
+            {
+                FinishCurrentWaypoint();
+                return;
+            }
+
+            // X/Y
+            float nx = dx / dist;
+            float ny = dy / dist;
+            float newX = me->GetPositionX() + nx * (float)EQ_MOVE_SMALL_STEP_SIZE;
+            float newY = me->GetPositionY() + ny * (float)EQ_MOVE_SMALL_STEP_SIZE;
+
+            // For Z, do multiple steps to catch inclines properly
+            float newZ = me->GetPositionZ() + 8.0f;
+            me->UpdateGroundPositionZ(newX, newY, newZ);
+            newZ += 3.0f;
+            me->UpdateGroundPositionZ(newX, newY, newZ);
+            newZ += 2.0f;
+            me->UpdateGroundPositionZ(newX, newY, newZ);
+
+            me->SetUnitMovementFlags(MOVEMENTFLAG_WALKING);
+
+            // Move to this small terrain-aligned point
+            me->GetMotionMaster()->MovePoint(EQ_MOVE_SMALL_TERRAIN_MOVE_ID, newX, newY, newZ);
+        }
+
+        void FinishCurrentWaypoint()
+        {
+            IsMovingToWaypoint = false;
+            const EverQuestCreatureWaypoint& wp = CreatureWaypoints[CurrentWaypointIndex];
+
+            if (wp.PauseInSec > 0)
+            {
+                events.ScheduleEvent(EVENT_PAUSE_DONE, Seconds(wp.PauseInSec));
+            }
+            else
+            {
+                CurrentWaypointIndex++;
+                StartMovingToNextWaypoint();
+            }
         }
 
         void MovementInform(uint32 type, uint32 id) override
@@ -88,70 +141,73 @@ public:
             if (type != POINT_MOTION_TYPE)
                 return;
 
-            // Special ID used when returning to aggro position after evade
             if (id == EQ_MOVE_RETURN_TO_AGRO_ID)
             {
-                MoveToNextWaypoint();
+                StartMovingToNextWaypoint();
                 return;
             }
 
-            // Did we reach the waypoint we were heading to?
-            if (id >= 10000 && (id - 10000) == CurrentWaypointIndex && !CreatureWaypoints.empty())
+            if (id == EQ_MOVE_SMALL_TERRAIN_MOVE_ID && IsMovingToWaypoint)
             {
-                const EverQuestCreatureWaypoint& wp = CreatureWaypoints[CurrentWaypointIndex];
-
-                if (wp.PauseInSec > 0)
-                {
-                    events.ScheduleEvent(EVENT_PAUSE_DONE, Seconds(wp.PauseInSec));
-                }
-                else
-                {
-                    CurrentWaypointIndex++;
-                    MoveToNextWaypoint();
-                }
+                events.ScheduleEvent(EVENT_NEXT_SMALL_STEP, 50ms);
             }
         }
 
         void UpdateAI(uint32 diff) override
         {
             events.Update(diff);
-
             while (uint32 eventId = events.ExecuteEvent())
             {
                 if (eventId == EVENT_PAUSE_DONE)
                 {
                     CurrentWaypointIndex++;
-                    MoveToNextWaypoint();
+                    StartMovingToNextWaypoint();
+                }
+                else if (eventId == EVENT_NEXT_SMALL_STEP)
+                {
+                    TakeNextSmallStep();
                 }
             }
 
             if (UpdateVictim() == false)
                 return;
-
             DoMeleeAttackIfReady();
         }
 
         void JustEngagedWith(Unit* /*who*/) override
         {
             events.CancelEvent(EVENT_PAUSE_DONE);
-
-            // Remember exact spot where aggro happened, and stop movement
+            events.CancelEvent(EVENT_NEXT_SMALL_STEP);
             AgroPosition = me->GetPosition();
             me->GetMotionMaster()->Clear(false);
+            IsMovingToWaypoint = false;
         }
 
         void EnterEvadeMode(EvadeReason why) override
         {
             ScriptedAI::EnterEvadeMode(why);
 
-            // Path back to the exact point where aggro started, then continue the waypoint sequence
             if (me->GetDistance(AgroPosition) > 3.0f)
             {
-                me->GetMotionMaster()->MovePoint(EQ_MOVE_RETURN_TO_AGRO_ID, AgroPosition);
+                float x = AgroPosition.GetPositionX();
+                float y = AgroPosition.GetPositionY();
+                float z = AgroPosition.GetPositionZ() + 8.0f;
+
+                // Cast twice to better handle steep ground
+                me->UpdateGroundPositionZ(x, y, z);
+                z += 3.0f;
+                me->UpdateGroundPositionZ(x, y, z);
+
+                me->SetCanFly(false);
+                me->SetDisableGravity(false);
+                me->SetHover(false);
+                me->SetUnitMovementFlags(MOVEMENTFLAG_WALKING);
+
+                me->GetMotionMaster()->MovePoint(EQ_MOVE_RETURN_TO_AGRO_ID, x, y, z);
             }
             else
             {
-                MoveToNextWaypoint();
+                StartMovingToNextWaypoint();
             }
         }
     };
