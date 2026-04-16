@@ -602,7 +602,7 @@ void EverQuestMod::LoadCreatureInstanceData()
 {
     CreatureInstancesByCreatureGUID.clear();
 
-    QueryResult queryResult = WorldDatabase.Query("SELECT CreatureGUID, WanderType, PauseType, MapID, WaypointID, DoesRoam, RoamMinX, RoamMaxX, RoamMinY, RoamMaxY FROM mod_everquest_creature_instance;");
+    QueryResult queryResult = WorldDatabase.Query("SELECT CreatureGUID, WanderType, PauseType, MapID, WaypointID, DoesRoam, RoamMinX, RoamMaxX, RoamMinY, RoamMaxY, RoamMinDelayInMS, RoamMaxDelayInMS FROM mod_everquest_creature_instance;");
     if (queryResult)
     {
         do
@@ -619,6 +619,8 @@ void EverQuestMod::LoadCreatureInstanceData()
             creatureInstance.RoamMaxX = fields[7].Get<float>();
             creatureInstance.RoamMinY = fields[8].Get<float>();
             creatureInstance.RoamMaxY = fields[9].Get<float>();
+            creatureInstance.RoamMinDelayInMS = fields[10].Get<uint32>();
+            creatureInstance.RoamMaxDelayInMS = fields[11].Get<uint32>();
             CreatureInstancesByCreatureGUID[creatureInstance.CreatureGUID] = creatureInstance;
         } while (queryResult->NextRow());
     }

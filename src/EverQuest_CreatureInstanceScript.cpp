@@ -47,6 +47,9 @@ public:
         vector<uint32> Random10Indices;
         uint32 Random10Current = 0;
 
+        // Roaming support
+        bool IsRoaming = false;
+
         enum Events
         {
             EVENT_PAUSE_DONE = 1,
@@ -70,13 +73,19 @@ public:
             IsMovingToWaypoint = false;
             Random10Indices.clear();
             Random10Current = 0;
+            IsRoaming = false;
 
             me->SetWalk(false); // true = walk
             me->SetUnitMovementFlags(MOVEMENTFLAG_WALKING);
 
             LoadCustomData();
 
-            if (CreatureInstanceData.WanderType != EQ_NONE)
+            if (CreatureInstanceData.DoesRoam)
+            {
+                IsRoaming = true;
+                StartRoamingMovement();
+            }
+            else if (CreatureInstanceData.WanderType != EQ_NONE)
                 StartWanderMovement();
         }
 
@@ -207,6 +216,32 @@ public:
             events.ScheduleEvent(EVENT_NEXT_SMALL_STEP, 100ms);
         }
 
+        void StartRoamingMovement()
+        {
+            if (!CreatureInstanceData.DoesRoam)
+                return;
+
+            PickRandomRoamPoint();
+        }
+
+        void PickRandomRoamPoint()
+        {
+            // Try to find a valid point inside the roam box
+            float x = frand(CreatureInstanceData.RoamMinX, CreatureInstanceData.RoamMaxX);
+            float y = frand(CreatureInstanceData.RoamMinY, CreatureInstanceData.RoamMaxY);
+            float z = me->GetPositionZ() + 8.0f;
+
+            me->UpdateGroundPositionZ(x, y, z);
+            z += 3.0f;
+            me->UpdateGroundPositionZ(x, y, z);
+            z += 2.0f;
+            me->UpdateGroundPositionZ(x, y, z);
+
+            CurrentTargetPos = Position(x, y, z);
+            IsMovingToWaypoint = true;
+            events.ScheduleEvent(EVENT_NEXT_SMALL_STEP, 100ms);
+        }
+
         void StartMovingToNextWaypoint()
         {
             if (CreatureWaypoints.empty())
@@ -258,6 +293,15 @@ public:
         void FinishCurrentWaypoint()
         {
             IsMovingToWaypoint = false;
+
+            if (IsRoaming == true)
+            {
+                // Roaming always waits a random delay after reaching a point
+                uint32 delay = urand(CreatureInstanceData.RoamMinDelayInMS, CreatureInstanceData.RoamMaxDelayInMS);
+                events.ScheduleEvent(EVENT_PAUSE_DONE, Milliseconds(delay));
+                return;
+            }
+
             const EverQuestCreatureWaypoint& wp = CreatureWaypoints[CurrentWaypointIndex];
 
             if (wp.PauseInSec > 0)
@@ -288,7 +332,9 @@ public:
 
             if (id == EQ_MOVE_RETURN_TO_AGRO_ID)
             {
-                if (CreatureInstanceData.WanderType != EQ_NONE)
+                if (CreatureInstanceData.DoesRoam)
+                    StartRoamingMovement();
+                else if (CreatureInstanceData.WanderType != EQ_NONE)
                     StartWanderMovement();
                 else
                     StartMovingToNextWaypoint();
@@ -306,7 +352,11 @@ public:
             {
                 if (eventId == EVENT_PAUSE_DONE)
                 {
-                    if (CreatureInstanceData.WanderType != EQ_NONE)
+                    if (IsRoaming == true)
+                    {
+                        StartRoamingMovement();
+                    }
+                    else if (CreatureInstanceData.WanderType != EQ_NONE)
                     {
                         if (CreatureInstanceData.WanderType == EQ_GRID_RANDOM_10)
                             GoToRandom10Point();
