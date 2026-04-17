@@ -15,6 +15,7 @@
 //  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #include "Creature.h"
+#include "GridTerrainData.h"
 #include "ScriptMgr.h"
 #include "ScriptedCreature.h"
 #include "EventMap.h"
@@ -87,6 +88,61 @@ public:
             }
             else if (CreatureInstanceData.WanderType != EQ_NONE)
                 StartWanderMovement();
+        }
+
+        float TempMapZHelper(float x, float y, float z)
+        {
+            float newZ = me->GetMapHeight(x, y, z);
+            if (newZ > INVALID_HEIGHT)
+                return newZ;
+            else
+                return z;
+        }
+
+        float GetEffectiveDestinationZ(float x, float y, float referenceZ)
+        {
+            // Find a test target that has a floor
+            float targetTestZ = referenceZ;
+            int floorLoopNum = 0;
+            float floorZ = -20001;
+            while (floorZ < -20000)
+            {
+                targetTestZ = referenceZ + 10.0f + (floorLoopNum * 5.0f);
+                floorZ = me->GetMapHeight(x, y, targetTestZ);
+                floorLoopNum++;
+                if (floorLoopNum >= 3)
+                    break;
+            }
+
+            // If there was no floor, it's probably liquid
+            if (floorZ < -20000)
+            {
+                // Look for water below the feet
+                LiquidData targetLiquidDataBelow = me->GetMap()->GetLiquidData(me->GetPhaseMask(), x, y, referenceZ - 10.0f, 0, {});
+                if (targetLiquidDataBelow.Status)
+                {
+                    // Drop down a little to 'skim' under the water
+                    return referenceZ - 5.0f;
+                }
+                else
+                    return referenceZ;
+            }
+            else
+            {
+                // Test first if in water since it may need to go straight sideways
+                if (me->isSwimming() == true)
+                {
+                    // Straight out is just swiming sideways
+                    LiquidData targetLiquidDataAtRef = me->GetMap()->GetLiquidData(me->GetPhaseMask(), x, y, referenceZ, 0, {});
+                    if (targetLiquidDataAtRef.Status)
+                    {
+                        if (floorZ > targetLiquidDataAtRef.DepthLevel)
+                            return floorZ;
+                    }
+                    return referenceZ;
+                }
+                return floorZ;
+            }
         }
 
         void StartWanderMovement()
@@ -226,16 +282,13 @@ public:
 
         void PickRandomRoamPoint()
         {
-            // Try to find a valid point inside the roam box
+            // Try to find a valid point inside the roam box.
+            // Water-aware Z is now computed via the helper (requirement #1).
             float x = frand(CreatureInstanceData.RoamMinX, CreatureInstanceData.RoamMaxX);
             float y = frand(CreatureInstanceData.RoamMinY, CreatureInstanceData.RoamMaxY);
-            float z = me->GetPositionZ() + 8.0f;
+            float referenceZ = me->GetPositionZ();
 
-            me->UpdateGroundPositionZ(x, y, z);
-            z += 3.0f;
-            me->UpdateGroundPositionZ(x, y, z);
-            z += 2.0f;
-            me->UpdateGroundPositionZ(x, y, z);
+            float z = GetEffectiveDestinationZ(x, y, referenceZ);
 
             CurrentTargetPos = Position(x, y, z);
             IsMovingToWaypoint = true;
@@ -254,7 +307,7 @@ public:
             events.ScheduleEvent(EVENT_NEXT_SMALL_STEP, 100ms);
         }
 
-        // Added this since not taking mini-steps caused a flying/floating issue over gaps and through mountains
+        // Small-step movement now also factors in WMO water volumes (requirement #2).
         void TakeNextSmallStep()
         {
             if (!IsMovingToWaypoint)
@@ -276,17 +329,12 @@ public:
             float newX = me->GetPositionX() + nx * (float)EQ_MOVE_SMALL_STEP_SIZE;
             float newY = me->GetPositionY() + ny * (float)EQ_MOVE_SMALL_STEP_SIZE;
 
-            // For Z, do multiple steps to catch inclines properly
-            float newZ = me->GetPositionZ() + 8.0f;
-            me->UpdateGroundPositionZ(newX, newY, newZ);
-            newZ += 3.0f;
-            me->UpdateGroundPositionZ(newX, newY, newZ);
-            newZ += 2.0f;
-            me->UpdateGroundPositionZ(newX, newY, newZ);
+            float referenceZ = me->GetPositionZ();
+            float newZ = GetEffectiveDestinationZ(newX, newY, referenceZ);
 
             me->SetUnitMovementFlags(MOVEMENTFLAG_WALKING);
 
-            // Move to this small terrain-aligned point
+            // Move to this small terrain/water-aware point
             me->GetMotionMaster()->MovePoint(EQ_MOVE_SMALL_TERRAIN_MOVE_ID, newX, newY, newZ);
         }
 
@@ -394,14 +442,12 @@ public:
         {
             ScriptedAI::EnterEvadeMode(why);
 
+            // Also make return-to-agro water-aware for full consistency (optional but recommended)
             float x = AgroPosition.GetPositionX();
             float y = AgroPosition.GetPositionY();
-            float z = AgroPosition.GetPositionZ() + 8.0f;
+            float referenceZ = AgroPosition.GetPositionZ();
 
-            // Cast twice to better handle steep ground
-            me->UpdateGroundPositionZ(x, y, z);
-            z += 3.0f;
-            me->UpdateGroundPositionZ(x, y, z);
+            float z = GetEffectiveDestinationZ(x, y, referenceZ);
 
             me->SetUnitMovementFlags(MOVEMENTFLAG_WALKING);
 
