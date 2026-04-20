@@ -105,18 +105,20 @@ public:
                 return z;
         }
 
-        float GetEffectiveDestinationZ(float x, float y, float referenceZ)
+        float GetEffectiveDestinationZ(float x, float y, float referenceZ, bool& foundValidZ)
         {
+            foundValidZ = false;
+
             // Find a test target that has a floor
             float targetTestZ = referenceZ;
             int floorLoopNum = 0;
             float floorZ = -20001;
             while (floorZ < -20000)
             {
-                targetTestZ = referenceZ + 10.0f + (floorLoopNum * 5.0f);
-                floorZ = me->GetMapHeight(x, y, targetTestZ);
+                targetTestZ = referenceZ + (floorLoopNum * 5.0f);
+                floorZ = me->GetMapHeight(x, y, targetTestZ, (floorLoopNum * 10.0f));
                 floorLoopNum++;
-                if (floorLoopNum >= 3)
+                if (floorLoopNum >= 5)
                     break;
             }
 
@@ -128,6 +130,7 @@ public:
                 if (targetLiquidDataBelow.Status)
                 {
                     // Drop down a little to 'skim' under the water
+                    foundValidZ = true;
                     return referenceZ - 5.0f;
                 }
                 else
@@ -135,6 +138,8 @@ public:
             }
             else
             {
+                foundValidZ = true;
+
                 // Test first if in water since it may need to go straight sideways
                 if (me->isSwimming() == true)
                 {
@@ -291,16 +296,37 @@ public:
 
         void PickRandomRoamPoint()
         {
-            // Try to find a valid point inside the roam box.
+            // Try to find a valid point inside the roam box
             float x = frand(CreatureInstanceData.RoamMinX, CreatureInstanceData.RoamMaxX);
             float y = frand(CreatureInstanceData.RoamMinY, CreatureInstanceData.RoamMaxY);
             float referenceZ = me->GetPositionZ();
 
-            float z = GetEffectiveDestinationZ(x, y, referenceZ);
+            bool foundValidZ = false;
+            float z = GetEffectiveDestinationZ(x, y, referenceZ, foundValidZ);
+
+            bool isValidPoint = foundValidZ;
+
+            if (isValidPoint)
+            {
+                PathGenerator path(me);
+                path.SetPathLengthLimit(200.0f);
+                bool result = path.CalculatePath(x, y, z, false);
+                bool pathFound = (result && path.GetPathType() != PATHFIND_NOPATH);
+                isValidPoint = pathFound;
+            }
+
+            if (!isValidPoint)
+            {
+                events.ScheduleEvent(EVENT_PAUSE_DONE, 100ms);
+                return;
+            }
 
             CurrentTargetPos = Position(x, y, z);
             IsMovingToWaypoint = true;
-            events.ScheduleEvent(EVENT_NEXT_SMALL_STEP, 100ms);
+
+            me->SetUnitMovementFlags(MOVEMENTFLAG_WALKING);
+            me->GetMotionMaster()->Clear(false);
+            me->GetMotionMaster()->MovePoint(EQ_MOVE_SMALL_TERRAIN_MOVE_ID, x, y, z);
         }
 
         void StartMovingToNextWaypoint()
@@ -317,31 +343,30 @@ public:
 
         void TakeNextSmallStep()
         {
-            if (!IsMovingToWaypoint)
+            if (!IsMovingToWaypoint || IsRoaming)
                 return;
 
             float dx = CurrentTargetPos.GetPositionX() - me->GetPositionX();
             float dy = CurrentTargetPos.GetPositionY() - me->GetPositionY();
             float dist = sqrt(dx * dx + dy * dy);
 
-            if (dist < 5.0f)
+            if (dist < 7.0f)
             {
                 FinishCurrentWaypoint();
                 return;
             }
 
-            // X/Y
+            // Calculate next small step
             float nx = dx / dist;
             float ny = dy / dist;
             float newX = me->GetPositionX() + nx * (float)EQ_MOVE_SMALL_STEP_SIZE;
             float newY = me->GetPositionY() + ny * (float)EQ_MOVE_SMALL_STEP_SIZE;
 
-            float referenceZ = me->GetPositionZ();
-            float newZ = GetEffectiveDestinationZ(newX, newY, referenceZ);
+            bool foundValidZ = false;
+            float newZ = GetEffectiveDestinationZ(newX, newY, me->GetPositionZ(), foundValidZ);
 
             me->SetUnitMovementFlags(MOVEMENTFLAG_WALKING);
-
-            // Move to this small terrain/water-aware point
+            me->GetMotionMaster()->Clear(false);
             me->GetMotionMaster()->MovePoint(EQ_MOVE_SMALL_TERRAIN_MOVE_ID, newX, newY, newZ);
         }
 
@@ -377,7 +402,6 @@ public:
                 return;
             }
 
-            // Re-snap if far from current waypoint (post-combat safety)
             const auto& currWp = CreatureWaypoints[CurrentWaypointIndex];
             float distToCurr = me->GetExactDist(currWp.X, currWp.Y, currWp.Z);
             if (distToCurr > 25.0f)
@@ -442,13 +466,13 @@ public:
 
             if (IsRoaming == true)
             {
-                // Roaming always waits a random delay after reaching a point
+                me->GetMotionMaster()->Clear(false);
+                me->StopMoving();
                 uint32 delay = urand(CreatureInstanceData.RoamMinDelayInMS, CreatureInstanceData.RoamMaxDelayInMS);
                 events.ScheduleEvent(EVENT_PAUSE_DONE, Milliseconds(delay));
                 return;
             }
-
-            if (CreatureInstanceData.WanderType == EQ_GRID_RANDOM_PATH)
+            else if (CreatureInstanceData.WanderType == EQ_GRID_RANDOM_PATH)
             {
                 CurrentWaypointIndex = NextPathWaypointIndex;
                 const EverQuestCreatureWaypoint& wp = CreatureWaypoints[CurrentWaypointIndex];
@@ -502,11 +526,11 @@ public:
                     return;
                 }
 
-                if (id == EQ_MOVE_SMALL_TERRAIN_MOVE_ID && IsMovingToWaypoint == true)
+                if (id == EQ_MOVE_SMALL_TERRAIN_MOVE_ID && IsMovingToWaypoint)
                 {
-                    events.ScheduleEvent(EVENT_NEXT_SMALL_STEP, 50ms);
+                    FinishCurrentWaypoint();
+                    return;
                 }
-                return;
             }
             else if (type == WAYPOINT_MOTION_TYPE)
             {
@@ -522,18 +546,15 @@ public:
         void UpdateAI(uint32 diff) override
         {
             events.Update(diff);
+
             while (uint32 eventId = events.ExecuteEvent())
             {
                 if (eventId == EVENT_PAUSE_DONE)
                 {
                     if (IsRoaming == true)
-                    {
                         StartRoamingMovement();
-                    }
                     else if (CreatureInstanceData.WanderType == EQ_GRID_RANDOM_PATH)
-                    {
                         StartMovingTowardsTargetInPath();
-                    }
                     else if (CreatureInstanceData.WanderType != EQ_NONE)
                     {
                         if (CreatureInstanceData.WanderType == EQ_GRID_RANDOM_10)
@@ -548,9 +569,7 @@ public:
                     }
                 }
                 else if (eventId == EVENT_NEXT_SMALL_STEP)
-                {
                     TakeNextSmallStep();
-                }
             }
 
             if (UpdateVictim() == false)
@@ -572,14 +591,11 @@ public:
         {
             ScriptedAI::EnterEvadeMode(why);
 
-            float x = AgroPosition.GetPositionX();
-            float y = AgroPosition.GetPositionY();
-            float referenceZ = AgroPosition.GetPositionZ();
-
-            float z = GetEffectiveDestinationZ(x, y, referenceZ);
-
             me->SetUnitMovementFlags(MOVEMENTFLAG_WALKING);
 
+            float x = AgroPosition.GetPositionX();
+            float y = AgroPosition.GetPositionY();
+            float z = AgroPosition.GetPositionZ();
             me->GetMotionMaster()->MovePoint(EQ_MOVE_RETURN_TO_AGRO_ID, x, y, z);
         }
     };
