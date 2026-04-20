@@ -489,22 +489,34 @@ public:
 
         void MovementInform(uint32 type, uint32 id) override
         {
-            if (type != POINT_MOTION_TYPE)
-                return;
-
-            if (id == EQ_MOVE_RETURN_TO_AGRO_ID)
+            if (type == POINT_MOTION_TYPE)
             {
-                if (CreatureInstanceData.DoesRoam)
-                    StartRoamingMovement();
-                else if (CreatureInstanceData.WanderType != EQ_NONE)
-                    StartWanderMovement();
-                else
-                    StartMovingToNextWaypoint();
+                if (id == EQ_MOVE_RETURN_TO_AGRO_ID)
+                {
+                    if (CreatureInstanceData.DoesRoam == true)
+                        StartRoamingMovement();
+                    else if (CreatureInstanceData.WanderType != EQ_NONE)
+                        StartWanderMovement();
+                    else
+                        StartMovingToNextWaypoint();
+                    return;
+                }
+
+                if (id == EQ_MOVE_SMALL_TERRAIN_MOVE_ID && IsMovingToWaypoint == true)
+                {
+                    events.ScheduleEvent(EVENT_NEXT_SMALL_STEP, 50ms);
+                }
                 return;
             }
-
-            if (id == EQ_MOVE_SMALL_TERRAIN_MOVE_ID && IsMovingToWaypoint)
-                events.ScheduleEvent(EVENT_NEXT_SMALL_STEP, 50ms);
+            else if (type == WAYPOINT_MOTION_TYPE)
+            {
+                if (CreatureInstanceData.DespawnAtWaypointNum != -1 &&
+                    id == (uint32)CreatureInstanceData.DespawnAtWaypointNum)
+                {
+                    me->DespawnOrUnsummon();
+                    return;
+                }
+            }
         }
 
         void UpdateAI(uint32 diff) override
