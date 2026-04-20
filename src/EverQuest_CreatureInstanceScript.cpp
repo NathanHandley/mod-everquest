@@ -43,13 +43,16 @@ public:
         Position AgroPosition;
         Position CurrentTargetPos;
         bool IsMovingToWaypoint = false;
+        bool IsRoaming = false;
 
         // For EQ_GRID_RANDOM_10
         vector<uint32> Random10Indices;
         uint32 Random10Current = 0;
 
-        // Roaming support
-        bool IsRoaming = false;
+        // For EQ_GRID_RANDOM_PATH
+        uint32 TargetWaypointIndex = 0;
+        uint32 NextPathWaypointIndex = 0;
+        bool HasInitializedPath = false;
 
         enum Events
         {
@@ -75,6 +78,9 @@ public:
             Random10Indices.clear();
             Random10Current = 0;
             IsRoaming = false;
+            TargetWaypointIndex = 0;
+            NextPathWaypointIndex = 0;
+            HasInitializedPath = false;
 
             me->SetWalk(false); // true = walk
             me->SetUnitMovementFlags(MOVEMENTFLAG_WALKING);
@@ -158,9 +164,12 @@ public:
                 Random10Current = 0;
                 GoToRandom10Point();
             } break;
+            case EQ_GRID_RANDOM_PATH:
+            {
+                StartRandomPathMovement();
+            } break;
             case EQ_GRID_RANDOM:
             case EQ_GRID_RANDOM_CENTER_POINT:
-            case EQ_GRID_RANDOM_PATH:
             {
                 PickAndGoToRandomWaypoint();
             } break;
@@ -283,7 +292,6 @@ public:
         void PickRandomRoamPoint()
         {
             // Try to find a valid point inside the roam box.
-            // Water-aware Z is now computed via the helper (requirement #1).
             float x = frand(CreatureInstanceData.RoamMinX, CreatureInstanceData.RoamMaxX);
             float y = frand(CreatureInstanceData.RoamMinY, CreatureInstanceData.RoamMaxY);
             float referenceZ = me->GetPositionZ();
@@ -307,7 +315,6 @@ public:
             events.ScheduleEvent(EVENT_NEXT_SMALL_STEP, 100ms);
         }
 
-        // Small-step movement now also factors in WMO water volumes (requirement #2).
         void TakeNextSmallStep()
         {
             if (!IsMovingToWaypoint)
@@ -338,6 +345,97 @@ public:
             me->GetMotionMaster()->MovePoint(EQ_MOVE_SMALL_TERRAIN_MOVE_ID, newX, newY, newZ);
         }
 
+        uint32 FindNearestWaypointIndex() const
+        {
+            if (CreatureWaypoints.empty())
+                return 0;
+
+            uint32 nearest = 0;
+            float minDist = 1000000.0f;
+            for (uint32 i = 0; i < CreatureWaypoints.size(); ++i)
+            {
+                const auto& wp = CreatureWaypoints[i];
+                float dist = me->GetExactDist(wp.X, wp.Y, wp.Z);
+                if (dist < minDist)
+                {
+                    minDist = dist;
+                    nearest = i;
+                }
+            }
+            return nearest;
+        }
+
+        void InitializePathIfNeeded()
+        {
+            if (CreatureWaypoints.empty())
+                return;
+
+            if (!HasInitializedPath)
+            {
+                CurrentWaypointIndex = FindNearestWaypointIndex();
+                HasInitializedPath = true;
+                return;
+            }
+
+            // Re-snap if far from current waypoint (post-combat safety)
+            const auto& currWp = CreatureWaypoints[CurrentWaypointIndex];
+            float distToCurr = me->GetExactDist(currWp.X, currWp.Y, currWp.Z);
+            if (distToCurr > 25.0f)
+            {
+                CurrentWaypointIndex = FindNearestWaypointIndex();
+            }
+        }
+
+        void PickRandomTargetWaypoint()
+        {
+            if (CreatureWaypoints.empty())
+                return;
+
+            uint32 newTarget = CurrentWaypointIndex;
+            uint32 attempts = 0;
+            while (newTarget == CurrentWaypointIndex && attempts < 20 && CreatureWaypoints.size() > 1)
+            {
+                newTarget = urand(0, CreatureWaypoints.size() - 1);
+                attempts++;
+            }
+            TargetWaypointIndex = newTarget;
+        }
+
+        void StartRandomPathMovement()
+        {
+            InitializePathIfNeeded();
+            PickRandomTargetWaypoint();
+            StartMovingTowardsTargetInPath();
+        }
+
+        void StartMovingTowardsTargetInPath()
+        {
+            if (CreatureWaypoints.empty())
+                return;
+
+            if (CurrentWaypointIndex == TargetWaypointIndex)
+            {
+                PickRandomTargetWaypoint();
+                if (CurrentWaypointIndex == TargetWaypointIndex)
+                {
+                    events.ScheduleEvent(EVENT_PAUSE_DONE, 1500ms);
+                    return;
+                }
+            }
+
+            int32 direction = (TargetWaypointIndex > CurrentWaypointIndex) ? 1 : -1;
+            int32 nextInt = static_cast<int32>(CurrentWaypointIndex) + direction;
+            uint32 nextIdx = (nextInt < 0) ? 0 : (nextInt >= static_cast<int32>(CreatureWaypoints.size()) ? CreatureWaypoints.size() - 1 : static_cast<uint32>(nextInt));
+
+            NextPathWaypointIndex = nextIdx;
+
+            const EverQuestCreatureWaypoint& wp = CreatureWaypoints[nextIdx];
+            CurrentTargetPos = Position(wp.X, wp.Y, wp.Z);
+
+            IsMovingToWaypoint = true;
+            events.ScheduleEvent(EVENT_NEXT_SMALL_STEP, 100ms);
+        }
+
         void FinishCurrentWaypoint()
         {
             IsMovingToWaypoint = false;
@@ -347,6 +445,22 @@ public:
                 // Roaming always waits a random delay after reaching a point
                 uint32 delay = urand(CreatureInstanceData.RoamMinDelayInMS, CreatureInstanceData.RoamMaxDelayInMS);
                 events.ScheduleEvent(EVENT_PAUSE_DONE, Milliseconds(delay));
+                return;
+            }
+
+            if (CreatureInstanceData.WanderType == EQ_GRID_RANDOM_PATH)
+            {
+                CurrentWaypointIndex = NextPathWaypointIndex;
+                const EverQuestCreatureWaypoint& wp = CreatureWaypoints[CurrentWaypointIndex];
+
+                if (wp.PauseInSec > 0)
+                {
+                    events.ScheduleEvent(EVENT_PAUSE_DONE, Seconds(wp.PauseInSec));
+                }
+                else
+                {
+                    StartMovingTowardsTargetInPath();
+                }
                 return;
             }
 
@@ -404,6 +518,10 @@ public:
                     {
                         StartRoamingMovement();
                     }
+                    else if (CreatureInstanceData.WanderType == EQ_GRID_RANDOM_PATH)
+                    {
+                        StartMovingTowardsTargetInPath();
+                    }
                     else if (CreatureInstanceData.WanderType != EQ_NONE)
                     {
                         if (CreatureInstanceData.WanderType == EQ_GRID_RANDOM_10)
@@ -442,7 +560,6 @@ public:
         {
             ScriptedAI::EnterEvadeMode(why);
 
-            // Also make return-to-agro water-aware for full consistency (optional but recommended)
             float x = AgroPosition.GetPositionX();
             float y = AgroPosition.GetPositionY();
             float referenceZ = AgroPosition.GetPositionZ();
