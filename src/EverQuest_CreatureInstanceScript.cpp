@@ -90,36 +90,49 @@ public:
             if (CreatureInstanceData.DoesRoam)
             {
                 IsRoaming = true;
+                NormalizeRoamZRange(CreatureInstanceData.RoamMinZ, CreatureInstanceData.RoamMaxZ);
                 StartRoamingMovement();
             }
             else if (CreatureInstanceData.WanderType != EQ_NONE)
                 StartWanderMovement();
         }
 
-        float TempMapZHelper(float x, float y, float z)
+        void NormalizeRoamZRange(float& minZ, float& maxZ)
         {
-            float newZ = me->GetMapHeight(x, y, z);
-            if (newZ > INVALID_HEIGHT)
-                return newZ;
-            else
-                return z;
+            float currentZ = me->GetPositionZ();
+
+            if (maxZ - minZ < 6.0f)
+            {
+                float halfGap = 3.0f;
+
+                minZ = currentZ - halfGap;
+                maxZ = currentZ + halfGap;
+            }
         }
 
-        float GetEffectiveDestinationZ(float x, float y, float referenceZ, bool& foundValidZ)
+        float GetEffectiveDestinationZ(float x, float y, float referenceZ, bool& foundValidZ, float minZ = 0, float maxZ = 0)
         {
             foundValidZ = false;
 
-            // Find a test target that has a floor
-            float targetTestZ = referenceZ;
-            int floorLoopNum = 0;
             float floorZ = -20001;
-            while (floorZ < -20000)
+            if (minZ != 0 && maxZ != 0)
             {
-                targetTestZ = referenceZ + (floorLoopNum * 5.0f);
-                floorZ = me->GetMapHeight(x, y, targetTestZ, (floorLoopNum * 10.0f));
-                floorLoopNum++;
-                if (floorLoopNum >= 5)
-                    break;
+                // Z-locked roam boxes use this
+                floorZ = me->GetMapHeight(x, y, referenceZ, true, maxZ - minZ);
+            }
+            else
+            {
+                // Find a test target that has a floor
+                float targetTestZ = referenceZ;
+                int floorLoopNum = 0;                
+                while (floorZ < -20000)
+                {
+                    targetTestZ = referenceZ + (floorLoopNum * 5.0f);
+                    floorZ = me->GetMapHeight(x, y, targetTestZ, true, (floorLoopNum * 10.0f));
+                    floorLoopNum++;
+                    if (floorLoopNum >= 5)
+                        break;
+                }
             }
 
             // If there was no floor, it's probably liquid
@@ -301,10 +314,8 @@ public:
             float y = frand(CreatureInstanceData.RoamMinY, CreatureInstanceData.RoamMaxY);
             float referenceZ = me->GetPositionZ();
 
-            bool foundValidZ = false;
-            float z = GetEffectiveDestinationZ(x, y, referenceZ, foundValidZ);
-
-            bool isValidPoint = foundValidZ;
+            bool isValidPoint = false;
+            float z = GetEffectiveDestinationZ(x, y, referenceZ, isValidPoint, CreatureInstanceData.RoamMinZ, CreatureInstanceData.RoamMaxZ);
 
             if (isValidPoint)
             {

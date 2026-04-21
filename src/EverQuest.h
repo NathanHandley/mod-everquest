@@ -223,6 +223,8 @@ public:
     float RoamMaxX = 0;
     float RoamMinY = 0;
     float RoamMaxY = 0;
+    float RoamMinZ = 0;
+    float RoamMaxZ = 0;
     uint32 RoamMinDelayInMS = 0;
     uint32 RoamMaxDelayInMS = 0;
     int32 DespawnAtWaypointNum = -1;
