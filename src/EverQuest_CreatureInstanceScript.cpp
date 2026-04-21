@@ -473,6 +473,20 @@ public:
 
         void FinishCurrentWaypoint()
         {
+            if (IsMovingToWaypoint)
+            {
+                float dx = CurrentTargetPos.GetPositionX() - me->GetPositionX();
+                float dy = CurrentTargetPos.GetPositionY() - me->GetPositionY();
+                float dist = sqrt(dx * dx + dy * dy);
+
+                // Don't end unless close to target
+                if (dist > 3.0f)  
+                {
+                    events.ScheduleEvent(EVENT_NEXT_SMALL_STEP, 100ms);
+                    return;
+                }
+            }
+
             IsMovingToWaypoint = false;
 
             if (IsRoaming == true)
