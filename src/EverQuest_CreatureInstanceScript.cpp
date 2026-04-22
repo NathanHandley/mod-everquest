@@ -353,7 +353,7 @@ public:
         //}
 
         // Keep
-        bool BuildAndStartPointMovementToTarget(float x, float y, float z)
+        bool BuildAndStartPointMovementToTarget(float x, float y, float z, bool isRoamMovement)
         {
             // Calculate a path
             PathGenerator path(me);
@@ -368,7 +368,10 @@ public:
 
             me->SetUnitMovementFlags(MOVEMENTFLAG_WALKING);
             me->GetMotionMaster()->Clear(false);
-            me->GetMotionMaster()->MovePoint(EQ_MOVE_TO_ROAM_POINT, x, y, z);
+            if (isRoamMovement == true)
+                me->GetMotionMaster()->MovePoint(EQ_MOVE_TO_ROAM_POINT, x, y, z, FORCED_MOVEMENT_NONE, 0.0f, 0.0f, true);
+            else
+                me->GetMotionMaster()->MovePoint(EQ_MOVE_TO_WAYPOINT_POINT, x, y, z, FORCED_MOVEMENT_NONE, 0.0f, 0.0f, true);
             return true;
         }
 
@@ -410,7 +413,7 @@ public:
         {
             WaypointCurrentTargetWaypointIndex = GetUniqueRandomWaypointIndexFromRandom10(WaypointCurrentTargetWaypointIndex);
             const EverQuestCreatureWaypoint& wp = CreatureWaypoints[WaypointCurrentTargetWaypointIndex];
-            BuildAndStartPointMovementToTarget(wp.X, wp.Y, wp.Z);
+            BuildAndStartPointMovementToTarget(wp.X, wp.Y, wp.Z, false);
         }
 
         // Keep
@@ -418,7 +421,7 @@ public:
         {
             WaypointCurrentTargetWaypointIndex = GetUniqueRandomWaypointIndex(WaypointCurrentTargetWaypointIndex);
             const EverQuestCreatureWaypoint& wp = CreatureWaypoints[WaypointCurrentTargetWaypointIndex];
-            BuildAndStartPointMovementToTarget(wp.X, wp.Y, wp.Z);
+            BuildAndStartPointMovementToTarget(wp.X, wp.Y, wp.Z, false);
         }
 
         // Keep
@@ -434,7 +437,7 @@ public:
                 WaypointCurrentTargetWaypointIndex = WaypointPriorTargetWaypointIndex - 1;
 
             const EverQuestCreatureWaypoint& wp = CreatureWaypoints[WaypointCurrentTargetWaypointIndex];
-            BuildAndStartPointMovementToTarget(wp.X, wp.Y, wp.Z);
+            BuildAndStartPointMovementToTarget(wp.X, wp.Y, wp.Z, false);
         }
 
         // Keep
@@ -469,7 +472,7 @@ public:
             float z = GetEffectiveDestinationZ(x, y, referenceZ, isValidPoint, CreatureInstanceData.RoamMinZ, CreatureInstanceData.RoamMaxZ);
 
             if (isValidPoint)
-                isValidPoint = BuildAndStartPointMovementToTarget(x, y, z);
+                isValidPoint = BuildAndStartPointMovementToTarget(x, y, z, true);
 
             if (isValidPoint == false)
             {
