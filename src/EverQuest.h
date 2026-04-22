@@ -84,6 +84,10 @@ using namespace std;
 #define EQ_GRID_RANDOM_CENTER_POINT                 8
 #define EQ_GRID_RANDOM_PATH                         9
 
+#define EQ_CREATURE_MOVEMENT_NO_CUSTOM              0      
+#define EQ_CREATURE_MOVEMENT_CUSTOM_WAYPOINT        1
+#define EQ_CREATURE_MOVEMENT_CUSTOM_ROAMING         2
+
 #define EQ_MOVE_RETURN_TO_AGRO_ID                   99999
 #define EQ_MOVE_SMALL_TERRAIN_MOVE_ID               20000
 #define EQ_MOVE_SMALL_STEP_SIZE                     15    // Smaller works better on steep inclines
