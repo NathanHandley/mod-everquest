@@ -40,19 +40,21 @@ public:
         // Shared Data
         uint32 MovementType = EQ_CREATURE_MOVEMENT_NO_CUSTOM;
         EverQuestCreatureInstance CreatureInstanceData;
+        Position CurrentTargetPos;
+        bool IsMovingToTargetPos = false;
 
         // Waypoint
         vector<EverQuestCreatureWaypoint> CreatureWaypoints;
-        uint32 WaypointCurrentIndex = 0;
+        uint32 WaypointPriorTargetWaypointIndex = 0;
+        uint32 WaypointCurrentTargetWaypointIndex = 0;
         vector<uint32> WaypointRandom10Indices;
-        uint32 WaypointRandom10CurrentRandomIndex = 0;
-        uint32 RandomPathWaypoint
-
-        // Roaming
-
+        uint32 WaypointRandomPathFinalTargetIndex = 0;
 
         // Agro
+        Position LastAgroPosition;
+        bool IsReturningToAgroPosition = false;
 
+        // Events
         enum Events
         {
             EVENT_PAUSE_DONE = 1
@@ -63,29 +65,28 @@ public:
 
 
 
-        Position AgroPosition;
-        Position CurrentTargetPos;
-        bool IsMovingToWaypoint = false;
+        
+        
+        //bool IsMovingToWaypoint = false;
         //bool IsRoaming = false;
 
         // For EQ_GRID_RANDOM_10        
 
 
         // For EQ_GRID_RANDOM_PATH
-        uint32 TargetWaypointIndex = 0;
-        uint32 NextPathWaypointIndex = 0;
-        bool HasInitializedPath = false;
+        //uint32 TargetWaypointIndex = 0;
+        //uint32 NextPathWaypointIndex = 0;
 
         // For smooth small-step movement
-        vector<Position> CurrentSmallStepPath;
+        //vector<Position> CurrentSmallStepPath;
 
         // State saved when combat starts so we can resume after evade
-        uint32 LastWaypointIndexBeforeCombat = 0;
-        uint32 LastTargetWaypointIndex = 0;
-        bool   WasInRandomPath = false;
+        //uint32 LastWaypointIndexBeforeCombat = 0;
+        //uint32 LastTargetWaypointIndex = 0;
+        //bool   WasInRandomPath = false;
 
 
-
+        // Keep
         void LoadCustomData()
         {
             uint32 creatureGUID = me->GetSpawnId();
@@ -101,13 +102,17 @@ public:
 
             events.Reset();
 
-            // TODO: Reset members
+            IsMovingToTargetPos = false;
+            WaypointPriorTargetWaypointIndex = 0;
+            WaypointCurrentTargetWaypointIndex = 0;
+            WaypointRandomPathFinalTargetIndex = 0;
+            IsReturningToAgroPosition = false;
 
             me->SetWalk(false);
             me->SetUnitMovementFlags(MOVEMENTFLAG_WALKING);
 
 
-            /*WaypointCurrentIndex = 0;
+            /*WaypointCurrentTargetWaypointIndex = 0;
             IsMovingToWaypoint = false;
             WaypointRandom10Indices.clear();
             WaypointRandom10CurrentRandomIndex = 0;
@@ -123,36 +128,63 @@ public:
             // Handle movement types
             if (CreatureInstanceData.DoesRoam == true)
             {
-                MovementType = EQ_CREATURE_MOVEMENT_CUSTOM_ROAMING;
                 NormalizeRoamZRange(CreatureInstanceData.RoamMinZ, CreatureInstanceData.RoamMaxZ);
-                StartRoamingMovement();
+                MovementType = EQ_CREATURE_MOVEMENT_CUSTOM_ROAMING;
             }
             else if (CreatureWaypoints.empty() == true)
-            {
                 MovementType = EQ_CREATURE_MOVEMENT_NO_CUSTOM;
-            }
             else if (CreatureInstanceData.WanderType == EQ_GRID_RANDOM_10)
             {
                 MovementType = EQ_CREATURE_MOVEMENT_CUSTOM_WAYPOINT;
-                GenerateRandom10WaypointIndices();
-                WaypointRandom10CurrentRandomIndex = 0;
-                PerformWaypointMovementForRandom10();
+                GenerateRandom10WaypointIndicesAndSetPriorIndex();
+            }
+            else if (CreatureInstanceData.WanderType == EQ_GRID_RANDOM_PATH)
+            {
+                MovementType = EQ_CREATURE_MOVEMENT_CUSTOM_WAYPOINT;
+                WaypointPriorTargetWaypointIndex = FindNearestWaypointIndex();
+                WaypointRandomPathFinalTargetIndex = WaypointPriorTargetWaypointIndex;
             }
             else if (CreatureInstanceData.WanderType == EQ_GRID_RANDOM
                 || CreatureInstanceData.WanderType == EQ_GRID_RAND_5_LOS
                 || CreatureInstanceData.WanderType == EQ_GRID_RANDOM_CENTER_POINT)
             {
                 MovementType = EQ_CREATURE_MOVEMENT_CUSTOM_WAYPOINT;
-                PerformWaypointMovementForRandom();
-            }
-            else if (CreatureInstanceData.WanderType == EQ_GRID_RANDOM_PATH)
-            {
-                MovementType = EQ_CREATURE_MOVEMENT_CUSTOM_WAYPOINT;
-                StartRandomPathMovement();
+                WaypointPriorTargetWaypointIndex = 0;                
             }
             else
-            {
                 MovementType = EQ_CREATURE_MOVEMENT_NO_CUSTOM;
+
+            if (MovementType != EQ_CREATURE_MOVEMENT_NO_CUSTOM)
+                PerformMovementToNewPoint();
+        }
+
+        // Keep
+        void PerformMovementToNewPoint()
+        {
+            if (MovementType == EQ_CREATURE_MOVEMENT_CUSTOM_ROAMING)
+            {
+                PerformRoamingMovement();
+            }
+            else if (MovementType == EQ_CREATURE_MOVEMENT_CUSTOM_WAYPOINT)
+            {
+                switch (CreatureInstanceData.WanderType)
+                {
+                case EQ_GRID_RANDOM_10:
+                {
+                    PerformWaypointMovementForRandom10();
+                } break;
+                case EQ_GRID_RANDOM_PATH:
+                {
+                    PerformWaypointMovementForRandomAny();
+                } break;
+                case EQ_GRID_RANDOM:
+                case EQ_GRID_RAND_5_LOS:
+                case EQ_GRID_RANDOM_CENTER_POINT:
+                default:
+                {
+                    PerformWaypointMovementForRandomPath();
+                } break;
+                }
             }
         }
 
@@ -220,7 +252,7 @@ public:
         }
 
         // Keep
-        void GenerateRandom10WaypointIndices()
+        void GenerateRandom10WaypointIndicesAndSetPriorIndex()
         {
             WaypointRandom10Indices.clear();
             vector<uint32> allIndices;
@@ -232,89 +264,116 @@ public:
 
             uint32 count = min<uint32>(10u, allIndices.size());
             WaypointRandom10Indices.assign(allIndices.begin(), allIndices.begin() + count);
+
+            // Set prior position to the nearest
+            uint32 nearestIndex = 0;
+            float minDist = 1000000.0f;
+            for (uint32 i = 0; i < WaypointRandom10Indices.size(); ++i)
+            {
+                const auto& wp = CreatureWaypoints[WaypointRandom10Indices[i]];
+                float dist = me->GetExactDist(wp.X, wp.Y, wp.Z);
+                if (dist < minDist)
+                {
+                    minDist = dist;
+                    nearestIndex = i;
+                }
+            }
+            WaypointPriorTargetWaypointIndex = nearestIndex;
         }
 
-        void GoToTargetWithSmallSteps(const Position& targetPos)
-        {
-            CurrentTargetPos = targetPos;
-            CurrentSmallStepPath.clear();
-            IsMovingToWaypoint = true;
+        //void GoToTargetWithSmallSteps(const Position& targetPos)
+        //{
+        //    CurrentTargetPos = targetPos;
+        //    CurrentSmallStepPath.clear();
+        //    IsMovingToWaypoint = true;
 
-            Position currentPos = me->GetPosition();
-            float dx = CurrentTargetPos.GetPositionX() - currentPos.GetPositionX();
-            float dy = CurrentTargetPos.GetPositionY() - currentPos.GetPositionY();
-            float dist = sqrt(dx * dx + dy * dy);
+        //    Position currentPos = me->GetPosition();
+        //    float dx = CurrentTargetPos.GetPositionX() - currentPos.GetPositionX();
+        //    float dy = CurrentTargetPos.GetPositionY() - currentPos.GetPositionY();
+        //    float dist = sqrt(dx * dx + dy * dy);
+
+        //    me->SetUnitMovementFlags(MOVEMENTFLAG_WALKING);
+        //    me->GetMotionMaster()->Clear(false);
+
+        //    if (dist < 10.0f)
+        //    {
+        //        // Very close — just do a direct MovePoint
+        //        me->GetMotionMaster()->MovePoint(EQ_MOVE_TO_ROAM_POINT, CurrentTargetPos);
+        //        return;
+        //    }
+
+        //    // Build full spline for longer distances
+        //    while (true)
+        //    {
+        //        dx = CurrentTargetPos.GetPositionX() - currentPos.GetPositionX();
+        //        dy = CurrentTargetPos.GetPositionY() - currentPos.GetPositionY();
+        //        dist = sqrt(dx * dx + dy * dy);
+
+        //        if (dist < 6.0f)
+        //        {
+        //            CurrentSmallStepPath.push_back(CurrentTargetPos);
+        //            break;
+        //        }
+
+        //        float stepSize = static_cast<float>(EQ_MOVE_SMALL_STEP_SIZE);
+        //        if (stepSize > dist - 3.0f)
+        //            stepSize = dist - 3.0f;
+
+        //        if (stepSize < 2.0f)
+        //        {
+        //            CurrentSmallStepPath.push_back(CurrentTargetPos);
+        //            break;
+        //        }
+
+        //        float nx = dx / dist;
+        //        float ny = dy / dist;
+
+        //        float newX = currentPos.GetPositionX() + nx * stepSize;
+        //        float newY = currentPos.GetPositionY() + ny * stepSize;
+
+        //        bool foundValidZ = false;
+        //        float newZ = GetEffectiveDestinationZ(newX, newY, currentPos.GetPositionZ(), foundValidZ);
+
+        //        CurrentSmallStepPath.emplace_back(newX, newY, newZ);
+        //        currentPos = CurrentSmallStepPath.back();
+        //    }
+
+        //    if (CurrentSmallStepPath.size() < 2)
+        //    {
+        //        me->GetMotionMaster()->MovePoint(EQ_MOVE_TO_ROAM_POINT, CurrentTargetPos);
+        //        return;
+        //    }
+
+        //    Movement::PointsArray splinePoints;
+        //    splinePoints.reserve(CurrentSmallStepPath.size());
+        //    for (const auto& p : CurrentSmallStepPath)
+        //        splinePoints.emplace_back(p.GetPositionX(), p.GetPositionY(), p.GetPositionZ());
+
+        //    me->GetMotionMaster()->MoveSplinePath(&splinePoints, FORCED_MOVEMENT_NONE);
+        //}
+
+        // Keep
+        bool BuildAndStartPointMovementToTarget(float x, float y, float z)
+        {
+            // Calculate a path
+            PathGenerator path(me);
+            path.SetPathLengthLimit(5000.0f);
+            bool result = path.CalculatePath(x, y, z, false);
+            bool pathFound = (result && path.GetPathType() != PATHFIND_NOPATH);
+            if (pathFound == false)
+                return false;
+
+            CurrentTargetPos = Position(x, y, z);
+            IsMovingToTargetPos = true;
 
             me->SetUnitMovementFlags(MOVEMENTFLAG_WALKING);
             me->GetMotionMaster()->Clear(false);
-
-            if (dist < 10.0f)
-            {
-                // Very close — just do a direct MovePoint
-                me->GetMotionMaster()->MovePoint(EQ_MOVE_SMALL_TERRAIN_MOVE_ID, CurrentTargetPos);
-                return;
-            }
-
-            // Build full spline for longer distances
-            while (true)
-            {
-                dx = CurrentTargetPos.GetPositionX() - currentPos.GetPositionX();
-                dy = CurrentTargetPos.GetPositionY() - currentPos.GetPositionY();
-                dist = sqrt(dx * dx + dy * dy);
-
-                if (dist < 6.0f)
-                {
-                    CurrentSmallStepPath.push_back(CurrentTargetPos);
-                    break;
-                }
-
-                float stepSize = static_cast<float>(EQ_MOVE_SMALL_STEP_SIZE);
-                if (stepSize > dist - 3.0f)
-                    stepSize = dist - 3.0f;
-
-                if (stepSize < 2.0f)
-                {
-                    CurrentSmallStepPath.push_back(CurrentTargetPos);
-                    break;
-                }
-
-                float nx = dx / dist;
-                float ny = dy / dist;
-
-                float newX = currentPos.GetPositionX() + nx * stepSize;
-                float newY = currentPos.GetPositionY() + ny * stepSize;
-
-                bool foundValidZ = false;
-                float newZ = GetEffectiveDestinationZ(newX, newY, currentPos.GetPositionZ(), foundValidZ);
-
-                CurrentSmallStepPath.emplace_back(newX, newY, newZ);
-                currentPos = CurrentSmallStepPath.back();
-            }
-
-            if (CurrentSmallStepPath.size() < 2)
-            {
-                me->GetMotionMaster()->MovePoint(EQ_MOVE_SMALL_TERRAIN_MOVE_ID, CurrentTargetPos);
-                return;
-            }
-
-            Movement::PointsArray splinePoints;
-            splinePoints.reserve(CurrentSmallStepPath.size());
-            for (const auto& p : CurrentSmallStepPath)
-                splinePoints.emplace_back(p.GetPositionX(), p.GetPositionY(), p.GetPositionZ());
-
-            me->GetMotionMaster()->MoveSplinePath(&splinePoints, FORCED_MOVEMENT_NONE);
+            me->GetMotionMaster()->MovePoint(EQ_MOVE_TO_ROAM_POINT, x, y, z);
+            return true;
         }
 
-        // Keep (in progress)
-        void BuildAndStartPointMovementToTarget(float x, float y, float z)
-        {
-
-
-
-
-        }
-
-        uint32 GetUniqueRandomWaypointIndex(uint32 currentIndex)
+        // Keep
+        uint32 GetUniqueRandomWaypointIndex(uint32 currentIndex) const
         {
             // Make sure it's always a new waypoint, when possible
             uint32 priorIndex = currentIndex;
@@ -324,7 +383,24 @@ public:
                 do
                 {
                     newIndex = urand(0, CreatureWaypoints.size() - 1);
-                } while (WaypointCurrentIndex == priorIndex);
+                } while (newIndex == priorIndex);
+            }
+            return newIndex;
+        }
+
+        // Keep
+        uint32 GetUniqueRandomWaypointIndexFromRandom10(uint32 currentIndex) const
+        {
+            // Make sure it's always a new waypoint, when possible
+            uint32 priorIndex = currentIndex;
+            uint32 newIndex = currentIndex;
+            if (WaypointRandom10Indices.size() > 1)
+            {
+                do
+                {
+                    uint32 curRandom10Index = urand(0, WaypointRandom10Indices.size() - 1);
+                    newIndex = WaypointRandom10Indices[curRandom10Index];
+                } while (newIndex == priorIndex);
             }
             return newIndex;
         }
@@ -332,202 +408,36 @@ public:
         // Keep
         void PerformWaypointMovementForRandom10()
         {
-            WaypointCurrentIndex = GetUniqueRandomWaypointIndex(WaypointCurrentIndex);
-            WaypointRandom10CurrentRandomIndex = (WaypointRandom10CurrentRandomIndex + 1) % WaypointRandom10Indices.size();
-            WaypointCurrentIndex = WaypointRandom10Indices[WaypointRandom10CurrentRandomIndex];            
-            const EverQuestCreatureWaypoint& wp = CreatureWaypoints[WaypointCurrentIndex];
+            WaypointCurrentTargetWaypointIndex = GetUniqueRandomWaypointIndexFromRandom10(WaypointCurrentTargetWaypointIndex);
+            const EverQuestCreatureWaypoint& wp = CreatureWaypoints[WaypointCurrentTargetWaypointIndex];
             BuildAndStartPointMovementToTarget(wp.X, wp.Y, wp.Z);
         }
 
         // Keep
-        void PerformWaypointMovementForRandom()
+        void PerformWaypointMovementForRandomAny()
         {
-            WaypointCurrentIndex = GetUniqueRandomWaypointIndex(WaypointCurrentIndex);
-            const EverQuestCreatureWaypoint& wp = CreatureWaypoints[WaypointCurrentIndex];
+            WaypointCurrentTargetWaypointIndex = GetUniqueRandomWaypointIndex(WaypointCurrentTargetWaypointIndex);
+            const EverQuestCreatureWaypoint& wp = CreatureWaypoints[WaypointCurrentTargetWaypointIndex];
             BuildAndStartPointMovementToTarget(wp.X, wp.Y, wp.Z);
-        }
-
-        void StartRandomPathMovement()
-        {
-            InitializePathIfNeeded();
-            PickRandomTargetWaypoint();
-            StartMovingTowardsTargetInPath();
         }
 
         // Keep
         void PerformWaypointMovementForRandomPath()
         {
-            WaypointCurrentIndex = GetUniqueRandomWaypointIndex(WaypointCurrentIndex);
+            if (WaypointPriorTargetWaypointIndex == WaypointRandomPathFinalTargetIndex)
+                WaypointRandomPathFinalTargetIndex = GetUniqueRandomWaypointIndex(WaypointCurrentTargetWaypointIndex);
 
-
-        }
-
-
-
-
-
-
-
-        void StartRoamingMovement()
-        {
-            if (!CreatureInstanceData.DoesRoam)
-                return;
-            PickRandomRoamPoint();
-        }
-
-        void PickRandomRoamPoint()
-        {
-            float x = frand(CreatureInstanceData.RoamMinX, CreatureInstanceData.RoamMaxX);
-            float y = frand(CreatureInstanceData.RoamMinY, CreatureInstanceData.RoamMaxY);
-            float referenceZ = me->GetPositionZ();
-
-            bool isValidPoint = false;
-            float z = GetEffectiveDestinationZ(x, y, referenceZ, isValidPoint, CreatureInstanceData.RoamMinZ, CreatureInstanceData.RoamMaxZ);
-
-            if (isValidPoint)
-            {
-                PathGenerator path(me);
-                path.SetPathLengthLimit(200.0f);
-                bool result = path.CalculatePath(x, y, z, false);
-                bool pathFound = (result && path.GetPathType() != PATHFIND_NOPATH);
-                isValidPoint = pathFound;
-            }
-
-            if (!isValidPoint)
-            {
-                events.ScheduleEvent(EVENT_PAUSE_DONE, 100ms);
-                return;
-            }
-
-            CurrentTargetPos = Position(x, y, z);
-            IsMovingToWaypoint = true;
-
-            me->SetUnitMovementFlags(MOVEMENTFLAG_WALKING);
-            me->GetMotionMaster()->Clear(false);
-            me->GetMotionMaster()->MovePoint(EQ_MOVE_SMALL_TERRAIN_MOVE_ID, x, y, z);
-        }
-
-        void StartMovingToNextWaypoint()
-        {
-            if (CreatureWaypoints.empty())
-                return;
-            if (WaypointCurrentIndex >= CreatureWaypoints.size())
-                WaypointCurrentIndex = 0;
-
-            const EverQuestCreatureWaypoint& wp = CreatureWaypoints[WaypointCurrentIndex];
-            GoToTargetWithSmallSteps(Position(wp.X, wp.Y, wp.Z));
-        }
-
-
-
-        void InitializePathIfNeeded()
-        {
-            if (CreatureWaypoints.empty())
-                return;
-
-            if (!HasInitializedPath)
-            {
-                WaypointCurrentIndex = FindNearestWaypointIndex();
-                HasInitializedPath = true;
-                return;
-            }
-
-            const auto& currWp = CreatureWaypoints[WaypointCurrentIndex];
-            float distToCurr = me->GetExactDist(currWp.X, currWp.Y, currWp.Z);
-            if (distToCurr > 25.0f)
-                WaypointCurrentIndex = FindNearestWaypointIndex();
-        }
-
-        void PickRandomTargetWaypoint()
-        {
-            if (CreatureWaypoints.empty())
-                return;
-
-            uint32 newTarget = WaypointCurrentIndex;
-            uint32 attempts = 0;
-            while (newTarget == WaypointCurrentIndex && attempts < 20 && CreatureWaypoints.size() > 1)
-            {
-                newTarget = urand(0, CreatureWaypoints.size() - 1);
-                attempts++;
-            }
-            TargetWaypointIndex = newTarget;
-        }
-
-        void StartMovingTowardsTargetInPath()
-        {
-            if (CreatureWaypoints.empty())
-                return;
-
-            if (WaypointCurrentIndex == TargetWaypointIndex)
-            {
-                PickRandomTargetWaypoint();
-                if (WaypointCurrentIndex == TargetWaypointIndex)
-                {
-                    events.ScheduleEvent(EVENT_PAUSE_DONE, 1500ms);
-                    return;
-                }
-            }
-
-            int32 direction = (TargetWaypointIndex > WaypointCurrentIndex) ? 1 : -1;
-            int32 nextInt = static_cast<int32>(WaypointCurrentIndex) + direction;
-            uint32 nextIdx = (nextInt < 0) ? 0 :
-                (nextInt >= static_cast<int32>(CreatureWaypoints.size()) ? CreatureWaypoints.size() - 1 : static_cast<uint32>(nextInt));
-
-            NextPathWaypointIndex = nextIdx;
-            const EverQuestCreatureWaypoint& wp = CreatureWaypoints[nextIdx];
-            GoToTargetWithSmallSteps(Position(wp.X, wp.Y, wp.Z));
-        }
-
-        void FinishCurrentWaypoint()
-        {
-            IsMovingToWaypoint = false;
-            CurrentSmallStepPath.clear();
-
-            if (IsRoaming)
-            {
-                me->GetMotionMaster()->Clear(false);
-                me->StopMoving();
-                uint32 delay = urand(CreatureInstanceData.RoamMinDelayInMS, CreatureInstanceData.RoamMaxDelayInMS);
-                events.ScheduleEvent(EVENT_PAUSE_DONE, Milliseconds(delay));
-                return;
-            }
-            else if (CreatureInstanceData.WanderType == EQ_GRID_RANDOM_PATH)
-            {
-                WaypointCurrentIndex = NextPathWaypointIndex;
-                const EverQuestCreatureWaypoint& wp = CreatureWaypoints[WaypointCurrentIndex];
-
-                if (wp.PauseInSec > 0)
-                    events.ScheduleEvent(EVENT_PAUSE_DONE, Seconds(wp.PauseInSec));
-                else
-                    StartMovingTowardsTargetInPath();
-                return;
-            }
-
-            // For EQ_GRID_RANDOM and similar
-            const EverQuestCreatureWaypoint& wp = CreatureWaypoints[WaypointCurrentIndex];
-
-            if (wp.PauseInSec > 0)
-            {
-                events.ScheduleEvent(EVENT_PAUSE_DONE, Seconds(wp.PauseInSec));
-            }
+            // Step up or down the list to the waypoint
+            if (WaypointRandomPathFinalTargetIndex > WaypointPriorTargetWaypointIndex)
+                WaypointCurrentTargetWaypointIndex = WaypointPriorTargetWaypointIndex + 1;
             else
-            {
-                // Zero pause → immediately pick next random waypoint
-                if (CreatureInstanceData.WanderType != EQ_NONE)
-                {
-                    if (CreatureInstanceData.WanderType == EQ_GRID_RANDOM_10)
-                        StartRandom10PointWaypointMovement();
-                    else
-                        StartCustomWanderMovement();
-                }
-                else
-                {
-                    WaypointCurrentIndex = (WaypointCurrentIndex + 1) % CreatureWaypoints.size();
-                    StartMovingToNextWaypoint();
-                }
-            }
+                WaypointCurrentTargetWaypointIndex = WaypointPriorTargetWaypointIndex - 1;
+
+            const EverQuestCreatureWaypoint& wp = CreatureWaypoints[WaypointCurrentTargetWaypointIndex];
+            BuildAndStartPointMovementToTarget(wp.X, wp.Y, wp.Z);
         }
 
+        // Keep
         uint32 FindNearestWaypointIndex() const
         {
             if (CreatureWaypoints.empty())
@@ -548,44 +458,121 @@ public:
             return nearest;
         }
 
+        // Keep
+        void PerformRoamingMovement()
+        {
+            float x = frand(CreatureInstanceData.RoamMinX, CreatureInstanceData.RoamMaxX);
+            float y = frand(CreatureInstanceData.RoamMinY, CreatureInstanceData.RoamMaxY);
+            float referenceZ = me->GetPositionZ();
+
+            bool isValidPoint = false;
+            float z = GetEffectiveDestinationZ(x, y, referenceZ, isValidPoint, CreatureInstanceData.RoamMinZ, CreatureInstanceData.RoamMaxZ);
+
+            if (isValidPoint)
+                isValidPoint = BuildAndStartPointMovementToTarget(x, y, z);
+
+            if (isValidPoint == false)
+            {
+                events.ScheduleEvent(EVENT_PAUSE_DONE, 100ms);
+                return;
+            }
+        }
+
+        //void StartMovingToNextWaypoint()
+        //{
+        //    if (CreatureWaypoints.empty())
+        //        return;
+        //    if (WaypointCurrentTargetWaypointIndex >= CreatureWaypoints.size())
+        //        WaypointCurrentTargetWaypointIndex = 0;
+
+        //    const EverQuestCreatureWaypoint& wp = CreatureWaypoints[WaypointCurrentTargetWaypointIndex];
+        //    GoToTargetWithSmallSteps(Position(wp.X, wp.Y, wp.Z));
+        //}
+
+        //void InitializePathIfNeeded()
+        //{
+        //    if (CreatureWaypoints.empty())
+        //        return;
+
+        //    if (!HasInitializedPath)
+        //    {
+        //        WaypointCurrentTargetWaypointIndex = FindNearestWaypointIndex();
+        //        HasInitializedPath = true;
+        //        return;
+        //    }
+
+        //    const auto& currWp = CreatureWaypoints[WaypointCurrentTargetWaypointIndex];
+        //    float distToCurr = me->GetExactDist(currWp.X, currWp.Y, currWp.Z);
+        //    if (distToCurr > 25.0f)
+        //        WaypointCurrentTargetWaypointIndex = FindNearestWaypointIndex();
+        //}
+
+        //void PickRandomTargetWaypoint()
+        //{
+        //    if (CreatureWaypoints.empty())
+        //        return;
+
+        //    uint32 newTarget = WaypointCurrentTargetWaypointIndex;
+        //    uint32 attempts = 0;
+        //    while (newTarget == WaypointCurrentTargetWaypointIndex && attempts < 20 && CreatureWaypoints.size() > 1)
+        //    {
+        //        newTarget = urand(0, CreatureWaypoints.size() - 1);
+        //        attempts++;
+        //    }
+        //    TargetWaypointIndex = newTarget;
+        //}
+
+        //void StartMovingTowardsTargetInPath()
+        //{
+        //    if (CreatureWaypoints.empty())
+        //        return;
+
+        //    if (WaypointCurrentTargetWaypointIndex == TargetWaypointIndex)
+        //    {
+        //        PickRandomTargetWaypoint();
+        //        if (WaypointCurrentTargetWaypointIndex == TargetWaypointIndex)
+        //        {
+        //            events.ScheduleEvent(EVENT_PAUSE_DONE, 1500ms);
+        //            return;
+        //        }
+        //    }
+
+        //    int32 direction = (TargetWaypointIndex > WaypointCurrentTargetWaypointIndex) ? 1 : -1;
+        //    int32 nextInt = static_cast<int32>(WaypointCurrentTargetWaypointIndex) + direction;
+        //    uint32 nextIdx = (nextInt < 0) ? 0 :
+        //        (nextInt >= static_cast<int32>(CreatureWaypoints.size()) ? CreatureWaypoints.size() - 1 : static_cast<uint32>(nextInt));
+
+        //    NextPathWaypointIndex = nextIdx;
+        //    const EverQuestCreatureWaypoint& wp = CreatureWaypoints[nextIdx];
+        //    GoToTargetWithSmallSteps(Position(wp.X, wp.Y, wp.Z));
+        //}
+
+        // Keep (work in progress)
         void MovementInform(uint32 type, uint32 id) override
         {
             if (type == POINT_MOTION_TYPE)
             {
                 if (id == EQ_MOVE_RETURN_TO_AGRO_ID)
                 {
-                    if (CreatureInstanceData.DoesRoam)
-                    {
-                        StartRoamingMovement();
-                        return;
-                    }
-
-                    if (LastWaypointIndexBeforeCombat < CreatureWaypoints.size())
-                        WaypointCurrentIndex = LastWaypointIndexBeforeCombat;
-                    else
-                        WaypointCurrentIndex = FindNearestWaypointIndex();
-
-                    if (WasInRandomPath)
-                    {
-                        TargetWaypointIndex = LastTargetWaypointIndex;
-                        HasInitializedPath = true;
-                        events.ScheduleEvent(EVENT_PAUSE_DONE, 500ms);
-                    }
-                    else if (CreatureInstanceData.WanderType != EQ_NONE)
-                    {
-                        events.ScheduleEvent(EVENT_PAUSE_DONE, 500ms);
-                    }
-                    else
-                    {
-                        StartMovingToNextWaypoint();
-                    }
-                    return;
+                    IsMovingToTargetPos = false;
+                    PerformMovementToNewPoint();
                 }
-
-                if (IsMovingToWaypoint)
+                else if (id == EQ_MOVE_TO_ROAM_POINT)
                 {
-                    FinishCurrentWaypoint();
-                    return;
+                    IsMovingToTargetPos = false;
+                    uint32 delay = urand(CreatureInstanceData.RoamMinDelayInMS, CreatureInstanceData.RoamMaxDelayInMS);
+                    if (delay > 0)
+                        events.ScheduleEvent(EVENT_PAUSE_DONE, Milliseconds(delay));
+                    else
+                        PerformMovementToNewPoint();
+                }
+                else if (id == EQ_MOVE_TO_WAYPOINT_POINT)
+                {
+                    IsMovingToTargetPos = false;
+                    WaypointPriorTargetWaypointIndex = WaypointCurrentTargetWaypointIndex;
+                    const EverQuestCreatureWaypoint& wp = CreatureWaypoints[WaypointPriorTargetWaypointIndex];
+                    if (wp.PauseInSec > 0)
+                        events.ScheduleEvent(EVENT_PAUSE_DONE, Seconds(wp.PauseInSec));
                 }
             }
             else if (type == WAYPOINT_MOTION_TYPE)
@@ -605,19 +592,7 @@ public:
             while (uint32 eventId = events.ExecuteEvent())
             {
                 if (eventId == EVENT_PAUSE_DONE)
-                {
-                    if (IsRoaming)
-                        StartRoamingMovement();
-                    else if (CreatureInstanceData.WanderType == EQ_GRID_RANDOM_PATH)
-                        StartMovingTowardsTargetInPath();
-                    else if (CreatureInstanceData.WanderType != EQ_NONE)
-                        StartCustomWanderMovement();
-                    else
-                    {
-                        WaypointCurrentIndex = (WaypointCurrentIndex + 1) % CreatureWaypoints.size();
-                        StartMovingToNextWaypoint();
-                    }
-                }
+                    PerformMovementToNewPoint();
             }
 
             if (!UpdateVictim())
@@ -628,28 +603,28 @@ public:
 
         void JustEngagedWith(Unit* /*who*/) override
         {
-            events.CancelEvent(EVENT_PAUSE_DONE);
-            AgroPosition = me->GetPosition();
-
-            LastWaypointIndexBeforeCombat = WaypointCurrentIndex;
-            LastTargetWaypointIndex = TargetWaypointIndex;
-            WasInRandomPath = (CreatureInstanceData.WanderType == EQ_GRID_RANDOM_PATH);
-
+            events.CancelEvent(EVENT_PAUSE_DONE); // TODO: Handle agro so that it doesn't also call UpdateAI?
+            if (MovementType == EQ_CREATURE_MOVEMENT_NO_CUSTOM)
+                return;
+            LastAgroPosition = me->GetPosition();
+            IsReturningToAgroPosition = false;
             me->GetMotionMaster()->Clear(false);
-            IsMovingToWaypoint = false;
-            CurrentSmallStepPath.clear();
         }
 
         void EnterEvadeMode(EvadeReason why) override
         {
             ScriptedAI::EnterEvadeMode(why);
+            if (MovementType == EQ_CREATURE_MOVEMENT_NO_CUSTOM)
+                return;
 
             me->SetUnitMovementFlags(MOVEMENTFLAG_WALKING);
 
-            float x = AgroPosition.GetPositionX();
-            float y = AgroPosition.GetPositionY();
-            float z = AgroPosition.GetPositionZ();
+            float x = LastAgroPosition.GetPositionX();
+            float y = LastAgroPosition.GetPositionY();
+            float z = LastAgroPosition.GetPositionZ();
             me->GetMotionMaster()->MovePoint(EQ_MOVE_RETURN_TO_AGRO_ID, x, y, z);
+            CurrentTargetPos = LastAgroPosition;
+            IsReturningToAgroPosition = true;
         }
     };
 

@@ -88,9 +88,11 @@ using namespace std;
 #define EQ_CREATURE_MOVEMENT_CUSTOM_WAYPOINT        1
 #define EQ_CREATURE_MOVEMENT_CUSTOM_ROAMING         2
 
-#define EQ_MOVE_RETURN_TO_AGRO_ID                   99999
-#define EQ_MOVE_SMALL_TERRAIN_MOVE_ID               20000
-#define EQ_MOVE_SMALL_STEP_SIZE                     15    // Smaller works better on steep inclines
+#define EQ_MOVE_RETURN_TO_AGRO_ID                   20000
+#define EQ_MOVE_TO_ROAM_POINT                       20001
+#define EQ_MOVE_TO_WAYPOINT_POINT                   20002
+
+//#define EQ_MOVE_SMALL_STEP_SIZE                     15    // Smaller works better on steep inclines
 
 class EverQuestCreatureOnkillReputation
 {
