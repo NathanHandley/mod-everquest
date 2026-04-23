@@ -92,7 +92,8 @@ using namespace std;
 #define EQ_MOVE_TO_ROAM_POINT                       20001
 #define EQ_MOVE_TO_WAYPOINT_POINT                   20002
 
-//#define EQ_MOVE_SMALL_STEP_SIZE                     15    // Smaller works better on steep inclines
+#define EQ_MOVE_SMALL_STEP_SIZE_DISTANCE            2.0f    // Minimum distance between nodes when making small steps
+#define EQ_MOVE_SMALL_STEP_SIZE_LAST_DISTANCE       3.0f    // How much minimium distance to allow on the last node
 
 class EverQuestCreatureOnkillReputation
 {
