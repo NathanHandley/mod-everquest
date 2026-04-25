@@ -37,11 +37,14 @@ public:
     {
         EverQuest_CreatureInstanceScriptAI(Creature* creature) : ScriptedAI(creature) {}
 
+        bool doDebug = false;
+        uint32 debugCreatureGUID = 0;
+
         // Shared Data
         uint32 MovementType = EQ_CREATURE_MOVEMENT_NO_CUSTOM;
         EverQuestCreatureInstance CreatureInstanceData;
         deque<Position> PathToCurrentTargetPos;
-        //Position CurrentTargetPos;
+        Position CurrentTargetPos;
         bool IsMovingToTargetPos = false; // Needed?
 
         // Waypoint
@@ -65,6 +68,13 @@ public:
         void LoadCustomData()
         {
             uint32 creatureGUID = me->GetSpawnId();
+            if (creatureGUID == 389523 || creatureGUID == 389155 || creatureGUID == 389525 || creatureGUID == 389533 || creatureGUID == 389534 || creatureGUID == 389528
+                || creatureGUID == 389527 || creatureGUID == 389524 || creatureGUID == 389529 || creatureGUID == 389531 || creatureGUID == 389535 || creatureGUID == 389532
+                || creatureGUID == 389530 || creatureGUID == 389526)
+            {
+                debugCreatureGUID = creatureGUID;
+                doDebug = true;
+            }
             CreatureInstanceData = EverQuest->GetCreatureInstanceData(creatureGUID);
             CreatureWaypoints.clear();
             if (CreatureInstanceData.WaypointListID != -1)
@@ -111,7 +121,7 @@ public:
                 || CreatureInstanceData.WanderType == EQ_GRID_RANDOM_CENTER_POINT)
             {
                 MovementType = EQ_CREATURE_MOVEMENT_CUSTOM_WAYPOINT;
-                WaypointPriorTargetWaypointIndex = 0;                
+                WaypointPriorTargetWaypointIndex = 0;
             }
             else
                 MovementType = EQ_CREATURE_MOVEMENT_NO_CUSTOM;
@@ -239,52 +249,68 @@ public:
             WaypointPriorTargetWaypointIndex = nearestIndex;
         }
 
-        bool BuildPathAndStartPointMovementToTarget(float x, float y, float z)
+        bool BuildPathAndStartPointMovementToTarget(float initialTargetX, float initialTargetY, float initialTargetZ)
         {
+            if (doDebug)
+            {
+                LOG_ERROR("module.EverQuest", "{} BuildPathAndStartPointMovementToTarget start", debugCreatureGUID);
+            }
+
             // Clear prior path
             deque<Position>().swap(PathToCurrentTargetPos);
 
-            // Determine that a path exists
+            // Snap the target Z
+            bool foundValidZ = false;
+            float terrainSnappedTargetZ = GetEffectiveDestinationZ(initialTargetX, initialTargetY, initialTargetZ, foundValidZ, CreatureInstanceData.RoamMinZ,
+                CreatureInstanceData.RoamMaxZ);
             PathGenerator path(me);
-            bool result = path.CalculatePath(x, y, z, false);           
-            bool pathFound = (result && path.GetPathType() != PATHFIND_NOPATH);
+            bool result = path.CalculatePath(initialTargetX, initialTargetY, initialTargetZ, false);
+            bool pathFound = (result == true && path.GetPathType() != PATHFIND_NOPATH);
             float pathLength = path.getPathLength();
-            if (pathFound == false && pathLength > 0.1f)
-                return false;
-
-            // Single step movement for something really close
-            if (pathLength < EQ_MOVE_SMALL_STEP_SIZE_DISTANCE)
+            if (foundValidZ == false || (pathFound == false && pathLength <= 0.1f))
             {
-                bool validPointFound = false;
-                float stepZ = GetEffectiveDestinationZ(x, y, z, validPointFound);
-                PathToCurrentTargetPos.emplace_back(Position(x, y, stepZ));
-                IsMovingToTargetPos = true;
-                return true;
+                PathToCurrentTargetPos.emplace_front(Position(initialTargetX, initialTargetY, initialTargetZ));
+                IsMovingToTargetPos = false;
+                if (doDebug)
+                {
+                    LOG_ERROR("module.EverQuest", "{} BuildPathAndStartPointMovementToTarget had invalid path", debugCreatureGUID);
+                }
+                return false;
             }
 
-            // Create a chain of nodes to pass through
-            Position lastAddedNodePosition = me->GetPosition();
-            for (int i = 1; i < (int)path.GetPath().size() - 1; i++)
+            // Break up straight longer paths
+            if (pathLength >= EQ_MOVE_SMALL_STEP_SIZE_LAST_DISTANCE)
             {
-                G3D::Vector3 const& p = path.GetPath()[i];
-                bool validPointFound = false;
-                float stepZ = GetEffectiveDestinationZ(p.x, p.y, p.z, validPointFound);
-                if (validPointFound == false)
-                    continue;
-
-                Position nextPoint(p.x, p.y, stepZ);
-                if (lastAddedNodePosition.GetExactDist(nextPoint) >= EQ_MOVE_SMALL_STEP_SIZE_DISTANCE)
+                float remainingDistance = pathLength;
+                Position previousPosition = me->GetPosition();
+                float ux = (initialTargetX - me->GetPositionX()) / pathLength;
+                float uy = (initialTargetY - me->GetPositionY()) / pathLength;
+                float uz = (terrainSnappedTargetZ - me->GetPositionZ()) / pathLength;
+                while (remainingDistance > EQ_MOVE_SMALL_STEP_SIZE_LAST_DISTANCE)
                 {
-                    PathToCurrentTargetPos.emplace_back(Position(p.x, p.y, stepZ));
-                    lastAddedNodePosition = nextPoint;
+                    float interimX = previousPosition.GetPositionX() + ux * EQ_MOVE_SMALL_STEP_SIZE_DISTANCE;
+                    float interimY = previousPosition.GetPositionY() + uy * EQ_MOVE_SMALL_STEP_SIZE_DISTANCE;
+                    float interimZ = previousPosition.GetPositionZ() + uz * EQ_MOVE_SMALL_STEP_SIZE_DISTANCE;
+                    if (doDebug)
+                    {
+                        LOG_ERROR("module.EverQuest", "{} BuildPathAndStartPointMovementToTarget small step calculated to {} {} {}", debugCreatureGUID, interimX, interimY, interimZ);
+                    }
+                    Position interimPosition = Position(interimX, interimY, interimZ);
+                    PathToCurrentTargetPos.emplace_back(interimPosition);
+                    previousPosition = interimPosition;
+                    remainingDistance -= EQ_MOVE_SMALL_STEP_SIZE_DISTANCE;
                 }
             }
 
-            // Add the final target to the list, replacing the last one if it wasn't far from destination
-            Position lastPosition = Position(x, y, z);
-            if (PathToCurrentTargetPos.size() > 1 && lastPosition.GetExactDist(PathToCurrentTargetPos.back()) < EQ_MOVE_SMALL_STEP_SIZE_LAST_DISTANCE)
-                PathToCurrentTargetPos.pop_back();
+            // Add the last position
+            Position lastPosition = Position(initialTargetX, initialTargetY, terrainSnappedTargetZ);
             PathToCurrentTargetPos.emplace_back(lastPosition);
+
+            if (doDebug)
+            {
+                int pathSize = (int)path.GetPath().size();
+                LOG_ERROR("module.EverQuest", "{} BuildPathAndStartPointMovementToTarget path calculated with {} nodes", debugCreatureGUID, PathToCurrentTargetPos.size());
+            }
 
             // Start Movement
             IsMovingToTargetPos = true;
@@ -303,10 +329,17 @@ public:
             Position nextPosition = PathToCurrentTargetPos.front();
             PathToCurrentTargetPos.pop_front();
 
+            if (doDebug)
+            {
+                LOG_ERROR("module.EverQuest", "{} ProcessNextMovementPoint {} {} {}", debugCreatureGUID, nextPosition.GetPositionX(), nextPosition.GetPositionY(), nextPosition.GetPositionZ());
+            }
+
+            me->SetUnitMovementFlags(MOVEMENTFLAG_WALKING);
             if (MovementType == EQ_CREATURE_MOVEMENT_CUSTOM_WAYPOINT)
-                me->GetMotionMaster()->MovePoint(EQ_MOVE_TO_WAYPOINT_POINT, nextPosition, FORCED_MOVEMENT_NONE, 0.0f, true);
+                me->GetMotionMaster()->MovePoint(EQ_MOVE_TO_WAYPOINT_POINT, nextPosition);
             else if (MovementType == EQ_CREATURE_MOVEMENT_CUSTOM_ROAMING)
-                me->GetMotionMaster()->MovePoint(EQ_MOVE_TO_ROAM_POINT, nextPosition, FORCED_MOVEMENT_NONE, 0.0f, true);
+                me->GetMotionMaster()->MovePoint(EQ_MOVE_TO_ROAM_POINT, nextPosition);
+            CurrentTargetPos = nextPosition;
         }
 
         uint32 GetUniqueRandomWaypointIndex(uint32 currentIndex) const
@@ -403,6 +436,8 @@ public:
 
             if (isValidPoint == false)
             {
+                // Clear path
+                deque<Position>().swap(PathToCurrentTargetPos);
                 events.ScheduleEvent(EVENT_PAUSE_DONE, 100ms);
                 return;
             }
@@ -412,10 +447,23 @@ public:
         {
             if (type == POINT_MOTION_TYPE)
             {
+                //if (IsDoingSmallStep == true)
+                //{
+                //    IsDoingSmallStep = false;
+                //    return;
+                //}
+
+                /*if (CurrentTargetPos.GetExactDist(me->GetPosition()) > EQ_MOVE_SMALL_STEP_DISTANCE_TO_END)
+                    return;*/
                 if (PathToCurrentTargetPos.empty() == false)
                 {
                     ProcessNextMovementPoint();
                     return;
+                }
+
+                if (doDebug)
+                {
+                    LOG_ERROR("module.EverQuest", "{} MovementInform movement ended", debugCreatureGUID);
                 }
 
                 IsMovingToTargetPos = false;
