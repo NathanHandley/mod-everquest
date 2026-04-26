@@ -20,6 +20,7 @@
 #include "ScriptedCreature.h"
 #include "EventMap.h"
 #include "MotionMaster.h"
+#include "MoveSplineInit.h"
 
 #include "EverQuest.h"
 
@@ -43,9 +44,7 @@ public:
         // Shared Data
         uint32 MovementType = EQ_CREATURE_MOVEMENT_NO_CUSTOM;
         EverQuestCreatureInstance CreatureInstanceData;
-        deque<Position> PathToCurrentTargetPos;
-        Position CurrentTargetPos;
-        bool IsMovingToTargetPos = false; // Needed?
+        bool IsMovingToTargetPos = false;
 
         // Waypoint
         vector<EverQuestCreatureWaypoint> CreatureWaypoints;
@@ -70,7 +69,7 @@ public:
             uint32 creatureGUID = me->GetSpawnId();
             if (creatureGUID == 389523 || creatureGUID == 389155 || creatureGUID == 389525 || creatureGUID == 389533 || creatureGUID == 389534 || creatureGUID == 389528
                 || creatureGUID == 389527 || creatureGUID == 389524 || creatureGUID == 389529 || creatureGUID == 389531 || creatureGUID == 389535 || creatureGUID == 389532
-                || creatureGUID == 389530 || creatureGUID == 389526)
+                || creatureGUID == 389530 || creatureGUID == 389526 || creatureGUID == 389536)
             {
                 debugCreatureGUID = creatureGUID;
                 doDebug = true;
@@ -86,14 +85,13 @@ public:
             LoadCustomData();
 
             events.Reset();
-            deque<Position>().swap(PathToCurrentTargetPos);
 
             IsMovingToTargetPos = false;
             WaypointPriorTargetWaypointIndex = 0;
             WaypointCurrentTargetWaypointIndex = 0;
             WaypointRandomPathFinalTargetIndex = 0;
             IsReturningToAgroPosition = false;
-
+            
             me->SetWalk(false);
             me->SetUnitMovementFlags(MOVEMENTFLAG_WALKING);
 
@@ -256,9 +254,6 @@ public:
                 LOG_ERROR("module.EverQuest", "{} BuildPathAndStartPointMovementToTarget start", debugCreatureGUID);
             }
 
-            // Clear prior path
-            deque<Position>().swap(PathToCurrentTargetPos);
-
             // Snap the target Z
             bool foundValidZ = false;
             float terrainSnappedTargetZ = GetEffectiveDestinationZ(initialTargetX, initialTargetY, initialTargetZ, foundValidZ, CreatureInstanceData.RoamMinZ,
@@ -269,14 +264,16 @@ public:
             float pathLength = path.getPathLength();
             if (foundValidZ == false || (pathFound == false && pathLength <= 0.1f))
             {
-                PathToCurrentTargetPos.emplace_front(Position(initialTargetX, initialTargetY, initialTargetZ));
-                IsMovingToTargetPos = false;
                 if (doDebug)
                 {
                     LOG_ERROR("module.EverQuest", "{} BuildPathAndStartPointMovementToTarget had invalid path", debugCreatureGUID);
                 }
                 return false;
             }
+
+            // Build the full waypoint list, and put current creature position up front
+            Movement::PointsArray waypointPath;
+            waypointPath.emplace_back(me->GetPositionX(), me->GetPositionY(), me->GetPositionZ());
 
             // Break up straight longer paths
             if (pathLength >= EQ_MOVE_SMALL_STEP_SIZE_LAST_DISTANCE)
@@ -291,59 +288,57 @@ public:
                     float interimX = previousPosition.GetPositionX() + ux * EQ_MOVE_SMALL_STEP_SIZE_DISTANCE;
                     float interimY = previousPosition.GetPositionY() + uy * EQ_MOVE_SMALL_STEP_SIZE_DISTANCE;
                     float interimZ = previousPosition.GetPositionZ() + uz * EQ_MOVE_SMALL_STEP_SIZE_DISTANCE;
+                    interimZ = GetEffectiveDestinationZ(interimX, interimY, interimZ, foundValidZ, CreatureInstanceData.RoamMinZ, CreatureInstanceData.RoamMaxZ);
                     if (doDebug)
                     {
                         LOG_ERROR("module.EverQuest", "{} BuildPathAndStartPointMovementToTarget small step calculated to {} {} {}", debugCreatureGUID, interimX, interimY, interimZ);
                     }
-                    Position interimPosition = Position(interimX, interimY, interimZ);
-                    PathToCurrentTargetPos.emplace_back(interimPosition);
-                    previousPosition = interimPosition;
+                    waypointPath.emplace_back(interimX, interimY, interimZ);
+                    previousPosition = Position(interimX, interimY, interimZ);
                     remainingDistance -= EQ_MOVE_SMALL_STEP_SIZE_DISTANCE;
                 }
             }
 
             // Add the last position
-            Position lastPosition = Position(initialTargetX, initialTargetY, terrainSnappedTargetZ);
-            PathToCurrentTargetPos.emplace_back(lastPosition);
+            waypointPath.emplace_back(initialTargetX, initialTargetY, terrainSnappedTargetZ);
 
             if (doDebug)
             {
-                int pathSize = (int)path.GetPath().size();
-                LOG_ERROR("module.EverQuest", "{} BuildPathAndStartPointMovementToTarget path calculated with {} nodes", debugCreatureGUID, PathToCurrentTargetPos.size());
+                LOG_ERROR("module.EverQuest", "{} BuildPathAndStartPointMovementToTarget path calculated with {} nodes", debugCreatureGUID, waypointPath.size());
             }
 
             // Start Movement
             IsMovingToTargetPos = true;
             me->SetUnitMovementFlags(MOVEMENTFLAG_WALKING);
             me->GetMotionMaster()->Clear(false);
-            ProcessNextMovementPoint();
+            me->GetMotionMaster()->MoveSplinePath(&waypointPath, FORCED_MOVEMENT_WALK);
 
             return true;
         }
 
-        void ProcessNextMovementPoint()
+        void OnCustomPathCompleted()
         {
-            if (PathToCurrentTargetPos.empty() == true || MovementType == EQ_CREATURE_MOVEMENT_NO_CUSTOM)
-                return;
-
-            Position nextPosition = PathToCurrentTargetPos.front();
-            PathToCurrentTargetPos.pop_front();
-
             if (doDebug)
             {
-                LOG_ERROR("module.EverQuest", "{} ProcessNextMovementPoint {} {} {}", debugCreatureGUID, nextPosition.GetPositionX(), nextPosition.GetPositionY(), nextPosition.GetPositionZ());
+                LOG_ERROR("module.EverQuest", "{} OnCustomPathCompleted movement type {}", debugCreatureGUID, MovementType);
             }
 
-            me->SetUnitMovementFlags(MOVEMENTFLAG_WALKING);
             if (MovementType == EQ_CREATURE_MOVEMENT_CUSTOM_WAYPOINT)
-                me->GetMotionMaster()->MovePoint(EQ_MOVE_TO_WAYPOINT_POINT, nextPosition);
-            else if (MovementType == EQ_CREATURE_MOVEMENT_CUSTOM_ROAMING)
-                me->GetMotionMaster()->MovePoint(EQ_MOVE_TO_ROAM_POINT, nextPosition);
-            CurrentTargetPos = nextPosition;
-
-            if (doDebug)
             {
-                LOG_ERROR("module.EverQuest", "{} ProcessNextMovementPoint ended", debugCreatureGUID);
+                WaypointPriorTargetWaypointIndex = WaypointCurrentTargetWaypointIndex;
+                const EverQuestCreatureWaypoint& wp = CreatureWaypoints[WaypointPriorTargetWaypointIndex];
+                if (wp.PauseInSec > 0)
+                    events.ScheduleEvent(EVENT_PAUSE_DONE, Seconds(wp.PauseInSec));
+                else
+                    PerformMovementToNewPoint();
+            }
+            else if (MovementType == EQ_CREATURE_MOVEMENT_CUSTOM_ROAMING)
+            {
+                uint32 delay = urand(CreatureInstanceData.RoamMinDelayInMS, CreatureInstanceData.RoamMaxDelayInMS);
+                if (delay > 0)
+                    events.ScheduleEvent(EVENT_PAUSE_DONE, Milliseconds(delay));
+                else
+                    PerformMovementToNewPoint();
             }
         }
 
@@ -441,8 +436,6 @@ public:
 
             if (isValidPoint == false)
             {
-                // Clear path
-                deque<Position>().swap(PathToCurrentTargetPos);
                 events.ScheduleEvent(EVENT_PAUSE_DONE, 100ms);
                 return;
             }
@@ -452,63 +445,19 @@ public:
         {
             if (doDebug)
             {
-                LOG_ERROR("module.EverQuest", "{} MovementInform movement started type {} id {}", debugCreatureGUID, type, id);
+                LOG_ERROR("module.EverQuest", "{} MovementInform type {} id {}", debugCreatureGUID, type, id);
             }
-            if (type == POINT_MOTION_TYPE)
+
+            if (type == POINT_MOTION_TYPE && id == EQ_MOVE_RETURN_TO_AGRO_ID)
             {
-                //if (IsDoingSmallStep == true)
-                //{
-                //    IsDoingSmallStep = false;
-                //    return;
-                //}
-
-                /*if (CurrentTargetPos.GetExactDist(me->GetPosition()) > EQ_MOVE_SMALL_STEP_DISTANCE_TO_END)
-                    return;*/
-                if (PathToCurrentTargetPos.empty() == false)
-                {
-                    ProcessNextMovementPoint();
-                    if (doDebug)
-                    {
-                        LOG_ERROR("module.EverQuest", "{} MovementInform movement ended after running ProcessNextMovementPoint()", debugCreatureGUID);
-                    }
-                    return;
-                }
-
-                IsMovingToTargetPos = false;
-
-                if (id == EQ_MOVE_RETURN_TO_AGRO_ID)
-                {
-                    PerformMovementToNewPoint();
-                }
-                else if (id == EQ_MOVE_TO_ROAM_POINT)
-                {
-                    uint32 delay = urand(CreatureInstanceData.RoamMinDelayInMS, CreatureInstanceData.RoamMaxDelayInMS);
-                    if (delay > 0)
-                        events.ScheduleEvent(EVENT_PAUSE_DONE, Milliseconds(delay));
-                    else
-                        PerformMovementToNewPoint();
-                }
-                else if (id == EQ_MOVE_TO_WAYPOINT_POINT)
-                {
-                    WaypointPriorTargetWaypointIndex = WaypointCurrentTargetWaypointIndex;
-                    const EverQuestCreatureWaypoint& wp = CreatureWaypoints[WaypointPriorTargetWaypointIndex];
-                    if (wp.PauseInSec > 0)
-                        events.ScheduleEvent(EVENT_PAUSE_DONE, Seconds(wp.PauseInSec));
-                    else
-                        PerformMovementToNewPoint();
-                }
+                IsReturningToAgroPosition = false;
+                PerformMovementToNewPoint();
             }
-            else if (type == WAYPOINT_MOTION_TYPE)
+
+            if (type == WAYPOINT_MOTION_TYPE)
             {
-                if (CreatureInstanceData.DespawnAtWaypointNum != -1 &&
-                    id == static_cast<uint32>(CreatureInstanceData.DespawnAtWaypointNum))
-                {
+                if (CreatureInstanceData.DespawnAtWaypointNum != -1 && id == static_cast<uint32>(CreatureInstanceData.DespawnAtWaypointNum))
                     me->DespawnOrUnsummon();
-                }
-            }
-            if (doDebug)
-            {
-                LOG_ERROR("module.EverQuest", "{} MovementInform movement ended at end of method - type {} id {}", debugCreatureGUID, type, id);
             }
         }
 
@@ -520,6 +469,13 @@ public:
             {
                 if (eventId == EVENT_PAUSE_DONE)
                     PerformMovementToNewPoint();
+            }
+
+            // Detect when the spline path movement has completed naturally
+            if (IsMovingToTargetPos == true && !me->GetMotionMaster()->HasMovementGeneratorType(ESCORT_MOTION_TYPE))
+            {
+                IsMovingToTargetPos = false;
+                OnCustomPathCompleted();
             }
 
             if (!UpdateVictim())
@@ -535,6 +491,7 @@ public:
                 return;
             LastAgroPosition = me->GetPosition();
             IsReturningToAgroPosition = false;
+            IsMovingToTargetPos = false;
             me->GetMotionMaster()->Clear(false);
         }
 
@@ -550,7 +507,6 @@ public:
             float y = LastAgroPosition.GetPositionY();
             float z = LastAgroPosition.GetPositionZ();
             me->GetMotionMaster()->MovePoint(EQ_MOVE_RETURN_TO_AGRO_ID, x, y, z);
-            //CurrentTargetPos = LastAgroPosition; TODO: Do something with this...
             IsReturningToAgroPosition = true;
         }
     };
