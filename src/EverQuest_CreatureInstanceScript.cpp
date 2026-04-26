@@ -38,9 +38,6 @@ public:
     {
         EverQuest_CreatureInstanceScriptAI(Creature* creature) : ScriptedAI(creature) {}
 
-        bool doDebug = false;
-        uint32 debugCreatureGUID = 0;
-
         // Shared Data
         uint32 MovementType = EQ_CREATURE_MOVEMENT_NO_CUSTOM;
         EverQuestCreatureInstance CreatureInstanceData;
@@ -67,13 +64,6 @@ public:
         void LoadCustomData()
         {
             uint32 creatureGUID = me->GetSpawnId();
-            if (creatureGUID == 389523 || creatureGUID == 389155 || creatureGUID == 389525 || creatureGUID == 389533 || creatureGUID == 389534 || creatureGUID == 389528
-                || creatureGUID == 389527 || creatureGUID == 389524 || creatureGUID == 389529 || creatureGUID == 389531 || creatureGUID == 389535 || creatureGUID == 389532
-                || creatureGUID == 389530 || creatureGUID == 389526 || creatureGUID == 389536)
-            {
-                debugCreatureGUID = creatureGUID;
-                doDebug = true;
-            }
             CreatureInstanceData = EverQuest->GetCreatureInstanceData(creatureGUID);
             CreatureWaypoints.clear();
             if (CreatureInstanceData.WaypointListID != -1)
@@ -249,11 +239,6 @@ public:
 
         bool BuildPathAndStartPointMovementToTarget(float initialTargetX, float initialTargetY, float initialTargetZ)
         {
-            if (doDebug)
-            {
-                LOG_ERROR("module.EverQuest", "{} BuildPathAndStartPointMovementToTarget start", debugCreatureGUID);
-            }
-
             // Snap the target Z
             bool foundValidZ = false;
             float terrainSnappedTargetZ = GetEffectiveDestinationZ(initialTargetX, initialTargetY, initialTargetZ, foundValidZ, CreatureInstanceData.RoamMinZ,
@@ -263,13 +248,7 @@ public:
             bool pathFound = (result == true && path.GetPathType() != PATHFIND_NOPATH);
             float pathLength = path.getPathLength();
             if (foundValidZ == false || (pathFound == false && pathLength <= 0.1f))
-            {
-                if (doDebug)
-                {
-                    LOG_ERROR("module.EverQuest", "{} BuildPathAndStartPointMovementToTarget had invalid path", debugCreatureGUID);
-                }
                 return false;
-            }
 
             // Build the full waypoint list, and put current creature position up front
             Movement::PointsArray waypointPath;
@@ -289,10 +268,6 @@ public:
                     float interimY = previousPosition.GetPositionY() + uy * EQ_MOVE_SMALL_STEP_SIZE_DISTANCE;
                     float interimZ = previousPosition.GetPositionZ() + uz * EQ_MOVE_SMALL_STEP_SIZE_DISTANCE;
                     interimZ = GetEffectiveDestinationZ(interimX, interimY, interimZ, foundValidZ, CreatureInstanceData.RoamMinZ, CreatureInstanceData.RoamMaxZ);
-                    if (doDebug)
-                    {
-                        LOG_ERROR("module.EverQuest", "{} BuildPathAndStartPointMovementToTarget small step calculated to {} {} {}", debugCreatureGUID, interimX, interimY, interimZ);
-                    }
                     waypointPath.emplace_back(interimX, interimY, interimZ);
                     previousPosition = Position(interimX, interimY, interimZ);
                     remainingDistance -= EQ_MOVE_SMALL_STEP_SIZE_DISTANCE;
@@ -301,11 +276,6 @@ public:
 
             // Add the last position
             waypointPath.emplace_back(initialTargetX, initialTargetY, terrainSnappedTargetZ);
-
-            if (doDebug)
-            {
-                LOG_ERROR("module.EverQuest", "{} BuildPathAndStartPointMovementToTarget path calculated with {} nodes", debugCreatureGUID, waypointPath.size());
-            }
 
             // Start Movement
             IsMovingToTargetPos = true;
@@ -318,11 +288,6 @@ public:
 
         void OnCustomPathCompleted()
         {
-            if (doDebug)
-            {
-                LOG_ERROR("module.EverQuest", "{} OnCustomPathCompleted movement type {}", debugCreatureGUID, MovementType);
-            }
-
             if (MovementType == EQ_CREATURE_MOVEMENT_CUSTOM_WAYPOINT)
             {
                 WaypointPriorTargetWaypointIndex = WaypointCurrentTargetWaypointIndex;
@@ -443,11 +408,6 @@ public:
 
         void MovementInform(uint32 type, uint32 id) override
         {
-            if (doDebug)
-            {
-                LOG_ERROR("module.EverQuest", "{} MovementInform type {} id {}", debugCreatureGUID, type, id);
-            }
-
             if (type == POINT_MOTION_TYPE && id == EQ_MOVE_RETURN_TO_AGRO_ID)
             {
                 IsReturningToAgroPosition = false;
