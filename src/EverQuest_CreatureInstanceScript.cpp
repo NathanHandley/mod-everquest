@@ -340,6 +340,11 @@ public:
             else if (MovementType == EQ_CREATURE_MOVEMENT_CUSTOM_ROAMING)
                 me->GetMotionMaster()->MovePoint(EQ_MOVE_TO_ROAM_POINT, nextPosition);
             CurrentTargetPos = nextPosition;
+
+            if (doDebug)
+            {
+                LOG_ERROR("module.EverQuest", "{} ProcessNextMovementPoint ended", debugCreatureGUID);
+            }
         }
 
         uint32 GetUniqueRandomWaypointIndex(uint32 currentIndex) const
@@ -445,6 +450,10 @@ public:
 
         void MovementInform(uint32 type, uint32 id) override
         {
+            if (doDebug)
+            {
+                LOG_ERROR("module.EverQuest", "{} MovementInform movement started type {} id {}", debugCreatureGUID, type, id);
+            }
             if (type == POINT_MOTION_TYPE)
             {
                 //if (IsDoingSmallStep == true)
@@ -458,12 +467,11 @@ public:
                 if (PathToCurrentTargetPos.empty() == false)
                 {
                     ProcessNextMovementPoint();
+                    if (doDebug)
+                    {
+                        LOG_ERROR("module.EverQuest", "{} MovementInform movement ended after running ProcessNextMovementPoint()", debugCreatureGUID);
+                    }
                     return;
-                }
-
-                if (doDebug)
-                {
-                    LOG_ERROR("module.EverQuest", "{} MovementInform movement ended", debugCreatureGUID);
                 }
 
                 IsMovingToTargetPos = false;
@@ -497,6 +505,10 @@ public:
                 {
                     me->DespawnOrUnsummon();
                 }
+            }
+            if (doDebug)
+            {
+                LOG_ERROR("module.EverQuest", "{} MovementInform movement ended at end of method - type {} id {}", debugCreatureGUID, type, id);
             }
         }
 
