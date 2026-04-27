@@ -38,6 +38,9 @@ public:
     {
         EverQuest_CreatureInstanceScriptAI(Creature* creature) : ScriptedAI(creature) {}
 
+        bool doDebug = false;
+        uint32 debugCreatureGUID = 0;
+
         // Shared Data
         uint32 MovementType = EQ_CREATURE_MOVEMENT_NO_CUSTOM;
         uint32 ActiveMovePhase = EQ_MOVE_PHASE_NONE;
@@ -68,6 +71,11 @@ public:
         void LoadCustomData()
         {
             uint32 creatureGUID = me->GetSpawnId();
+            if (creatureGUID == 356452 || creatureGUID == 356476 || creatureGUID == 356457 || creatureGUID == 356453 || creatureGUID == 356450 || creatureGUID == 356458 || creatureGUID == 356451)
+            {
+                debugCreatureGUID = creatureGUID;
+                doDebug = true;
+            }
             CreatureInstanceData = EverQuest->GetCreatureInstanceData(creatureGUID);
             CreatureWaypoints.clear();
             if (CreatureInstanceData.WaypointListID != -1)
@@ -91,7 +99,8 @@ public:
             // Handle movement types
             if (CreatureInstanceData.DoesRoam == true)
             {
-                NormalizeRoamZRange(CreatureInstanceData.RoamMinZ, CreatureInstanceData.RoamMaxZ);
+                if (CreatureInstanceData.RoamMinZ != 0 && CreatureInstanceData.RoamMaxZ != 0)
+                    NormalizeRoamZRange(CreatureInstanceData.RoamMinZ, CreatureInstanceData.RoamMaxZ);
                 MovementType = EQ_CREATURE_MOVEMENT_CUSTOM_ROAMING;
             }
             else if (CreatureWaypoints.empty() == true)
@@ -163,6 +172,11 @@ public:
 
         float GetEffectiveDestinationZ(float x, float y, float referenceZ, bool& foundValidZ, float minZ = 0, float maxZ = 0)
         {
+            if (doDebug)
+            {
+                LOG_ERROR("module.EverQuest", "{} GetEffectiveDestinationZ method entry - x y referenceZ : minZ maxZ {} {} {} : {} {}", debugCreatureGUID, x, y, referenceZ, minZ, maxZ);
+            }
+
             foundValidZ = false;
             float floorZ = -20001;
             if (minZ != 0 && maxZ != 0)
@@ -177,10 +191,21 @@ public:
                 {
                     targetTestZ = referenceZ + (floorLoopNum * 5.0f);
                     floorZ = me->GetMapHeight(x, y, targetTestZ, true, (floorLoopNum * 10.0f));
+
+                    if (doDebug)
+                    {
+                        LOG_ERROR("module.EverQuest", "GetEffectiveDestinationZ {} find Z test {}, floorZ {}, loop {}", debugCreatureGUID, targetTestZ, floorZ, floorLoopNum);
+                    }
+
                     floorLoopNum++;
                     if (floorLoopNum >= 5)
                         break;
                 }
+            }
+
+            if (doDebug)
+            {
+                LOG_ERROR("module.EverQuest", "GetEffectiveDestinationZ {} floorZ {}", debugCreatureGUID, floorZ);
             }
 
             if (floorZ < -20000)
@@ -188,24 +213,46 @@ public:
                 LiquidData targetLiquidDataBelow = me->GetMap()->GetLiquidData(me->GetPhaseMask(), x, y, referenceZ - 10.0f, 0, {});
                 if (targetLiquidDataBelow.Status)
                 {
+                    if (doDebug)
+                    {
+                        LOG_ERROR("module.EverQuest", "GetEffectiveDestinationZ (end) {} was in liquid at z {} ({})", debugCreatureGUID, floorZ, referenceZ-5.0f);
+                    }
                     foundValidZ = true;
                     return referenceZ - 5.0f;
                 }
                 else
+                {
+                    if (doDebug)
+                    {
+                        LOG_ERROR("module.EverQuest", "GetEffectiveDestinationZ (end) {} was not in liquid at z {} ({})", debugCreatureGUID, floorZ, referenceZ);
+                    }
                     return referenceZ;
+                }
             }
             else
             {
                 foundValidZ = true;
                 if (me->isSwimming())
                 {
+
+
                     LiquidData targetLiquidDataAtRef = me->GetMap()->GetLiquidData(me->GetPhaseMask(), x, y, referenceZ, 0, {});
                     if (targetLiquidDataAtRef.Status)
                     {
                         if (floorZ > targetLiquidDataAtRef.DepthLevel)
+                        {
+                            if (doDebug)
+                            {
+                                LOG_ERROR("module.EverQuest", "GetEffectiveDestinationZ (end) {} was swimming and floorZ was > DepthLevel ({})", debugCreatureGUID, floorZ);
+                            }
                             return floorZ;
+                        }
                     }
                     return referenceZ;
+                }
+                if (doDebug)
+                {
+                    LOG_ERROR("module.EverQuest", "GetEffectiveDestinationZ (end) {} was not swimming ({})", debugCreatureGUID, floorZ);
                 }
                 return floorZ;
             }
@@ -242,6 +289,11 @@ public:
 
         bool BuildPathAndStartPointMovementToTarget(float initialTargetX, float initialTargetY, float initialTargetZ, uint32 moveType, bool run = false)
         {
+            if (doDebug)
+            {
+                LOG_ERROR("module.EverQuest", "{} BuildPathAndStartPointMovementToTarget start", debugCreatureGUID);
+            }
+
             // Snap the target Z
             bool foundValidZ = false;
             float terrainSnappedTargetZ = GetEffectiveDestinationZ(initialTargetX, initialTargetY, initialTargetZ, foundValidZ, CreatureInstanceData.RoamMinZ,
@@ -251,11 +303,22 @@ public:
             bool pathFound = (result == true && path.GetPathType() != PATHFIND_NOPATH);
             float pathLength = path.getPathLength();
             if (foundValidZ == false || (pathFound == false && pathLength <= 0.1f))
+            {
+                if (doDebug)
+                {
+                    LOG_ERROR("module.EverQuest", "{} BuildPathAndStartPointMovementToTarget had invalid path", debugCreatureGUID);
+                }
                 return false;
+            }
 
             // Build the full waypoint list, and put current creature position up front
             Movement::PointsArray waypointPath;
             waypointPath.emplace_back(me->GetPositionX(), me->GetPositionY(), me->GetPositionZ());
+
+            if (doDebug)
+            {
+                LOG_ERROR("module.EverQuest", "{} BuildPathAndStartPointMovementToTarget first position calculated to {} {} {} {}", debugCreatureGUID, me->GetPositionX(), me->GetPositionY(), me->GetPositionZ(), foundValidZ);
+            }
 
             // Break up straight longer paths
             if (pathLength >= EQ_MOVE_SMALL_STEP_SIZE_LAST_DISTANCE)
@@ -271,6 +334,12 @@ public:
                     float interimY = previousPosition.GetPositionY() + uy * EQ_MOVE_SMALL_STEP_SIZE_DISTANCE;
                     float interimZ = previousPosition.GetPositionZ() + uz * EQ_MOVE_SMALL_STEP_SIZE_DISTANCE;
                     interimZ = GetEffectiveDestinationZ(interimX, interimY, interimZ, foundValidZ, CreatureInstanceData.RoamMinZ, CreatureInstanceData.RoamMaxZ);
+
+                    if (doDebug)
+                    {
+                        LOG_ERROR("module.EverQuest", "{} BuildPathAndStartPointMovementToTarget small step calculated to {} {} {} {}", debugCreatureGUID, interimX, interimY, interimZ, foundValidZ);
+                    }
+                    
                     waypointPath.emplace_back(interimX, interimY, interimZ);
                     previousPosition = Position(interimX, interimY, interimZ);
                     remainingDistance -= EQ_MOVE_SMALL_STEP_SIZE_DISTANCE;
@@ -283,6 +352,12 @@ public:
             {
                 Position newTargetPosition(initialTargetX, initialTargetY, terrainSnappedTargetZ);
                 WaypointAndRoamTargetTravelPosition = newTargetPosition;
+            }
+
+            if (doDebug)
+            {
+                LOG_ERROR("module.EverQuest", "{} BuildPathAndStartPointMovementToTarget last position calculated to {} {} {}", debugCreatureGUID, initialTargetX, initialTargetY, terrainSnappedTargetZ);
+                LOG_ERROR("module.EverQuest", "{} BuildPathAndStartPointMovementToTarget path calculated with {} nodes", debugCreatureGUID, waypointPath.size());
             }
 
             // Start Movement
@@ -420,9 +495,8 @@ public:
 
         void MovementInform(uint32 type, uint32 id) override
         {
-            if (type == POINT_MOTION_TYPE && id == EQ_MOVE_RETURN_TO_AGRO_ID)
-                PerformMovementToNewPoint();
-
+            //if (type == POINT_MOTION_TYPE && id == EQ_MOVE_RETURN_TO_AGRO_ID)
+            //    PerformMovementToNewPoint();
             if (type == WAYPOINT_MOTION_TYPE)
             {
                 if (CreatureInstanceData.DespawnAtWaypointNum != -1 && id == static_cast<uint32>(CreatureInstanceData.DespawnAtWaypointNum))
