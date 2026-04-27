@@ -96,6 +96,12 @@ using namespace std;
 #define EQ_MOVE_SMALL_STEP_SIZE_LAST_DISTANCE       15.0f    // How much minimium distance to allow on the last node
 #define EQ_MOVE_SMALL_STEP_DISTANCE_TO_END          0.1f     // If within this distance, end movement to current node
 
+#define EQ_MOVE_PHASE_NONE                          0
+#define EQ_MOVE_PHASE_TRAVELING                     1
+#define EQ_MOVE_PHASE_WAITING_FOR_TIMER             2
+#define EQ_MOVE_PHASE_AGRO                          3
+#define EQ_MOVE_PHASE_RETURNING_FROM_AGRO           4
+
 class EverQuestCreatureOnkillReputation
 {
 public:

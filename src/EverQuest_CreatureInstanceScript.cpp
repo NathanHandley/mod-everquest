@@ -40,8 +40,9 @@ public:
 
         // Shared Data
         uint32 MovementType = EQ_CREATURE_MOVEMENT_NO_CUSTOM;
+        uint32 ActiveMovePhase = EQ_MOVE_PHASE_NONE;
         EverQuestCreatureInstance CreatureInstanceData;
-        bool IsMovingToTargetPos = false;
+        Position WaypointAndRoamTargetTravelPosition;
 
         // Waypoint
         vector<EverQuestCreatureWaypoint> CreatureWaypoints;
@@ -52,7 +53,10 @@ public:
 
         // Agro
         Position LastAgroPosition;
-        bool IsReturningToAgroPosition = false;
+        uint32 PreAgroCurrentTargetIdx = 0;
+        uint32 PreAgroPriorTargetIdx = 0;
+        uint32 PreAgroFinalTargetIdx = 0;
+        Position PreAgroTravelPosition;
 
         // Events
         enum Events
@@ -76,12 +80,11 @@ public:
 
             events.Reset();
 
-            IsMovingToTargetPos = false;
+            ActiveMovePhase = EQ_MOVE_PHASE_NONE;
             WaypointPriorTargetWaypointIndex = 0;
             WaypointCurrentTargetWaypointIndex = 0;
             WaypointRandomPathFinalTargetIndex = 0;
-            IsReturningToAgroPosition = false;
-            
+
             me->SetWalk(false);
             me->SetUnitMovementFlags(MOVEMENTFLAG_WALKING);
 
@@ -237,7 +240,7 @@ public:
             WaypointPriorTargetWaypointIndex = nearestIndex;
         }
 
-        bool BuildPathAndStartPointMovementToTarget(float initialTargetX, float initialTargetY, float initialTargetZ)
+        bool BuildPathAndStartPointMovementToTarget(float initialTargetX, float initialTargetY, float initialTargetZ, uint32 moveType, bool run = false)
         {
             // Snap the target Z
             bool foundValidZ = false;
@@ -276,12 +279,20 @@ public:
 
             // Add the last position
             waypointPath.emplace_back(initialTargetX, initialTargetY, terrainSnappedTargetZ);
+            if (moveType == EQ_MOVE_PHASE_TRAVELING)
+            {
+                Position newTargetPosition(initialTargetX, initialTargetY, terrainSnappedTargetZ);
+                WaypointAndRoamTargetTravelPosition = newTargetPosition;
+            }
 
             // Start Movement
-            IsMovingToTargetPos = true;
-            me->SetUnitMovementFlags(MOVEMENTFLAG_WALKING);
+            if (run)
+                me->RemoveUnitMovementFlag(MOVEMENTFLAG_WALKING);
+            else
+                me->SetUnitMovementFlags(MOVEMENTFLAG_WALKING);
             me->GetMotionMaster()->Clear(false);
-            me->GetMotionMaster()->MoveSplinePath(&waypointPath, FORCED_MOVEMENT_WALK);
+            me->GetMotionMaster()->MoveSplinePath(&waypointPath, run ? FORCED_MOVEMENT_RUN : FORCED_MOVEMENT_WALK);
+            ActiveMovePhase = moveType;
 
             return true;
         }
@@ -342,14 +353,14 @@ public:
         {
             WaypointCurrentTargetWaypointIndex = GetUniqueRandomWaypointIndexFromRandom10(WaypointCurrentTargetWaypointIndex);
             const EverQuestCreatureWaypoint& wp = CreatureWaypoints[WaypointCurrentTargetWaypointIndex];
-            BuildPathAndStartPointMovementToTarget(wp.X, wp.Y, wp.Z);
+            BuildPathAndStartPointMovementToTarget(wp.X, wp.Y, wp.Z, EQ_MOVE_PHASE_TRAVELING);
         }
 
         void PerformWaypointMovementForRandomAny()
         {
             WaypointCurrentTargetWaypointIndex = GetUniqueRandomWaypointIndex(WaypointCurrentTargetWaypointIndex);
             const EverQuestCreatureWaypoint& wp = CreatureWaypoints[WaypointCurrentTargetWaypointIndex];
-            BuildPathAndStartPointMovementToTarget(wp.X, wp.Y, wp.Z);
+            BuildPathAndStartPointMovementToTarget(wp.X, wp.Y, wp.Z, EQ_MOVE_PHASE_TRAVELING);
         }
 
         void PerformWaypointMovementForRandomPath()
@@ -364,7 +375,7 @@ public:
                 WaypointCurrentTargetWaypointIndex = WaypointPriorTargetWaypointIndex - 1;
 
             const EverQuestCreatureWaypoint& wp = CreatureWaypoints[WaypointCurrentTargetWaypointIndex];
-            BuildPathAndStartPointMovementToTarget(wp.X, wp.Y, wp.Z);
+            BuildPathAndStartPointMovementToTarget(wp.X, wp.Y, wp.Z, EQ_MOVE_PHASE_TRAVELING);
         }
 
         uint32 FindNearestWaypointIndex() const
@@ -397,11 +408,12 @@ public:
             float z = GetEffectiveDestinationZ(x, y, referenceZ, isValidPoint, CreatureInstanceData.RoamMinZ, CreatureInstanceData.RoamMaxZ);
 
             if (isValidPoint)
-                isValidPoint = BuildPathAndStartPointMovementToTarget(x, y, z);
+                isValidPoint = BuildPathAndStartPointMovementToTarget(x, y, z, EQ_MOVE_PHASE_TRAVELING);
 
             if (isValidPoint == false)
             {
                 events.ScheduleEvent(EVENT_PAUSE_DONE, 100ms);
+                ActiveMovePhase = EQ_MOVE_PHASE_WAITING_FOR_TIMER;
                 return;
             }
         }
@@ -409,10 +421,7 @@ public:
         void MovementInform(uint32 type, uint32 id) override
         {
             if (type == POINT_MOTION_TYPE && id == EQ_MOVE_RETURN_TO_AGRO_ID)
-            {
-                IsReturningToAgroPosition = false;
                 PerformMovementToNewPoint();
-            }
 
             if (type == WAYPOINT_MOTION_TYPE)
             {
@@ -431,11 +440,14 @@ public:
                     PerformMovementToNewPoint();
             }
 
-            // Detect when the spline path movement has completed naturally
-            if (IsMovingToTargetPos == true && !me->GetMotionMaster()->HasMovementGeneratorType(ESCORT_MOTION_TYPE))
+            // Handle spline ends
+            if (me->GetMotionMaster()->HasMovementGeneratorType(ESCORT_MOTION_TYPE) == false)
             {
-                IsMovingToTargetPos = false;
-                OnCustomPathCompleted();
+                if (ActiveMovePhase == EQ_MOVE_PHASE_TRAVELING)
+                    OnCustomPathCompleted();
+                else if (ActiveMovePhase == EQ_MOVE_PHASE_RETURNING_FROM_AGRO)
+                    BuildPathAndStartPointMovementToTarget(WaypointAndRoamTargetTravelPosition.GetPositionX(),
+                        WaypointAndRoamTargetTravelPosition.GetPositionY(), WaypointAndRoamTargetTravelPosition.GetPositionZ(), EQ_MOVE_PHASE_TRAVELING);
             }
 
             if (!UpdateVictim())
@@ -446,13 +458,19 @@ public:
 
         void JustEngagedWith(Unit* /*who*/) override
         {
-            events.CancelEvent(EVENT_PAUSE_DONE); // TODO: Handle agro so that it doesn't also call UpdateAI?
+            events.CancelEvent(EVENT_PAUSE_DONE);
             if (MovementType == EQ_CREATURE_MOVEMENT_NO_CUSTOM)
                 return;
+
+            // Snapshot the full waypoint state so EnterEvadeMode can restore it after since Reset() overwrites everything
+            PreAgroCurrentTargetIdx = WaypointCurrentTargetWaypointIndex;
+            PreAgroPriorTargetIdx = WaypointPriorTargetWaypointIndex;
+            PreAgroFinalTargetIdx = WaypointRandomPathFinalTargetIndex;
+            PreAgroTravelPosition = WaypointAndRoamTargetTravelPosition;
+
             LastAgroPosition = me->GetPosition();
-            IsReturningToAgroPosition = false;
-            IsMovingToTargetPos = false;
             me->GetMotionMaster()->Clear(false);
+            ActiveMovePhase = EQ_MOVE_PHASE_AGRO;
         }
 
         void EnterEvadeMode(EvadeReason why) override
@@ -461,13 +479,16 @@ public:
             if (MovementType == EQ_CREATURE_MOVEMENT_NO_CUSTOM)
                 return;
 
-            me->SetUnitMovementFlags(MOVEMENTFLAG_WALKING);
+            // Restore any prior states
+            WaypointCurrentTargetWaypointIndex = PreAgroCurrentTargetIdx;
+            WaypointPriorTargetWaypointIndex = PreAgroPriorTargetIdx;
+            WaypointRandomPathFinalTargetIndex = PreAgroFinalTargetIdx;
+            WaypointAndRoamTargetTravelPosition = PreAgroTravelPosition;
 
             float x = LastAgroPosition.GetPositionX();
             float y = LastAgroPosition.GetPositionY();
             float z = LastAgroPosition.GetPositionZ();
-            me->GetMotionMaster()->MovePoint(EQ_MOVE_RETURN_TO_AGRO_ID, x, y, z);
-            IsReturningToAgroPosition = true;
+            BuildPathAndStartPointMovementToTarget(x, y, z, EQ_MOVE_PHASE_RETURNING_FROM_AGRO, true);
         }
     };
 
