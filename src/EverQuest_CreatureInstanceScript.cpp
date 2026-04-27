@@ -71,7 +71,7 @@ public:
         void LoadCustomData()
         {
             uint32 creatureGUID = me->GetSpawnId();
-            if (creatureGUID == 356452 || creatureGUID == 356476 || creatureGUID == 356457 || creatureGUID == 356453 || creatureGUID == 356450 || creatureGUID == 356458 || creatureGUID == 356451)
+            if (/*creatureGUID == 356451 && */me->GetMapId() == 830)
             {
                 debugCreatureGUID = creatureGUID;
                 doDebug = true;
@@ -361,7 +361,7 @@ public:
             }
 
             // Start Movement
-            if (run)
+            if (run == true)
                 me->RemoveUnitMovementFlag(MOVEMENTFLAG_WALKING);
             else
                 me->SetUnitMovementFlags(MOVEMENTFLAG_WALKING);
@@ -376,6 +376,7 @@ public:
         {
             if (MovementType == EQ_CREATURE_MOVEMENT_CUSTOM_WAYPOINT)
             {
+                ActiveMovePhase = EQ_MOVE_PHASE_NONE;
                 WaypointPriorTargetWaypointIndex = WaypointCurrentTargetWaypointIndex;
                 const EverQuestCreatureWaypoint& wp = CreatureWaypoints[WaypointPriorTargetWaypointIndex];
                 if (wp.PauseInSec > 0)
@@ -385,6 +386,7 @@ public:
             }
             else if (MovementType == EQ_CREATURE_MOVEMENT_CUSTOM_ROAMING)
             {
+                ActiveMovePhase = EQ_MOVE_PHASE_NONE;
                 uint32 delay = urand(CreatureInstanceData.RoamMinDelayInMS, CreatureInstanceData.RoamMaxDelayInMS);
                 if (delay > 0)
                     events.ScheduleEvent(EVENT_PAUSE_DONE, Milliseconds(delay));
@@ -482,7 +484,7 @@ public:
             bool isValidPoint = false;
             float z = GetEffectiveDestinationZ(x, y, referenceZ, isValidPoint, CreatureInstanceData.RoamMinZ, CreatureInstanceData.RoamMaxZ);
 
-            if (isValidPoint)
+            if (isValidPoint == true)
                 isValidPoint = BuildPathAndStartPointMovementToTarget(x, y, z, EQ_MOVE_PHASE_TRAVELING);
 
             if (isValidPoint == false)
@@ -495,8 +497,6 @@ public:
 
         void MovementInform(uint32 type, uint32 id) override
         {
-            //if (type == POINT_MOTION_TYPE && id == EQ_MOVE_RETURN_TO_AGRO_ID)
-            //    PerformMovementToNewPoint();
             if (type == WAYPOINT_MOTION_TYPE)
             {
                 if (CreatureInstanceData.DespawnAtWaypointNum != -1 && id == static_cast<uint32>(CreatureInstanceData.DespawnAtWaypointNum))
@@ -507,7 +507,6 @@ public:
         void UpdateAI(uint32 diff) override
         {
             events.Update(diff);
-
             while (uint32 eventId = events.ExecuteEvent())
             {
                 if (eventId == EVENT_PAUSE_DONE)
