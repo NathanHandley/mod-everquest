@@ -92,9 +92,9 @@ using namespace std;
 #define EQ_MOVE_TO_ROAM_POINT                       20001
 #define EQ_MOVE_TO_WAYPOINT_POINT                   20002
 
-#define EQ_MOVE_SMALL_STEP_SIZE_DISTANCE            10.0f    // Minimum distance between nodes when making small steps
-#define EQ_MOVE_SMALL_STEP_SIZE_LAST_DISTANCE       15.0f    // How much minimium distance to allow on the last node
-#define EQ_MOVE_SMALL_STEP_DISTANCE_TO_END          0.1f     // If within this distance, end movement to current node
+#define EQ_MOVE_SMALL_STEP_SIZE_DISTANCE            5.0f    // Minimum distance between nodes when making small steps
+#define EQ_MOVE_SMALL_STEP_SIZE_LAST_DISTANCE       10.0f   // How much minimium distance to allow on the last node
+#define EQ_MOVE_SMALL_STEP_DISTANCE_TO_END          0.25f    // If within this distance, end movement to current node
 
 #define EQ_MOVE_PHASE_NONE                          0
 #define EQ_MOVE_PHASE_TRAVELING                     1

@@ -71,7 +71,7 @@ public:
         void LoadCustomData()
         {
             uint32 creatureGUID = me->GetSpawnId();
-            if (/*creatureGUID == 356451 && */me->GetMapId() == 830)
+            if (/*creatureGUID == 356451 && */me->GetMapId() == 760)
             {
                 debugCreatureGUID = creatureGUID;
                 doDebug = true;
@@ -146,14 +146,14 @@ public:
                 } break;
                 case EQ_GRID_RANDOM_PATH:
                 {
-                    PerformWaypointMovementForRandomAny();
+                    PerformWaypointMovementForRandomPath();
                 } break;
                 case EQ_GRID_RANDOM:
                 case EQ_GRID_RAND_5_LOS:
                 case EQ_GRID_RANDOM_CENTER_POINT:
                 default:
                 {
-                    PerformWaypointMovementForRandomPath();
+                    PerformWaypointMovementForRandomAny();
                 } break;
                 }
             }
