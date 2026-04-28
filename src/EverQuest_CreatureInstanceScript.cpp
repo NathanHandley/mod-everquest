@@ -189,8 +189,8 @@ public:
                 int floorLoopNum = 0;
                 while (floorZ < -20000)
                 {
-                    targetTestZ = referenceZ + (floorLoopNum * 5.0f);
-                    floorZ = me->GetMapHeight(x, y, targetTestZ, true, (floorLoopNum * 10.0f));
+                    targetTestZ = referenceZ + (floorLoopNum * 10.0f);
+                    floorZ = me->GetMapHeight(x, y, targetTestZ, true, (floorLoopNum * 40.0f));
 
                     if (doDebug)
                     {
@@ -328,12 +328,16 @@ public:
                 float ux = (initialTargetX - me->GetPositionX()) / pathLength;
                 float uy = (initialTargetY - me->GetPositionY()) / pathLength;
                 float uz = (terrainSnappedTargetZ - me->GetPositionZ()) / pathLength;
+                float priorInterimZ = -100001;
                 while (remainingDistance > EQ_MOVE_SMALL_STEP_SIZE_LAST_DISTANCE)
                 {
                     float interimX = previousPosition.GetPositionX() + ux * EQ_MOVE_SMALL_STEP_SIZE_DISTANCE;
                     float interimY = previousPosition.GetPositionY() + uy * EQ_MOVE_SMALL_STEP_SIZE_DISTANCE;
                     float interimZ = previousPosition.GetPositionZ() + uz * EQ_MOVE_SMALL_STEP_SIZE_DISTANCE;
-                    interimZ = GetEffectiveDestinationZ(interimX, interimY, interimZ, foundValidZ, CreatureInstanceData.RoamMinZ, CreatureInstanceData.RoamMaxZ);
+                    if (priorInterimZ < -100000)
+                        priorInterimZ = interimZ;
+                    interimZ = GetEffectiveDestinationZ(interimX, interimY, priorInterimZ, foundValidZ, CreatureInstanceData.RoamMinZ, CreatureInstanceData.RoamMaxZ);
+                    priorInterimZ = interimZ;
 
                     if (doDebug)
                     {
