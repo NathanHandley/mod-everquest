@@ -71,11 +71,11 @@ public:
         void LoadCustomData()
         {
             uint32 creatureGUID = me->GetSpawnId();
-            if (/*creatureGUID == 356451 && */me->GetMapId() == 760)
-            {
-                debugCreatureGUID = creatureGUID;
-                doDebug = true;
-            }
+            //if (/*creatureGUID == 356451 && */me->GetMapId() == 760)
+            //{
+            //    debugCreatureGUID = creatureGUID;
+            //    doDebug = true;
+            //}
             CreatureInstanceData = EverQuest->GetCreatureInstanceData(creatureGUID);
             CreatureWaypoints.clear();
             if (CreatureInstanceData.WaypointListID != -1)
@@ -170,91 +170,116 @@ public:
             }
         }
 
-        float GetEffectiveDestinationZ(float x, float y, float referenceZ, bool& foundValidZ, float minZ = 0, float maxZ = 0)
+        float GetEffectiveDestinationZ(float priorX, float priorY, float priorZ, float initialTargetX, float initialTargetY, float initialTargetZ,
+            bool& foundValidZ, float minZ = 0, float maxZ = 0)
         {
             if (doDebug)
             {
-                LOG_ERROR("module.EverQuest", "{} GetEffectiveDestinationZ method entry - x y referenceZ : minZ maxZ {} {} {} : {} {}", debugCreatureGUID, x, y, referenceZ, minZ, maxZ);
+                LOG_ERROR("module.EverQuest", "{} GetEffectiveDestinationZ method entry - initialTargetX initialTargetY initialTargetZ : minZ maxZ {} {} {} : {} {}", debugCreatureGUID, initialTargetX, initialTargetY, initialTargetZ, minZ, maxZ);
             }
 
             foundValidZ = false;
-            float floorZ = -20001;
+
+            // Calculate a solid floor
+            float solidFloorZ = -20001;
             if (minZ != 0 && maxZ != 0)
             {
-                floorZ = me->GetMapHeight(x, y, referenceZ, true, maxZ - minZ);
+                solidFloorZ = me->GetMapHeight(initialTargetX, initialTargetY, maxZ, true, maxZ - minZ);
             }
             else
             {
-                float targetTestZ = referenceZ;
+                float targetTestZ = initialTargetZ;
                 int floorLoopNum = 0;
-                while (floorZ < -20000)
+                float curAddedZStep = 0;
+                while (solidFloorZ < -20000)
                 {
-                    targetTestZ = referenceZ + (floorLoopNum * 10.0f);
-                    floorZ = me->GetMapHeight(x, y, targetTestZ, true, (floorLoopNum * 40.0f));
+                    targetTestZ = initialTargetZ + (floorLoopNum * curAddedZStep);
+                    curAddedZStep += 1.0f;
+                    solidFloorZ = me->GetMapHeight(initialTargetX, initialTargetY, targetTestZ, true, (floorLoopNum * 20.0f));
 
                     if (doDebug)
                     {
-                        LOG_ERROR("module.EverQuest", "GetEffectiveDestinationZ {} find Z test {}, floorZ {}, loop {}", debugCreatureGUID, targetTestZ, floorZ, floorLoopNum);
+                        LOG_ERROR("module.EverQuest", "GetEffectiveDestinationZ {} find Z test {}, solidFloorZ {}, loop {}", debugCreatureGUID, targetTestZ, solidFloorZ, floorLoopNum);
                     }
 
                     floorLoopNum++;
-                    if (floorLoopNum >= 5)
+                    if (floorLoopNum >= 10)
                         break;
                 }
             }
-
             if (doDebug)
             {
-                LOG_ERROR("module.EverQuest", "GetEffectiveDestinationZ {} floorZ {}", debugCreatureGUID, floorZ);
+                LOG_ERROR("module.EverQuest", "GetEffectiveDestinationZ {} solidFloorZ {}", debugCreatureGUID, solidFloorZ);
             }
 
-            if (floorZ < -20000)
+            // Prior point might be in water
+            bool isPriorPointInWater = false;
+            if (priorX != 0 && priorY != 0 && priorZ != 0)
             {
-                LiquidData targetLiquidDataBelow = me->GetMap()->GetLiquidData(me->GetPhaseMask(), x, y, referenceZ - 10.0f, 0, {});
+                LiquidData priorLiquidDataBelow = me->GetMap()->GetLiquidData(me->GetPhaseMask(), priorX, priorY, priorZ, 0, {});
+                if (priorLiquidDataBelow.Status)
+                {
+                    if (doDebug)
+                    {
+                        LOG_ERROR("module.EverQuest", "GetEffectiveDestinationZ {} prior position was in liquid ({} {} {})", debugCreatureGUID, priorX, priorY, priorZ);
+                    }
+                    isPriorPointInWater = true;
+                }
+            }
+
+            if (solidFloorZ < -20000)
+            {
+                // No solid floor means it's out of bounds or over a large body of water, so first test if it's a body of water
+                LiquidData targetLiquidDataBelow = me->GetMap()->GetLiquidData(me->GetPhaseMask(), initialTargetX, initialTargetY, initialTargetZ - EQ_MOVE_TEST_Z_DOWN_AMOUNT_FOR_WATER_TEST, 0, {});
                 if (targetLiquidDataBelow.Status)
                 {
                     if (doDebug)
                     {
-                        LOG_ERROR("module.EverQuest", "GetEffectiveDestinationZ (end) {} was in liquid at z {} ({})", debugCreatureGUID, floorZ, referenceZ-5.0f);
+                        LOG_ERROR("module.EverQuest", "GetEffectiveDestinationZ (end) {} was in liquid at z {} ({})", debugCreatureGUID, solidFloorZ, initialTargetZ - EQ_MOVE_TEST_Z_DOWN_AMOUNT_FOR_WATER_TEST);
                     }
                     foundValidZ = true;
-                    return referenceZ - 5.0f;
+                    if (isPriorPointInWater == true && priorZ <= (targetLiquidDataBelow.Level - EQ_MOVE_UNDER_WATER_SURFACE_SKIM_REDICTION))
+                        return priorZ;
+                    else
+                        return targetLiquidDataBelow.Level - EQ_MOVE_UNDER_WATER_SURFACE_SKIM_REDICTION;
                 }
                 else
                 {
                     if (doDebug)
                     {
-                        LOG_ERROR("module.EverQuest", "GetEffectiveDestinationZ (end) {} was not in liquid at z {} ({})", debugCreatureGUID, floorZ, referenceZ);
+                        LOG_ERROR("module.EverQuest", "GetEffectiveDestinationZ (end) {} was not in liquid at z {} ({})", debugCreatureGUID, solidFloorZ, initialTargetZ);
                     }
-                    return referenceZ;
+                    return initialTargetZ;
                 }
             }
             else
             {
                 foundValidZ = true;
-                if (me->isSwimming())
+                if (isPriorPointInWater == true)
                 {
-
-
-                    LiquidData targetLiquidDataAtRef = me->GetMap()->GetLiquidData(me->GetPhaseMask(), x, y, referenceZ, 0, {});
+                    LiquidData targetLiquidDataAtRef = me->GetMap()->GetLiquidData(me->GetPhaseMask(), initialTargetX, initialTargetY, initialTargetZ, 0, {});
                     if (targetLiquidDataAtRef.Status)
                     {
-                        if (floorZ > targetLiquidDataAtRef.DepthLevel)
+                        float skimLevel = targetLiquidDataAtRef.Level - EQ_MOVE_UNDER_WATER_SURFACE_SKIM_REDICTION;
+                        if (solidFloorZ > priorZ || solidFloorZ > skimLevel)
                         {
                             if (doDebug)
                             {
-                                LOG_ERROR("module.EverQuest", "GetEffectiveDestinationZ (end) {} was swimming and floorZ was > DepthLevel ({})", debugCreatureGUID, floorZ);
+                                LOG_ERROR("module.EverQuest", "GetEffectiveDestinationZ (end) {} was swimming and solidFloorZ ({}) was > priorZ ({})", debugCreatureGUID, solidFloorZ, priorZ);
                             }
-                            return floorZ;
+                            return solidFloorZ;
                         }
+                        else if (priorZ > skimLevel)
+                            return skimLevel;
+                        else
+                            return priorZ;
                     }
-                    return referenceZ;
                 }
                 if (doDebug)
                 {
-                    LOG_ERROR("module.EverQuest", "GetEffectiveDestinationZ (end) {} was not swimming ({})", debugCreatureGUID, floorZ);
+                    LOG_ERROR("module.EverQuest", "GetEffectiveDestinationZ (end) {} was not swimming ({})", debugCreatureGUID, solidFloorZ);
                 }
-                return floorZ;
+                return solidFloorZ;
             }
         }
 
@@ -296,7 +321,7 @@ public:
 
             // Snap the target Z
             bool foundValidZ = false;
-            float terrainSnappedTargetZ = GetEffectiveDestinationZ(initialTargetX, initialTargetY, initialTargetZ, foundValidZ, CreatureInstanceData.RoamMinZ,
+            float terrainSnappedTargetZ = GetEffectiveDestinationZ(0, 0, 0, initialTargetX, initialTargetY, initialTargetZ, foundValidZ, CreatureInstanceData.RoamMinZ,
                 CreatureInstanceData.RoamMaxZ);
             PathGenerator path(me);
             bool result = path.CalculatePath(initialTargetX, initialTargetY, initialTargetZ, false);
@@ -336,7 +361,8 @@ public:
                     float interimZ = previousPosition.GetPositionZ() + uz * EQ_MOVE_SMALL_STEP_SIZE_DISTANCE;
                     if (priorInterimZ < -100000)
                         priorInterimZ = interimZ;
-                    interimZ = GetEffectiveDestinationZ(interimX, interimY, priorInterimZ, foundValidZ, CreatureInstanceData.RoamMinZ, CreatureInstanceData.RoamMaxZ);
+                    interimZ = GetEffectiveDestinationZ(previousPosition.GetPositionX(), previousPosition.GetPositionY(), previousPosition.GetPositionZ(),
+                        interimX, interimY, priorInterimZ, foundValidZ, CreatureInstanceData.RoamMinZ, CreatureInstanceData.RoamMaxZ);
                     priorInterimZ = interimZ;
 
                     if (doDebug)
@@ -486,7 +512,7 @@ public:
             float referenceZ = me->GetPositionZ();
 
             bool isValidPoint = false;
-            float z = GetEffectiveDestinationZ(x, y, referenceZ, isValidPoint, CreatureInstanceData.RoamMinZ, CreatureInstanceData.RoamMaxZ);
+            float z = GetEffectiveDestinationZ(me->GetPositionX(), me->GetPositionY(), me->GetPositionZ(), x, y, referenceZ, isValidPoint, CreatureInstanceData.RoamMinZ, CreatureInstanceData.RoamMaxZ);
 
             if (isValidPoint == true)
                 isValidPoint = BuildPathAndStartPointMovementToTarget(x, y, z, EQ_MOVE_PHASE_TRAVELING);
