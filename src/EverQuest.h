@@ -104,6 +104,8 @@ using namespace std;
 #define EQ_MOVE_PHASE_AGRO                          3
 #define EQ_MOVE_PHASE_RETURNING_FROM_AGRO           4
 
+#define EQ_MOVE_PATH_MAX_RETRY_COUNT                10
+
 class EverQuestCreatureOnkillReputation
 {
 public:

@@ -43,6 +43,7 @@ public:
         uint32 ActiveMovePhase = EQ_MOVE_PHASE_NONE;
         EverQuestCreatureInstance CreatureInstanceData;
         Position WaypointAndRoamTargetTravelPosition;
+        uint32 PathRetryCount = 0;
 
         // Waypoint
         vector<EverQuestCreatureWaypoint> CreatureWaypoints;
@@ -265,62 +266,138 @@ public:
 
         bool BuildPathAndStartPointMovementToTarget(float initialTargetX, float initialTargetY, float initialTargetZ, uint32 moveType, bool run = false)
         {
-            // Snap the target Z
             bool foundValidZ = false;
-            float terrainSnappedTargetZ = GetEffectiveDestinationZ(0, 0, 0, initialTargetX, initialTargetY, initialTargetZ, foundValidZ, CreatureInstanceData.RoamMinZ,
-                CreatureInstanceData.RoamMaxZ);
+            float terrainSnappedTargetZ = GetEffectiveDestinationZ(0, 0, 0, initialTargetX, initialTargetY, initialTargetZ, foundValidZ,
+                CreatureInstanceData.RoamMinZ, CreatureInstanceData.RoamMaxZ);
+
+            // Generate a base path to make sure it exists
             PathGenerator path(me);
             bool result = path.CalculatePath(initialTargetX, initialTargetY, initialTargetZ, false);
-            bool pathFound = (result == true && path.GetPathType() != PATHFIND_NOPATH);
-            float pathLength = path.getPathLength();
-            if (foundValidZ == false || (pathFound == false && pathLength <= 0.1f))
+            PathType pathType = path.GetPathType();
+            bool pathFound = ((result == true) && ((pathType & PATHFIND_NOPATH) == 0));
+            Movement::PointsArray fallbackPath;
+            const Movement::PointsArray* pathNodesPtr = &path.GetPath();
+
+            // If there is no single spline-based path, it was probably too long so break it into parts
+            if (pathFound == false)
+            {
+                float distToTarget = me->GetExactDist(initialTargetX, initialTargetY, terrainSnappedTargetZ);
+                if (distToTarget > 30.0f)
+                {
+                    const float MAX_SAFE_SEGMENT = 220.0f;
+
+                    Position current = me->GetPosition();
+                    float dx = initialTargetX - current.GetPositionX();
+                    float dy = initialTargetY - current.GetPositionY();
+                    float dz = terrainSnappedTargetZ - current.GetPositionZ();
+                    float dist = std::sqrt(dx * dx + dy * dy + dz * dz);
+
+                    if (dist > 5.0f)
+                    {
+                        float ratio = std::min(1.0f, MAX_SAFE_SEGMENT / dist);
+                        float interX = current.GetPositionX() + dx * ratio;
+                        float interY = current.GetPositionY() + dy * ratio;
+                        float interZ = current.GetPositionZ() + dz * ratio;
+
+                        PathGenerator shortPath(me);
+                        bool shortResult = shortPath.CalculatePath(interX, interY, interZ, false);
+                        if (shortResult && (shortPath.GetPathType() & PATHFIND_NOPATH) == 0)
+                        {
+                            fallbackPath = shortPath.GetPath();
+                            if (fallbackPath.size() >= 2)
+                            {
+                                pathNodesPtr = &fallbackPath;
+                                pathFound = true;
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (pathFound == false && foundValidZ == false && MovementType == EQ_CREATURE_MOVEMENT_CUSTOM_ROAMING)
                 return false;
 
-            // Build the full waypoint list, and put current creature position up front
+            const Movement::PointsArray& pathNodes = *pathNodesPtr;
+            if (pathNodes.size() < 2)
+                return false;
+
+            // Walk the path to generate steps that are small enough to snap the character to the Z
             Movement::PointsArray waypointPath;
             waypointPath.emplace_back(me->GetPositionX(), me->GetPositionY(), me->GetPositionZ());
-
-            // Break up straight longer paths
-            if (pathLength >= EQ_MOVE_SMALL_STEP_SIZE_LAST_DISTANCE)
+            Position previousPosition = me->GetPosition();
+            float priorInterimZ = -100001.0f;
+            for (int cornerIndex = 1; cornerIndex < (int)pathNodes.size(); ++cornerIndex)
             {
-                float remainingDistance = pathLength;
-                Position previousPosition = me->GetPosition();
-                float ux = (initialTargetX - me->GetPositionX()) / pathLength;
-                float uy = (initialTargetY - me->GetPositionY()) / pathLength;
-                float uz = (terrainSnappedTargetZ - me->GetPositionZ()) / pathLength;
-                float priorInterimZ = -100001;
-                while (remainingDistance > EQ_MOVE_SMALL_STEP_SIZE_LAST_DISTANCE)
+                Position corner(pathNodes[cornerIndex].x, pathNodes[cornerIndex].y, pathNodes[cornerIndex].z);
+                bool isFinalCorner = (cornerIndex == pathNodes.size() - 1);
+
+                float segDX = corner.GetPositionX() - previousPosition.GetPositionX();
+                float segDY = corner.GetPositionY() - previousPosition.GetPositionY();
+                float segDZ = corner.GetPositionZ() - previousPosition.GetPositionZ();
+                float segLength = std::sqrt(segDX * segDX + segDY * segDY + segDZ * segDZ);
+
+                if (segLength < 0.001f)
+                    continue;
+
+                float ux = segDX / segLength;
+                float uy = segDY / segLength;
+                float uz = segDZ / segLength;
+
+                float endThreshold = isFinalCorner ? EQ_MOVE_SMALL_STEP_SIZE_LAST_DISTANCE : EQ_MOVE_SMALL_STEP_SIZE_DISTANCE;
+                float remainingDistance = segLength;
+
+                while (remainingDistance > endThreshold)
                 {
                     float interimX = previousPosition.GetPositionX() + ux * EQ_MOVE_SMALL_STEP_SIZE_DISTANCE;
                     float interimY = previousPosition.GetPositionY() + uy * EQ_MOVE_SMALL_STEP_SIZE_DISTANCE;
                     float interimZ = previousPosition.GetPositionZ() + uz * EQ_MOVE_SMALL_STEP_SIZE_DISTANCE;
+
                     if (priorInterimZ < -100000)
                         priorInterimZ = interimZ;
-                    interimZ = GetEffectiveDestinationZ(previousPosition.GetPositionX(), previousPosition.GetPositionY(), previousPosition.GetPositionZ(),
-                        interimX, interimY, priorInterimZ, foundValidZ, CreatureInstanceData.RoamMinZ, CreatureInstanceData.RoamMaxZ);
-                    priorInterimZ = interimZ;                  
+
+                    interimZ = GetEffectiveDestinationZ(previousPosition.GetPositionX(), previousPosition.GetPositionY(),
+                        previousPosition.GetPositionZ(), interimX, interimY, priorInterimZ, foundValidZ,
+                        CreatureInstanceData.RoamMinZ, CreatureInstanceData.RoamMaxZ);
+
                     waypointPath.emplace_back(interimX, interimY, interimZ);
                     previousPosition = Position(interimX, interimY, interimZ);
                     remainingDistance -= EQ_MOVE_SMALL_STEP_SIZE_DISTANCE;
+                    priorInterimZ = interimZ;
                 }
+
+                // Add corner
+                float refZ = (priorInterimZ < -100000.0f) ? corner.GetPositionZ() : priorInterimZ;
+                float cornerZ = GetEffectiveDestinationZ(previousPosition.GetPositionX(), previousPosition.GetPositionY(),
+                    previousPosition.GetPositionZ(), corner.GetPositionX(), corner.GetPositionY(), refZ,
+                    foundValidZ, CreatureInstanceData.RoamMinZ, CreatureInstanceData.RoamMaxZ);
+
+                waypointPath.emplace_back(corner.GetPositionX(), corner.GetPositionY(), cornerZ);
+                previousPosition = Position(corner.GetPositionX(), corner.GetPositionY(), cornerZ);
+                priorInterimZ = cornerZ;
             }
 
-            // Add the last position
-            waypointPath.emplace_back(initialTargetX, initialTargetY, terrainSnappedTargetZ);
+            // Add for saftey, though this shouldn't happen...
+            if (waypointPath.size() <= 1)
+                waypointPath.emplace_back(initialTargetX, initialTargetY, terrainSnappedTargetZ);
+
+            // Track intended destination
             if (moveType == EQ_MOVE_PHASE_TRAVELING)
             {
                 Position newTargetPosition(initialTargetX, initialTargetY, terrainSnappedTargetZ);
                 WaypointAndRoamTargetTravelPosition = newTargetPosition;
             }
 
-            // Start Movement
+            // Start movement
             if (run == true)
                 me->RemoveUnitMovementFlag(MOVEMENTFLAG_WALKING);
             else
                 me->SetUnitMovementFlags(MOVEMENTFLAG_WALKING);
+
             me->GetMotionMaster()->Clear(false);
-            me->GetMotionMaster()->MoveSplinePath(&waypointPath, run ? FORCED_MOVEMENT_RUN : FORCED_MOVEMENT_WALK);
+            me->GetMotionMaster()->MoveSplinePath(&waypointPath, run == true ? FORCED_MOVEMENT_RUN : FORCED_MOVEMENT_WALK);
             ActiveMovePhase = moveType;
+            if (moveType == EQ_MOVE_PHASE_TRAVELING)
+                PathRetryCount = 0;
 
             return true;
         }
@@ -379,18 +456,34 @@ public:
             return newIndex;
         }
 
+        void ScheduleMovementRetry()
+        {
+            PathRetryCount++;
+            if (PathRetryCount > EQ_MOVE_PATH_MAX_RETRY_COUNT)
+            {
+                LOG_ERROR("module.EverQuest", "Creature {} has retried {} times to path and will no longer retry", me->GetSpawnId(), PathRetryCount);
+                ActiveMovePhase = EQ_MOVE_PHASE_NONE;
+                return;
+            }
+            
+            events.ScheduleEvent(EVENT_PAUSE_DONE, 100ms);
+            ActiveMovePhase = EQ_MOVE_PHASE_WAITING_FOR_TIMER;
+        }
+
         void PerformWaypointMovementForRandom10()
         {
             WaypointCurrentTargetWaypointIndex = GetUniqueRandomWaypointIndexFromRandom10(WaypointCurrentTargetWaypointIndex);
             const EverQuestCreatureWaypoint& wp = CreatureWaypoints[WaypointCurrentTargetWaypointIndex];
-            BuildPathAndStartPointMovementToTarget(wp.X, wp.Y, wp.Z, EQ_MOVE_PHASE_TRAVELING);
+            if (BuildPathAndStartPointMovementToTarget(wp.X, wp.Y, wp.Z, EQ_MOVE_PHASE_TRAVELING) == false)
+                ScheduleMovementRetry();
         }
 
         void PerformWaypointMovementForRandomAny()
         {
             WaypointCurrentTargetWaypointIndex = GetUniqueRandomWaypointIndex(WaypointCurrentTargetWaypointIndex);
             const EverQuestCreatureWaypoint& wp = CreatureWaypoints[WaypointCurrentTargetWaypointIndex];
-            BuildPathAndStartPointMovementToTarget(wp.X, wp.Y, wp.Z, EQ_MOVE_PHASE_TRAVELING);
+            if (BuildPathAndStartPointMovementToTarget(wp.X, wp.Y, wp.Z, EQ_MOVE_PHASE_TRAVELING) == false)
+                ScheduleMovementRetry();
         }
 
         void PerformWaypointMovementForRandomPath()
@@ -405,7 +498,8 @@ public:
                 WaypointCurrentTargetWaypointIndex = WaypointPriorTargetWaypointIndex - 1;
 
             const EverQuestCreatureWaypoint& wp = CreatureWaypoints[WaypointCurrentTargetWaypointIndex];
-            BuildPathAndStartPointMovementToTarget(wp.X, wp.Y, wp.Z, EQ_MOVE_PHASE_TRAVELING);
+            if (BuildPathAndStartPointMovementToTarget(wp.X, wp.Y, wp.Z, EQ_MOVE_PHASE_TRAVELING) == false)
+                ScheduleMovementRetry();
         }
 
         uint32 FindNearestWaypointIndex() const
