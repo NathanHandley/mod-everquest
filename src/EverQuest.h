@@ -27,7 +27,7 @@
 
 using namespace std;
 
-#define EQ_MOD_VERSION                              7
+#define EQ_MOD_VERSION                              8
 
 #define EQ_SPELLDUMMYTYPE_BINDSELF                  1
 #define EQ_SPELLDUMMYTYPE_BINDANY                   2
@@ -246,6 +246,7 @@ public:
     uint32 RoamMinDelayInMS = 0;
     uint32 RoamMaxDelayInMS = 0;
     int32 DespawnAtWaypointNum = -1;
+    bool DisableGroundContour = false;
 };
 
 class EverQuestCreatureWaypoint

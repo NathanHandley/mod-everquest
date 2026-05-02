@@ -166,7 +166,22 @@ public:
         float GetEffectiveDestinationZ(float priorX, float priorY, float priorZ, float initialTargetX, float initialTargetY, float initialTargetZ,
             bool& foundValidZ, float minZ = 0, float maxZ = 0)
         {
+            if (CreatureInstanceData.DisableGroundContour == true)
+            {
+                foundValidZ = true;
+                return initialTargetZ;
+            }
+            
             foundValidZ = false;
+
+            // Prior point might be in water
+            bool isPriorPointInWater = false;
+            if (priorX != 0 && priorY != 0 && priorZ != 0)
+            {
+                LiquidData priorLiquidDataBelow = me->GetMap()->GetLiquidData(me->GetPhaseMask(), priorX, priorY, priorZ, 0, {});
+                if (priorLiquidDataBelow.Status)
+                    isPriorPointInWater = true;
+            }
 
             // Calculate a solid floor
             float solidFloorZ = -20001;
@@ -179,6 +194,8 @@ public:
                 float targetTestZ = initialTargetZ;
                 int floorLoopNum = 0;
                 float curAddedZStep = 0;
+                if (isPriorPointInWater == false)
+                    curAddedZStep = 1.0f;
                 while (solidFloorZ < -20000)
                 {
                     targetTestZ = initialTargetZ + (floorLoopNum * curAddedZStep);
@@ -188,15 +205,6 @@ public:
                     if (floorLoopNum >= 10)
                         break;
                 }
-            }
-
-            // Prior point might be in water
-            bool isPriorPointInWater = false;
-            if (priorX != 0 && priorY != 0 && priorZ != 0)
-            {
-                LiquidData priorLiquidDataBelow = me->GetMap()->GetLiquidData(me->GetPhaseMask(), priorX, priorY, priorZ, 0, {});
-                if (priorLiquidDataBelow.Status)
-                    isPriorPointInWater = true;
             }
 
             if (solidFloorZ < -20000)
