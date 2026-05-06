@@ -535,6 +535,12 @@ void EverQuestMod::TrackVisualEquippedItemsForCreatureGUID(ObjectGuid creatureGU
     VisualEquippedItemsByCreatureGUID[creatureGUID].OffhandItemID = offhandItemID;
 }
 
+void EverQuestMod::ClearVisualEquippedItemsForCreatureGUID(ObjectGuid creatureGUID)
+{
+    if (VisualEquippedItemsByCreatureGUID.find(creatureGUID) != VisualEquippedItemsByCreatureGUID.end())
+        VisualEquippedItemsByCreatureGUID.erase(creatureGUID);
+}
+
 void EverQuestMod::RemoveVisualEquippedItemForCreatureGUIDIfExists(Map* map, ObjectGuid creatureGUID, uint32 itemTemplateID)
 {
     if (VisualEquippedItemsByCreatureGUID.find(creatureGUID) == VisualEquippedItemsByCreatureGUID.end())

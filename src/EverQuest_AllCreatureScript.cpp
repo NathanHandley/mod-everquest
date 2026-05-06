@@ -24,17 +24,10 @@
 
 using namespace std;
 
-class EverQuest_AllCreatureScript: public AllCreatureScript
+class EverQuest_AllCreatureScript : public AllCreatureScript
 {
 public:
     EverQuest_AllCreatureScript() : AllCreatureScript("EverQuest_AllCreatureScript") {}
-
-    void OnCreatureSelectLevel(const CreatureTemplate* /*cinfo*/, Creature* creature) override
-    {
-        if (EverQuest->IsEnabled == false)
-            return;
-        SetVisualEquipment(creature);
-    }
 
     void OnCreatureAddWorld(Creature* creature) override
     {
@@ -60,101 +53,102 @@ public:
 private:
     void SetVisualEquipment(Creature* creature)
     {
+        // Reset first
+        creature->SetUInt32Value(UNIT_VIRTUAL_ITEM_SLOT_ID + 0, 0);
+        creature->SetUInt32Value(UNIT_VIRTUAL_ITEM_SLOT_ID + 1, 0);
+        EverQuest->ClearVisualEquippedItemsForCreatureGUID(creature->GetGUID());
+
         // Roll items
         if (EverQuest->HasLootTemplateRowsByCreatureTemplateEntryID(creature->GetEntry()))
             EverQuest->RollLootItemsForCreature(creature->GetGUID(), creature->GetEntry());
 
         // Add visual information
-        if (EverQuest->HasCreatureDataForCreatureTemplateID(creature->GetEntry()) == true)
+        if (EverQuest->HasCreatureDataForCreatureTemplateID(creature->GetEntry()) == false)
+            return;
+
+        EverQuestCreature eqCreature = EverQuest->GetCreatureDataForCreatureTemplateID(creature->GetEntry());
+        if (eqCreature.CanShowHeldLootItems == false || EverQuest->HasPreloadedLootItemIDsForCreatureGUID(creature->GetGUID()) == false)
+            return;
+
+        // Prioritize what items to show as worn
+        vector<ItemTemplate const*> oneHandWeapons;
+        vector<ItemTemplate const*> twoHandWeapons;
+        vector<ItemTemplate const*> shields;
+        vector<ItemTemplate const*> heldItems;
+        vector<ItemTemplate const*> fishingPoles;
+        for (uint32 itemTemplateID : EverQuest->GetPreloadedLootIDsForCreatureGUID(creature->GetGUID()))
         {
-            EverQuestCreature eqCreature = EverQuest->GetCreatureDataForCreatureTemplateID(creature->GetEntry());
-            if (eqCreature.CanShowHeldLootItems == true && EverQuest->HasPreloadedLootItemIDsForCreatureGUID(creature->GetGUID()))
+            uint32 itemTemplateForNPCEquipID = EverQuest->GetNPCEquipItemTemplateIDForItemTemplate(itemTemplateID);
+            ItemTemplate const* itemTemplate = sObjectMgr->GetItemTemplate(itemTemplateForNPCEquipID);
+            if (!itemTemplate)
             {
-                // Prioritize what items to show as worn
-                vector<ItemTemplate const*> oneHandWeapons;
-                vector<ItemTemplate const*> twoHandWeapons;
-                vector<ItemTemplate const*> shields;
-                vector<ItemTemplate const*> heldItems;
-                vector<ItemTemplate const*> fishingPoles;
-                for (uint32 itemTemplateID : EverQuest->GetPreloadedLootIDsForCreatureGUID(creature->GetGUID()))
-                {
-                    uint32 itemTemplateForNPCEquipID = EverQuest->GetNPCEquipItemTemplateIDForItemTemplate(itemTemplateID);
-                    ItemTemplate const* itemTemplate = sObjectMgr->GetItemTemplate(itemTemplateForNPCEquipID);
-                    if (!itemTemplate)
-                    {
-                        LOG_ERROR("module.EverQuest", "EverQuestMod::OnCreatureAddWorld failure, as item template ID {} could not be found", itemTemplateID);
-                        continue;
-                    }
-
-                    // Sort items by types
-                    if (itemTemplate->Class == ITEM_CLASS_WEAPON)
-                    {
-                        if (itemTemplate->SubClass == ITEM_SUBCLASS_WEAPON_FISHING_POLE)
-                            fishingPoles.push_back(itemTemplate);
-                        else if (itemTemplate->InventoryType == INVTYPE_2HWEAPON)
-                            twoHandWeapons.push_back(itemTemplate);
-                        else if (itemTemplate->InventoryType == INVTYPE_WEAPONMAINHAND || itemTemplate->InventoryType == INVTYPE_WEAPONOFFHAND || itemTemplate->InventoryType == INVTYPE_WEAPON)
-                            oneHandWeapons.push_back(itemTemplate);
-                    }
-                    else if (eqCreature.CanShowHeldLootShields == true && itemTemplate->Class == ITEM_CLASS_ARMOR && itemTemplate->InventoryType == INVTYPE_SHIELD)
-                        shields.push_back(itemTemplate);
-                    else if (itemTemplate->InventoryType == INVTYPE_HOLDABLE)
-                        heldItems.push_back(itemTemplate);
-
-                    // Assign positions
-                    ItemTemplate const* mainHandItem = nullptr;
-                    ItemTemplate const* offHandItem = nullptr;
-                    bool doHoldFishingPole = (fishingPoles.size() > 0) && (oneHandWeapons.size() == 0) && (twoHandWeapons.size() == 0) && (shields.size() == 0) && (heldItems.size() == 0);
-                    if (doHoldFishingPole == true && fishingPoles.size() > 0)
-                        mainHandItem = fishingPoles[0];
-                    else if (twoHandWeapons.size() > 0)
-                        mainHandItem = twoHandWeapons[0];
-                    else
-                    {
-                        // Mainhand
-                        if (oneHandWeapons.size() > 0)
-                            mainHandItem = oneHandWeapons[0];
-
-                        // Offhand
-                        if (shields.size() > 0)
-                            offHandItem = shields[0];
-                        else if (oneHandWeapons.size() > 1)
-                            offHandItem = oneHandWeapons[1];
-                        else if (heldItems.size() > 0)
-                            offHandItem = heldItems[0];
-                    }
-
-                    // Show needed visuals
-                    uint32 mainhandItemID = 0;
-                    if (mainHandItem != nullptr)
-                    {
-                        creature->SetUInt32Value(UNIT_VIRTUAL_ITEM_SLOT_ID + 0, mainHandItem->ItemId);
-                        mainhandItemID = mainHandItem->ItemId;
-                    }
-                    else
-                        creature->SetUInt32Value(UNIT_VIRTUAL_ITEM_SLOT_ID + 0, 0);
-                        
-                    uint32 offhandItemID = 0;
-                    if (offHandItem != nullptr)
-                    {
-                        creature->SetUInt32Value(UNIT_VIRTUAL_ITEM_SLOT_ID + 1, offHandItem->ItemId);
-                        offhandItemID = offHandItem->ItemId;
-                    }
-                    else
-                        creature->SetUInt32Value(UNIT_VIRTUAL_ITEM_SLOT_ID + 1, 0);
-
-                    // Update combat posture and equipped visual tracking
-                    if (mainHandItem != nullptr || offHandItem != nullptr)
-                    {
-                        creature->SetSheath(SHEATH_STATE_MELEE);
-                        EverQuest->TrackVisualEquippedItemsForCreatureGUID(creature->GetGUID(), mainhandItemID, offhandItemID);
-                    }
-
-                    // Reset combat type
-                    creature->UpdateDamagePhysical(BASE_ATTACK);
-                }
+                LOG_ERROR("module.EverQuest", "EverQuestMod::OnCreatureAddWorld failure, as item template ID {} could not be found", itemTemplateID);
+                continue;
             }
+
+            // Sort items by types
+            if (itemTemplate->Class == ITEM_CLASS_WEAPON)
+            {
+                if (itemTemplate->SubClass == ITEM_SUBCLASS_WEAPON_FISHING_POLE)
+                    fishingPoles.push_back(itemTemplate);
+                else if (itemTemplate->InventoryType == INVTYPE_2HWEAPON)
+                    twoHandWeapons.push_back(itemTemplate);
+                else if (itemTemplate->InventoryType == INVTYPE_WEAPONMAINHAND || itemTemplate->InventoryType == INVTYPE_WEAPONOFFHAND || itemTemplate->InventoryType == INVTYPE_WEAPON)
+                    oneHandWeapons.push_back(itemTemplate);
+            }
+            else if (eqCreature.CanShowHeldLootShields == true && itemTemplate->Class == ITEM_CLASS_ARMOR && itemTemplate->InventoryType == INVTYPE_SHIELD)
+                shields.push_back(itemTemplate);
+            else if (itemTemplate->InventoryType == INVTYPE_HOLDABLE)
+                heldItems.push_back(itemTemplate);
         }
+
+        // Assign positions
+        ItemTemplate const* mainHandItem = nullptr;
+        ItemTemplate const* offHandItem = nullptr;
+        bool doHoldFishingPole = (fishingPoles.size() > 0) && (oneHandWeapons.size() == 0) && (twoHandWeapons.size() == 0) && (shields.size() == 0) && (heldItems.size() == 0);
+        if (doHoldFishingPole == true)
+            mainHandItem = fishingPoles[0];
+        else if (twoHandWeapons.size() > 0)
+            mainHandItem = twoHandWeapons[0];
+        else
+        {
+            // Mainhand
+            if (oneHandWeapons.size() > 0)
+                mainHandItem = oneHandWeapons[0];
+
+            // Offhand
+            if (shields.size() > 0)
+                offHandItem = shields[0];
+            else if (oneHandWeapons.size() > 1)
+                offHandItem = oneHandWeapons[1];
+            else if (heldItems.size() > 0)
+                offHandItem = heldItems[0];
+        }
+
+        // Show needed visuals
+        uint32 mainhandItemID = 0;
+        if (mainHandItem != nullptr)
+        {
+            creature->SetUInt32Value(UNIT_VIRTUAL_ITEM_SLOT_ID + 0, mainHandItem->ItemId);
+            mainhandItemID = mainHandItem->ItemId;
+        }
+
+        uint32 offhandItemID = 0;
+        if (offHandItem != nullptr)
+        {
+            creature->SetUInt32Value(UNIT_VIRTUAL_ITEM_SLOT_ID + 1, offHandItem->ItemId);
+            offhandItemID = offHandItem->ItemId;
+        }
+
+        // Update combat posture and equipped visual tracking
+        if (mainHandItem != nullptr || offHandItem != nullptr)
+        {
+            creature->SetSheath(SHEATH_STATE_MELEE);
+            EverQuest->TrackVisualEquippedItemsForCreatureGUID(creature->GetGUID(), mainhandItemID, offhandItemID);
+        }
+
+        // Reset combat type
+        creature->UpdateDamagePhysical(BASE_ATTACK);
     }
 };
 
