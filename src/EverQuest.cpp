@@ -465,6 +465,36 @@ const list<uint32>& EverQuestMod::GetAutoLearnSkillsForClass(uint8 classID)
     }
 }
 
+void EverQuestMod::LoadAutoLearnSpellsData()
+{
+    PlayerAutoLearnSpellsByClassID.clear();
+    QueryResult queryResult = WorldDatabase.Query("SELECT class, spell FROM mod_everquest_playerautolearnspells;");
+    if (queryResult)
+    {
+        do
+        {
+            // Pull the data out
+            Field* fields = queryResult->Fetch();
+            uint8 classID = fields[0].Get<uint8>();
+            uint32 spellID = fields[1].Get<uint32>();
+            PlayerAutoLearnSpellsByClassID[classID].push_back(spellID);
+        } while (queryResult->NextRow());
+    }
+}
+
+const list<uint32>& EverQuestMod::GetAutoLearnSpellsForClass(uint8 classID)
+{
+    if (PlayerAutoLearnSpellsByClassID.find(classID) != PlayerAutoLearnSpellsByClassID.end())
+    {
+        return PlayerAutoLearnSpellsByClassID[classID];
+    }
+    else
+    {
+        static const list<uint32> returnEmpty;
+        return returnEmpty;
+    }
+}
+
 bool EverQuestMod::HasCreatePlayerData(uint8 raceID, uint8 classID)
 {
     if (PlayerCreateInfoByRaceIDThenClassID.find(raceID) == PlayerCreateInfoByRaceIDThenClassID.end())

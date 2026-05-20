@@ -51,6 +51,7 @@ public:
         EverQuest->LoadCreatureInstanceData();
         EverQuest->LoadCreatureWaypointData();
         EverQuest->LoadAutoLearnSkillsData();
+        EverQuest->LoadAutoLearnSpellsData();
     }
 };
 

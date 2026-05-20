@@ -247,12 +247,30 @@ public:
             }
         }
 
+        // Learn any spells the player may not have
+        bool needsUpdate = false;
+        for (auto spellID : EverQuest->GetAutoLearnSpellsForClass(player->getClass()))
+        {
+            if (player->HasSpell(spellID) == false)
+            {
+                player->learnSpell(spellID);
+                needsUpdate = true;
+            }
+        }
+
         // Learn any skills the player may not have
         for (auto skillID : EverQuest->GetAutoLearnSkillsForClass(player->getClass()))
         {
             if (player->GetSkillValue(skillID) == 0)
+            {
                 player->SetSkill((uint16)skillID, 0, 1, 1);
+                needsUpdate = true;
+            }
         }
+
+        // Only force an update to the player if there is one
+        if (needsUpdate == true)
+            player->UpdateSkillsForLevel();
     }
 
     void OnPlayerLogout(Player* player) override
