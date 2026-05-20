@@ -25,6 +25,7 @@ class EverQuest_GlobalScript: public GlobalScript
 public:
     EverQuest_GlobalScript() : GlobalScript("EverQuest_GlobalScript") {}
 
+    // Note: There is a bug here because the calculated number of dropped items (MinCount/MaxCount) is not in scope
     bool OnItemRoll(Player const* /*player*/, LootStoreItem const* lootStoreItem, float& chance, Loot& loot, LootStore const& /*lootStore*/) override
     {
         if (EverQuest->IsEnabled == false)
@@ -38,6 +39,19 @@ public:
             chance = 100.0f;
         else
             chance = 0.0f;
+        return true;
+    }
+
+    // Called when GroupID > 0 and chance == 0
+    bool OnBeforeLootEqualChanced(Player const* /*player*/, list<LootStoreItem*> /*equalChanced*/, Loot& loot, LootStore const& /*lootStore*/) override
+    {
+        if (EverQuest->IsEnabled == false)
+            return true;
+
+        // Fail it so only prerolled items drop
+        if (EverQuest->HasPreloadedLootItemIDsForCreatureGUID(loot.sourceWorldObjectGUID))
+            return false;
+
         return true;
     }
 };

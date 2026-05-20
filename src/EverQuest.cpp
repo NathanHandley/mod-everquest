@@ -916,9 +916,8 @@ void EverQuestMod::RollLootItemsForCreature(ObjectGuid creatureGUID, uint32 crea
     if (creatureLootItems == LootTemplateRowsInGroupByEntryID.end())
         return;
 
-    // Clear old
-    if (PreloadedLootItemIDsByCreatureGUID.find(creatureGUID) != PreloadedLootItemIDsByCreatureGUID.end())
-        PreloadedLootItemIDsByCreatureGUID.erase(creatureGUID);
+    // Clear old and ensure it has a record
+    PreloadedLootItemIDsByCreatureGUID[creatureGUID] = vector<uint32>();
 
     // Rolls are by group
     for (auto& lootTemplateRowsByGroup : creatureLootItems->second)
@@ -959,7 +958,10 @@ void EverQuestMod::RollLootItemsForCreature(ObjectGuid creatureGUID, uint32 crea
             // Add hits and step down group iterations, otherwise move to the next
             if (rollResult == true)
             {
-                PreloadedLootItemIDsByCreatureGUID[creatureGUID].push_back(lootRow.ItemTemplateID);
+                // Factor for min drops
+                // NOTE: Note that this does not factor for MaxCount, see OnItemRoll
+                for (int i = 0; i < lootRow.MinCount; i++)
+                    PreloadedLootItemIDsByCreatureGUID[creatureGUID].push_back(lootRow.ItemTemplateID);
 
                 if (lootTemplateRowsByGroup.first != 0) // 0 doesn't follow group restrictions
                     groupIterationsLeft--;

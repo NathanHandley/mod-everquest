@@ -60,7 +60,7 @@ public:
         if (questReactions.empty() == false)
         {
             Map* map = player->GetMap();
-            for (const EverQuestQuestReaction questReaction : questReactions)
+            for (const EverQuestQuestReaction& questReaction : questReactions)
             {
                 float x = questReaction.PositionX;
                 if (questReaction.UsePlayerX == true)
