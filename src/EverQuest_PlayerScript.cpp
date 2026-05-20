@@ -246,6 +246,13 @@ public:
                     queue.push_back(spellID);
             }
         }
+
+        // Learn any skills the player may not have
+        for (auto skillID : EverQuest->GetAutoLearnSkillsForClass(player->getClass()))
+        {
+            if (player->GetSkillValue(skillID) == 0)
+                player->SetSkill((uint16)skillID, 0, 1, 1);
+        }
     }
 
     void OnPlayerLogout(Player* player) override

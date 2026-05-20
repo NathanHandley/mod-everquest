@@ -435,6 +435,36 @@ void EverQuestMod::LoadCreatePlayerData()
     }
 }
 
+void EverQuestMod::LoadAutoLearnSkillsData()
+{
+    PlayerAutoLearnSkillsByClassID.clear();
+    QueryResult queryResult = WorldDatabase.Query("SELECT class, skill FROM mod_everquest_playerautolearnskills;");
+    if (queryResult)
+    {
+        do
+        {
+            // Pull the data out
+            Field* fields = queryResult->Fetch();
+            uint8 classID = fields[0].Get<uint8>();
+            uint32 skillID = fields[1].Get<uint32>();
+            PlayerAutoLearnSkillsByClassID[classID].push_back(skillID);
+        } while (queryResult->NextRow());
+    }
+}
+
+const list<uint32>& EverQuestMod::GetAutoLearnSkillsForClass(uint8 classID)
+{
+    if (PlayerAutoLearnSkillsByClassID.find(classID) != PlayerAutoLearnSkillsByClassID.end())
+    {
+        return PlayerAutoLearnSkillsByClassID[classID];
+    }
+    else
+    {
+        static const list<uint32> returnEmpty;
+        return returnEmpty;
+    }
+}
+
 bool EverQuestMod::HasCreatePlayerData(uint8 raceID, uint8 classID)
 {
     if (PlayerCreateInfoByRaceIDThenClassID.find(raceID) == PlayerCreateInfoByRaceIDThenClassID.end())

@@ -50,6 +50,7 @@ public:
         EverQuest->LoadShipTriggerData();
         EverQuest->LoadCreatureInstanceData();
         EverQuest->LoadCreatureWaypointData();
+        EverQuest->LoadAutoLearnSkillsData();
     }
 };
 
