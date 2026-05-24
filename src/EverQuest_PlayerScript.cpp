@@ -253,11 +253,23 @@ public:
 
         // Learn any spells the player may not have
         bool needsUpdate = false;
-        for (auto spellID : EverQuest->GetAutoLearnSpellsForClass(player->getClass()))
+        for (auto autoLearnSpell : EverQuest->GetAutoLearnSpellsForClass(player->getClass()))
         {
-            if (player->HasSpell(spellID) == false)
+            if (player->HasSpell(autoLearnSpell.SpellID) == false)
             {
-                player->learnSpell(spellID);
+                player->learnSpell(autoLearnSpell.SpellID);
+                if (autoLearnSpell.DoAddToBar == true)
+                {
+                    for (uint8 button = 0; button < 12; ++button)   // 0-11 is just the first action bar row
+                    {
+                        ActionButton const* ab = player->GetActionButton(button);
+                        if (!ab || ab->GetAction() == 0)
+                        {
+                            player->addActionButton(button, autoLearnSpell.SpellID, ACTION_BUTTON_SPELL);
+                            break;
+                        }
+                    }
+                }
                 needsUpdate = true;
             }
         }
@@ -274,7 +286,9 @@ public:
 
         // Only force an update to the player if there is one
         if (needsUpdate == true)
+        {
             player->UpdateSkillsForLevel();
+        }
     }
 
     void OnPlayerLogout(Player* player) override

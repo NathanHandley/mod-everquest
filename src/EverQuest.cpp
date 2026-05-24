@@ -468,21 +468,22 @@ const list<uint32>& EverQuestMod::GetAutoLearnSkillsForClass(uint8 classID)
 void EverQuestMod::LoadAutoLearnSpellsData()
 {
     PlayerAutoLearnSpellsByClassID.clear();
-    QueryResult queryResult = WorldDatabase.Query("SELECT class, spell FROM mod_everquest_playerautolearnspells;");
+    QueryResult queryResult = WorldDatabase.Query("SELECT class, spell, addtobar FROM mod_everquest_playerautolearnspells;");
     if (queryResult)
     {
         do
         {
-            // Pull the data out
+            EverQuestAutoLearnSpell autoLearnSpell;
             Field* fields = queryResult->Fetch();
-            uint8 classID = fields[0].Get<uint8>();
-            uint32 spellID = fields[1].Get<uint32>();
-            PlayerAutoLearnSpellsByClassID[classID].push_back(spellID);
+            autoLearnSpell.ClassID = fields[0].Get<uint8>();
+            autoLearnSpell.SpellID = fields[1].Get<uint32>();
+            autoLearnSpell.DoAddToBar = fields[2].Get<int8>() == 1 ? true : false;
+            PlayerAutoLearnSpellsByClassID[autoLearnSpell.ClassID].push_back(autoLearnSpell);
         } while (queryResult->NextRow());
     }
 }
 
-const list<uint32>& EverQuestMod::GetAutoLearnSpellsForClass(uint8 classID)
+const list<EverQuestAutoLearnSpell>& EverQuestMod::GetAutoLearnSpellsForClass(uint8 classID)
 {
     if (PlayerAutoLearnSpellsByClassID.find(classID) != PlayerAutoLearnSpellsByClassID.end())
     {
@@ -490,7 +491,7 @@ const list<uint32>& EverQuestMod::GetAutoLearnSpellsForClass(uint8 classID)
     }
     else
     {
-        static const list<uint32> returnEmpty;
+        static const list<EverQuestAutoLearnSpell> returnEmpty;
         return returnEmpty;
     }
 }

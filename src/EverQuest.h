@@ -27,7 +27,7 @@
 
 using namespace std;
 
-#define EQ_MOD_VERSION                              10
+#define EQ_MOD_VERSION                              11
 
 #define EQ_SPELLDUMMYTYPE_BINDSELF                  1
 #define EQ_SPELLDUMMYTYPE_BINDANY                   2
@@ -267,6 +267,14 @@ public:
     uint32 PauseInSec = 0;
 };
 
+class EverQuestAutoLearnSpell
+{
+public:
+    uint8 ClassID = 0;
+    uint32 SpellID = 0;
+    bool DoAddToBar = false;
+};
+
 class EverQuestForageZoneItem
 {
 public:
@@ -318,7 +326,7 @@ public:
     unordered_map<uint32, EverQuestPet> PetDataByCreatureTemplateID;
     unordered_map<uint8, unordered_map<uint8, EverQuestPlayerCreateInfo>> PlayerCreateInfoByRaceIDThenClassID;
     unordered_map<uint8, list<uint32>> PlayerAutoLearnSkillsByClassID;
-    unordered_map<uint8, list<uint32>> PlayerAutoLearnSpellsByClassID;
+    unordered_map<uint8, list<EverQuestAutoLearnSpell>> PlayerAutoLearnSpellsByClassID;
     unordered_map<int, unordered_map<int, vector<Creature*>>> AllLoadedCreaturesByMapIDThenCreatureEntryID;
     unordered_map<ObjectGuid, deque<uint32>> PlayerCasterConcurrentBardSongs;
     unordered_map<uint32, unordered_map<uint32, vector<EverQuestLootTemplateRow>>> LootTemplateRowsInGroupByEntryID;
@@ -363,7 +371,7 @@ public:
     void LoadAutoLearnSkillsData();
     const list<uint32>& GetAutoLearnSkillsForClass(uint8 classID);
     void LoadAutoLearnSpellsData();
-    const list<uint32>& GetAutoLearnSpellsForClass(uint8 classID);
+    const list<EverQuestAutoLearnSpell>& GetAutoLearnSpellsForClass(uint8 classID);
     void LoadLootTemplateRows();
     bool HasLootTemplateRowsByCreatureTemplateEntryID(uint32 creatureTemplateEntryID);
     bool HasPreloadedLootItemIDsForCreatureGUID(ObjectGuid creatureGUID);
