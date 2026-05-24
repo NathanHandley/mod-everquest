@@ -1154,13 +1154,19 @@ void EverQuestMod::ProcessForage(Player* player)
         return;
     if (player->GetMap() == nullptr)
         return;
-    vector<EverQuestForageZoneItem> forageZoneItems = GetForageZoneItemsInMap(player->GetMap()->GetId());
-    if (forageZoneItems.empty() == true)
+    uint32 mapID = player->GetMap()->GetId();
+    if (mapID < EverQuest->ConfigSystemMapDBCIDMin || mapID > EverQuest->ConfigSystemMapDBCIDMax)
     {
-        ChatHandler(player->GetSession()).PSendSysMessage("You fail to locate any food nearby.");
+        ChatHandler(player->GetSession()).PSendSysMessage("There is nothing to forage outside of Norrath.");
         return;
     }
-    int32 roll = (int32)urand(0, ForageZoneItemTotalChanceByMapID[player->GetMap()->GetId()]);
+    vector<EverQuestForageZoneItem> forageZoneItems = GetForageZoneItemsInMap(mapID);
+    if (forageZoneItems.empty() == true)
+    {
+        ChatHandler(player->GetSession()).PSendSysMessage("This area has nothing to forage.");
+        return;
+    }
+    int32 roll = (int32)urand(0, ForageZoneItemTotalChanceByMapID[mapID]);
     for (const EverQuestForageZoneItem& zoneItem : forageZoneItems)
     {
         roll -= zoneItem.Chance;
@@ -1173,17 +1179,27 @@ void EverQuestMod::ProcessForage(Player* player)
                 return;
             }
 
-            // TODO: Error if the player can't hold the item
-            // TODO: Give the item to the player
+            ItemPosCountVec destPosition;
+            InventoryResult invResult = player->CanStoreNewItem(NULL_BAG, NULL_SLOT, destPosition, zoneItem.ItemTemplateID, 1);
+            if (invResult == EQUIP_ERR_OK)
+                player->StoreNewItem(destPosition, zoneItem.ItemTemplateID, true);
+            else
+            {
+                ChatHandler(player->GetSession()).PSendSysMessage("You lack the space to pick anything up.");
+                return;
+            }
 
+            string itemLink = "|cffffffff|Hitem:" + to_string(zoneItem.ItemTemplateID) + ":0:0:0:0:0:0:0:0:0|h[" + itemTemplate->Name1 + "]|h|r";
+            ChatHandler(player->GetSession()).PSendSysMessage("You have recieved: " + itemLink);
             if (zoneItem.ForageType == EQ_FORAGE_TYPE_FOOD)
                 ChatHandler(player->GetSession()).PSendSysMessage("You have scrounged up some food.");
             else if (zoneItem.ForageType == EQ_FORAGE_TYPE_DRINK)
                 ChatHandler(player->GetSession()).PSendSysMessage("You have scrounged up some water.");
             else if (zoneItem.ForageType == EQ_FORAGE_TYPE_BAIT)
-                ChatHandler(player->GetSession()).PSendSysMessage("You have scrounged up some water.");
-            else
                 ChatHandler(player->GetSession()).PSendSysMessage("You have scrounged up some fishing grubs.");
+            else
+                ChatHandler(player->GetSession()).PSendSysMessage("You have scrounged up some food.");
+            return;
         }
     }
     ChatHandler(player->GetSession()).PSendSysMessage("You fail to locate any food nearby.");
