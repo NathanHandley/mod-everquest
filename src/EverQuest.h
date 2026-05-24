@@ -27,7 +27,7 @@
 
 using namespace std;
 
-#define EQ_MOD_VERSION                              9
+#define EQ_MOD_VERSION                              10
 
 #define EQ_SPELLDUMMYTYPE_BINDSELF                  1
 #define EQ_SPELLDUMMYTYPE_BINDANY                   2
@@ -44,6 +44,7 @@ using namespace std;
 #define EQ_SPELLDUMMYTYPE_BARDSONGFRIENDLYSINGLE    13
 #define EQ_SPELLDUMMYTYPE_BARDSONGANY               14
 #define EQ_SPELLDUMMYTYPE_ILLUSIONPARENT            15
+#define EQ_SPELLDUMMYTYPE_FORAGE                    16
 
 #define EQ_BARDSONGAURATARGET_ENEMYAREA             1
 #define EQ_BARDSONGAURATARGET_FRIENDLYPARTY         2
@@ -105,6 +106,11 @@ using namespace std;
 #define EQ_MOVE_PHASE_RETURNING_FROM_AGRO           4
 
 #define EQ_MOVE_PATH_MAX_RETRY_COUNT                10
+
+#define EQ_FORAGE_TYPE_FOOD                         0
+#define EQ_FORAGE_TYPE_DRINK                        1
+#define EQ_FORAGE_TYPE_BAIT                         2
+#define EQ_FORAGE_TYPE_OTHER                        3
 
 class EverQuestCreatureOnkillReputation
 {
@@ -261,6 +267,15 @@ public:
     uint32 PauseInSec = 0;
 };
 
+class EverQuestForageZoneItem
+{
+public:
+    uint32 MapID = 0;
+    uint32 ItemTemplateID = 0;
+    uint32 Chance = 0;
+    uint32 ForageType = EQ_FORAGE_TYPE_FOOD;
+};
+
 class EverQuestMod
 {
 private:
@@ -314,6 +329,8 @@ public:
     unordered_map<uint32, GameObject*> ShipGameObjectsByTemplateEntryID;
     unordered_map<uint32, EverQuestCreatureInstance> CreatureInstancesByCreatureGUID;
     unordered_map<uint32, unordered_map<uint32, vector<EverQuestCreatureWaypoint>>> CreatureWaypointsByMapIDAndWaypointID;
+    unordered_map<uint32, vector<EverQuestForageZoneItem>> ForageZoneItemsByMapID;
+    unordered_map<uint32, uint32> ForageZoneItemTotalChanceByMapID;
 
     static EverQuestMod* instance()
     {
@@ -362,6 +379,8 @@ public:
     const EverQuestCreatureInstance& GetCreatureInstanceData(uint32 creatureInstanceGUID);
     void LoadCreatureWaypointData();
     const vector<EverQuestCreatureWaypoint> GetWaypoints(uint32 mapID, uint32 waypointListID);
+    void LoadForageData();
+    const vector<EverQuestForageZoneItem>& GetForageZoneItemsInMap(uint32 mapID);
 
     void StorePositionAsLastGate(Player* player);
     void SendPlayerToLastGate(Player* player);
@@ -378,6 +397,7 @@ public:
     bool IsSpellAnEQSpell(uint32 spellID);
     bool IsSpellAnEQBardSong(uint32 spellID);
     uint32 CalculateSpellFocusBoostValue(Unit* caster, uint32 spellID);
+    void ProcessForage(Player* player);
 };
 
 #define EverQuest EverQuestMod::instance()

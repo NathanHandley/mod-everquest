@@ -196,6 +196,10 @@ public:
                 EverQuest->StorePositionAsLastGate(player);
                 EverQuest->SendPlayerToEQBindHome(player);
             }
+            else if (spell->m_spellInfo->Effects[EFFECT_0].MiscValue == EQ_SPELLDUMMYTYPE_FORAGE) // Forage
+            {
+                EverQuest->ProcessForage(player);
+            }
         }
     }
 

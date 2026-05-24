@@ -744,6 +744,41 @@ const vector<EverQuestCreatureWaypoint> EverQuestMod::GetWaypoints(uint32 mapID,
     return innerMap.at(waypointListID);
 }
 
+void EverQuestMod::LoadForageData()
+{
+    ForageZoneItemsByMapID.clear();
+    ForageZoneItemTotalChanceByMapID.clear();
+
+    QueryResult queryResult = WorldDatabase.Query("SELECT MapID, ItemTemplateID, Chance, ForageType FROM mod_everquest_forage_zone_items;");
+    if (queryResult)
+    {
+        do
+        {
+            Field* fields = queryResult->Fetch();
+            EverQuestForageZoneItem forageZoneItem;
+            forageZoneItem.MapID = fields[0].Get<uint32>();
+            forageZoneItem.ItemTemplateID = fields[1].Get<uint32>();
+            forageZoneItem.Chance = fields[2].Get<uint32>();
+            forageZoneItem.ForageType = fields[3].Get<uint32>();
+            ForageZoneItemsByMapID[forageZoneItem.MapID].push_back(forageZoneItem);
+            ForageZoneItemTotalChanceByMapID[forageZoneItem.MapID] += forageZoneItem.Chance;
+        } while (queryResult->NextRow());
+    }
+}
+
+const vector<EverQuestForageZoneItem>& EverQuestMod::GetForageZoneItemsInMap(uint32 mapID)
+{
+    if (ForageZoneItemsByMapID.find(mapID) != ForageZoneItemsByMapID.end())
+    {
+        return ForageZoneItemsByMapID[mapID];
+    }
+    else
+    {
+        static const vector<EverQuestForageZoneItem> returnEmpty;
+        return returnEmpty;
+    }
+}
+
 void EverQuestMod::StorePositionAsLastGate(Player* player)
 {
     // Fail if there is no map, or if the map is invalid
@@ -1111,4 +1146,45 @@ uint32 EverQuestMod::CalculateSpellFocusBoostValue(Unit* caster, uint32 spellID)
         }
     }
     return boostValue;
+}
+
+void EverQuestMod::ProcessForage(Player* player)
+{
+    if (player == nullptr)
+        return;
+    if (player->GetMap() == nullptr)
+        return;
+    vector<EverQuestForageZoneItem> forageZoneItems = GetForageZoneItemsInMap(player->GetMap()->GetId());
+    if (forageZoneItems.empty() == true)
+    {
+        ChatHandler(player->GetSession()).PSendSysMessage("You fail to locate any food nearby.");
+        return;
+    }
+    int32 roll = (int32)urand(0, ForageZoneItemTotalChanceByMapID[player->GetMap()->GetId()]);
+    for (const EverQuestForageZoneItem& zoneItem : forageZoneItems)
+    {
+        roll -= zoneItem.Chance;
+        if (roll <= 0)
+        {
+            ItemTemplate const* itemTemplate = sObjectMgr->GetItemTemplate(zoneItem.ItemTemplateID);
+            if (!itemTemplate)
+            {
+                ChatHandler(player->GetSession()).PSendSysMessage("You fail to locate any food nearby.");
+                return;
+            }
+
+            // TODO: Error if the player can't hold the item
+            // TODO: Give the item to the player
+
+            if (zoneItem.ForageType == EQ_FORAGE_TYPE_FOOD)
+                ChatHandler(player->GetSession()).PSendSysMessage("You have scrounged up some food.");
+            else if (zoneItem.ForageType == EQ_FORAGE_TYPE_DRINK)
+                ChatHandler(player->GetSession()).PSendSysMessage("You have scrounged up some water.");
+            else if (zoneItem.ForageType == EQ_FORAGE_TYPE_BAIT)
+                ChatHandler(player->GetSession()).PSendSysMessage("You have scrounged up some water.");
+            else
+                ChatHandler(player->GetSession()).PSendSysMessage("You have scrounged up some fishing grubs.");
+        }
+    }
+    ChatHandler(player->GetSession()).PSendSysMessage("You fail to locate any food nearby.");
 }
