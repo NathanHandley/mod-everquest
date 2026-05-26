@@ -1199,7 +1199,7 @@ void EverQuestMod::ProcessForage(Player* player)
             else if (zoneItem.ForageType == EQ_FORAGE_TYPE_BAIT)
                 ChatHandler(player->GetSession()).PSendSysMessage("You have scrounged up some fishing grubs.");
             else
-                ChatHandler(player->GetSession()).PSendSysMessage("You have scrounged up some food.");
+                ChatHandler(player->GetSession()).PSendSysMessage("You have scrounged up something that doesn't look edible.");
             return;
         }
     }
