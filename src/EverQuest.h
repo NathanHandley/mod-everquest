@@ -27,7 +27,7 @@
 
 using namespace std;
 
-#define EQ_MOD_VERSION                              11
+#define EQ_MOD_VERSION                              12
 
 #define EQ_SPELLDUMMYTYPE_BINDSELF                  1
 #define EQ_SPELLDUMMYTYPE_BINDANY                   2
@@ -303,6 +303,7 @@ public:
     uint32 ConfigSystemQuestSQLIDMax;
     uint32 ConfigSystemCreatureTemplateIDMin;
     uint32 ConfigSystemCreatureTemplateIDMax;
+    bool ConfigDeathKnightsStartLikeOtherClasses;
     uint32 ConfigSystemGameObjectTemplateIDMin;
     uint32 ConfigSystemGameObjectTemplateIDMax;
     uint32 ConfigSystemShipEntryTemplateIDMin;
@@ -394,6 +395,7 @@ public:
     void SendPlayerToLastGate(Player* player);
     void SendPlayerToEQBindHome(Player* player);
     void SetNewBindHome(Player* player);
+    void SetNewBindHome(Player* player, uint32 playerGUIDCounter, int mapID, int zoneID, float playerX, float playerY, float playerZ);
     void DeletePlayerBindHome(ObjectGuid guid);
     void AddCreatureAsLoaded(int mapID, Creature* creature);
     void RemoveCreatureAsLoaded(int mapID, Creature* creature);

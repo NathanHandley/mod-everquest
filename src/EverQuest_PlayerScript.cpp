@@ -216,17 +216,20 @@ public:
         if (EverQuest->IsEnabled == false)
             return;
 
-        // If there is create data, move the player to the related zone
+        // Special logic for deathknights
+        if (EverQuest->ConfigDeathKnightsStartLikeOtherClasses == true)
+        {
+            // If the DK doesn't learn DeathGate, teleport will fail
+            player->learnSpell(50977); 
+        }
+
+        // If there is create data, move the player to the related zone and set initial bind
         if (EverQuest->HasCreatePlayerData(player->getRace(), player->getClass()) == true)
         {
             EverQuestPlayerCreateInfo createInfo = EverQuest->GetPlayerCreateInfo(player->getRace(), player->getClass());
             player->TeleportTo(createInfo.MapID, createInfo.PositionX, createInfo.PositionY, createInfo.PositionZ, createInfo.Orientation);
-        }
-
-        // If the player logged in for the first time and is in a norrath zone, set the bind and aura
-        if (player->GetMap() != nullptr && player->GetMap()->GetId() >= EverQuest->ConfigSystemMapDBCIDMin && player->GetMap()->GetId() <= EverQuest->ConfigSystemMapDBCIDMax)
-        {
-            EverQuest->SetNewBindHome(player);
+            EverQuest->SetNewBindHome(player, player->GetGUID().GetCounter(), createInfo.MapID, createInfo.ZoneID, createInfo.PositionX,
+                createInfo.PositionY, createInfo.PositionZ);
         }
     }
 

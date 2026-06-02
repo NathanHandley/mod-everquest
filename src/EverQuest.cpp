@@ -38,6 +38,7 @@ EverQuestMod::EverQuestMod() :
     ConfigSystemQuestSQLIDMax(0),
     ConfigSystemCreatureTemplateIDMin(0),
     ConfigSystemCreatureTemplateIDMax(0),
+    ConfigDeathKnightsStartLikeOtherClasses(false),
     ConfigMapRestrictPlayersToNorrath(false),    
     ConfigQuestGrantExpOnRepeatCompletion(true),
     ConfigExpLossOnDeathEnabled(true),
@@ -84,6 +85,8 @@ bool EverQuestMod::LoadConfigurationSystemDataFromDB()
                 ConfigSystemCreatureTemplateIDMin = (uint32)atoi(value.c_str());
             else if (key == "CreatureTemplateIDMax")
                 ConfigSystemCreatureTemplateIDMax = (uint32)atoi(value.c_str());
+            else if (key == "DeathKnightsStartLikeOtherClasses")
+                ConfigDeathKnightsStartLikeOtherClasses = value == "1" ? true : false;
             else if (key == "GameObjectTemplateIDMin")
                 ConfigSystemGameObjectTemplateIDMin = (uint32)atoi(value.c_str());
             else if (key == "GameObjectTemplateIDMax")
@@ -876,8 +879,22 @@ void EverQuestMod::SetNewBindHome(Player* player)
     float playerZ = player->GetPosition().GetPositionZ();
     int mapID = player->GetMap()->GetId();
     int zoneID = player->GetAreaId();
+    int playerGUIDCounter = player->GetGUID().GetCounter();
+
+    SetNewBindHome(player, playerGUIDCounter, mapID, zoneID, playerX, playerY, playerZ);
+}
+
+void EverQuestMod::SetNewBindHome(Player* player, uint32 playerGUIDCounter, int mapID, int zoneID, float playerX, float playerY, float playerZ)
+{
+    // Set up the transaction
+    CharacterDatabaseTransaction transaction = CharacterDatabase.BeginTransaction();
+
+    // Delete the old record, if it exists
+    transaction->Append("DELETE FROM `mod_everquest_character_homebind` WHERE guid = {}", playerGUIDCounter);
+
+    // Add the new binding
     transaction->Append("INSERT INTO `mod_everquest_character_homebind` (`guid`, `mapId`, `zoneId`, `posX`, `posY`, `posZ`) VALUES ({}, {}, {}, {}, {}, {})",
-        player->GetGUID().GetCounter(), mapID, zoneID, playerX, playerY, playerZ);
+        playerGUIDCounter, mapID, zoneID, playerX, playerY, playerZ);
 
     // Commit the transaction
     CharacterDatabase.CommitTransaction(transaction);
