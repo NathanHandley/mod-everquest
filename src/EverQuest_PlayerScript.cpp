@@ -217,7 +217,7 @@ public:
             return;
 
         // Special logic for deathknights
-        if (EverQuest->ConfigDeathKnightsStartLikeOtherClasses == true)
+        if (EverQuest->ConfigDeathKnightsStartLikeOtherClasses == true && player->getClass() == CLASS_DEATH_KNIGHT)
         {
             // If the DK doesn't learn DeathGate, teleport will fail
             player->learnSpell(50977); 
@@ -230,6 +230,11 @@ public:
             player->TeleportTo(createInfo.MapID, createInfo.PositionX, createInfo.PositionY, createInfo.PositionZ, createInfo.Orientation);
             EverQuest->SetNewBindHome(player, player->GetGUID().GetCounter(), createInfo.MapID, createInfo.ZoneID, createInfo.PositionX,
                 createInfo.PositionY, createInfo.PositionZ);
+            if (EverQuest->ConfigDeathKnightsStartLikeOtherClasses == true && player->getClass() == CLASS_DEATH_KNIGHT)
+            {
+                player->RemoveAura(48266); // Take off Blood Presence
+            }
+
         }
     }
 
