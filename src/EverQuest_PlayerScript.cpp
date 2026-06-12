@@ -154,10 +154,17 @@ public:
             return;
 
         // Disable any group exp reduction if needed
-        if (EverQuest->ConfigDisableGroupEXPReduction == true)
+        if (EverQuest->ConfigAlternateGroupExperienceFormulaEnabled == true)
         {
-            if (player->GetGroup() != nullptr)
-                rate = 1.0f;
+            if (player->GetGroup() != nullptr && player->GetGroup()->GetMembersCount() >= 2 && player->GetGroup()->GetMembersCount() <= 5)
+            {
+                float bonusTotalRatePercent = static_cast<float>(player->GetGroup()->GetMembersCount() - 1) * (EverQuest->ConfigAlternateGroupExperienceAddPercentPerAddedMember * 0.01f);
+                LOG_ERROR("module.EverQuest", "bonus {}", bonusTotalRatePercent);
+                float splitBaseRate = 1.0f / static_cast<float>(player->GetGroup()->GetMembersCount());
+                LOG_ERROR("module.EverQuest", "splitBaseRate {}", splitBaseRate);
+                rate = splitBaseRate * (1.0f + bonusTotalRatePercent);
+                LOG_ERROR("module.EverQuest", "rate {}", rate);
+            }
         }
 
         // Skip invalid victims
