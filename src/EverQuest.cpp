@@ -156,7 +156,7 @@ void EverQuestMod::LoadConfigurationFile()
 void EverQuestMod::LoadCreatureData()
 {
     CreaturesByTemplateID.clear();
-    QueryResult queryResult = WorldDatabase.Query("SELECT CreatureTemplateID, CanShowHeldLootItems, CanShowHeldLootShields FROM mod_everquest_creature ORDER BY CreatureTemplateID;");
+    QueryResult queryResult = WorldDatabase.Query("SELECT CreatureTemplateID, CanShowHeldLootItems, CanShowHeldLootShields, SpawnLimit FROM mod_everquest_creature ORDER BY CreatureTemplateID;");
     if (queryResult)
     {
         do
@@ -167,9 +167,83 @@ void EverQuestMod::LoadCreatureData()
             everQuestCreature.CreatureTemplateID = fields[0].Get<uint32>();
             everQuestCreature.CanShowHeldLootItems = fields[1].Get<bool>();
             everQuestCreature.CanShowHeldLootShields = fields[2].Get<bool>();
+            everQuestCreature.SpawnLimit = fields[3].Get<uint32>();
             CreaturesByTemplateID[everQuestCreature.CreatureTemplateID] = everQuestCreature;
         } while (queryResult->NextRow());
     }
+}
+
+void EverQuestMod::LoadCreatureSpawnPoints()
+{
+    CreatureSpawnPointsByCreatureGUID.clear();
+    QueryResult queryResult = WorldDatabase.Query("SELECT CreatureGUID, MapID, SpawnPointID, SpawnGroupID, SpawnGroupLimit FROM mod_everquest_creature_spawn_point;");
+    if (queryResult)
+    {
+        do
+        {
+            // Pull the data out
+            Field* fields = queryResult->Fetch();
+            EverQuestCreatureSpawnPoint creatureSpawnPoint;
+            creatureSpawnPoint.CreatureGUID = fields[0].Get<uint32>();
+            creatureSpawnPoint.MapID = fields[1].Get<uint32>();
+            creatureSpawnPoint.SpawnPointID = fields[2].Get<uint32>();
+            creatureSpawnPoint.SpawnGroupID = fields[3].Get<uint32>();
+            creatureSpawnPoint.SpawnGroupLimit = fields[4].Get<uint32>();
+            CreatureSpawnPointsByCreatureGUID[creatureSpawnPoint.CreatureGUID] = creatureSpawnPoint;
+        } while (queryResult->NextRow());
+    }
+}
+
+bool EverQuestMod::ShouldDespawnCreatureDueToSpawnRestrictions(int mapID, Creature* creature)
+{
+    // Creatures loading in dead (corpses) never count against spawn restrictions
+    if (creature->IsAlive() == false)
+        return false;
+
+    // Pets and summoned creatures are not placed spawns, so never restrict them
+    if (creature->IsPet() == true || creature->IsSummon() == true)
+        return false;
+
+    // Restricted creatures (EQ "spawn_limit") can only have so many alive in a map at once
+    uint32 spawnLimit = GetCreatureDataForCreatureTemplateID(creature->GetEntry()).SpawnLimit;
+    if (spawnLimit > 0)
+    {
+        uint32 aliveCount = 0;
+        for (Creature* loadedCreature : GetLoadedCreaturesWithEntryID(mapID, creature->GetEntry()))
+            if (loadedCreature != creature && loadedCreature->IsAlive() == true && loadedCreature->IsPet() == false && loadedCreature->IsSummon() == false)
+                aliveCount++;
+        if (aliveCount >= spawnLimit)
+            return true;
+    }
+
+    // Pooled spawn points can only ever have one creature alive on them, and capped spawn groups so many alive in total
+    if (creature->GetSpawnId() != 0 && CreatureSpawnPointsByCreatureGUID.find(creature->GetSpawnId()) != CreatureSpawnPointsByCreatureGUID.end())
+    {
+        const EverQuestCreatureSpawnPoint& creatureSpawnPoint = CreatureSpawnPointsByCreatureGUID[creature->GetSpawnId()];
+        if (AllLoadedCreaturesByMapIDThenSpawnPointID.find(mapID) != AllLoadedCreaturesByMapIDThenSpawnPointID.end())
+        {
+            unordered_map<uint32, vector<Creature*>>& spawnPointMap = AllLoadedCreaturesByMapIDThenSpawnPointID[mapID];
+            if (spawnPointMap.find(creatureSpawnPoint.SpawnPointID) != spawnPointMap.end())
+                for (Creature* loadedCreature : spawnPointMap[creatureSpawnPoint.SpawnPointID])
+                    if (loadedCreature != creature && loadedCreature->IsAlive() == true)
+                        return true;
+        }
+        if (creatureSpawnPoint.SpawnGroupLimit > 0 && AllLoadedCreaturesByMapIDThenSpawnGroupID.find(mapID) != AllLoadedCreaturesByMapIDThenSpawnGroupID.end())
+        {
+            unordered_map<uint32, vector<Creature*>>& spawnGroupMap = AllLoadedCreaturesByMapIDThenSpawnGroupID[mapID];
+            if (spawnGroupMap.find(creatureSpawnPoint.SpawnGroupID) != spawnGroupMap.end())
+            {
+                uint32 aliveCount = 0;
+                for (Creature* loadedCreature : spawnGroupMap[creatureSpawnPoint.SpawnGroupID])
+                    if (loadedCreature != creature && loadedCreature->IsAlive() == true)
+                        aliveCount++;
+                if (aliveCount >= creatureSpawnPoint.SpawnGroupLimit)
+                    return true;
+            }
+        }
+    }
+
+    return false;
 }
 
 bool EverQuestMod::HasCreatureDataForCreatureTemplateID(uint32 creatureTemplateID)
@@ -923,6 +997,14 @@ void EverQuestMod::AddCreatureAsLoaded(int mapID, Creature* creature)
     if (innerMap.find(creature->GetEntry()) != innerMap.end())
         innerMap[creature->GetEntry()];
     innerMap[creature->GetEntry()].push_back(creature);
+
+    // Track by spawn point and spawn group, if this creature has one
+    if (creature->GetSpawnId() != 0 && CreatureSpawnPointsByCreatureGUID.find(creature->GetSpawnId()) != CreatureSpawnPointsByCreatureGUID.end())
+    {
+        const EverQuestCreatureSpawnPoint& creatureSpawnPoint = CreatureSpawnPointsByCreatureGUID[creature->GetSpawnId()];
+        AllLoadedCreaturesByMapIDThenSpawnPointID[mapID][creatureSpawnPoint.SpawnPointID].push_back(creature);
+        AllLoadedCreaturesByMapIDThenSpawnGroupID[mapID][creatureSpawnPoint.SpawnGroupID].push_back(creature);
+    }
 }
 
 void EverQuestMod::RemoveCreatureAsLoaded(int mapID, Creature* creature)
@@ -946,6 +1028,51 @@ void EverQuestMod::RemoveCreatureAsLoaded(int mapID, Creature* creature)
                 AllLoadedCreaturesByMapIDThenCreatureEntryID.erase(mapID);
         }
     }
+
+    // Remove from the spawn point and spawn group trackers, if this creature has one
+    if (creature->GetSpawnId() != 0 && CreatureSpawnPointsByCreatureGUID.find(creature->GetSpawnId()) != CreatureSpawnPointsByCreatureGUID.end())
+    {
+        const EverQuestCreatureSpawnPoint& creatureSpawnPoint = CreatureSpawnPointsByCreatureGUID[creature->GetSpawnId()];
+        if (AllLoadedCreaturesByMapIDThenSpawnPointID.find(mapID) != AllLoadedCreaturesByMapIDThenSpawnPointID.end())
+        {
+            unordered_map<uint32, vector<Creature*>>& spawnPointMap = AllLoadedCreaturesByMapIDThenSpawnPointID[mapID];
+            if (spawnPointMap.find(creatureSpawnPoint.SpawnPointID) != spawnPointMap.end())
+            {
+                vector<Creature*>& spawnPointCreatureVector = spawnPointMap[creatureSpawnPoint.SpawnPointID];
+                vector<Creature*>::iterator spawnPointIt = find(spawnPointCreatureVector.begin(), spawnPointCreatureVector.end(), creature);
+                if (spawnPointIt != spawnPointCreatureVector.end())
+                {
+                    spawnPointCreatureVector.erase(spawnPointIt);
+                    if (spawnPointCreatureVector.empty())
+                    {
+                        spawnPointMap.erase(creatureSpawnPoint.SpawnPointID);
+                        if (spawnPointMap.empty())
+                            AllLoadedCreaturesByMapIDThenSpawnPointID.erase(mapID);
+                    }
+                }
+            }
+        }
+        if (AllLoadedCreaturesByMapIDThenSpawnGroupID.find(mapID) != AllLoadedCreaturesByMapIDThenSpawnGroupID.end())
+        {
+            unordered_map<uint32, vector<Creature*>>& spawnGroupMap = AllLoadedCreaturesByMapIDThenSpawnGroupID[mapID];
+            if (spawnGroupMap.find(creatureSpawnPoint.SpawnGroupID) != spawnGroupMap.end())
+            {
+                vector<Creature*>& spawnGroupCreatureVector = spawnGroupMap[creatureSpawnPoint.SpawnGroupID];
+                vector<Creature*>::iterator spawnGroupIt = find(spawnGroupCreatureVector.begin(), spawnGroupCreatureVector.end(), creature);
+                if (spawnGroupIt != spawnGroupCreatureVector.end())
+                {
+                    spawnGroupCreatureVector.erase(spawnGroupIt);
+                    if (spawnGroupCreatureVector.empty())
+                    {
+                        spawnGroupMap.erase(creatureSpawnPoint.SpawnGroupID);
+                        if (spawnGroupMap.empty())
+                            AllLoadedCreaturesByMapIDThenSpawnGroupID.erase(mapID);
+                    }
+                }
+            }
+        }
+    }
+
     if (EverQuest->PreloadedLootItemIDsByCreatureGUID.find(creature->GetGUID()) != EverQuest->PreloadedLootItemIDsByCreatureGUID.end())
         EverQuest->PreloadedLootItemIDsByCreatureGUID.erase(creature->GetGUID());
     if (EverQuest->VisualEquippedItemsByCreatureGUID.find(creature->GetGUID()) != EverQuest->VisualEquippedItemsByCreatureGUID.end())

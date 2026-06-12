@@ -27,7 +27,7 @@
 
 using namespace std;
 
-#define EQ_MOD_VERSION                              12
+#define EQ_MOD_VERSION                              13
 
 #define EQ_SPELLDUMMYTYPE_BINDSELF                  1
 #define EQ_SPELLDUMMYTYPE_BINDANY                   2
@@ -146,6 +146,17 @@ public:
     uint32 CreatureTemplateID = 0;
     bool CanShowHeldLootItems = 0;
     bool CanShowHeldLootShields = 0;
+    uint32 SpawnLimit = 0;
+};
+
+class EverQuestCreatureSpawnPoint
+{
+public:
+    uint32 CreatureGUID = 0;
+    uint32 MapID = 0;
+    uint32 SpawnPointID = 0;
+    uint32 SpawnGroupID = 0;
+    uint32 SpawnGroupLimit = 0;
 };
 
 class EverQuestLoadedCreatureEquippedVisualItems
@@ -330,6 +341,9 @@ public:
     unordered_map<uint8, list<uint32>> PlayerAutoLearnSkillsByClassID;
     unordered_map<uint8, list<EverQuestAutoLearnSpell>> PlayerAutoLearnSpellsByClassID;
     unordered_map<int, unordered_map<int, vector<Creature*>>> AllLoadedCreaturesByMapIDThenCreatureEntryID;
+    unordered_map<uint32, EverQuestCreatureSpawnPoint> CreatureSpawnPointsByCreatureGUID;
+    unordered_map<int, unordered_map<uint32, vector<Creature*>>> AllLoadedCreaturesByMapIDThenSpawnPointID;
+    unordered_map<int, unordered_map<uint32, vector<Creature*>>> AllLoadedCreaturesByMapIDThenSpawnGroupID;
     unordered_map<ObjectGuid, deque<uint32>> PlayerCasterConcurrentBardSongs;
     unordered_map<uint32, unordered_map<uint32, vector<EverQuestLootTemplateRow>>> LootTemplateRowsInGroupByEntryID;
     unordered_map<ObjectGuid, vector<uint32>> PreloadedLootItemIDsByCreatureGUID;
@@ -354,6 +368,8 @@ public:
     void LoadCreatureData();
     bool HasCreatureDataForCreatureTemplateID(uint32 creatureTemplateID);
     const EverQuestCreature& GetCreatureDataForCreatureTemplateID(uint32 creatureTemplateID);
+    void LoadCreatureSpawnPoints();
+    bool ShouldDespawnCreatureDueToSpawnRestrictions(int mapID, Creature* creature);
     void LoadCreatureOnkillReputations();
     const list<EverQuestCreatureOnkillReputation>& GetOnkillReputationsForCreatureTemplate(uint32 creatureTemplateID);
     void LoadItemTemplateData();
