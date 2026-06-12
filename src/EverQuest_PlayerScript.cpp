@@ -148,10 +148,17 @@ public:
         }
     }
 
-    void OnPlayerRewardKillRewarder(Player* player, KillRewarder* rewarder, bool /*isDungeon*/, float& /*rate*/) override
+    void OnPlayerRewardKillRewarder(Player* player, KillRewarder* rewarder, bool /*isDungeon*/, float& rate) override
     {
         if (EverQuest->IsEnabled == false)
             return;
+
+        // Disable any group exp reduction if needed
+        if (EverQuest->ConfigDisableGroupEXPReduction == true)
+        {
+            if (player->GetGroup() != nullptr)
+                rate = 1.0f;
+        }
 
         // Skip invalid victims
         Unit* victim = rewarder->GetVictim();

@@ -328,6 +328,7 @@ public:
     int ConfigExpLossOnDeathMinLevel;
     float ConfigExpLossOnDeathLossPercent;
     bool ConfigExpLossOnDeathAddLostExpToRestExp;
+    bool ConfigDisableGroupEXPReduction;
 
     vector<Player*> AllLoadedPlayers;
     unordered_map<uint32, EverQuestCreature> CreaturesByTemplateID;

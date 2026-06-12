@@ -59,3 +59,13 @@ EverQuest.ExpLossOnDeath.Enabled = True
 EverQuest.ExpLossOnDeath.MinLevel = 5
 EverQuest.ExpLossOnDeath.LossPercent = 10
 EverQuest.ExpLossOnDeath.AddLostExpToRestExp = True
+
+###################################################################################################
+#
+# 	EverQuest.DisableGroupEXPReduction
+#		If true, exp granted while in a group will always be at full rate (same as solo)
+#	Default: False (group exp is reduced like a live server)
+#
+###################################################################################################
+
+EverQuest.DisableGroupEXPReduction = False

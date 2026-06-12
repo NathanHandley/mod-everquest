@@ -44,7 +44,8 @@ EverQuestMod::EverQuestMod() :
     ConfigExpLossOnDeathEnabled(true),
     ConfigExpLossOnDeathMinLevel(5),
     ConfigExpLossOnDeathLossPercent(10),
-    ConfigExpLossOnDeathAddLostExpToRestExp(true)
+    ConfigExpLossOnDeathAddLostExpToRestExp(true),
+    ConfigDisableGroupEXPReduction(false)
 {
 }
 
@@ -151,6 +152,9 @@ void EverQuestMod::LoadConfigurationFile()
     ConfigExpLossOnDeathMinLevel = sConfigMgr->GetOption<uint32>("EverQuest.ExpLossOnDeath.MinLevel", 5);
     ConfigExpLossOnDeathLossPercent = sConfigMgr->GetOption<float>("EverQuest.ExpLossOnDeath.LossPercent", 10);
     ConfigExpLossOnDeathAddLostExpToRestExp = sConfigMgr->GetOption<bool>("EverQuest.ExpLossOnDeath.AddLostExpToRestExp", true);
+
+    // Group EXP rates
+    ConfigDisableGroupEXPReduction = sConfigMgr->GetOption<bool>("EverQuest.DisableGroupEXPReduction", false);
 }
 
 void EverQuestMod::LoadCreatureData()
