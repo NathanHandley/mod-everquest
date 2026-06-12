@@ -45,6 +45,7 @@ using namespace std;
 #define EQ_SPELLDUMMYTYPE_BARDSONGANY               14
 #define EQ_SPELLDUMMYTYPE_ILLUSIONPARENT            15
 #define EQ_SPELLDUMMYTYPE_FORAGE                    16
+#define EQ_SPELLDUMMYTYPE_SUMMONACTIVE              17
 
 #define EQ_BARDSONGAURATARGET_ENEMYAREA             1
 #define EQ_BARDSONGAURATARGET_FRIENDLYPARTY         2

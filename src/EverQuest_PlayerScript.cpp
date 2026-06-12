@@ -18,6 +18,7 @@
 #include "GameGraveyard.h"
 #include "ObjectAccessor.h"
 #include "ObjectGuid.h"
+#include "Pet.h"
 #include "Player.h"
 #include "ReputationMgr.h"
 #include "ScriptMgr.h"
@@ -35,6 +36,54 @@ class EverQuest_PlayerScript : public PlayerScript
 {
 public:
     EverQuest_PlayerScript() : PlayerScript("EverQuest_PlayerScript") {}
+
+    Optional<bool> OnPlayerIsClass(Player const* player, Classes playerClass, ClassContext context) override
+    {
+        if (EverQuest->IsEnabled == false)
+            return std::nullopt;
+
+        // TODO: This needs to be dynamic from the server in case SK is mapped to a different class
+        if (context == CLASS_CONTEXT_PET && playerClass == CLASS_WARLOCK && player->getClass() == CLASS_DEATH_KNIGHT)
+            return true;
+
+        return std::nullopt;
+    }
+
+    void OnPlayerBeforeLoadPetFromDB(Player* player, uint32& petEntry, uint32& petNumber, bool& current, bool& forceLoadFromDB) override
+    {
+        if (EverQuest->IsEnabled == false)
+            return;
+        if (forceLoadFromDB == true)
+            return;
+
+        uint32 creatureTemplateID = petEntry;
+        if (creatureTemplateID == 0)
+        {
+            PetStable const* petStable = player->GetPetStable();
+            if (petStable == nullptr)
+                return;
+            if (petNumber != 0)
+            {
+                if (petStable->CurrentPet && petStable->CurrentPet->PetNumber == petNumber)
+                    creatureTemplateID = petStable->CurrentPet->CreatureId;
+                if (creatureTemplateID == 0)
+                    for (auto const& stabledPet : petStable->StabledPets)
+                        if (stabledPet && stabledPet->PetNumber == petNumber)
+                            creatureTemplateID = stabledPet->CreatureId;
+                if (creatureTemplateID == 0)
+                    for (PetStable::PetInfo const& unslottedPet : petStable->UnslottedPets)
+                        if (unslottedPet.PetNumber == petNumber)
+                            creatureTemplateID = unslottedPet.CreatureId;
+            }
+            else if (petStable->CurrentPet)
+                creatureTemplateID = petStable->CurrentPet->CreatureId;
+            else if (petStable->UnslottedPets.empty() == false)
+                creatureTemplateID = petStable->UnslottedPets.front().CreatureId;
+        }
+
+        if (creatureTemplateID != 0 && EverQuest->HasPetDataForCreatureTemplateID(creatureTemplateID) == true)
+            forceLoadFromDB = true;
+    }
 
     // Called when a player completes a quest
     void OnPlayerCompleteQuest(Player* player, Quest const* quest) override
