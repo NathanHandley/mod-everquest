@@ -16,6 +16,7 @@
 
 #include "Chat.h"
 #include "GameGraveyard.h"
+#include "Group.h"
 #include "ObjectAccessor.h"
 #include "ObjectGuid.h"
 #include "Pet.h"
@@ -156,14 +157,29 @@ public:
         // Disable any group exp reduction if needed
         if (EverQuest->ConfigAlternateGroupExperienceFormulaEnabled == true)
         {
-            if (player->GetGroup() != nullptr && player->GetGroup()->GetMembersCount() >= 2 && player->GetGroup()->GetMembersCount() <= 5)
+            Group* group = player->GetGroup();
+            if (group != nullptr)
             {
-                float bonusTotalRatePercent = static_cast<float>(player->GetGroup()->GetMembersCount() - 1) * (EverQuest->ConfigAlternateGroupExperienceAddPercentPerAddedMember * 0.01f);
-                LOG_ERROR("module.EverQuest", "bonus {}", bonusTotalRatePercent);
-                float splitBaseRate = 1.0f / static_cast<float>(player->GetGroup()->GetMembersCount());
-                LOG_ERROR("module.EverQuest", "splitBaseRate {}", splitBaseRate);
-                rate = splitBaseRate * (1.0f + bonusTotalRatePercent);
-                LOG_ERROR("module.EverQuest", "rate {}", rate);
+                // Only count members that are online, alive, and in reward range 
+                Player* killer = rewarder->GetKiller();
+                Unit* rewardVictim = rewarder->GetVictim();
+                uint32 eligibleMemberCount = 0;
+                for (GroupReference* itr = group->GetFirstMember(); itr != nullptr; itr = itr->next())
+                {
+                    Player* member = itr->GetSource();
+                    if (member == nullptr || member->IsAlive() == false)
+                        continue;
+                    if (member != killer && (rewardVictim == nullptr || member->IsAtGroupRewardDistance(rewardVictim) == false))
+                        continue;
+                    eligibleMemberCount++;
+                }
+
+                if (eligibleMemberCount >= 2 && eligibleMemberCount <= 5)
+                {
+                    float bonusTotalRatePercent = static_cast<float>(eligibleMemberCount - 1) * (EverQuest->ConfigAlternateGroupExperienceAddPercentPerAddedMember * 0.01f);
+                    float splitBaseRate = 1.0f / static_cast<float>(eligibleMemberCount);
+                    rate = splitBaseRate * (1.0f + bonusTotalRatePercent);
+                }
             }
         }
 
