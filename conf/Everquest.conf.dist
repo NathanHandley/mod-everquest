@@ -76,3 +76,13 @@ EverQuest.ExpLossOnDeath.AddLostExpToRestExp = True
 
 EverQuest.AlternateGroupExperienceFormula.Enabled = False
 EverQuest.AlternateGroupExperienceFormula.AddPercentPerMember = 20
+
+###################################################################################################
+#
+# 	EverQuest.Spells.DisableStackingOfSameDOT
+#		If true, spells that apply the same dot will not stack, which is EQ-like
+#	Default: False (use WoW behavior)
+#
+###################################################################################################
+
+EverQuest.Spells.DisableStackingOfSameDOT = False

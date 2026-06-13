@@ -330,6 +330,7 @@ public:
     bool ConfigExpLossOnDeathAddLostExpToRestExp;
     bool ConfigAlternateGroupExperienceFormulaEnabled;
     float ConfigAlternateGroupExperienceAddPercentPerAddedMember;
+    bool configSpellDisableStackingOfSameDOT;
 
     vector<Player*> AllLoadedPlayers;
     unordered_map<uint32, EverQuestCreature> CreaturesByTemplateID;

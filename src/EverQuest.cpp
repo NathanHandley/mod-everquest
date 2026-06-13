@@ -46,7 +46,8 @@ EverQuestMod::EverQuestMod() :
     ConfigExpLossOnDeathLossPercent(10),
     ConfigExpLossOnDeathAddLostExpToRestExp(true),
     ConfigAlternateGroupExperienceFormulaEnabled(false),
-    ConfigAlternateGroupExperienceAddPercentPerAddedMember(20.0f)
+    ConfigAlternateGroupExperienceAddPercentPerAddedMember(20.0f),
+    configSpellDisableStackingOfSameDOT(false)
 {
 }
 
@@ -157,6 +158,9 @@ void EverQuestMod::LoadConfigurationFile()
     // Group EXP rates
     ConfigAlternateGroupExperienceFormulaEnabled = sConfigMgr->GetOption<bool>("EverQuest.AlternateGroupExperienceFormula.Enabled", false);
     ConfigAlternateGroupExperienceAddPercentPerAddedMember = sConfigMgr->GetOption<float>("EverQuest.AlternateGroupExperienceFormula.AddPercentPerMember", false);
+
+    // Spells
+    configSpellDisableStackingOfSameDOT = sConfigMgr->GetOption<bool>("EverQuest.Spells.DisableStackingOfSameDOT", false);
 }
 
 void EverQuestMod::LoadCreatureData()

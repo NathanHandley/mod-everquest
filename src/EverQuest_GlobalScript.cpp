@@ -15,6 +15,7 @@
 //  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #include "ScriptMgr.h"
+#include "SpellInfo.h"
 
 #include "EverQuest.h"
 
@@ -24,6 +25,73 @@ class EverQuest_GlobalScript: public GlobalScript
 {
 public:
     EverQuest_GlobalScript() : GlobalScript("EverQuest_GlobalScript") {}
+
+    // EverQuest spell custom-attribute fixups.  This hook runs after AzerothCore has computed each
+    // effect's positivity (SpellMgr::LoadSpellInfoCustomAttributes), so we can both read and override
+    // that decision here.
+    void OnLoadSpellCustomAttr(SpellInfo* spell) override
+    {
+        if (EverQuest->IsEnabled == false)
+            return;
+        if (spell == nullptr)
+            return;
+
+        // Only adjust EQ-generated spells
+        if (spell->Id < EverQuest->ConfigSystemSpellDBCIDMin || spell->Id > EverQuest->ConfigSystemSpellDBCIDMax)
+            return;
+        if (EverQuest->IsSpellAnEQSpell(spell->Id) == false)
+            return;
+
+        bool hasHarmfulPeriodic = false;
+        bool allSelfTargeted = true;
+        bool hasPositiveEffect = false;
+        bool hasNegativeEffect = false;
+        for (uint8 i = 0; i < MAX_SPELL_EFFECTS; ++i)
+        {
+            if (spell->Effects[i].IsEffect() == false)
+                continue;
+
+            switch (spell->Effects[i].ApplyAuraName)
+            {
+                case SPELL_AURA_PERIODIC_DAMAGE:
+                case SPELL_AURA_PERIODIC_DAMAGE_PERCENT:
+                case SPELL_AURA_PERIODIC_LEECH:
+                case SPELL_AURA_PERIODIC_MANA_LEECH:
+                case SPELL_AURA_POWER_BURN:
+                    hasHarmfulPeriodic = true;
+                    break;
+                default:
+                    break;
+            }
+
+            uint32 targetA = spell->Effects[i].TargetA.GetTarget();
+            if (targetA != TARGET_UNIT_CASTER && targetA != 0)
+                allSelfTargeted = false;
+
+            if (spell->IsPositiveEffect(i))
+                hasPositiveEffect = true;
+            else
+                hasNegativeEffect = true;
+        }
+
+        if (EverQuest->configSpellDisableStackingOfSameDOT == true)
+        {
+            if (hasHarmfulPeriodic)
+                spell->AttributesCu |= SPELL_ATTR0_CU_SINGLE_AURA_STACK;
+        }
+
+        // By default in WoW, buffs that have a cost are treated as a debuff (can't be removed).  That's not EQ behavior.
+        if (allSelfTargeted && hasPositiveEffect && hasNegativeEffect)
+        {
+            for (uint8 i = 0; i < MAX_SPELL_EFFECTS; ++i)
+            {
+                if (spell->Effects[i].IsEffect() == false)
+                    continue;
+                spell->AttributesCu &= ~(SPELL_ATTR0_CU_NEGATIVE_EFF0 << i);
+                spell->AttributesCu |= (SPELL_ATTR0_CU_POSITIVE_EFF0 << i);
+            }
+        }
+    }
 
     // Note: There is a bug here because the calculated number of dropped items (MinCount/MaxCount) is not in scope
     bool OnItemRoll(Player const* /*player*/, LootStoreItem const* lootStoreItem, float& chance, Loot& loot, LootStore const& /*lootStore*/) override
