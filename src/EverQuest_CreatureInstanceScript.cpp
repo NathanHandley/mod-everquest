@@ -200,7 +200,9 @@ public:
                 {
                     targetTestZ = initialTargetZ + (floorLoopNum * curAddedZStep);
                     curAddedZStep += 1.0f;
-                    solidFloorZ = me->GetMapHeight(initialTargetX, initialTargetY, targetTestZ, true, (floorLoopNum * 20.0f));
+                    float floorSearchDist = floorLoopNum * 20.0f;
+                    if (floorSearchDist > 0.0f)
+                        solidFloorZ = me->GetMapHeight(initialTargetX, initialTargetY, targetTestZ, true, floorSearchDist);
                     floorLoopNum++;
                     if (floorLoopNum >= 10)
                         break;
@@ -354,8 +356,16 @@ public:
                 float endThreshold = isFinalCorner ? EQ_MOVE_SMALL_STEP_SIZE_LAST_DISTANCE : EQ_MOVE_SMALL_STEP_SIZE_DISTANCE;
                 float remainingDistance = segLength;
 
+                bool nodeCapReached = false;
                 while (remainingDistance > endThreshold)
                 {
+                    // Prevent oversizing paths
+                    if (waypointPath.size() >= EQ_MOVE_MAX_PATH_NODES)
+                    {
+                        nodeCapReached = true;
+                        break;
+                    }
+
                     float interimX = previousPosition.GetPositionX() + ux * EQ_MOVE_SMALL_STEP_SIZE_DISTANCE;
                     float interimY = previousPosition.GetPositionY() + uy * EQ_MOVE_SMALL_STEP_SIZE_DISTANCE;
                     float interimZ = previousPosition.GetPositionZ() + uz * EQ_MOVE_SMALL_STEP_SIZE_DISTANCE;
@@ -372,6 +382,10 @@ public:
                     remainingDistance -= EQ_MOVE_SMALL_STEP_SIZE_DISTANCE;
                     priorInterimZ = interimZ;
                 }
+
+                // When cap is hit, stop at the last interim node instead of an unsnapped one
+                if (nodeCapReached)
+                    break;
 
                 // Add corner
                 float refZ = (priorInterimZ < -100000.0f) ? corner.GetPositionZ() : priorInterimZ;

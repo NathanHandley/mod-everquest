@@ -94,11 +94,12 @@ using namespace std;
 #define EQ_MOVE_TO_ROAM_POINT                       20001
 #define EQ_MOVE_TO_WAYPOINT_POINT                   20002
 
-#define EQ_MOVE_SMALL_STEP_SIZE_DISTANCE            3.0f    // Minimum distance between nodes when making small steps
+#define EQ_MOVE_SMALL_STEP_SIZE_DISTANCE            5.0f    // Minimum distance between nodes when making small steps
 #define EQ_MOVE_SMALL_STEP_SIZE_LAST_DISTANCE       5.0f    // How much minimium distance to allow on the last node
 #define EQ_MOVE_SMALL_STEP_DISTANCE_TO_END          0.25f   // If within this distance, end movement to current node
 #define EQ_MOVE_UNDER_WATER_SURFACE_SKIM_REDICTION  3.0f    // How far to reduce a position if a tested z position hit water
 #define EQ_MOVE_TEST_Z_DOWN_AMOUNT_FOR_WATER_TEST   10.0f   // How far to test down when looking for water in the Z testing
+#define EQ_MOVE_MAX_PATH_NODES                      512     // Hard cap on generated step nodes
 
 #define EQ_MOVE_PHASE_NONE                          0
 #define EQ_MOVE_PHASE_TRAVELING                     1
