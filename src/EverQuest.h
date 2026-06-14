@@ -421,6 +421,8 @@ public:
     void RemoveCreatureAsLoaded(int mapID, Creature* creature);
     vector<Creature*> GetLoadedCreaturesWithEntryID(int mapID, uint32 entryID);
     void RollLootItemsForCreature(ObjectGuid creatureGUID, uint32 creatureTemplateEntryID);
+    void RecordPreloadedLootRow(vector<uint32>& preloadedItemIDs, const EverQuestLootTemplateRow& lootRow);
+    bool IsLootRowAlreadyChosen(const vector<const EverQuestLootTemplateRow*>& alreadyChosen, const EverQuestLootTemplateRow* lootRow);
     void SpawnCreature(uint32 entryID, Map* map, float x, float y, float z, float orientation, bool enforceUniqueSpawn);
     void DespawnCreature(uint32 entryID, Map* map);
     void MakeCreatureAttackPlayer(uint32 entryID, Map* map, Player* player);

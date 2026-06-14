@@ -1107,59 +1107,124 @@ void EverQuestMod::RollLootItemsForCreature(ObjectGuid creatureGUID, uint32 crea
         return;
 
     // Clear old and ensure it has a record
-    PreloadedLootItemIDsByCreatureGUID[creatureGUID] = vector<uint32>();
+    vector<uint32>& preloadedItemIDs = PreloadedLootItemIDsByCreatureGUID[creatureGUID];
+    preloadedItemIDs.clear();
 
-    // Rolls are by group
+    // Process each group and mirror core loottemplate processing. group 0 is ungrouped, > 0 are grouped
     for (auto& lootTemplateRowsByGroup : creatureLootItems->second)
     {
-        // Shuffle the items so it's more random
-        random_device randomDevice;
-        mt19937 seed(randomDevice());
-        shuffle(lootTemplateRowsByGroup.second.begin(), lootTemplateRowsByGroup.second.end(), randomDevice);
+        uint8 groupID = lootTemplateRowsByGroup.first;
+        const vector<EverQuestLootTemplateRow>& groupRows = lootTemplateRowsByGroup.second;
 
-        // Process a roll for each item until max hits are made
-        uint16 groupIterationsLeft = uint16(sWorld->getRate(RATE_DROP_ITEM_GROUP_AMOUNT));
-        for (const auto& lootRow : lootTemplateRowsByGroup.second)
+        // Individual rolls
+        if (groupID == 0)
         {
-            // Calculate roll chance using the configuration modifiers
-            ItemTemplate const* itemTemplate = sObjectMgr->GetItemTemplate(lootRow.ItemTemplateID);
-            if (!itemTemplate)
+            for (const auto& lootRow : groupRows)
             {
-                LOG_ERROR("module.EverQuest", "EverQuestMod::RollLootItemsForCreature failure, as item template ID {} could not be found", lootRow.ItemTemplateID);
-                continue;
+                ItemTemplate const* itemTemplate = sObjectMgr->GetItemTemplate(lootRow.ItemTemplateID);
+                if (!itemTemplate)
+                {
+                    LOG_ERROR("module.EverQuest", "EverQuestMod::RollLootItemsForCreature failure, as item template ID {} could not be found", lootRow.ItemTemplateID);
+                    continue;
+                }
+
+                // These chance modifiers seem to only happen on upgrouped
+                float rollChance = lootRow.Chance;
+                switch (itemTemplate->Quality)
+                {
+                    case ITEM_QUALITY_POOR: rollChance *= sWorld->getRate(RATE_DROP_ITEM_POOR); break;
+                    case ITEM_QUALITY_NORMAL: rollChance *= sWorld->getRate(RATE_DROP_ITEM_NORMAL); break;
+                    case ITEM_QUALITY_UNCOMMON: rollChance *= sWorld->getRate(RATE_DROP_ITEM_UNCOMMON); break;
+                    case ITEM_QUALITY_RARE: rollChance *= sWorld->getRate(RATE_DROP_ITEM_RARE); break;
+                    case ITEM_QUALITY_EPIC: rollChance *= sWorld->getRate(RATE_DROP_ITEM_EPIC); break;
+                    case ITEM_QUALITY_LEGENDARY: rollChance *= sWorld->getRate(RATE_DROP_ITEM_LEGENDARY); break;
+                    case ITEM_QUALITY_ARTIFACT: rollChance *= sWorld->getRate(RATE_DROP_ITEM_ARTIFACT); break;
+                    default: break;
+                }
+
+                if (rollChance >= 100.0f || roll_chance_f(rollChance))
+                    RecordPreloadedLootRow(preloadedItemIDs, lootRow);
             }
+            continue;
+        }
 
-            float rollChance = lootRow.Chance;
-            switch (itemTemplate->Quality)
+        // Grouped entries
+        vector<const EverQuestLootTemplateRow*> explicitlyChanced;
+        vector<const EverQuestLootTemplateRow*> equalChanced;
+        for (const auto& lootRow : groupRows)
+        {
+            if (lootRow.Chance > 0.0f)
+                explicitlyChanced.push_back(&lootRow);
+            else
+                equalChanced.push_back(&lootRow);
+        }
+
+        // Track chosen
+        vector<const EverQuestLootTemplateRow*> alreadyChosen;
+
+        uint32 groupIterations = uint32(sWorld->getRate(RATE_DROP_ITEM_GROUP_AMOUNT));
+        for (uint32 iteration = 0; iteration < groupIterations; iteration++)
+        {
+            const EverQuestLootTemplateRow* chosenRow = nullptr;
+
+            // Weighted roll (skip already chosen)
+            float roll = float(rand_chance());
+            for (const EverQuestLootTemplateRow* candidate : explicitlyChanced)
             {
-                case ITEM_QUALITY_POOR: rollChance *= sWorld->getRate(RATE_DROP_ITEM_POOR); break;
-                case ITEM_QUALITY_NORMAL: rollChance *= sWorld->getRate(RATE_DROP_ITEM_NORMAL); break;
-                case ITEM_QUALITY_UNCOMMON: rollChance *= sWorld->getRate(RATE_DROP_ITEM_UNCOMMON); break;
-                case ITEM_QUALITY_RARE: rollChance *= sWorld->getRate(RATE_DROP_ITEM_RARE); break;
-                case ITEM_QUALITY_EPIC: rollChance *= sWorld->getRate(RATE_DROP_ITEM_EPIC); break;
-                case ITEM_QUALITY_LEGENDARY: rollChance *= sWorld->getRate(RATE_DROP_ITEM_LEGENDARY); break;
-                case ITEM_QUALITY_ARTIFACT: rollChance *= sWorld->getRate(RATE_DROP_ITEM_ARTIFACT); break;
-                default: break;
-            }
-
-            // Roll the item
-            bool rollResult = roll_chance_f(rollChance);
-            
-            // Add hits and step down group iterations, otherwise move to the next
-            if (rollResult == true)
-            {
-                // Factor for min drops
-                // NOTE: Note that this does not factor for MaxCount, see OnItemRoll
-                for (int i = 0; i < lootRow.MinCount; i++)
-                    PreloadedLootItemIDsByCreatureGUID[creatureGUID].push_back(lootRow.ItemTemplateID);
-
-                if (lootTemplateRowsByGroup.first != 0) // 0 doesn't follow group restrictions
-                    groupIterationsLeft--;
-                if (groupIterationsLeft <= 0)
+                if (IsLootRowAlreadyChosen(alreadyChosen, candidate))
+                    continue;
+                if (candidate->Chance >= 100.0f)
+                {
+                    chosenRow = candidate;
                     break;
+                }
+                roll -= candidate->Chance;
+                if (roll < 0.0f)
+                {
+                    chosenRow = candidate;
+                    break;
+                }
             }
+
+            // Nothing selected so fall back
+            if (chosenRow == nullptr && equalChanced.empty() == false)
+            {
+                vector<const EverQuestLootTemplateRow*> availableEqual;
+                for (const EverQuestLootTemplateRow* candidate : equalChanced)
+                    if (IsLootRowAlreadyChosen(alreadyChosen, candidate) == false)
+                        availableEqual.push_back(candidate);
+                if (availableEqual.empty() == false)
+                    chosenRow = availableEqual[urand(0, uint32(availableEqual.size()) - 1)];
+            }
+
+            // Empty drop from the group (chances came up to under 100 and the roll missed, or nothing left to pick)
+            if (chosenRow == nullptr)
+                break;
+
+            alreadyChosen.push_back(chosenRow);
+            RecordPreloadedLootRow(preloadedItemIDs, *chosenRow);
         }
     }
+}
+
+// Records a selected loot row's item (honoring MinCount, just like the original pre-roll) into the pre-roll list.
+// The pre-roll is the single source of truth for what actually drops: OnItemRoll/OnBeforeLootEqualChanced force
+// prerolled items to 100% and everything else to 0% at death time.
+void EverQuestMod::RecordPreloadedLootRow(vector<uint32>& preloadedItemIDs, const EverQuestLootTemplateRow& lootRow)
+{
+    // NOTE: This does not factor for MaxCount, see OnItemRoll
+    for (int i = 0; i < lootRow.MinCount; i++)
+        preloadedItemIDs.push_back(lootRow.ItemTemplateID);
+}
+
+// Returns true if the given loot row has already been chosen for the current group (prevents a group from
+// selecting the same item more than once across Rate.Drop.Item.GroupAmount iterations).
+bool EverQuestMod::IsLootRowAlreadyChosen(const vector<const EverQuestLootTemplateRow*>& alreadyChosen, const EverQuestLootTemplateRow* lootRow)
+{
+    for (const EverQuestLootTemplateRow* chosenRow : alreadyChosen)
+        if (chosenRow == lootRow)
+            return true;
+    return false;
 }
 
 void EverQuestMod::SpawnCreature(uint32 entryID, Map* map, float x, float y, float z, float orientation, bool enforceUniqueSpawn)
