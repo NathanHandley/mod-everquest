@@ -47,7 +47,7 @@ public:
         EverQuest->LoadQuestReactions();
         EverQuest->LoadPetData();
         EverQuest->LoadCreatePlayerData();
-        EverQuest->LoadLootTemplateRows();
+        EverQuest->LoadCreatureLootData();
         EverQuest->LoadShipTriggerData();
         EverQuest->LoadCreatureInstanceData();
         EverQuest->LoadCreatureWaypointData();

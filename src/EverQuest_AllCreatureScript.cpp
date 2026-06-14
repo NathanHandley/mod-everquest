@@ -68,7 +68,7 @@ private:
         EverQuest->ClearVisualEquippedItemsForCreatureGUID(creature->GetGUID());
 
         // Roll items
-        if (EverQuest->HasLootTemplateRowsByCreatureTemplateEntryID(creature->GetEntry()))
+        if (EverQuest->HasCreatureLootDataForCreatureTemplateEntryID(creature->GetEntry()))
             EverQuest->RollLootItemsForCreature(creature->GetGUID(), creature->GetEntry());
 
         // Add visual information

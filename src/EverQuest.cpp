@@ -22,6 +22,7 @@
 
 #include "EverQuest.h"
 
+#include <algorithm>
 #include <random>
 
 using namespace std;
@@ -605,32 +606,51 @@ const EverQuestPlayerCreateInfo& EverQuestMod::GetPlayerCreateInfo(uint8 raceID,
     return returnEmpty;
 }
 
-void EverQuestMod::LoadLootTemplateRows()
+void EverQuestMod::LoadCreatureLootData()
 {
-    LootTemplateRowsInGroupByEntryID.clear();
-    QueryResult queryResult = WorldDatabase.Query("SELECT Entry, Item, Chance, QuestRequired, GroupId, MinCount, MaxCount FROM creature_loot_template WHERE Entry > {} AND Entry < {}",
-        ConfigSystemCreatureTemplateIDMin, ConfigSystemCreatureTemplateIDMax);
+    CreatureLootGroupsByCreatureTemplateID.clear();
+
+    // Rows are ordered so that all entries of a creature's loot group are next to each other
+    QueryResult queryResult = WorldDatabase.Query("SELECT CreatureTemplateID, LootGroupID, GroupMultiplier, GroupProbability, DropLimit, MinDrop, ItemTemplateID, Chance, ItemMultiplier, ItemCharges FROM mod_everquest_creature_loot ORDER BY CreatureTemplateID, LootGroupID");
     if (queryResult)
     {
         do
         {
             Field* fields = queryResult->Fetch();
-            EverQuestLootTemplateRow lootRow;
-            lootRow.Entry = fields[0].Get<uint32>();
-            lootRow.ItemTemplateID = fields[1].Get<uint32>();
-            lootRow.Chance = fields[2].Get<float>();
-            lootRow.QuestRequired = fields[3].Get<bool>();
-            lootRow.GroupID = fields[4].Get<uint8>();
-            lootRow.MinCount = fields[5].Get<int32>();
-            lootRow.MaxCount = fields[6].Get<int32>();
-            LootTemplateRowsInGroupByEntryID[lootRow.Entry][lootRow.GroupID].push_back(lootRow);
+            uint32 creatureTemplateID = fields[0].Get<uint32>();
+            uint32 lootGroupID = fields[1].Get<uint32>();
+
+            vector<EverQuestCreatureLootGroup>& lootGroups = CreatureLootGroupsByCreatureTemplateID[creatureTemplateID];
+
+            // Find or create the group for this LootGroupID (entries for the same group are contiguous)
+            EverQuestCreatureLootGroup* lootGroup = nullptr;
+            if (lootGroups.empty() == false && lootGroups.back().LootGroupID == lootGroupID)
+                lootGroup = &lootGroups.back();
+            else
+            {
+                EverQuestCreatureLootGroup newLootGroup;
+                newLootGroup.LootGroupID = lootGroupID;
+                newLootGroup.GroupMultiplier = fields[2].Get<uint32>();
+                newLootGroup.GroupProbability = fields[3].Get<float>();
+                newLootGroup.DropLimit = fields[4].Get<uint32>();
+                newLootGroup.MinDrop = fields[5].Get<uint32>();
+                lootGroups.push_back(newLootGroup);
+                lootGroup = &lootGroups.back();
+            }
+
+            EverQuestCreatureLootEntry lootEntry;
+            lootEntry.ItemTemplateID = fields[6].Get<uint32>();
+            lootEntry.Chance = fields[7].Get<float>();
+            lootEntry.ItemMultiplier = fields[8].Get<uint32>();
+            lootEntry.ItemCharges = fields[9].Get<uint32>();
+            lootGroup->Entries.push_back(lootEntry);
         } while (queryResult->NextRow());
     }
 }
 
-bool EverQuestMod::HasLootTemplateRowsByCreatureTemplateEntryID(uint32 creatureTemplateEntryID)
+bool EverQuestMod::HasCreatureLootDataForCreatureTemplateEntryID(uint32 creatureTemplateEntryID)
 {
-    if (LootTemplateRowsInGroupByEntryID.find(creatureTemplateEntryID) == LootTemplateRowsInGroupByEntryID.end())
+    if (CreatureLootGroupsByCreatureTemplateID.find(creatureTemplateEntryID) == CreatureLootGroupsByCreatureTemplateID.end())
         return false;
     return true;
 }
@@ -656,6 +676,17 @@ bool EverQuestMod::HasPreloadedLootItemIDForCreatureGUID(ObjectGuid creatureGUID
     return false;
 }
 
+uint32 EverQuestMod::GetPreloadedLootCountForCreatureGUID(ObjectGuid creatureGUID, uint32 itemTemplateID)
+{
+    auto countsByItem = PreloadedLootCountsByCreatureGUID.find(creatureGUID);
+    if (countsByItem == PreloadedLootCountsByCreatureGUID.end())
+        return 0;
+    auto count = countsByItem->second.find(itemTemplateID);
+    if (count == countsByItem->second.end())
+        return 0;
+    return count->second;
+}
+
 const vector<uint32>& EverQuestMod::GetPreloadedLootIDsForCreatureGUID(ObjectGuid creatureGUID)
 {
     if (PreloadedLootItemIDsByCreatureGUID.find(creatureGUID) != PreloadedLootItemIDsByCreatureGUID.end())
@@ -674,6 +705,10 @@ void EverQuestMod::ClearPreloadedLootIDsForCreatureGUID(ObjectGuid creatureGUID)
     if (PreloadedLootItemIDsByCreatureGUID.find(creatureGUID) != PreloadedLootItemIDsByCreatureGUID.end())
     {
         PreloadedLootItemIDsByCreatureGUID.erase(creatureGUID);
+    }
+    if (PreloadedLootCountsByCreatureGUID.find(creatureGUID) != PreloadedLootCountsByCreatureGUID.end())
+    {
+        PreloadedLootCountsByCreatureGUID.erase(creatureGUID);
     }
 }
 
@@ -1101,130 +1136,100 @@ vector<Creature*> EverQuestMod::GetLoadedCreaturesWithEntryID(int mapID, uint32 
 
 void EverQuestMod::RollLootItemsForCreature(ObjectGuid creatureGUID, uint32 creatureTemplateEntryID)
 {
-    // Skip empty loot tables
-    auto creatureLootItems = LootTemplateRowsInGroupByEntryID.find(creatureTemplateEntryID);
-    if (creatureLootItems == LootTemplateRowsInGroupByEntryID.end())
-        return;
-
-    // Clear old and ensure it has a record
+    // Clear previous rolls (and empty counts map means it drops nothing)
     vector<uint32>& preloadedItemIDs = PreloadedLootItemIDsByCreatureGUID[creatureGUID];
     preloadedItemIDs.clear();
+    unordered_map<uint32, uint32>& counts = PreloadedLootCountsByCreatureGUID[creatureGUID];
+    counts.clear();
 
-    // Process each group and mirror core loottemplate processing. group 0 is ungrouped, > 0 are grouped
-    for (auto& lootTemplateRowsByGroup : creatureLootItems->second)
+    // Skip creatures with no loot data
+    auto creatureLootGroups = CreatureLootGroupsByCreatureTemplateID.find(creatureTemplateEntryID);
+    if (creatureLootGroups == CreatureLootGroupsByCreatureTemplateID.end())
+        return;
+
+    // Each loot group (lootdrop reference) is processed based on the group multiplier
+    for (const EverQuestCreatureLootGroup& lootGroup : creatureLootGroups->second)
     {
-        uint8 groupID = lootTemplateRowsByGroup.first;
-        const vector<EverQuestLootTemplateRow>& groupRows = lootTemplateRowsByGroup.second;
-
-        // Individual rolls
-        if (groupID == 0)
+        uint32 groupMultiplier = std::max(lootGroup.GroupMultiplier, 1u);
+        for (uint32 t = 0; t < groupMultiplier; t++)
         {
-            for (const auto& lootRow : groupRows)
-            {
-                ItemTemplate const* itemTemplate = sObjectMgr->GetItemTemplate(lootRow.ItemTemplateID);
-                if (!itemTemplate)
-                {
-                    LOG_ERROR("module.EverQuest", "EverQuestMod::RollLootItemsForCreature failure, as item template ID {} could not be found", lootRow.ItemTemplateID);
-                    continue;
-                }
+            if (lootGroup.GroupProbability <= 0.0f)
+                continue;
+            if (lootGroup.GroupProbability < 100.0f && float(rand_chance()) > lootGroup.GroupProbability)
+                continue;
 
-                // These chance modifiers seem to only happen on upgrouped
-                float rollChance = lootRow.Chance;
-                switch (itemTemplate->Quality)
-                {
-                    case ITEM_QUALITY_POOR: rollChance *= sWorld->getRate(RATE_DROP_ITEM_POOR); break;
-                    case ITEM_QUALITY_NORMAL: rollChance *= sWorld->getRate(RATE_DROP_ITEM_NORMAL); break;
-                    case ITEM_QUALITY_UNCOMMON: rollChance *= sWorld->getRate(RATE_DROP_ITEM_UNCOMMON); break;
-                    case ITEM_QUALITY_RARE: rollChance *= sWorld->getRate(RATE_DROP_ITEM_RARE); break;
-                    case ITEM_QUALITY_EPIC: rollChance *= sWorld->getRate(RATE_DROP_ITEM_EPIC); break;
-                    case ITEM_QUALITY_LEGENDARY: rollChance *= sWorld->getRate(RATE_DROP_ITEM_LEGENDARY); break;
-                    case ITEM_QUALITY_ARTIFACT: rollChance *= sWorld->getRate(RATE_DROP_ITEM_ARTIFACT); break;
-                    default: break;
-                }
-
-                if (rollChance >= 100.0f || roll_chance_f(rollChance))
-                    RecordPreloadedLootRow(preloadedItemIDs, lootRow);
-            }
-            continue;
-        }
-
-        // Grouped entries
-        vector<const EverQuestLootTemplateRow*> explicitlyChanced;
-        vector<const EverQuestLootTemplateRow*> equalChanced;
-        for (const auto& lootRow : groupRows)
-        {
-            if (lootRow.Chance > 0.0f)
-                explicitlyChanced.push_back(&lootRow);
-            else
-                equalChanced.push_back(&lootRow);
-        }
-
-        // Track chosen
-        vector<const EverQuestLootTemplateRow*> alreadyChosen;
-
-        uint32 groupIterations = uint32(sWorld->getRate(RATE_DROP_ITEM_GROUP_AMOUNT));
-        for (uint32 iteration = 0; iteration < groupIterations; iteration++)
-        {
-            const EverQuestLootTemplateRow* chosenRow = nullptr;
-
-            // Weighted roll (skip already chosen)
-            float roll = float(rand_chance());
-            for (const EverQuestLootTemplateRow* candidate : explicitlyChanced)
-            {
-                if (IsLootRowAlreadyChosen(alreadyChosen, candidate))
-                    continue;
-                if (candidate->Chance >= 100.0f)
-                {
-                    chosenRow = candidate;
-                    break;
-                }
-                roll -= candidate->Chance;
-                if (roll < 0.0f)
-                {
-                    chosenRow = candidate;
-                    break;
-                }
-            }
-
-            // Nothing selected so fall back
-            if (chosenRow == nullptr && equalChanced.empty() == false)
-            {
-                vector<const EverQuestLootTemplateRow*> availableEqual;
-                for (const EverQuestLootTemplateRow* candidate : equalChanced)
-                    if (IsLootRowAlreadyChosen(alreadyChosen, candidate) == false)
-                        availableEqual.push_back(candidate);
-                if (availableEqual.empty() == false)
-                    chosenRow = availableEqual[urand(0, uint32(availableEqual.size()) - 1)];
-            }
-
-            // Empty drop from the group (chances came up to under 100 and the roll missed, or nothing left to pick)
-            if (chosenRow == nullptr)
-                break;
-
-            alreadyChosen.push_back(chosenRow);
-            RecordPreloadedLootRow(preloadedItemIDs, *chosenRow);
+            RollLootGroupIntoCounts(lootGroup, counts);
         }
     }
+
+    // Track preloaded items for visuals and OnItemRoll checks
+    for (const auto& itemCount : counts)
+        preloadedItemIDs.push_back(itemCount.first);
 }
 
-// Records a selected loot row's item (honoring MinCount, just like the original pre-roll) into the pre-roll list.
-// The pre-roll is the single source of truth for what actually drops: OnItemRoll/OnBeforeLootEqualChanced force
-// prerolled items to 100% and everything else to 0% at death time.
-void EverQuestMod::RecordPreloadedLootRow(vector<uint32>& preloadedItemIDs, const EverQuestLootTemplateRow& lootRow)
+void EverQuestMod::RollLootGroupIntoCounts(const EverQuestCreatureLootGroup& lootGroup, unordered_map<uint32, uint32>& counts)
 {
-    // NOTE: This does not factor for MaxCount, see OnItemRoll
-    for (int i = 0; i < lootRow.MinCount; i++)
-        preloadedItemIDs.push_back(lootRow.ItemTemplateID);
-}
+    const vector<EverQuestCreatureLootEntry>& entries = lootGroup.Entries;
+    if (entries.empty())
+        return;
 
-// Returns true if the given loot row has already been chosen for the current group (prevents a group from
-// selecting the same item more than once across Rate.Drop.Item.GroupAmount iterations).
-bool EverQuestMod::IsLootRowAlreadyChosen(const vector<const EverQuestLootTemplateRow*>& alreadyChosen, const EverQuestLootTemplateRow* lootRow)
-{
-    for (const EverQuestLootTemplateRow* chosenRow : alreadyChosen)
-        if (chosenRow == lootRow)
-            return true;
-    return false;
+    if (lootGroup.DropLimit == 0 && lootGroup.MinDrop == 0)
+    {
+        for (const EverQuestCreatureLootEntry& entry : entries)
+        {
+            uint32 attempts = std::max(entry.ItemMultiplier, 1u);
+            for (uint32 j = 0; j < attempts; j++)
+                if (float(rand_chance()) <= entry.Chance)
+                    counts[entry.ItemTemplateID] += std::max(entry.ItemCharges, 1u);
+        }
+        return;
+    }
+
+    uint32 dropLimit = lootGroup.DropLimit;
+    if (entries.size() > 100 && dropLimit == 0)
+        dropLimit = 10;
+    if (dropLimit < lootGroup.MinDrop)
+        dropLimit = lootGroup.MinDrop;
+
+    float rollTotal = 0.0f;
+    float noLootProb = 1.0f;
+    bool chanceBypass = false;
+    for (const EverQuestCreatureLootEntry& entry : entries)
+    {
+        rollTotal += entry.Chance;
+        if (entry.Chance >= 100.0f)
+            chanceBypass = true;
+        else
+            noLootProb *= (100.0f - entry.Chance) / 100.0f;
+    }
+    if (rollTotal <= 0.0f)
+        return;
+
+    uint32 drops = 0;
+    for (uint32 i = 0; i < dropLimit; i++)
+    {
+        // Keep rolling while below MinDrop or a guaranteed item exists; otherwise stop with probability noLootProb
+        if (drops < lootGroup.MinDrop || chanceBypass == true || frand(0.0f, 1.0f) >= noLootProb)
+        {
+            float roll = frand(0.0f, rollTotal);
+            for (const EverQuestCreatureLootEntry& entry : entries)
+            {
+                if (roll < entry.Chance)
+                {
+                    counts[entry.ItemTemplateID] += std::max(entry.ItemCharges, 1u);
+                    drops++;
+
+                    uint32 extraAttempts = std::max(entry.ItemMultiplier, 1u);
+                    for (uint32 k = 1; k < extraAttempts; k++)
+                        if (float(rand_chance()) <= entry.Chance)
+                            counts[entry.ItemTemplateID] += std::max(entry.ItemCharges, 1u);
+                    break;
+                }
+                else
+                    roll -= entry.Chance;
+            }
+        }
+    }
 }
 
 void EverQuestMod::SpawnCreature(uint32 entryID, Map* map, float x, float y, float z, float orientation, bool enforceUniqueSpawn)

@@ -27,7 +27,7 @@
 
 using namespace std;
 
-#define EQ_MOD_VERSION                              13
+#define EQ_MOD_VERSION                              14
 
 #define EQ_SPELLDUMMYTYPE_BINDSELF                  1
 #define EQ_SPELLDUMMYTYPE_BINDANY                   2
@@ -225,16 +225,24 @@ public:
     uint32 CreatureTemplateID = 0;
 };
 
-class EverQuestLootTemplateRow
+class EverQuestCreatureLootEntry
 {
 public:
-    uint32 Entry = 0;
     uint32 ItemTemplateID = 0;
     float Chance = 0;
-    bool QuestRequired = 0;
-    uint8 GroupID = 0;
-    int32 MinCount = 0;
-    int32 MaxCount = 0;
+    uint32 ItemMultiplier = 1;
+    uint32 ItemCharges = 1;
+};
+
+class EverQuestCreatureLootGroup
+{
+public:
+    uint32 LootGroupID = 0;
+    uint32 GroupMultiplier = 1;
+    float GroupProbability = 100;
+    uint32 DropLimit = 0;
+    uint32 MinDrop = 0;
+    vector<EverQuestCreatureLootEntry> Entries;
 };
 
 class EverQuestTransportShipTrigger
@@ -348,8 +356,9 @@ public:
     unordered_map<int, unordered_map<uint32, vector<Creature*>>> AllLoadedCreaturesByMapIDThenSpawnPointID;
     unordered_map<int, unordered_map<uint32, vector<Creature*>>> AllLoadedCreaturesByMapIDThenSpawnGroupID;
     unordered_map<ObjectGuid, deque<uint32>> PlayerCasterConcurrentBardSongs;
-    unordered_map<uint32, unordered_map<uint32, vector<EverQuestLootTemplateRow>>> LootTemplateRowsInGroupByEntryID;
+    unordered_map<uint32, vector<EverQuestCreatureLootGroup>> CreatureLootGroupsByCreatureTemplateID;
     unordered_map<ObjectGuid, vector<uint32>> PreloadedLootItemIDsByCreatureGUID;
+    unordered_map<ObjectGuid, unordered_map<uint32, uint32>> PreloadedLootCountsByCreatureGUID;
     unordered_map<ObjectGuid, EverQuestLoadedCreatureEquippedVisualItems> VisualEquippedItemsByCreatureGUID;
     unordered_map<uint32, vector<EverQuestTransportShipTrigger>> ShipTriggersByTriggeringGameObjectTemplateEntryID;
     unordered_map<uint32, int> ShipWaitNodesByGameObjectTemplateEntryID;
@@ -393,10 +402,11 @@ public:
     const list<uint32>& GetAutoLearnSkillsForClass(uint8 classID);
     void LoadAutoLearnSpellsData();
     const list<EverQuestAutoLearnSpell>& GetAutoLearnSpellsForClass(uint8 classID);
-    void LoadLootTemplateRows();
-    bool HasLootTemplateRowsByCreatureTemplateEntryID(uint32 creatureTemplateEntryID);
+    void LoadCreatureLootData();
+    bool HasCreatureLootDataForCreatureTemplateEntryID(uint32 creatureTemplateEntryID);
     bool HasPreloadedLootItemIDsForCreatureGUID(ObjectGuid creatureGUID);
     bool HasPreloadedLootItemIDForCreatureGUID(ObjectGuid creatureGUID, uint32 itemTemplateID);
+    uint32 GetPreloadedLootCountForCreatureGUID(ObjectGuid creatureGUID, uint32 itemTemplateID);
     const vector<uint32>& GetPreloadedLootIDsForCreatureGUID(ObjectGuid creatureGUID);
     void ClearPreloadedLootIDsForCreatureGUID(ObjectGuid creatureGUID);
     void TrackVisualEquippedItemsForCreatureGUID(ObjectGuid creatureGUID, uint32 mainhandItemID, uint32 offhandItemID);
@@ -421,8 +431,7 @@ public:
     void RemoveCreatureAsLoaded(int mapID, Creature* creature);
     vector<Creature*> GetLoadedCreaturesWithEntryID(int mapID, uint32 entryID);
     void RollLootItemsForCreature(ObjectGuid creatureGUID, uint32 creatureTemplateEntryID);
-    void RecordPreloadedLootRow(vector<uint32>& preloadedItemIDs, const EverQuestLootTemplateRow& lootRow);
-    bool IsLootRowAlreadyChosen(const vector<const EverQuestLootTemplateRow*>& alreadyChosen, const EverQuestLootTemplateRow* lootRow);
+    void RollLootGroupIntoCounts(const EverQuestCreatureLootGroup& lootGroup, unordered_map<uint32, uint32>& counts);
     void SpawnCreature(uint32 entryID, Map* map, float x, float y, float z, float orientation, bool enforceUniqueSpawn);
     void DespawnCreature(uint32 entryID, Map* map);
     void MakeCreatureAttackPlayer(uint32 entryID, Map* map, Player* player);

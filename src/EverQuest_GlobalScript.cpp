@@ -26,9 +26,6 @@ class EverQuest_GlobalScript: public GlobalScript
 public:
     EverQuest_GlobalScript() : GlobalScript("EverQuest_GlobalScript") {}
 
-    // EverQuest spell custom-attribute fixups.  This hook runs after AzerothCore has computed each
-    // effect's positivity (SpellMgr::LoadSpellInfoCustomAttributes), so we can both read and override
-    // that decision here.
     void OnLoadSpellCustomAttr(SpellInfo* spell) override
     {
         if (EverQuest->IsEnabled == false)
@@ -93,7 +90,6 @@ public:
         }
     }
 
-    // Note: There is a bug here because the calculated number of dropped items (MinCount/MaxCount) is not in scope
     bool OnItemRoll(Player const* /*player*/, LootStoreItem const* lootStoreItem, float& chance, Loot& loot, LootStore const& /*lootStore*/) override
     {
         if (EverQuest->IsEnabled == false)
@@ -108,6 +104,24 @@ public:
         else
             chance = 0.0f;
         return true;
+    }
+
+    void OnBeforeDropAddItem(Player const* /*player*/, Loot& loot, bool /*canRate*/, uint16 /*lootMode*/, LootStoreItem* lootStoreItem, LootStore const& /*store*/) override
+    {
+        if (EverQuest->IsEnabled == false)
+            return;
+
+        if (EverQuest->HasPreloadedLootItemIDsForCreatureGUID(loot.sourceWorldObjectGUID) == false)
+            return;
+
+        uint32 prerolledCount = EverQuest->GetPreloadedLootCountForCreatureGUID(loot.sourceWorldObjectGUID, lootStoreItem->itemid);
+        if (prerolledCount > 0)
+        {
+            // Clamp so a large quantity doesn't truncate vs the uint8 limit
+            uint8 clampedCount = prerolledCount > 255 ? 255 : uint8(prerolledCount);
+            lootStoreItem->mincount = clampedCount;
+            lootStoreItem->maxcount = clampedCount;
+        }
     }
 
     // Called when GroupID > 0 and chance == 0
