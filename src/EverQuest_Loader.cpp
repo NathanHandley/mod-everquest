@@ -24,6 +24,7 @@ void AddEverQuestAllSpellScripts();
 void AddEverQuestFocusBoostAuraScripts();
 void AddEverQuestFocusBoostNonAuraScripts();
 void AddEverQuestBardSongAuraScripts();
+void AddEverQuestCharmAuraScripts();
 void AddEverQuestIllusionSpellScripts();
 void AddEverQuestPetScripts();
 void AddEverQuestCommandScripts();
@@ -43,6 +44,7 @@ void Addmod_everquestScripts()
     AddEverQuestFocusBoostAuraScripts();
     AddEverQuestFocusBoostNonAuraScripts();
     AddEverQuestBardSongAuraScripts();
+    AddEverQuestCharmAuraScripts();
     AddEverQuestIllusionSpellScripts();
     AddEverQuestPetScripts();
     AddEverQuestCommandScripts();
