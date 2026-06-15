@@ -24,8 +24,11 @@
 
 #include <list>
 #include <map>
+#include <unordered_set>
 
 using namespace std;
+
+class Unit;
 
 #define EQ_MOD_VERSION                              14
 
@@ -165,6 +168,7 @@ class EverQuestLoadedCreatureEquippedVisualItems
 public:
     uint32 MainhandItemID = 0;
     uint32 OffhandItemID = 0;
+    bool IsDualWielding = false;
 };
 
 class EverQuestItemTemplate
@@ -361,6 +365,7 @@ public:
     unordered_map<ObjectGuid, vector<uint32>> PreloadedLootItemIDsByCreatureGUID;
     unordered_map<ObjectGuid, unordered_map<uint32, uint32>> PreloadedLootCountsByCreatureGUID;
     unordered_map<ObjectGuid, EverQuestLoadedCreatureEquippedVisualItems> VisualEquippedItemsByCreatureGUID;
+    unordered_set<ObjectGuid> CreaturesResolvingEQMeleeExtraAttacks;
     unordered_map<uint32, vector<EverQuestTransportShipTrigger>> ShipTriggersByTriggeringGameObjectTemplateEntryID;
     unordered_map<uint32, int> ShipWaitNodesByGameObjectTemplateEntryID;
     unordered_map<uint32, GameObject*> ShipGameObjectsByTemplateEntryID;
@@ -410,8 +415,11 @@ public:
     uint32 GetPreloadedLootCountForCreatureGUID(ObjectGuid creatureGUID, uint32 itemTemplateID);
     const vector<uint32>& GetPreloadedLootIDsForCreatureGUID(ObjectGuid creatureGUID);
     void ClearPreloadedLootIDsForCreatureGUID(ObjectGuid creatureGUID);
-    void TrackVisualEquippedItemsForCreatureGUID(ObjectGuid creatureGUID, uint32 mainhandItemID, uint32 offhandItemID);
+    void TrackVisualEquippedItemsForCreatureGUID(ObjectGuid creatureGUID, uint32 mainhandItemID, uint32 offhandItemID, bool isDualWielding);
     void ClearVisualEquippedItemsForCreatureGUID(ObjectGuid creatureGUID);
+    bool IsCreatureDualWielding(ObjectGuid creatureGUID);
+    uint32 GetEQNPCMeleeWeaponSkillForLevel(uint32 level);
+    void TryDoCreatureEQMeleeExtraAttacks(Unit* attacker, Unit* victim);
     void RemoveVisualEquippedItemForCreatureGUIDIfExists(Map* map, ObjectGuid creatureGUID, uint32 itemTemplateID);
     void LoadShipTriggerData();
     const vector<EverQuestTransportShipTrigger>& GetShipTriggersForShip(int triggeringGameObjectTemplateEntryID);

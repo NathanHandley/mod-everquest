@@ -712,10 +712,89 @@ void EverQuestMod::ClearPreloadedLootIDsForCreatureGUID(ObjectGuid creatureGUID)
     }
 }
 
-void EverQuestMod::TrackVisualEquippedItemsForCreatureGUID(ObjectGuid creatureGUID, uint32 mainhandItemID, uint32 offhandItemID)
+void EverQuestMod::TrackVisualEquippedItemsForCreatureGUID(ObjectGuid creatureGUID, uint32 mainhandItemID, uint32 offhandItemID, bool isDualWielding)
 {
     VisualEquippedItemsByCreatureGUID[creatureGUID].MainhandItemID = mainhandItemID;
     VisualEquippedItemsByCreatureGUID[creatureGUID].OffhandItemID = offhandItemID;
+    VisualEquippedItemsByCreatureGUID[creatureGUID].IsDualWielding = isDualWielding;
+}
+
+bool EverQuestMod::IsCreatureDualWielding(ObjectGuid creatureGUID)
+{
+    auto it = VisualEquippedItemsByCreatureGUID.find(creatureGUID);
+    if (it == VisualEquippedItemsByCreatureGUID.end())
+        return false;
+    return it->second.IsDualWielding;
+}
+
+// Formula based from formulas in TAKP (EQMacEmu/Server)
+uint32 EverQuestMod::GetEQNPCMeleeWeaponSkillForLevel(uint32 level)
+{
+    if (level <= 7)
+        return 0;
+    if (level > 50)
+        return 250;
+    return std::min<uint32>(level * 5, 210);
+}
+
+// Formula based from formulas in TAKP (EQMacEmu/Server). Driven from landed main-hand auto attack.
+void EverQuestMod::TryDoCreatureEQMeleeExtraAttacks(Unit* attacker, Unit* victim)
+{
+    if (attacker == nullptr || victim == nullptr)
+        return;
+    if (attacker->IsCreature() == false)
+        return;
+    if (victim->IsAlive() == false)
+        return;
+
+    // Prevent injected swings from repeating
+    ObjectGuid attackerGUID = attacker->GetGUID();
+    if (CreaturesResolvingEQMeleeExtraAttacks.count(attackerGUID) > 0)
+        return;
+
+    Creature* creature = attacker->ToCreature();
+
+    // Restrict to EverQuest zones
+    uint32 mapID = creature->GetMap()->GetId();
+    if (mapID < ConfigSystemMapDBCIDMin || mapID > ConfigSystemMapDBCIDMax)
+        return;
+
+    uint32 level = creature->GetLevel();
+    uint32 weaponSkill = GetEQNPCMeleeWeaponSkillForLevel(level);
+    if (weaponSkill == 0)
+        return;
+
+    uint32 effectiveSkill = weaponSkill;
+    if (level > 35)
+        effectiveSkill += level;
+
+    CreaturesResolvingEQMeleeExtraAttacks.insert(attackerGUID);
+
+    // Main-hand double attack. "effectiveSkill" out of 500. Warrior creatures 60+ rolls for a triple attack at 13.5%
+    if (effectiveSkill > urand(0, 499))
+    {
+        if (victim->IsAlive() == true)
+            creature->AttackerStateUpdate(victim, BASE_ATTACK, true);
+
+        if (victim->IsAlive() == true && creature->getClass() == CLASS_WARRIOR && level >= 60 && urand(0, 999) < 135)
+            creature->AttackerStateUpdate(victim, BASE_ATTACK, true);
+    }
+
+    // For creatures with an off-hand weapon only, calc per-round chance out of effectiveSkill 375.
+    // Also, connecting off-hand swing can double attack once the creature's skil reaches 150 (level 30+)
+    if (victim->IsAlive() == true && IsCreatureDualWielding(attackerGUID) == true)
+    {
+        if (effectiveSkill > urand(0, 374))
+        {
+            if (victim->IsAlive() == true)
+                creature->AttackerStateUpdate(victim, BASE_ATTACK, true);
+
+            if (victim->IsAlive() == true && weaponSkill >= 150 && effectiveSkill > urand(0, 499))
+                creature->AttackerStateUpdate(victim, BASE_ATTACK, true);
+        }
+    }
+
+    CreaturesResolvingEQMeleeExtraAttacks.erase(attackerGUID);
 }
 
 void EverQuestMod::ClearVisualEquippedItemsForCreatureGUID(ObjectGuid creatureGUID)

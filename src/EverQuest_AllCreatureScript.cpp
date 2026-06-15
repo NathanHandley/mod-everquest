@@ -114,6 +114,7 @@ private:
         // Assign positions
         ItemTemplate const* mainHandItem = nullptr;
         ItemTemplate const* offHandItem = nullptr;
+        bool isDualWielding = false;
         bool doHoldFishingPole = (fishingPoles.size() > 0) && (oneHandWeapons.size() == 0) && (twoHandWeapons.size() == 0) && (shields.size() == 0) && (heldItems.size() == 0);
         if (doHoldFishingPole == true)
             mainHandItem = fishingPoles[0];
@@ -129,7 +130,10 @@ private:
             if (shields.size() > 0)
                 offHandItem = shields[0];
             else if (oneHandWeapons.size() > 1)
+            {
                 offHandItem = oneHandWeapons[1];
+                isDualWielding = true; // Need this for attacking with offhand
+            }
             else if (heldItems.size() > 0)
                 offHandItem = heldItems[0];
         }
@@ -153,7 +157,7 @@ private:
         if (mainHandItem != nullptr || offHandItem != nullptr)
         {
             creature->SetSheath(SHEATH_STATE_MELEE);
-            EverQuest->TrackVisualEquippedItemsForCreatureGUID(creature->GetGUID(), mainhandItemID, offhandItemID);
+            EverQuest->TrackVisualEquippedItemsForCreatureGUID(creature->GetGUID(), mainhandItemID, offhandItemID, isDualWielding);
         }
 
         // Reset combat type

@@ -111,6 +111,10 @@ public:
             return;
         if (attacker == nullptr)
             return;
+
+        // Some creatures double/triple attack and off-hand attack
+        EverQuest->TryDoCreatureEQMeleeExtraAttacks(attacker, target);
+
         if (damage <= 0)
             return;
 
