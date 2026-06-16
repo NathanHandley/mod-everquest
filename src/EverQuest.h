@@ -350,6 +350,7 @@ public:
     unordered_map<uint32, EverQuestCreature> CreaturesByTemplateID;
     unordered_map<uint32, list<EverQuestCreatureOnkillReputation>> CreatureOnkillReputationsByCreatureTemplateID;
     unordered_map<uint32, EverQuestItemTemplate> ItemTemplatesByEntryID;
+    unordered_set<uint32> WornEffectSpellIDs;
     unordered_map<uint32, EverQuestSpell> SpellDataBySpellID;
     unordered_map<uint32, list<EverQuestQuestCompletionReputation>> QuestCompletionReputationsByQuestTemplateID;
     unordered_map<uint32, list<EverQuestQuestReaction>> QuestReactionListByQuestTemplateID;
@@ -394,6 +395,7 @@ public:
     void LoadItemTemplateData();
     uint32 GetNPCEquipItemTemplateIDForItemTemplate(uint32 itemTemplateID);
     uint32 GetWornEffectSpellIDForItemTemplate(uint32 itemTemplateID);
+    bool IsWornEffectSpell(uint32 spellID);
     void LoadSpellData();
     const EverQuestSpell& GetSpellDataForSpellID(uint32 spellID);
     void LoadQuestCompletionReputations();

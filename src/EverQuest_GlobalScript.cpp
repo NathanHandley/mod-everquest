@@ -33,6 +33,10 @@ public:
         if (spell == nullptr)
             return;
 
+        // Used to keep worn spell effects on creatures to persist when the creature evades
+        if (EverQuest->IsWornEffectSpell(spell->Id))
+            spell->AttributesCu |= SPELL_ATTR0_CU_IGNORE_EVADE;
+
         // Only adjust EQ-generated spells
         if (spell->Id < EverQuest->ConfigSystemSpellDBCIDMin || spell->Id > EverQuest->ConfigSystemSpellDBCIDMax)
             return;

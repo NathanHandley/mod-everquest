@@ -316,6 +316,7 @@ const list<EverQuestCreatureOnkillReputation>& EverQuestMod::GetOnkillReputation
 void EverQuestMod::LoadItemTemplateData()
 {
     ItemTemplatesByEntryID.clear();
+    WornEffectSpellIDs.clear();
     QueryResult queryResult = WorldDatabase.Query("SELECT ItemTemplateID, NPCEquipItemTemplateID, WornEffectSpellID FROM mod_everquest_item_template ORDER BY ItemTemplateID;");
     if (queryResult)
     {
@@ -328,8 +329,15 @@ void EverQuestMod::LoadItemTemplateData()
             everQuestItemTemplate.ItemTemplateEntryIDForNPCEquip = fields[1].Get<uint32>();
             everQuestItemTemplate.WornEffectSpellID = fields[2].Get<uint32>();
             ItemTemplatesByEntryID[everQuestItemTemplate.ItemTemplateEntryID] = everQuestItemTemplate;
+            if (everQuestItemTemplate.WornEffectSpellID != 0)
+                WornEffectSpellIDs.insert(everQuestItemTemplate.WornEffectSpellID);
         } while (queryResult->NextRow());
     }
+}
+
+bool EverQuestMod::IsWornEffectSpell(uint32 spellID)
+{
+    return WornEffectSpellIDs.find(spellID) != WornEffectSpellIDs.end();
 }
 
 uint32 EverQuestMod::GetNPCEquipItemTemplateIDForItemTemplate(uint32 itemTemplateID)
