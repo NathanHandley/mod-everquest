@@ -47,6 +47,7 @@ public:
             EverQuest->AddCreatureAsLoaded(mapID, creature);
         }
         SetVisualEquipment(creature);
+        ApplyLootWornEffectAuras(creature);
     }
 
     void OnCreatureRemoveWorld(Creature* creature) override
@@ -60,6 +61,21 @@ public:
     }
 
 private:
+    void ApplyLootWornEffectAuras(Creature* creature)
+    {
+        if (EverQuest->HasPreloadedLootItemIDsForCreatureGUID(creature->GetGUID()) == false)
+            return;
+        for (uint32 itemTemplateID : EverQuest->GetPreloadedLootIDsForCreatureGUID(creature->GetGUID()))
+        {
+            uint32 wornEffectSpellID = EverQuest->GetWornEffectSpellIDForItemTemplate(itemTemplateID);
+            if (wornEffectSpellID == 0)
+                continue;
+            if (creature->HasAura(wornEffectSpellID) == true)
+                continue;
+            creature->AddAura(wornEffectSpellID, creature);
+        }
+    }
+
     void SetVisualEquipment(Creature* creature)
     {
         // Reset first

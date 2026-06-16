@@ -316,7 +316,7 @@ const list<EverQuestCreatureOnkillReputation>& EverQuestMod::GetOnkillReputation
 void EverQuestMod::LoadItemTemplateData()
 {
     ItemTemplatesByEntryID.clear();
-    QueryResult queryResult = WorldDatabase.Query("SELECT ItemTemplateID, NPCEquipItemTemplateID FROM mod_everquest_item_template ORDER BY ItemTemplateID;");
+    QueryResult queryResult = WorldDatabase.Query("SELECT ItemTemplateID, NPCEquipItemTemplateID, WornEffectSpellID FROM mod_everquest_item_template ORDER BY ItemTemplateID;");
     if (queryResult)
     {
         do
@@ -326,6 +326,7 @@ void EverQuestMod::LoadItemTemplateData()
             EverQuestItemTemplate everQuestItemTemplate;
             everQuestItemTemplate.ItemTemplateEntryID = fields[0].Get<uint32>();
             everQuestItemTemplate.ItemTemplateEntryIDForNPCEquip = fields[1].Get<uint32>();
+            everQuestItemTemplate.WornEffectSpellID = fields[2].Get<uint32>();
             ItemTemplatesByEntryID[everQuestItemTemplate.ItemTemplateEntryID] = everQuestItemTemplate;
         } while (queryResult->NextRow());
     }
@@ -337,6 +338,14 @@ uint32 EverQuestMod::GetNPCEquipItemTemplateIDForItemTemplate(uint32 itemTemplat
         return itemTemplateID;
     else
         return ItemTemplatesByEntryID[itemTemplateID].ItemTemplateEntryIDForNPCEquip;
+}
+
+uint32 EverQuestMod::GetWornEffectSpellIDForItemTemplate(uint32 itemTemplateID)
+{
+    if (ItemTemplatesByEntryID.find(itemTemplateID) == ItemTemplatesByEntryID.end())
+        return 0;
+    else
+        return ItemTemplatesByEntryID[itemTemplateID].WornEffectSpellID;
 }
 
 void EverQuestMod::LoadSpellData()

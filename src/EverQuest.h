@@ -30,7 +30,7 @@ using namespace std;
 
 class Unit;
 
-#define EQ_MOD_VERSION                              14
+#define EQ_MOD_VERSION                              15
 
 #define EQ_SPELLDUMMYTYPE_BINDSELF                  1
 #define EQ_SPELLDUMMYTYPE_BINDANY                   2
@@ -176,6 +176,7 @@ class EverQuestItemTemplate
 public:
     uint32 ItemTemplateEntryID = 0;
     uint32 ItemTemplateEntryIDForNPCEquip = 0;
+    uint32 WornEffectSpellID = 0;
 };
 
 class EverQuestPet
@@ -392,6 +393,7 @@ public:
     const list<EverQuestCreatureOnkillReputation>& GetOnkillReputationsForCreatureTemplate(uint32 creatureTemplateID);
     void LoadItemTemplateData();
     uint32 GetNPCEquipItemTemplateIDForItemTemplate(uint32 itemTemplateID);
+    uint32 GetWornEffectSpellIDForItemTemplate(uint32 itemTemplateID);
     void LoadSpellData();
     const EverQuestSpell& GetSpellDataForSpellID(uint32 spellID);
     void LoadQuestCompletionReputations();
