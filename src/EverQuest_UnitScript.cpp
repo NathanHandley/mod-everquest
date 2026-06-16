@@ -19,8 +19,11 @@
 #include "ScriptMgr.h"
 #include "SpellAuras.h"
 #include "SpellAuraEffects.h"
+#include "SpellInfo.h"
 
 #include "EverQuest.h"
+
+#include <cmath>
 
 using namespace std;
 
@@ -101,6 +104,27 @@ public:
                 }
             }
         }
+    }
+
+    void ModifyPeriodicDamageAurasTick(Unit* /*target*/, Unit* attacker, uint32& damage, SpellInfo const* spellInfo) override
+    {
+        if (EverQuest->IsEnabled == false)
+            return;
+        if (attacker == nullptr || spellInfo == nullptr)
+            return;
+        if (damage == 0)
+            return;
+
+        uint32 spellID = spellInfo->Id;
+        if (EverQuest->IsSpellAnEQSpell(spellID) == false)
+            return;
+
+        uint32 boostPercent = EverQuest->CalculateSpellFocusBoostValue(attacker, spellID);
+        if (boostPercent == 0)
+            return;
+
+        // Rounding is to match the non-periodic focus boost behavior
+        damage = uint32(std::ceil((float)damage * (1.0f + (float)boostPercent / 100.0f)));
     }
 
     void ModifyMeleeDamage(Unit* target, Unit* attacker, uint32& damage) override

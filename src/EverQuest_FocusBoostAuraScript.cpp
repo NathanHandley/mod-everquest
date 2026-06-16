@@ -16,6 +16,7 @@
 
 #include "ScriptMgr.h"
 #include "SpellAuras.h"
+#include "SpellAuraEffects.h"
 #include "SpellScript.h"
 
 #include "EverQuest.h"
@@ -26,7 +27,7 @@ class EverQuest_FocusBoostAuraScript: public AuraScript
 {
     PrepareAuraScript(EverQuest_FocusBoostAuraScript);
 
-    void CalculateAmount(AuraEffect const* /*aurEff*/, int32& amount, bool& /*canBeRecalculated*/)
+    void CalculateAmount(AuraEffect const* aurEff, int32& amount, bool& /*canBeRecalculated*/)
     {
         if (EverQuest->IsEnabled == false)
             return;
@@ -39,6 +40,12 @@ class EverQuest_FocusBoostAuraScript: public AuraScript
         // Only EQ spells
         uint32 spellID = GetId();
         if (EverQuest->IsSpellAnEQSpell(spellID) == false)
+            return;
+
+        // Bard focus effect needs to come last on spell power scaled effects
+        AuraType auraType = aurEff->GetAuraType();
+        if (auraType == SPELL_AURA_PERIODIC_DAMAGE || auraType == SPELL_AURA_PERIODIC_DAMAGE_PERCENT ||
+            auraType == SPELL_AURA_PERIODIC_LEECH || auraType == SPELL_AURA_PERIODIC_HEAL)
             return;
 
         uint32 boostPercent = EverQuest->CalculateSpellFocusBoostValue(caster, spellID);
