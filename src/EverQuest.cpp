@@ -573,7 +573,7 @@ const list<uint32>& EverQuestMod::GetAutoLearnSkillsForClass(uint8 classID)
 void EverQuestMod::LoadAutoLearnSpellsData()
 {
     PlayerAutoLearnSpellsByClassID.clear();
-    QueryResult queryResult = WorldDatabase.Query("SELECT class, spell, addtobar FROM mod_everquest_playerautolearnspells;");
+    QueryResult queryResult = WorldDatabase.Query("SELECT class, race, spell, addtobar FROM mod_everquest_playerautolearnspells;");
     if (queryResult)
     {
         do
@@ -581,8 +581,9 @@ void EverQuestMod::LoadAutoLearnSpellsData()
             EverQuestAutoLearnSpell autoLearnSpell;
             Field* fields = queryResult->Fetch();
             autoLearnSpell.ClassID = fields[0].Get<uint8>();
-            autoLearnSpell.SpellID = fields[1].Get<uint32>();
-            autoLearnSpell.DoAddToBar = fields[2].Get<int8>() == 1 ? true : false;
+            autoLearnSpell.RaceID = fields[1].Get<uint8>();
+            autoLearnSpell.SpellID = fields[2].Get<uint32>();
+            autoLearnSpell.DoAddToBar = fields[3].Get<int8>() == 1 ? true : false;
             PlayerAutoLearnSpellsByClassID[autoLearnSpell.ClassID].push_back(autoLearnSpell);
         } while (queryResult->NextRow());
     }

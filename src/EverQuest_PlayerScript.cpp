@@ -342,6 +342,9 @@ public:
         bool needsUpdate = false;
         for (auto autoLearnSpell : EverQuest->GetAutoLearnSpellsForClass(player->getClass()))
         {
+            // A race of 0 means the spell is learned regardless of race
+            if (autoLearnSpell.RaceID != 0 && autoLearnSpell.RaceID != player->getRace())
+                continue;
             if (player->HasSpell(autoLearnSpell.SpellID) == false)
             {
                 player->learnSpell(autoLearnSpell.SpellID);

@@ -30,7 +30,7 @@ using namespace std;
 
 class Unit;
 
-#define EQ_MOD_VERSION                              15
+#define EQ_MOD_VERSION                              16
 
 #define EQ_SPELLDUMMYTYPE_BINDSELF                  1
 #define EQ_SPELLDUMMYTYPE_BINDANY                   2
@@ -297,6 +297,7 @@ class EverQuestAutoLearnSpell
 {
 public:
     uint8 ClassID = 0;
+    uint8 RaceID = 0;
     uint32 SpellID = 0;
     bool DoAddToBar = false;
 };
