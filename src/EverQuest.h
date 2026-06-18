@@ -30,7 +30,7 @@ using namespace std;
 
 class Unit;
 
-#define EQ_MOD_VERSION                              16
+#define EQ_MOD_VERSION                              17
 
 #define EQ_SPELLDUMMYTYPE_BINDSELF                  1
 #define EQ_SPELLDUMMYTYPE_BINDANY                   2
@@ -56,6 +56,9 @@ class Unit;
 #define EQ_BARDSONGAURATARGET_ENEMYSINGLE           4
 #define EQ_BARDSONGAURATARGET_FRIENDLYSINGLE        5
 #define EQ_BARDSONGAURATARGET_ANY                   6
+
+#define EQ_SPELLFAILABLETYPE_NONE                   0
+#define EQ_SPELLFAILABLETYPE_FEIGNDEATH             1
 
 #define EQ_SPELLFOCUSBOOSTTYPE_BARDPERCUSSION       1
 #define EQ_SPELLFOCUSBOOSTTYPE_BARDBRASS            2
@@ -142,6 +145,8 @@ public:
     uint32 PeriodicAuraSpellRadius = 0;
     uint32 MaleFormSpellID = 0;
     uint32 FemaleFormSpellID = 0;
+    uint32 EffectFailChancePercent = 0;
+    uint32 EffectFailableType = 0;
 };
 
 class EverQuestCreature

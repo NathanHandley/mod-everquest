@@ -359,7 +359,7 @@ uint32 EverQuestMod::GetWornEffectSpellIDForItemTemplate(uint32 itemTemplateID)
 void EverQuestMod::LoadSpellData()
 {
     SpellDataBySpellID.clear();
-    QueryResult queryResult = WorldDatabase.Query("SELECT SpellID, AuraDurationBaseInMS, AuraDurationAddPerLevelInMS, AuraDurationMaxInMS, AuraDurationCalcMinLevel, AuraDurationCalcMaxLevel, RecourseSpellID, SpellIDCastOnMeleeAttacker, FocusBoostType, PeriodicAuraSpellID, PeriodicAuraSpellRadius, MaleFormSpellID, FemaleFormSpellID FROM mod_everquest_spell ORDER BY SpellID;");
+    QueryResult queryResult = WorldDatabase.Query("SELECT SpellID, AuraDurationBaseInMS, AuraDurationAddPerLevelInMS, AuraDurationMaxInMS, AuraDurationCalcMinLevel, AuraDurationCalcMaxLevel, RecourseSpellID, SpellIDCastOnMeleeAttacker, FocusBoostType, PeriodicAuraSpellID, PeriodicAuraSpellRadius, MaleFormSpellID, FemaleFormSpellID, EffectFailChancePercent, EffectFailableType FROM mod_everquest_spell ORDER BY SpellID;");
     if (queryResult)
     {
         do
@@ -380,6 +380,8 @@ void EverQuestMod::LoadSpellData()
             everQuestSpell.PeriodicAuraSpellRadius = fields[10].Get<uint32>();
             everQuestSpell.MaleFormSpellID = fields[11].Get<uint32>();
             everQuestSpell.FemaleFormSpellID = fields[12].Get<uint32>();
+            everQuestSpell.EffectFailChancePercent = fields[13].Get<uint32>();
+            everQuestSpell.EffectFailableType = fields[14].Get<uint32>();
             SpellDataBySpellID[everQuestSpell.SpellID] = everQuestSpell;
         } while (queryResult->NextRow());
     }

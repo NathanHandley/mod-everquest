@@ -15,14 +15,23 @@
 //  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #include "Configuration/Config.h"
+#include "Chat.h"
+#include "Creature.h"
+#include "ObjectAccessor.h"
 #include "ObjectMgr.h"
+#include "Player.h"
+#include "Random.h"
 #include "ScriptMgr.h"
 #include "SpellMgr.h"
 #include "Spell.h"
 #include "SpellAuras.h"
+#include "ThreatManager.h"
 #include "Unit.h"
 
 #include "EverQuest.h"
+
+#include <unordered_map>
+#include <vector>
 
 using namespace std;
 
@@ -30,6 +39,94 @@ class EverQuest_AllSpellScript: public AllSpellScript
 {
 public:
     EverQuest_AllSpellScript() : AllSpellScript("EverQuest_AllSpellScript") {}
+
+    struct PendingSpellFailure
+    {
+        uint32 FailableType = EQ_SPELLFAILABLETYPE_NONE;
+        std::vector<ObjectGuid> FeignDeathThreatenerGUIDs;
+    };
+
+    uint32 GetEffectFailChance(Unit* caster, SpellInfo const* spellInfo)
+    {
+        if (EverQuest->IsEnabled == false)
+            return 0;
+        if (caster == nullptr || spellInfo == nullptr)
+            return 0;
+        if (caster->IsPlayer() == false)
+            return 0;
+        if (spellInfo->Id < EverQuest->ConfigSystemSpellDBCIDMin || spellInfo->Id > EverQuest->ConfigSystemSpellDBCIDMax)
+            return 0;
+        if (EverQuest->IsSpellAnEQSpell(spellInfo->Id) == false)
+            return 0;
+        return EverQuest->GetSpellDataForSpellID(spellInfo->Id).EffectFailChancePercent;
+    }
+
+    void OnSpellPrepare(Spell* /*spell*/, Unit* caster, SpellInfo const* spellInfo) override
+    {
+        uint32 failChancePercent = GetEffectFailChance(caster, spellInfo);
+        if (failChancePercent == 0)
+            return;
+
+        // Clear any stale pending failure from a previous failure
+        PendingSpellFailuresByCasterGUID.erase(caster->GetGUID());
+
+        if (roll_chance_i((int)failChancePercent) == false)
+            return; // Behave normally
+
+        PendingSpellFailure pendingFailure;
+        pendingFailure.FailableType = EverQuest->GetSpellDataForSpellID(spellInfo->Id).EffectFailableType;
+        switch (pendingFailure.FailableType)
+        {
+            case EQ_SPELLFAILABLETYPE_FEIGNDEATH:
+                // The core feign aura will wipe our threat on apply, so remember who is attacking now
+                for (auto const& threatenerPair : caster->GetThreatMgr().GetThreatenedByMeList())
+                    pendingFailure.FeignDeathThreatenerGUIDs.push_back(threatenerPair.first);
+                break;
+            default:
+                break;
+        }
+        PendingSpellFailuresByCasterGUID[caster->GetGUID()] = std::move(pendingFailure);
+    }
+
+    void OnSpellCastCancel(Spell* /*spell*/, Unit* caster, SpellInfo const* /*spellInfo*/, bool /*bySelf*/) override
+    {
+        if (caster == nullptr)
+            return;
+        PendingSpellFailuresByCasterGUID.erase(caster->GetGUID());
+    }
+
+    void ApplySpellFailure(Player* player, uint32 spellID, PendingSpellFailure const& pendingFailure)
+    {
+        switch (pendingFailure.FailableType)
+        {
+            case EQ_SPELLFAILABLETYPE_FEIGNDEATH:
+                ApplyFeignDeathFailure(player, spellID, pendingFailure.FeignDeathThreatenerGUIDs);
+                break;
+            default:
+                break;
+        }
+    }
+
+    void ApplyFeignDeathFailure(Player* player, uint32 spellID, std::vector<ObjectGuid> const& threatenerGUIDs)
+    {
+        if (player == nullptr)
+            return;
+
+        player->RemoveAurasDueToSpell(spellID);
+
+        for (ObjectGuid const& threatenerGUID : threatenerGUIDs)
+        {
+            Creature* threatener = ObjectAccessor::GetCreature(*player, threatenerGUID);
+            if (threatener == nullptr || threatener->IsAlive() == false)
+                continue;
+            threatener->EngageWithTarget(player);
+        }
+
+        // Show the failure as an emote to the player and everyone nearby
+        WorldPacket failMessageData;
+        ChatHandler::BuildChatPacket(failMessageData, CHAT_MSG_EMOTE, LANG_UNIVERSAL, player, player, "tries to feign death, but fails!");
+        player->SendMessageToSet(&failMessageData, true);
+    }
 
     void OnCalcMaxDuration(Aura const* aura, int32& maxDuration) override
     {
@@ -102,6 +199,17 @@ public:
             return;
         EverQuestSpell curSpell = EverQuest->GetSpellDataForSpellID(spellInfo->Id);
 
+        // Handle a rolled effect failure (decided at cast start in OnSpellPrepare)
+        if (caster->IsPlayer())
+        {
+            std::unordered_map<ObjectGuid, PendingSpellFailure>::iterator pendingFailureItr = PendingSpellFailuresByCasterGUID.find(caster->GetGUID());
+            if (pendingFailureItr != PendingSpellFailuresByCasterGUID.end())
+            {
+                ApplySpellFailure(caster->ToPlayer(), spellInfo->Id, pendingFailureItr->second);
+                PendingSpellFailuresByCasterGUID.erase(pendingFailureItr);
+            }
+        }
+
         // Handle any recourse
         if (curSpell.RecourseSpellID != 0)
         {
@@ -138,6 +246,9 @@ public:
                 caster->CastSpell(target, curSpell.RecourseSpellID, true);
         }       
     }
+
+private:
+    std::unordered_map<ObjectGuid, PendingSpellFailure> PendingSpellFailuresByCasterGUID;
 };
 
 void AddEverQuestAllSpellScripts()
