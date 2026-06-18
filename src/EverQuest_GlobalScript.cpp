@@ -35,7 +35,10 @@ public:
 
         // Used to keep worn spell effects on creatures to persist when the creature evades
         if (EverQuest->IsWornEffectSpell(spell->Id))
+        {
             spell->AttributesCu |= SPELL_ATTR0_CU_IGNORE_EVADE;
+            spell->AttributesEx3 |= SPELL_ATTR3_ALLOW_AURA_WHILE_DEAD;
+        }
 
         // Only adjust EQ-generated spells
         if (spell->Id < EverQuest->ConfigSystemSpellDBCIDMin || spell->Id > EverQuest->ConfigSystemSpellDBCIDMax)
