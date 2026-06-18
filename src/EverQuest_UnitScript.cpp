@@ -17,6 +17,7 @@
 #include "Player.h"
 #include "Unit.h"
 #include "ScriptMgr.h"
+#include "Spell.h"
 #include "SpellAuras.h"
 #include "SpellAuraEffects.h"
 #include "SpellInfo.h"
@@ -161,6 +162,40 @@ public:
             if (curSpell.SpellIDCastOnMeleeAttacker == 0)
                 continue;
             attacker->CastSpell(attacker, curSpell.SpellIDCastOnMeleeAttacker);
+        }
+    }
+
+    void OnBeforeRollMeleeOutcomeAgainst(Unit const* /*attacker*/, Unit const* victim, WeaponAttackType /*attType*/,
+        int32& /*attackerMaxSkillValueForLevel*/, int32& /*victimMaxSkillValueForLevel*/, int32& /*attackerWeaponSkill*/,
+        int32& /*victimDefenseSkill*/, int32& /*crit_chance*/, int32& miss_chance, int32& dodge_chance,
+        int32& parry_chance, int32& /*block_chance*/) override
+    {
+        if (EverQuest->IsEnabled == false)
+            return;
+        if (victim == nullptr || victim->IsPlayer() == false)
+            return;
+
+        // This is a bit 'hacky', but this logic will fold dodge and parry into 'miss' during the casting of a bard song to
+        // somewhat simulate how bard songs don't stop defensive/avoidance during combat. The only exception is that
+        // block is not converted AND since everything is turning into a 'miss' any combat abilities that fire on dodge
+        // or parry will simply not fire during the cast.
+        if (victim->IsNonMeleeSpellCast(false, false, true) == false)
+            return;
+        Spell* currentSongCast = victim->GetCurrentSpell(CURRENT_GENERIC_SPELL);
+        if (currentSongCast == nullptr)
+            return;
+        if (EverQuest->IsSpellAnEQBardSong(currentSongCast->GetSpellInfo()->Id) == false)
+            return;
+
+        if (dodge_chance > 0)
+        {
+            miss_chance += dodge_chance;
+            dodge_chance = 0;
+        }
+        if (parry_chance > 0)
+        {
+            miss_chance += parry_chance;
+            parry_chance = 0;
         }
     }
 };
