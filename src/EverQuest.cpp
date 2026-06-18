@@ -39,6 +39,7 @@ EverQuestMod::EverQuestMod() :
     ConfigSystemQuestSQLIDMax(0),
     ConfigSystemCreatureTemplateIDMin(0),
     ConfigSystemCreatureTemplateIDMax(0),
+    ConfigSystemInvisVsUndeadDetectSpellID(0),
     ConfigDeathKnightsStartLikeOtherClasses(false),
     ConfigMapRestrictPlayersToNorrath(false),    
     ConfigQuestGrantExpOnRepeatCompletion(true),
@@ -95,6 +96,8 @@ bool EverQuestMod::LoadConfigurationSystemDataFromDB()
                 ConfigSystemGameObjectTemplateIDMin = (uint32)atoi(value.c_str());
             else if (key == "GameObjectTemplateIDMax")
                 ConfigSystemGameObjectTemplateIDMax = (uint32)atoi(value.c_str());
+            else if (key == "InvisVsUndeadDetectSpellID")
+                ConfigSystemInvisVsUndeadDetectSpellID = (uint32)atoi(value.c_str());
             else if (key == "MapDBCIDMin")
                 ConfigSystemMapDBCIDMin = (uint32)atoi(value.c_str());
             else if (key == "MapDBCIDMax")

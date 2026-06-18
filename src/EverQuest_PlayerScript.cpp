@@ -324,6 +324,10 @@ public:
 
         EverQuest->AllLoadedPlayers.push_back(player);
 
+        // Give players the ability to see invis vs undead
+        if (EverQuest->ConfigSystemInvisVsUndeadDetectSpellID != 0 && player->HasAura(EverQuest->ConfigSystemInvisVsUndeadDetectSpellID) == false)
+            player->CastSpell(player, EverQuest->ConfigSystemInvisVsUndeadDetectSpellID, true);
+
         // Grab any cast bard songs for the player
         if (EverQuest->ConfigBardMaxConcurrentSongs != 0)
         {

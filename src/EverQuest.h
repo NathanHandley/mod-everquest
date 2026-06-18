@@ -30,7 +30,7 @@ using namespace std;
 
 class Unit;
 
-#define EQ_MOD_VERSION                              17
+#define EQ_MOD_VERSION                              18
 
 #define EQ_SPELLDUMMYTYPE_BINDSELF                  1
 #define EQ_SPELLDUMMYTYPE_BINDANY                   2
@@ -340,6 +340,7 @@ public:
     uint32 ConfigSystemGameObjectTemplateIDMax;
     uint32 ConfigSystemShipEntryTemplateIDMin;
     uint32 ConfigSystemShipEntryTemplateIDMax;
+    uint32 ConfigSystemInvisVsUndeadDetectSpellID;
 
     // Configs (from server file)
     bool ConfigMapRestrictPlayersToNorrath;
