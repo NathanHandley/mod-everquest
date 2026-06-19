@@ -43,7 +43,8 @@ public:
             return false;
         if (EverQuest->IsSpellAnEQSpell(spellID) == false)
             return false;
-        if (EverQuest->GetSpellDataForSpellID(spellID).StunUsesBashKickChance == false)
+        const EverQuestSpell& curSpell = EverQuest->GetSpellDataForSpellID(spellID);
+        if (curSpell.StunUsesBashKickChance == false)
             return false;
 
         Unit* attacker = aura->GetCaster();
@@ -51,7 +52,13 @@ public:
             return true;
 
         if (EverQuest->RollBashKickStunLands(attacker, defender) == false)
+        {
             defender->RemoveAura(aura);
+            return true;
+        }
+
+        if (curSpell.SpellIDCastOnTargetWhenStunLands != 0)
+            attacker->CastSpell(defender, curSpell.SpellIDCastOnTargetWhenStunLands, true);
         return true;
     }
 

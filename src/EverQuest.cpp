@@ -362,7 +362,7 @@ uint32 EverQuestMod::GetWornEffectSpellIDForItemTemplate(uint32 itemTemplateID)
 void EverQuestMod::LoadSpellData()
 {
     SpellDataBySpellID.clear();
-    QueryResult queryResult = WorldDatabase.Query("SELECT SpellID, AuraDurationBaseInMS, AuraDurationAddPerLevelInMS, AuraDurationMaxInMS, AuraDurationCalcMinLevel, AuraDurationCalcMaxLevel, RecourseSpellID, SpellIDCastOnMeleeAttacker, FocusBoostType, PeriodicAuraSpellID, PeriodicAuraSpellRadius, MaleFormSpellID, FemaleFormSpellID, EffectFailChancePercent, EffectFailableType, StunUsesBashKickChance FROM mod_everquest_spell ORDER BY SpellID;");
+    QueryResult queryResult = WorldDatabase.Query("SELECT SpellID, AuraDurationBaseInMS, AuraDurationAddPerLevelInMS, AuraDurationMaxInMS, AuraDurationCalcMinLevel, AuraDurationCalcMaxLevel, RecourseSpellID, SpellIDCastOnMeleeAttacker, FocusBoostType, PeriodicAuraSpellID, PeriodicAuraSpellRadius, MaleFormSpellID, FemaleFormSpellID, EffectFailChancePercent, EffectFailableType, StunUsesBashKickChance, SpellIDCastOnTargetWhenStunLands FROM mod_everquest_spell ORDER BY SpellID;");
     if (queryResult)
     {
         do
@@ -386,6 +386,7 @@ void EverQuestMod::LoadSpellData()
             everQuestSpell.EffectFailChancePercent = fields[13].Get<uint32>();
             everQuestSpell.EffectFailableType = fields[14].Get<uint32>();
             everQuestSpell.StunUsesBashKickChance = fields[15].Get<bool>();
+            everQuestSpell.SpellIDCastOnTargetWhenStunLands = fields[16].Get<uint32>();
             SpellDataBySpellID[everQuestSpell.SpellID] = everQuestSpell;
         } while (queryResult->NextRow());
     }

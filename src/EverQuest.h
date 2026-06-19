@@ -153,6 +153,7 @@ public:
     uint32 EffectFailChancePercent = 0;
     uint32 EffectFailableType = 0;
     bool StunUsesBashKickChance = false;
+    uint32 SpellIDCastOnTargetWhenStunLands = 0;
 };
 
 class EverQuestCreature
