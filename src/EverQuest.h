@@ -30,12 +30,14 @@ using namespace std;
 
 class Unit;
 
-#define EQ_MOD_VERSION                              19
+#define EQ_MOD_VERSION                              20
 
 #define EQ_BASHKICKSTUN_BASE_CHANCE                 45
 #define EQ_BASHKICKSTUN_BASE_CHANCE_ABOVE_LEVEL_60  40
 #define EQ_BASHKICKSTUN_MIN_CHANCE                  2
 #define EQ_BASHKICKSTUN_NPC_IMMUNE_ABOVE_LEVEL      55
+
+#define EQ_DAZE_SPELL_ID                            1604   // Pre-defined by the WoW core
 
 #define EQ_SPELLDUMMYTYPE_BINDSELF                  1
 #define EQ_SPELLDUMMYTYPE_BINDANY                   2
@@ -343,6 +345,7 @@ public:
     uint32 ConfigSystemCreatureTemplateIDMin;
     uint32 ConfigSystemCreatureTemplateIDMax;
     bool ConfigDeathKnightsStartLikeOtherClasses;
+    bool ConfigDazeEnabledInEQZones;
     uint32 ConfigSystemGameObjectTemplateIDMin;
     uint32 ConfigSystemGameObjectTemplateIDMax;
     uint32 ConfigSystemShipEntryTemplateIDMin;

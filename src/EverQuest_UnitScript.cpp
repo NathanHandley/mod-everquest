@@ -69,6 +69,16 @@ public:
         if (unit == nullptr || aura == nullptr)
             return;
 
+        if (EverQuest->ConfigDazeEnabledInEQZones == false && aura->GetId() == EQ_DAZE_SPELL_ID)
+        {
+            uint32 mapID = unit->GetMapId();
+            if (mapID >= EverQuest->ConfigSystemMapDBCIDMin && mapID <= EverQuest->ConfigSystemMapDBCIDMax)
+            {
+                unit->RemoveAura(aura);
+                return;
+            }
+        }
+
         if (TryHandleBashKickStunChance(unit, aura) == true)
             return;
 

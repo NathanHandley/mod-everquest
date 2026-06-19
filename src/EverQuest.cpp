@@ -90,6 +90,8 @@ bool EverQuestMod::LoadConfigurationSystemDataFromDB()
                 ConfigSystemCreatureTemplateIDMin = (uint32)atoi(value.c_str());
             else if (key == "CreatureTemplateIDMax")
                 ConfigSystemCreatureTemplateIDMax = (uint32)atoi(value.c_str());
+            else if (key == "DazeEnabledInEQZones")
+                ConfigDazeEnabledInEQZones = value == "1" ? true : false;
             else if (key == "DeathKnightsStartLikeOtherClasses")
                 ConfigDeathKnightsStartLikeOtherClasses = value == "1" ? true : false;
             else if (key == "GameObjectTemplateIDMin")
