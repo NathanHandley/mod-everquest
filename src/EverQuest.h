@@ -30,7 +30,12 @@ using namespace std;
 
 class Unit;
 
-#define EQ_MOD_VERSION                              18
+#define EQ_MOD_VERSION                              19
+
+#define EQ_BASHKICKSTUN_BASE_CHANCE                 45
+#define EQ_BASHKICKSTUN_BASE_CHANCE_ABOVE_LEVEL_60  40
+#define EQ_BASHKICKSTUN_MIN_CHANCE                  2
+#define EQ_BASHKICKSTUN_NPC_IMMUNE_ABOVE_LEVEL      55
 
 #define EQ_SPELLDUMMYTYPE_BINDSELF                  1
 #define EQ_SPELLDUMMYTYPE_BINDANY                   2
@@ -147,6 +152,7 @@ public:
     uint32 FemaleFormSpellID = 0;
     uint32 EffectFailChancePercent = 0;
     uint32 EffectFailableType = 0;
+    bool StunUsesBashKickChance = false;
 };
 
 class EverQuestCreature
@@ -457,6 +463,7 @@ public:
     void MakeCreatureAttackPlayer(uint32 entryID, Map* map, Player* player);
     bool IsSpellAnEQSpell(uint32 spellID);
     bool IsSpellAnEQBardSong(uint32 spellID);
+    bool RollBashKickStunLands(Unit* attacker, Unit* defender);
     uint32 CalculateSpellFocusBoostValue(Unit* caster, uint32 spellID);
     void ProcessForage(Player* player);
 };

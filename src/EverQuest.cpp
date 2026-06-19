@@ -362,7 +362,7 @@ uint32 EverQuestMod::GetWornEffectSpellIDForItemTemplate(uint32 itemTemplateID)
 void EverQuestMod::LoadSpellData()
 {
     SpellDataBySpellID.clear();
-    QueryResult queryResult = WorldDatabase.Query("SELECT SpellID, AuraDurationBaseInMS, AuraDurationAddPerLevelInMS, AuraDurationMaxInMS, AuraDurationCalcMinLevel, AuraDurationCalcMaxLevel, RecourseSpellID, SpellIDCastOnMeleeAttacker, FocusBoostType, PeriodicAuraSpellID, PeriodicAuraSpellRadius, MaleFormSpellID, FemaleFormSpellID, EffectFailChancePercent, EffectFailableType FROM mod_everquest_spell ORDER BY SpellID;");
+    QueryResult queryResult = WorldDatabase.Query("SELECT SpellID, AuraDurationBaseInMS, AuraDurationAddPerLevelInMS, AuraDurationMaxInMS, AuraDurationCalcMinLevel, AuraDurationCalcMaxLevel, RecourseSpellID, SpellIDCastOnMeleeAttacker, FocusBoostType, PeriodicAuraSpellID, PeriodicAuraSpellRadius, MaleFormSpellID, FemaleFormSpellID, EffectFailChancePercent, EffectFailableType, StunUsesBashKickChance FROM mod_everquest_spell ORDER BY SpellID;");
     if (queryResult)
     {
         do
@@ -385,6 +385,7 @@ void EverQuestMod::LoadSpellData()
             everQuestSpell.FemaleFormSpellID = fields[12].Get<uint32>();
             everQuestSpell.EffectFailChancePercent = fields[13].Get<uint32>();
             everQuestSpell.EffectFailableType = fields[14].Get<uint32>();
+            everQuestSpell.StunUsesBashKickChance = fields[15].Get<bool>();
             SpellDataBySpellID[everQuestSpell.SpellID] = everQuestSpell;
         } while (queryResult->NextRow());
     }
@@ -818,6 +819,38 @@ void EverQuestMod::TryDoCreatureEQMeleeExtraAttacks(Unit* attacker, Unit* victim
     }
 
     CreaturesResolvingEQMeleeExtraAttacks.erase(attackerGUID);
+}
+
+// Reference is EQMacEmu/TAKP Mob::TryBashKickStun
+bool EverQuestMod::RollBashKickStunLands(Unit* attacker, Unit* defender)
+{
+    if (attacker == nullptr || defender == nullptr)
+        return false;
+
+    int attackerLevel = (int)attacker->GetLevel();
+    int defenderLevel = (int)defender->GetLevel();
+
+    // NPC defenders above the base immunity level can never be stunned by bash/kick (raid-tier mobs)
+    // TODO: Make this a config in case the world gets scaled to 80
+    if (defender->IsCreature() == true && defenderLevel > EQ_BASHKICKSTUN_NPC_IMMUNE_ABOVE_LEVEL)
+        return false;
+
+    // Base chance, lowered slightly once the attacker is above level 60 (matches TAKP)
+    int stunChance = EQ_BASHKICKSTUN_BASE_CHANCE;
+    if (attackerLevel > 60)
+        stunChance = EQ_BASHKICKSTUN_BASE_CHANCE_ABOVE_LEVEL_60;
+
+    // Scale by the level
+    int levelDiff = attackerLevel - defenderLevel;
+    if (levelDiff < 0)
+        stunChance -= (levelDiff * levelDiff) / 2;
+    else
+        stunChance += (levelDiff * levelDiff) / 2;
+
+    if (stunChance < EQ_BASHKICKSTUN_MIN_CHANCE)
+        stunChance = EQ_BASHKICKSTUN_MIN_CHANCE;
+
+    return ((int)urand(0, 99) < stunChance);
 }
 
 void EverQuestMod::ClearVisualEquippedItemsForCreatureGUID(ObjectGuid creatureGUID)

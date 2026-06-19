@@ -33,10 +33,38 @@ class EverQuest_UnitScript : public UnitScript
 public:
     EverQuest_UnitScript() : UnitScript("EverQuest_UnitScript") {}
 
+    bool TryHandleBashKickStunChance(Unit* defender, Aura* aura)
+    {
+        if (defender == nullptr || aura == nullptr)
+            return false;
+
+        uint32 spellID = aura->GetId();
+        if (spellID < EverQuest->ConfigSystemSpellDBCIDMin || spellID > EverQuest->ConfigSystemSpellDBCIDMax)
+            return false;
+        if (EverQuest->IsSpellAnEQSpell(spellID) == false)
+            return false;
+        if (EverQuest->GetSpellDataForSpellID(spellID).StunUsesBashKickChance == false)
+            return false;
+
+        Unit* attacker = aura->GetCaster();
+        if (attacker == nullptr)
+            return true;
+
+        if (EverQuest->RollBashKickStunLands(attacker, defender) == false)
+            defender->RemoveAura(aura);
+        return true;
+    }
+
     void OnAuraApply(Unit* unit, Aura* aura) override
     {
         if (EverQuest->IsEnabled == false)
             return;
+        if (unit == nullptr || aura == nullptr)
+            return;
+
+        if (TryHandleBashKickStunChance(unit, aura) == true)
+            return;
+
         if (!unit->IsPlayer())
             return;
 
