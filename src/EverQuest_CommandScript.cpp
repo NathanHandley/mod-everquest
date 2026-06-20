@@ -49,12 +49,19 @@ public:
 
     ChatCommandTable GetCommands() const
     {
-        static ChatCommandTable designCommandTable =
+        static ChatCommandTable classCommandTable =
         {
-            { "eqgps",                   HandleEQGPSCommand,                   SEC_PLAYER,          Console::No  },
+            { "change", HandleMultiClassChangeClass,    SEC_PLAYER, Console::No },
+            { "info",   HandleMultiClassInfo,           SEC_PLAYER, Console::No },
         };
 
-        return designCommandTable;
+        static ChatCommandTable commandTable =
+        {
+            { "eqgps",  HandleEQGPSCommand,             SEC_PLAYER, Console::No },
+            { "class",  classCommandTable                                       },
+        };
+
+        return commandTable;
     }
 
     static bool HandleEQGPSCommand(ChatHandler* handler, Optional<PlayerIdentifier> target)
@@ -90,6 +97,91 @@ public:
         float eqHeadingFloat = ((((object->GetOrientation() - 3.14159265359) * 180.0) / 3.14159265359f) / 360.0) * 512.0;
         string eqText = fmt::format("EverQuest X: {} Y: {} Z: {} H: {}", RoundVal(object->GetPositionY() / worldScale, 6), RoundVal(object->GetPositionX() / worldScale, 6), RoundVal(object->GetPositionZ() / worldScale, 6), RoundVal(eqHeadingFloat, 6));
         handler->PSendSysMessage(eqText);
+        return true;
+    }
+
+    static bool HandleMultiClassChangeClass(ChatHandler* handler, const char* args)
+    {
+        /*if (MultiClass->ConfigEnabled == false)
+            return true;
+
+        if (!*args)
+        {
+            handler->PSendSysMessage(".class change 'class'");
+            handler->PSendSysMessage("Changes the player class on next logout.  Example: '.class change warrior'");
+            handler->PSendSysMessage("Valid Class Values: warrior, paladin, hunter, rogue, priest, deathknight, shaman, mage, warlock, druid");
+            return true;
+        }
+
+        uint8 classInt = CLASS_NONE;
+        std::string className = strtok((char*)args, " ");
+        if (className.starts_with("Warr") || className.starts_with("warr") || className.starts_with("WARR"))
+            classInt = CLASS_WARRIOR;
+        else if (className.starts_with("Pa") || className.starts_with("pa") || className.starts_with("PA"))
+            classInt = CLASS_PALADIN;
+        else if (className.starts_with("H") || className.starts_with("h"))
+            classInt = CLASS_HUNTER;
+        else if (className.starts_with("R") || className.starts_with("r"))
+            classInt = CLASS_ROGUE;
+        else if (className.starts_with("Pr") || className.starts_with("pr") || className.starts_with("PR"))
+            classInt = CLASS_PRIEST;
+        else if (className.starts_with("De") || className.starts_with("de") || className.starts_with("DE"))
+            classInt = CLASS_DEATH_KNIGHT;
+        else if (className.starts_with("S") || className.starts_with("s"))
+            classInt = CLASS_SHAMAN;
+        else if (className.starts_with("M") || className.starts_with("m"))
+            classInt = CLASS_MAGE;
+        else if (className.starts_with("Warl") || className.starts_with("warl") || className.starts_with("WARL"))
+            classInt = CLASS_WARLOCK;
+        else if (className.starts_with("Dr") || className.starts_with("dr") || className.starts_with("DR"))
+            classInt = CLASS_DRUID;
+        else
+        {
+            handler->PSendSysMessage(".class change 'class'");
+            handler->PSendSysMessage("Changes the player class.  Example: '.class change warrior'");
+            handler->PSendSysMessage("Valid Class Values: warrior, paladin, hunter, rogue, priest, deathknight, shaman, mage warlock, druid");
+            std::string enteredValueLine = "Entered Value was ";
+            enteredValueLine.append(className);
+            handler->PSendSysMessage(enteredValueLine.c_str());
+            return true;
+        }
+
+        Player* player = handler->GetPlayer();
+        MultiClass->MarkClassChangeOnNextLogout(handler, player, classInt);
+        player->SaveToDB(false, false);*/
+
+        // Class change accepted
+        return true;
+    }
+
+    static bool HandleMultiClassInfo(ChatHandler* handler, const char* /*args*/)
+    {
+        //if (MultiClass->ConfigEnabled == false)
+        //    return true;
+
+        //handler->PSendSysMessage("Class List:");
+
+        //// Get the player data
+        //Player* player = handler->GetPlayer();
+        //map<string, PlayerClassInfoItem> playerClassInfoItems = MultiClass->GetPlayerClassInfoByClassNameForPlayer(player);
+
+        //// Write the information out
+        //for (auto& playerClassInfoItem : playerClassInfoItems)
+        //{
+        //    string currentLine = " - " + playerClassInfoItem.second.ClassName + "(" + std::to_string(playerClassInfoItem.second.Level) + "), Shared: Quests(";
+        //    if (playerClassInfoItem.second.UseSharedQuests)
+        //        currentLine += "|cff4CFF00ON|r";
+        //    else
+        //        currentLine += "|cffff0000OFF|r";
+        //    currentLine += "), Reputation(";
+        //    if (playerClassInfoItem.second.UseSharedReputation)
+        //        currentLine += "|cff4CFF00ON|r";
+        //    else
+        //        currentLine += "|cffff0000OFF|r";
+        //    currentLine += ")";
+        //    handler->PSendSysMessage(currentLine.c_str());
+        //}
+
         return true;
     }
 };
