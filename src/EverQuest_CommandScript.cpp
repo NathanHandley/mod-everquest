@@ -155,8 +155,10 @@ public:
         }
 
         Player* player = handler->GetPlayer();
-        EverQuest->MarkClassChangeOnNextLogout(handler, player, classInt);
-        player->SaveToDB(false, false);
+        EverQuest->SetNextEQClassForPlayer(player, classInt);
+
+        string text = fmt::format("Your EQ class will change to |cff4CFF00{}|r on the next login", GetEQClassStringFromID(classInt));
+        ChatHandler(player->GetSession()).SendSysMessage(text);
 
         // Class change accepted
         return true;

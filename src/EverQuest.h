@@ -345,10 +345,10 @@ public:
     uint32 ForageType = EQ_FORAGE_TYPE_FOOD;
 };
 
-class EverQuestPlayerControllerData
+struct EverQuestPlayerControllerData
 {
-public: 
     uint32 GUID = 0;
+    uint8 CurrentClass = 0;
     uint8 NextClass = 0;
 };
 
@@ -373,6 +373,7 @@ class EverQuestMod
 {
 private:
     EverQuestMod();
+    unordered_map<ObjectGuid, EverQuestPlayerControllerData> ActivePlayerClassControllerDataByGUID;
 
 public:
     bool IsEnabled;
@@ -410,7 +411,6 @@ public:
     std::set<uint32> ConfigCrossClassIncludeSkillIDs;
 
     vector<Player*> AllLoadedPlayers;
-    unordered_map<ObjectGuid, uint8> CurPlayerEQClassByGUID;
     unordered_map<uint32, EverQuestCreature> CreaturesByTemplateID;
     unordered_map<uint32, list<EverQuestCreatureOnkillReputation>> CreatureOnkillReputationsByCreatureTemplateID;
     unordered_map<uint32, EverQuestItemTemplate> ItemTemplatesByEntryID;
@@ -518,11 +518,13 @@ public:
     uint32 CalculateSpellFocusBoostValue(Unit* caster, uint32 spellID);
     void ProcessForage(Player* player);
 
-    uint8 GetEQClassForPlayer(Player* player);
-    std::map<std::string, EverQuestPlayerClassInfoItem> GetPlayerClassInfoByClassNameForPlayer(Player* player);
+    uint8 GetCurrentEQClassForPlayer(Player* player);
+    uint8 GetNextEQClassForPlayer(Player* player);
+    void SetNextEQClassForPlayer(Player* player, uint8 nextEQClass);
     EverQuestPlayerControllerData GetPlayerControllerData(Player* player);
-    void SetPlayerControllerData(EverQuestPlayerControllerData controllerData);
-    bool MarkClassChangeOnNextLogout(ChatHandler* handler, Player* player, uint8 newEQClass);
+    //void SetPlayerControllerData(EverQuestPlayerControllerData controllerData);
+
+    std::map<std::string, EverQuestPlayerClassInfoItem> GetPlayerClassInfoByClassNameForPlayer(Player* player);
     std::map<uint8, uint8> GetClassLevelsByClassForPlayer(Player* player);
 
     bool DoesSavedClassDataExistForPlayer(Player* player, uint8 lookupClass);
@@ -539,9 +541,10 @@ public:
     void CopyModSpellTableIntoCharacterSpells(Player* player, uint8 pullEQClassID, CharacterDatabaseTransaction& transaction);
     void CopyModActionTableIntoCharacterAction(Player* player, uint8 pullEQClassID, CharacterDatabaseTransaction& transaction);
     void CopyModSkillTableIntoCharacterSkills(Player* player, uint8 pullEQClassID, CharacterDatabaseTransaction& transaction);
+    void UpdatePlayerControllerForClassChange(Player* player, uint8 newEQClassID, CharacterDatabaseTransaction& transaction);
 
     std::map<uint8, EverQuestPlayerEquipedItemData> GetVisibleItemsBySlotForPlayerClass(Player* player, uint8 classID);
-    bool PerformClassSwitch(Player* player, EverQuestPlayerControllerData controllerData);
+    bool PerformClassSwitch(Player* player);
     bool PerformPlayerDelete(ObjectGuid guid);
 };
 
