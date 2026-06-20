@@ -1175,6 +1175,7 @@ void EverQuestMod::DeletePlayerBindHome(ObjectGuid guid)
 
     // Delete the old record, if it exists
     transaction->Append("DELETE FROM `mod_everquest_character_homebind` WHERE guid = {}", guid.GetCounter());
+    transaction->Append("DELETE FROM `mod_everquest_character_lastgate` WHERE guid = {}", guid.GetCounter());
 
     // Commit the transaction
     CharacterDatabase.CommitTransaction(transaction);
@@ -2052,7 +2053,6 @@ map<uint8, EverQuestPlayerEquipedItemData> EverQuestMod::GetVisibleItemsBySlotFo
 
 bool EverQuestMod::PerformClassSwitch(Player* player)
 {
-    LOG_ERROR("module.EverQuest", "Ping");
     uint8 nextEQClass = GetNextEQClassForPlayer(player);
     bool isNew = !DoesSavedClassDataExistForPlayer(player, nextEQClass);
 
@@ -2077,8 +2077,6 @@ bool EverQuestMod::PerformClassSwitch(Player* player)
     // New
     if (isNew)
     {
-        LOG_ERROR("module.EverQuest", "Ping - New, curClass = {}, nextEQClass = {}", GetCurrentEQClassForPlayer(player), nextEQClass);
-
         // For start level
         uint32 startLevel = nextEQClass != CLASS_DEATH_KNIGHT
             ? sWorld->getIntConfig(CONFIG_START_PLAYER_LEVEL)
@@ -2097,7 +2095,6 @@ bool EverQuestMod::PerformClassSwitch(Player* player)
     // Existing
     else
     {
-        LOG_ERROR("module.EverQuest", "Ping - Existing");
         // Copy in the stored version for existing
         UpdateCharacterFromModCharacterTable(player, nextEQClass, transaction);
         CopyModSpellTableIntoCharacterSpells(player, nextEQClass, transaction);
@@ -2112,6 +2109,7 @@ bool EverQuestMod::PerformClassSwitch(Player* player)
 
     // Update current class
     UpdatePlayerControllerForClassChange(player, nextEQClass, transaction);
+    ActivePlayerClassControllerDataByGUID[player->GetGUID()].CurrentClass = nextEQClass;
 
     // Commit the transaction
     CharacterDatabase.CommitTransaction(transaction);
@@ -2136,6 +2134,8 @@ bool EverQuestMod::PerformPlayerDelete(ObjectGuid guid)
     transaction->Append("DELETE FROM mod_everquest_character_class_controller WHERE guid = {}", playerGUID);
     transaction->Append("DELETE FROM character_pet WHERE owner = 0 AND eq_owner = {}", playerGUID);
     CharacterDatabase.CommitTransaction(transaction);
+    if (ActivePlayerClassControllerDataByGUID.find(guid) != ActivePlayerClassControllerDataByGUID.end())
+        ActivePlayerClassControllerDataByGUID.erase(guid);
     return true;
 }
 

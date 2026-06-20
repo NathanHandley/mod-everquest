@@ -331,12 +331,6 @@ public:
 
         EverQuest->AllLoadedPlayers.push_back(player);
 
-        // Grab EQ class info
-        string text = fmt::format("You are a {}. Type |cff4CFF00.class |rto change or edit classes.", GetEQClassStringFromID(EverQuest->GetCurrentEQClassForPlayer(player)));
-        ChatHandler(player->GetSession()).SendSysMessage(text);
-
-        unordered_map<ObjectGuid, uint8> CurPlayerEQClassByGUID;
-
         // Give players the ability to see invis vs undead
         if (EverQuest->ConfigSystemInvisVsUndeadDetectSpellID != 0 && player->HasAura(EverQuest->ConfigSystemInvisVsUndeadDetectSpellID) == false)
             player->CastSpell(player, EverQuest->ConfigSystemInvisVsUndeadDetectSpellID, true);
@@ -396,6 +390,10 @@ public:
         {
             player->UpdateSkillsForLevel();
         }
+
+        // Grab EQ class info
+        string text = fmt::format("Your EQ class is |cff4CFF00'{}'|r. Type |cff4CFF00.class |rto change or edit classes.", GetEQClassStringFromID(EverQuest->GetCurrentEQClassForPlayer(player)));
+        ChatHandler(player->GetSession()).SendSysMessage(text);
     }
 
     void OnPlayerLogout(Player* player) override
