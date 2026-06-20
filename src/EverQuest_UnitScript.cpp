@@ -47,9 +47,21 @@ public:
         if (curSpell.StunUsesBashKickChance == false)
             return false;
 
+        if (EverQuest->ConfigCombatSkillsDisableBashKickStunOnPlayers == true && defender->IsPlayer() == true)
+        {
+            defender->RemoveAura(aura);
+            return true;
+        }
+
         Unit* attacker = aura->GetCaster();
         if (attacker == nullptr)
             return true;
+
+        if (attacker->isSpellBlocked(defender, aura->GetSpellInfo(), BASE_ATTACK) == true)
+        {
+            defender->RemoveAura(aura);
+            return true;
+        }
 
         if (EverQuest->RollBashKickStunLands(attacker, defender) == false)
         {

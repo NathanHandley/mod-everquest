@@ -86,3 +86,13 @@ EverQuest.AlternateGroupExperienceFormula.AddPercentPerMember = 20
 ###################################################################################################
 
 EverQuest.Spells.DisableStackingOfSameDOT = False
+
+###################################################################################################
+#
+# 	EverQuest.CombatSkills.DisableBashKickStunOnPlayers
+#		If true, the stun part of Bash/Kick/Slam combat skills will never land on player targets.
+#	Default: False (players can be stunned by these combat skills)
+#
+###################################################################################################
+
+EverQuest.CombatSkills.DisableBashKickStunOnPlayers = False

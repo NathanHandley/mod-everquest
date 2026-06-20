@@ -362,6 +362,7 @@ public:
     bool ConfigAlternateGroupExperienceFormulaEnabled;
     float ConfigAlternateGroupExperienceAddPercentPerAddedMember;
     bool configSpellDisableStackingOfSameDOT;
+    bool ConfigCombatSkillsDisableBashKickStunOnPlayers;
 
     vector<Player*> AllLoadedPlayers;
     unordered_map<uint32, EverQuestCreature> CreaturesByTemplateID;

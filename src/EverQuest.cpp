@@ -49,7 +49,8 @@ EverQuestMod::EverQuestMod() :
     ConfigExpLossOnDeathAddLostExpToRestExp(true),
     ConfigAlternateGroupExperienceFormulaEnabled(false),
     ConfigAlternateGroupExperienceAddPercentPerAddedMember(20.0f),
-    configSpellDisableStackingOfSameDOT(false)
+    configSpellDisableStackingOfSameDOT(false),
+    ConfigCombatSkillsDisableBashKickStunOnPlayers(false)
 {
 }
 
@@ -167,6 +168,9 @@ void EverQuestMod::LoadConfigurationFile()
 
     // Spells
     configSpellDisableStackingOfSameDOT = sConfigMgr->GetOption<bool>("EverQuest.Spells.DisableStackingOfSameDOT", false);
+
+    // Combat Skills
+    ConfigCombatSkillsDisableBashKickStunOnPlayers = sConfigMgr->GetOption<bool>("EverQuest.CombatSkills.DisableBashKickStunOnPlayers", false);
 }
 
 void EverQuestMod::LoadCreatureData()
