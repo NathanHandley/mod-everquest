@@ -49,7 +49,7 @@ EverQuestMod::EverQuestMod() :
     ConfigExpLossOnDeathAddLostExpToRestExp(true),
     ConfigAlternateGroupExperienceFormulaEnabled(false),
     ConfigAlternateGroupExperienceAddPercentPerAddedMember(20.0f),
-    configSpellDisableStackingOfSameDOT(false),
+    ConfigSpellDisableStackingOfSameDOT(false),
     ConfigCombatSkillsDisableBashKickStunOnPlayers(false)
 {
 }
@@ -167,10 +167,13 @@ void EverQuestMod::LoadConfigurationFile()
     ConfigAlternateGroupExperienceAddPercentPerAddedMember = sConfigMgr->GetOption<float>("EverQuest.AlternateGroupExperienceFormula.AddPercentPerMember", false);
 
     // Spells
-    configSpellDisableStackingOfSameDOT = sConfigMgr->GetOption<bool>("EverQuest.Spells.DisableStackingOfSameDOT", false);
+    ConfigSpellDisableStackingOfSameDOT = sConfigMgr->GetOption<bool>("EverQuest.Spells.DisableStackingOfSameDOT", false);
 
     // Combat Skills
     ConfigCombatSkillsDisableBashKickStunOnPlayers = sConfigMgr->GetOption<bool>("EverQuest.CombatSkills.DisableBashKickStunOnPlayers", false);
+
+    // Cross-Class values
+    ConfigCrossClassIncludeSkillIDs = GetSetFromConfigString("EverQuest.CrossClass.IncludeSkillIDs");
 }
 
 void EverQuestMod::LoadCreatureData()
@@ -1572,12 +1575,17 @@ void EverQuestMod::ProcessForage(Player* player)
     ChatHandler(player->GetSession()).PSendSysMessage("You fail to locate any food nearby.");
 }
 
+uint8 EverQuestMod::GetEQClassForPlayer(Player* player)
+{
+    return EQ_EQCLASS_WARRIOR; // Temp, warrior
+}
+
 map<string, EverQuestPlayerClassInfoItem> EverQuestMod::GetPlayerClassInfoByClassNameForPlayer(Player* player)
 {
     map<string, EverQuestPlayerClassInfoItem> playerClassInfoByClass;
 
     // Get levels for classes first, and populate the base list
-    map<uint8, uint8> classLevelsByClass = GetClassLevelsByClassForPlayer(player, 0); // TODO: Need to have the current EQ class
+    map<uint8, uint8> classLevelsByClass = GetClassLevelsByClassForPlayer(player);
     for (auto& curClassLevel : classLevelsByClass)
     {
         EverQuestPlayerClassInfoItem curClassInfo;
@@ -1597,7 +1605,7 @@ EverQuestPlayerControllerData EverQuestMod::GetPlayerControllerData(Player* play
     QueryResult queryResult = CharacterDatabase.Query("SELECT nextClass FROM mod_everquest_character_class_controller WHERE guid = {}", player->GetGUID().GetCounter());
     if (!queryResult || queryResult->GetRowCount() == 0)
     {
-        controllerData.NextClass = 0; // TODO: Need this to work! Default to warrior
+        controllerData.NextClass = EQ_EQCLASS_WARRIOR; // TODO: Make an actual default
     }
     else
     {
@@ -1641,11 +1649,11 @@ bool EverQuestMod::MarkClassChangeOnNextLogout(ChatHandler* handler, Player* pla
     return true;
 }
 
-map<uint8, uint8> EverQuestMod::GetClassLevelsByClassForPlayer(Player* player, uint8 curEQClass)
+map<uint8, uint8> EverQuestMod::GetClassLevelsByClassForPlayer(Player* player)
 {
     // Pull the other class levels first
     map<uint8, uint8> levelsByClass;
-    QueryResult classQueryResult = CharacterDatabase.Query("SELECT `eqclass`, `level` FROM mod_everquest_characters WHERE guid = {} AND eqclass <> {}", player->GetGUID().GetCounter(), curEQClass);
+    QueryResult classQueryResult = CharacterDatabase.Query("SELECT `eqclass`, `level` FROM mod_everquest_characters WHERE guid = {} AND eqclass <> {}", player->GetGUID().GetCounter(), GetEQClassForPlayer(player));
     if (classQueryResult)
     {
         do
@@ -1662,6 +1670,296 @@ map<uint8, uint8> EverQuestMod::GetClassLevelsByClassForPlayer(Player* player, u
     levelsByClass.insert(pair<uint8, uint8>(player->getClass(), player->GetLevel()));
 
     return levelsByClass;
+}
+
+bool EverQuestMod::DoesSavedClassDataExistForPlayer(Player* player, uint8 lookupClass)
+{
+    QueryResult queryResult = CharacterDatabase.Query("SELECT guid, eqclass FROM mod_everquest_characters WHERE guid = {} AND eqclass = {}", player->GetGUID().GetCounter(), lookupClass);
+    if (!queryResult || queryResult->GetRowCount() == 0)
+        return false;
+    return true;
+}
+
+void EverQuestMod::CopyCharacterDataIntoModCharacterTable(Player* player, CharacterDatabaseTransaction& transaction)
+{
+    uint8 curEQClass = GetEQClassForPlayer(player);
+
+    transaction->Append("DELETE FROM `mod_everquest_characters` WHERE guid = {} and eqclass = {}", player->GetGUID().GetCounter(), curEQClass);
+    QueryResult queryResult = CharacterDatabase.Query("SELECT leveltime, rest_bonus, resettalents_cost, resettalents_time FROM characters WHERE guid = {}", player->GetGUID().GetCounter());
+    if (!queryResult)
+    {
+        LOG_ERROR("module.EverQuest", "EverQuestMod Error pulling character data for guid {}", player->GetGUID().GetCounter());
+    }
+    else
+    {
+        Field* fields = queryResult->Fetch();
+        auto finiteAlways = [](float f) { return std::isfinite(f) ? f : 0.0f; };
+
+        transaction->Append("INSERT IGNORE INTO mod_everquest_characters (guid, class, eqclass, `level`, xp, leveltime, rest_bonus, resettalents_cost, resettalents_time, health, power1, power2, power3, power4, power5, power6, power7, talentGroupsCount, activeTalentGroup) VALUES ({}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {})",
+            player->GetGUID().GetCounter(),
+            player->getClass(),
+            curEQClass,
+            player->GetLevel(),
+            player->GetUInt32Value(PLAYER_XP),
+            fields[0].Get<uint32>(),                // leveltime
+            finiteAlways(fields[1].Get<float>()),   // rest_bonus
+            fields[2].Get<uint32>(),                //resettalents_cost - m_resetTalentsCost,
+            fields[3].Get<uint32>(),                //resettalents_time - uint32(m_resetTalentsTime),
+            player->GetHealth(),
+            player->GetPower(Powers(0)),
+            player->GetPower(Powers(1)),
+            player->GetPower(Powers(2)),
+            player->GetPower(Powers(3)),
+            player->GetPower(Powers(4)),
+            player->GetPower(Powers(5)),
+            player->GetPower(Powers(6)),
+            player->GetSpecsCount(),
+            player->GetActiveSpec()
+        );
+    }
+}
+
+void EverQuestMod::MoveTalentsToModTalentsTable(Player* player, CharacterDatabaseTransaction& transaction)
+{
+    uint8 curEQClass = GetEQClassForPlayer(player);
+
+    transaction->Append("DELETE FROM `mod_everquest_character_class_talent` WHERE guid = {} and eqclass = {}", player->GetGUID().GetCounter(), curEQClass);
+    transaction->Append("INSERT IGNORE INTO mod_everquest_character_class_talent (guid, class, eqclass, spell, specMask) SELECT guid, {}, {}, spell, specMask FROM character_talent WHERE guid = {}", player->getClass(), curEQClass, player->GetGUID().GetCounter());
+    transaction->Append("DELETE FROM `character_talent` WHERE guid = {}", player->GetGUID().GetCounter());
+}
+
+void EverQuestMod::MoveClassSpellsToModSpellsTable(Player* player, CharacterDatabaseTransaction& transaction)
+{
+    uint8 curEQClass = GetEQClassForPlayer(player);
+
+    // Purge old spell list in mod table
+    transaction->Append("DELETE FROM `mod_everquest_character_class_spell` WHERE guid = {} and eqclass = {}", player->GetGUID().GetCounter(), curEQClass);
+
+    // Move class spells from the character table into the mod table
+    for (auto& curSpell : player->GetSpellMap())
+    {
+        // Skip non-class spells
+        // TODO: Make this work
+        //if (ClassSpellIDs.find(curSpell.first) == ClassSpellIDs.end())
+        //    continue;
+
+        // Skip deleting spells
+        if (curSpell.second->State == PLAYERSPELL_REMOVED)
+            continue;
+
+        // INSERT IGNORE INTO Mod
+        transaction->Append("INSERT IGNORE INTO mod_everquest_character_class_spell (guid, class, eqclass, spell, specMask) VALUES ({}, {}, {}, {}, {})",
+            player->GetGUID().GetCounter(),
+            player->getClass(),
+            curEQClass,
+            curSpell.first,
+            (uint32)(curSpell.second->specMask));
+
+        // Delete from character
+        transaction->Append("DELETE FROM character_spell WHERE guid = {} and spell = {}",
+            player->GetGUID().GetCounter(),
+            curSpell.first);
+    }
+}
+
+void EverQuestMod::MoveClassSkillsToModSkillsTable(Player* player, CharacterDatabaseTransaction& transaction)
+{
+    uint8 curEQClass = GetEQClassForPlayer(player);
+
+    // Purge old skill list in mod table
+    transaction->Append("DELETE FROM `mod_everquest_character_class_skills` WHERE guid = {} and eqclass = {}", player->GetGUID().GetCounter(), curEQClass);
+
+    // Get all of the known player skills
+    // TODO: This REALLY needs to be done somehow better
+    set<uint32> playerKnownSkills;
+    for (uint32 i = 0; i < ConfigMaxSkillIDCheck; ++i)
+    {
+        if (player->HasSkill(i))
+            playerKnownSkills.insert(i);
+    }
+
+    // Go through all known skills on this player to move them
+    for (uint32 curSkillID : playerKnownSkills)
+    {
+        // Ignore shared skills
+        if (ConfigCrossClassIncludeSkillIDs.find(curSkillID) != ConfigCrossClassIncludeSkillIDs.end())
+        {
+            continue;
+        }
+
+        // Add to the mod table
+        transaction->Append("INSERT IGNORE INTO mod_everquest_character_class_skills (guid, class, eqclass, skill, value, max) VALUES ({}, {}, {}, {}, {}, {})",
+            player->GetGUID().GetCounter(),
+            player->getClass(),
+            curEQClass,
+            curSkillID,
+            player->GetPureSkillValue(curSkillID),
+            player->GetPureMaxSkillValue(curSkillID));
+
+        // Remove from the character skill table
+        transaction->Append("DELETE FROM character_skills WHERE guid = {} AND skill = {}",
+            player->GetGUID().GetCounter(),
+            curSkillID);
+    }
+}
+
+void EverQuestMod::ReplaceModClassActionCopy(Player* player, CharacterDatabaseTransaction& transaction)
+{
+    uint8 curEQClass = GetEQClassForPlayer(player);
+
+    // Delete the old action entries
+    transaction->Append("DELETE FROM `mod_everquest_character_class_action` WHERE guid = {} and eqclass = {}", player->GetGUID().GetCounter(), curEQClass);
+
+    // Less ideal approach, as it causes a table scan on character_action
+    transaction->Append("INSERT IGNORE INTO mod_everquest_character_class_action (guid, class, eqclass, spec, button, `action`, `type`) SELECT guid, {}, {}, spec, button, `action`, `type` FROM character_action WHERE guid = {}", player->getClass(), curEQClass, player->GetGUID().GetCounter());
+}
+
+void EverQuestMod::MoveGlyphsToModGlyhpsTable(Player* player, CharacterDatabaseTransaction& transaction)
+{
+    uint8 curEQClass = GetEQClassForPlayer(player);
+
+    transaction->Append("DELETE FROM `mod_everquest_character_class_glyphs` WHERE guid = {} and eqclass = {}", player->GetGUID().GetCounter(), curEQClass);
+    transaction->Append("INSERT IGNORE INTO mod_everquest_character_class_glyphs (guid, class, eqclass, talentGroup, glyph1, glyph2, glyph3, glyph4, glyph5, glyph6) SELECT guid, {}, {}, talentGroup, glyph1, glyph2, glyph3, glyph4, glyph5, glyph6 FROM character_glyphs WHERE guid = {}", player->getClass(), curEQClass, player->GetGUID().GetCounter());
+    transaction->Append("DELETE FROM `character_glyphs` WHERE guid = {}", player->GetGUID().GetCounter());
+}
+
+void EverQuestMod::MoveAuraToModAuraTable(Player* player, CharacterDatabaseTransaction& transaction)
+{
+    uint8 curEQClass = GetEQClassForPlayer(player);
+
+    // TODO: Do something about gate
+
+    transaction->Append("DELETE FROM `mod_everquest_character_class_glyphs` WHERE guid = {} and eqclass = {}", player->GetGUID().GetCounter(), curEQClass);
+    transaction->Append("INSERT IGNORE INTO mod_everquest_character_class_glyphs (guid, class, eqclass, casterGuid, itemGuid, spell, effectMask, recalculateMask, stackCount, amount0, amount1, amount2, base_amount0, base_amount1, base_amount2, maxDuration, remainTime, remainCharges) SELECT guid, {}, {}, casterGuid, itemGuid, spell, effectMask, recalculateMask, stackCount, amount0, amount1, amount2, base_amount0, base_amount1, base_amount2, maxDuration, remainTime, remainCharges FROM character_aura WHERE guid = {}", player->getClass(), curEQClass, player->GetGUID().GetCounter());
+    transaction->Append("DELETE FROM `character_aura` WHERE guid = {}", player->GetGUID().GetCounter());
+}
+
+void EverQuestMod::MoveEquipToModInventoryTable(Player* player, CharacterDatabaseTransaction& transaction)
+{
+    uint8 curEQClass = GetEQClassForPlayer(player);
+
+    transaction->Append("DELETE FROM `mod_everquest_character_class_inventory` WHERE guid = {} AND eqclass = {} AND `bag` = 0 AND `slot` <= 18;", player->GetGUID().GetCounter(), curEQClass);
+    transaction->Append("INSERT IGNORE INTO `mod_everquest_character_class_inventory` (`guid`, `class`, `eqclass`, `bag`, `slot`, `item`) SELECT `guid`, {}, {}, `bag`, `slot`, `item` FROM character_inventory WHERE guid = {} AND `bag` = 0 AND `slot` <= 18", player->getClass(), curEQClass, player->GetGUID().GetCounter());
+    transaction->Append("DELETE FROM `character_inventory` WHERE guid = {} AND `bag` = 0 AND `slot` <= 18", player->GetGUID().GetCounter());
+}
+
+void EverQuestMod::UpdateCharacterFromModCharacterTable(Player* player, uint8 pullEQClassID, CharacterDatabaseTransaction& transaction)
+{
+    QueryResult queryResult = CharacterDatabase.Query("SELECT `level`, `xp`, `leveltime`, `rest_bonus`, `resettalents_cost`, `resettalents_time`, `health`, `power1`, `power2`, `power3`, `power4`, `power5`, `power6`, `power7`, `talentGroupsCount`, `activeTalentGroup` FROM mod_everquest_character_class_inventory WHERE guid = {} AND eqclass = {}", player->GetGUID().GetCounter(), pullEQClassID);
+    if (!queryResult)
+    {
+        LOG_ERROR("module.EverQuest", "EverQuestMod Error pulling character data for guid {} eqclass {}", player->GetGUID().GetCounter(), pullEQClassID);
+    }
+    else
+    {
+        Field* fields = queryResult->Fetch();
+        auto finiteAlways = [](float f) { return std::isfinite(f) ? f : 0.0f; };
+
+        transaction->Append("UPDATE characters SET `level` = {}, `xp` = {}, `leveltime` = {}, `rest_bonus` = {}, `resettalents_cost` = {}, `resettalents_time` = {}, `health` = {}, `power1` = {}, `power2` = {}, `power3` = {}, `power4` = {}, `power5` = {}, `power6` = {}, `power7` = {}, `talentGroupsCount` = {}, `activeTalentGroup` = {} WHERE `guid` = {}",
+            fields[0].Get<uint8>(),                 // level
+            fields[1].Get<uint32>(),                // xp
+            fields[2].Get<uint32>(),                // leveltime
+            finiteAlways(fields[3].Get<float>()),   // rest_bonus
+            fields[4].Get<uint32>(),                // resettalents_cost
+            fields[5].Get<uint32>(),                // resettalents_time
+            fields[6].Get<uint32>(),                // health
+            fields[7].Get<uint32>(),                // power1
+            fields[8].Get<uint32>(),                // power2
+            fields[9].Get<uint32>(),                // power3
+            fields[10].Get<uint32>(),               // power4
+            fields[11].Get<uint32>(),               // power5
+            fields[12].Get<uint32>(),               // power6
+            fields[13].Get<uint32>(),               // power7
+            fields[14].Get<uint8>(),                // talentGroupsCount
+            fields[15].Get<uint8>(),                // activeTalentGroup
+            player->GetGUID().GetCounter()
+        );
+    }
+}
+
+void EverQuestMod::CopyModSpellTableIntoCharacterSpells(Player* player, uint8 pullEQClassID, CharacterDatabaseTransaction& transaction)
+{
+    // Create inserts for all of the coming class spells
+    QueryResult queryResult = CharacterDatabase.Query("SELECT spell, specMask FROM mod_everquest_character_class_spell WHERE guid = {} and eqclass = {}", player->GetGUID().GetCounter(), (uint32)pullEQClassID);
+    if (queryResult)
+    {
+        do
+        {
+            // Pull the data out
+            Field* fields = queryResult->Fetch();
+            uint32 spellID = fields[0].Get<uint32>();
+            uint8 specMask = fields[1].Get<uint8>();
+
+            // Skip if not valid
+            // TODO:?
+            //if (ClassSpellIDs.find(spellID) == ClassSpellIDs.end())
+            //    continue;
+
+            // Add it
+            transaction->Append("INSERT IGNORE INTO character_spell (guid, spell, specMask) VALUES ({}, {}, {})",
+                player->GetGUID().GetCounter(),
+                spellID,
+                (uint32)specMask);
+        } while (queryResult->NextRow());
+    }
+}
+
+void EverQuestMod::CopyModActionTableIntoCharacterAction(Player* player, uint8 pullEQClassID, CharacterDatabaseTransaction& transaction)
+{
+    // Delete the old data
+    transaction->Append("DELETE FROM `character_action` WHERE guid = {}", player->GetGUID().GetCounter());
+
+    // Create inserts for all of the coming class action bar buttons
+    QueryResult queryResult = CharacterDatabase.Query("SELECT spec, button, `action`, `type` FROM mod_everquest_character_class_action WHERE guid = {} and eqclass = {}", player->GetGUID().GetCounter(), (uint32)pullEQClassID);
+    if (queryResult)
+    {
+        do
+        {
+            // Pull the data out
+            Field* fields = queryResult->Fetch();
+            uint8 actionSpec = fields[0].Get<uint8>();
+            uint8 actionButton = fields[1].Get<uint8>();
+            uint32 actionAction = fields[2].Get<uint32>();
+            uint8 actionType = fields[3].Get<uint8>();
+
+            transaction->Append("INSERT IGNORE INTO `character_action` (`guid`, `spec`, `button`, `action`, `type`) VALUES ({}, {}, {}, {}, {})",
+                player->GetGUID().GetCounter(),
+                (uint32)actionSpec,
+                (uint32)actionButton,
+                actionAction,
+                (uint32)actionType);
+
+        } while (queryResult->NextRow());
+    }
+}
+
+void EverQuestMod::CopyModSkillTableIntoCharacterSkills(Player* player, uint8 pullEQClassID, CharacterDatabaseTransaction& transaction)
+{
+    // Create inserts for all of the coming class skills
+    QueryResult queryResult = CharacterDatabase.Query("SELECT skill, value, max FROM mod_everquest_character_class_skills WHERE guid = {} and eqclass = {}", player->GetGUID().GetCounter(), (uint32)pullEQClassID);
+    if (!queryResult)
+    {
+        LOG_ERROR("module.EverQuest", "EverQuestMod Error pulling class skill data from the mod table for eqclass {} on guid {}, so the class will have no non-shared skills...", (uint32)pullEQClassID, player->GetGUID().GetCounter());
+    }
+    else
+    {
+        do
+        {
+            // Pull the data out
+            Field* fields = queryResult->Fetch();
+            uint32 skillID = fields[0].Get<uint32>();
+            uint32 value = fields[1].Get<uint32>();
+            uint32 max = fields[2].Get<uint32>();
+
+            // Insert it
+            transaction->Append("INSERT IGNORE INTO `character_skills` (`guid`, `skill`, `value`, `max`) VALUES ({}, {}, {}, {})",
+                player->GetGUID().GetCounter(),
+                skillID,
+                value,
+                max);
+
+        } while (queryResult->NextRow());
+    }
 }
 
 std::string GetEQClassStringFromID(uint8 classID)
@@ -1684,4 +1982,32 @@ std::string GetEQClassStringFromID(uint8 classID)
     case EQ_EQCLASS_ENCHANTER:      return "EQ Enchanter";
     default:                        return "Unknown";
     }
+}
+
+set<uint32> GetSetFromConfigString(string configStringName)
+{
+    string configString = sConfigMgr->GetOption<std::string>(configStringName, "");
+
+    std::string delimitedValue;
+    std::stringstream delimetedValueStream;
+    std::set<uint32> generatedSet;
+
+    delimetedValueStream.str(configString);
+    while (std::getline(delimetedValueStream, delimitedValue, ','))
+    {
+        std::string curValue;
+        std::stringstream delimetedPairStream(delimitedValue);
+        delimetedPairStream >> curValue;
+        auto itemId = atoi(curValue.c_str());
+        if (generatedSet.find(itemId) != generatedSet.end())
+        {
+            LOG_ERROR("module.EverQuest", "EverQuestMod Duplicate value found in config string named {}", configString);
+        }
+        else
+        {
+            generatedSet.insert(itemId);
+        }
+    }
+
+    return generatedSet;
 }

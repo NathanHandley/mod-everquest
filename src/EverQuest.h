@@ -31,6 +31,8 @@
 
 using namespace std;
 
+static uint32 ConfigMaxSkillIDCheck = 1000;         // The highest level of skill ID it will look for when doing copies
+
 class Unit;
 
 #define EQ_MOD_VERSION                              20
@@ -394,8 +396,9 @@ public:
     bool ConfigExpLossOnDeathAddLostExpToRestExp;
     bool ConfigAlternateGroupExperienceFormulaEnabled;
     float ConfigAlternateGroupExperienceAddPercentPerAddedMember;
-    bool configSpellDisableStackingOfSameDOT;
+    bool ConfigSpellDisableStackingOfSameDOT;
     bool ConfigCombatSkillsDisableBashKickStunOnPlayers;
+    std::set<uint32> ConfigCrossClassIncludeSkillIDs;
 
     vector<Player*> AllLoadedPlayers;
     unordered_map<uint32, EverQuestCreature> CreaturesByTemplateID;
@@ -505,14 +508,32 @@ public:
     uint32 CalculateSpellFocusBoostValue(Unit* caster, uint32 spellID);
     void ProcessForage(Player* player);
 
+    uint8 GetEQClassForPlayer(Player* player);
     std::map<std::string, EverQuestPlayerClassInfoItem> GetPlayerClassInfoByClassNameForPlayer(Player* player);
     EverQuestPlayerControllerData GetPlayerControllerData(Player* player);
     void SetPlayerControllerData(EverQuestPlayerControllerData controllerData);
     bool MarkClassChangeOnNextLogout(ChatHandler* handler, Player* player, uint8 newEQClass);
-    std::map<uint8, uint8> GetClassLevelsByClassForPlayer(Player* player, uint8 curEQClass);
+    std::map<uint8, uint8> GetClassLevelsByClassForPlayer(Player* player);
+
+    bool DoesSavedClassDataExistForPlayer(Player* player, uint8 lookupClass);
+    void CopyCharacterDataIntoModCharacterTable(Player* player, CharacterDatabaseTransaction& transaction);
+    void MoveTalentsToModTalentsTable(Player* player, CharacterDatabaseTransaction& transaction);
+    void MoveClassSpellsToModSpellsTable(Player* player, CharacterDatabaseTransaction& transaction);
+    void MoveClassSkillsToModSkillsTable(Player* player, CharacterDatabaseTransaction& transaction);
+    void ReplaceModClassActionCopy(Player* player, CharacterDatabaseTransaction& transaction);
+    void MoveGlyphsToModGlyhpsTable(Player* player, CharacterDatabaseTransaction& transaction);
+    void MoveAuraToModAuraTable(Player* player, CharacterDatabaseTransaction& transaction);
+    void MoveEquipToModInventoryTable(Player* player, CharacterDatabaseTransaction& transaction);
+
+    void UpdateCharacterFromModCharacterTable(Player* player, uint8 pullEQClassID, CharacterDatabaseTransaction& transaction);
+    void CopyModSpellTableIntoCharacterSpells(Player* player, uint8 pullEQClassID, CharacterDatabaseTransaction& transaction);
+    void CopyModActionTableIntoCharacterAction(Player* player, uint8 pullEQClassID, CharacterDatabaseTransaction& transaction);
+    void CopyModSkillTableIntoCharacterSkills(Player* player, uint8 pullEQClassID, CharacterDatabaseTransaction& transaction);
+
 };
 
 std::string GetEQClassStringFromID(uint8 classID);
+std::set<uint32> GetSetFromConfigString(string configStringName);
 
 #define EverQuest EverQuestMod::instance()
 

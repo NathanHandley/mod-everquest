@@ -78,7 +78,7 @@ public:
                 hasNegativeEffect = true;
         }
 
-        if (EverQuest->configSpellDisableStackingOfSameDOT == true)
+        if (EverQuest->ConfigSpellDisableStackingOfSameDOT == true)
         {
             if (hasHarmfulPeriodic)
                 spell->AttributesCu |= SPELL_ATTR0_CU_SINGLE_AURA_STACK;

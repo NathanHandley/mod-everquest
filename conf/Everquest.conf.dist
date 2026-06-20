@@ -96,3 +96,13 @@ EverQuest.Spells.DisableStackingOfSameDOT = False
 ###################################################################################################
 
 EverQuest.CombatSkills.DisableBashKickStunOnPlayers = False
+
+###################################################################################################
+#
+# 	EverQuest.CrossClass.IncludeSkillIDs
+#		Comma delimited list of skill IDs that remain when you switch eq classes
+#	Default: list is related to professions, flying, pick lock, ...
+#
+###################################################################################################
+
+EverQuest.CrossClass.IncludeSkillIDs = 129, 164, 165, 171, 182, 185, 186, 197, 202, 333, 356, 393, 633, 755, 762, 773
