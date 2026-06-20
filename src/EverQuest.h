@@ -21,7 +21,10 @@
 #include "GameObject.h"
 #include "ObjectGuid.h"
 #include "CreatureData.h"
+#include "Player.h"
+#include "Chat.h"
 
+#include <string>
 #include <list>
 #include <map>
 #include <unordered_set>
@@ -31,6 +34,21 @@ using namespace std;
 class Unit;
 
 #define EQ_MOD_VERSION                              20
+
+#define EQ_EQCLASS_WARRIOR                          1
+#define EQ_EQCLASS_CLERIC                           2
+#define EQ_EQCLASS_PALADIN                          3
+#define EQ_EQCLASS_RANGER                           4
+#define EQ_EQCLASS_SHADOWKNIGHT                     5
+#define EQ_EQCLASS_DRUID                            6
+#define EQ_EQCLASS_MONK                             7
+#define EQ_EQCLASS_BARD                             8
+#define EQ_EQCLASS_ROGUE                            9
+#define EQ_EQCLASS_SHAMAN                           10
+#define EQ_EQCLASS_NECROMANCER                      11
+#define EQ_EQCLASS_WIZARD                           12
+#define EQ_EQCLASS_MAGICIAN                         13
+#define EQ_EQCLASS_ENCHANTER                        14
 
 #define EQ_BASHKICKSTUN_BASE_CHANCE                 45
 #define EQ_BASHKICKSTUN_BASE_CHANCE_ABOVE_LEVEL_60  40
@@ -325,6 +343,21 @@ public:
     uint32 ForageType = EQ_FORAGE_TYPE_FOOD;
 };
 
+class EverQuestPlayerControllerData
+{
+public: 
+    uint32 GUID = 0;
+    uint8 NextClass = 0;
+};
+
+class EverQuestPlayerClassInfoItem
+{
+public:
+    uint8 ClassID = 0;
+    string ClassName = "";
+    uint8 Level = 1;
+};
+
 class EverQuestMod
 {
 private:
@@ -471,7 +504,15 @@ public:
     bool RollBashKickStunLands(Unit* attacker, Unit* defender);
     uint32 CalculateSpellFocusBoostValue(Unit* caster, uint32 spellID);
     void ProcessForage(Player* player);
+
+    std::map<std::string, EverQuestPlayerClassInfoItem> GetPlayerClassInfoByClassNameForPlayer(Player* player);
+    EverQuestPlayerControllerData GetPlayerControllerData(Player* player);
+    void SetPlayerControllerData(EverQuestPlayerControllerData controllerData);
+    bool MarkClassChangeOnNextLogout(ChatHandler* handler, Player* player, uint8 newEQClass);
+    std::map<uint8, uint8> GetClassLevelsByClassForPlayer(Player* player, uint8 curEQClass);
 };
+
+std::string GetEQClassStringFromID(uint8 classID);
 
 #define EverQuest EverQuestMod::instance()
 

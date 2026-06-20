@@ -1571,3 +1571,117 @@ void EverQuestMod::ProcessForage(Player* player)
     }
     ChatHandler(player->GetSession()).PSendSysMessage("You fail to locate any food nearby.");
 }
+
+map<string, EverQuestPlayerClassInfoItem> EverQuestMod::GetPlayerClassInfoByClassNameForPlayer(Player* player)
+{
+    map<string, EverQuestPlayerClassInfoItem> playerClassInfoByClass;
+
+    // Get levels for classes first, and populate the base list
+    map<uint8, uint8> classLevelsByClass = GetClassLevelsByClassForPlayer(player, 0); // TODO: Need to have the current EQ class
+    for (auto& curClassLevel : classLevelsByClass)
+    {
+        EverQuestPlayerClassInfoItem curClassInfo;
+        curClassInfo.ClassID = curClassLevel.first;
+        curClassInfo.ClassName = GetEQClassStringFromID(curClassInfo.ClassID);
+        curClassInfo.Level = curClassLevel.second;
+        playerClassInfoByClass.insert(pair<string, EverQuestPlayerClassInfoItem>(curClassInfo.ClassName, curClassInfo));
+    }
+
+    return playerClassInfoByClass;
+}
+
+EverQuestPlayerControllerData EverQuestMod::GetPlayerControllerData(Player* player)
+{
+    EverQuestPlayerControllerData controllerData;
+    controllerData.GUID = player->GetGUID().GetCounter();
+    QueryResult queryResult = CharacterDatabase.Query("SELECT nextClass FROM mod_everquest_character_class_controller WHERE guid = {}", player->GetGUID().GetCounter());
+    if (!queryResult || queryResult->GetRowCount() == 0)
+    {
+        controllerData.NextClass = 0; // TODO: Need this to work! Default to warrior
+    }
+    else
+    {
+        Field* fields = queryResult->Fetch();
+        controllerData.NextClass = fields[0].Get<uint8>();
+    }
+    return controllerData;
+}
+
+void EverQuestMod::SetPlayerControllerData(EverQuestPlayerControllerData controllerData)
+{
+    CharacterDatabase.DirectExecute("REPLACE INTO `mod_everquest_character_class_controller` (`guid`, `nextClass`) VALUES ({}, {})",
+        controllerData.GUID,
+        controllerData.NextClass);
+}
+
+bool EverQuestMod::MarkClassChangeOnNextLogout(ChatHandler* handler, Player* player, uint8 newEQClass)
+{
+    // Add the switch event
+    EverQuestPlayerControllerData controllerData = GetPlayerControllerData(player);
+    controllerData.NextClass = newEQClass;
+    SetPlayerControllerData(controllerData);
+    switch (newEQClass)
+    {
+        case EQ_EQCLASS_WARRIOR: handler->PSendSysMessage("You will become an EQ Warrior on the next login"); break;
+        case EQ_EQCLASS_CLERIC: handler->PSendSysMessage("You will become an EQ Cleric on the next login"); break;
+        case EQ_EQCLASS_PALADIN: handler->PSendSysMessage("You will become an EQ Paladin on the next login"); break;
+        case EQ_EQCLASS_RANGER: handler->PSendSysMessage("You will become an EQ Ranger on the next login"); break;
+        case EQ_EQCLASS_SHADOWKNIGHT: handler->PSendSysMessage("You will become an EQ Shadow Knight on the next login"); break;
+        case EQ_EQCLASS_DRUID: handler->PSendSysMessage("You will become an EQ Druid on the next login"); break;
+        case EQ_EQCLASS_MONK: handler->PSendSysMessage("You will become an EQ Monk on the next login"); break;
+        case EQ_EQCLASS_BARD: handler->PSendSysMessage("You will become an EQ Bard on the next login"); break;
+        case EQ_EQCLASS_ROGUE: handler->PSendSysMessage("You will become an EQ Rogue on the next login"); break;
+        case EQ_EQCLASS_SHAMAN: handler->PSendSysMessage("You will become an EQ Shaman on the next login"); break;
+        case EQ_EQCLASS_NECROMANCER: handler->PSendSysMessage("You will become an EQ Necromancer on the next login"); break;
+        case EQ_EQCLASS_WIZARD: handler->PSendSysMessage("You will become an EQ Wizard on the next login"); break;
+        case EQ_EQCLASS_MAGICIAN: handler->PSendSysMessage("You will become an EQ Magician on the next login"); break;
+        case EQ_EQCLASS_ENCHANTER: handler->PSendSysMessage("You will become an EQ Enchanter on the next login"); break;
+    default: break;
+    }
+    return true;
+}
+
+map<uint8, uint8> EverQuestMod::GetClassLevelsByClassForPlayer(Player* player, uint8 curEQClass)
+{
+    // Pull the other class levels first
+    map<uint8, uint8> levelsByClass;
+    QueryResult classQueryResult = CharacterDatabase.Query("SELECT `eqclass`, `level` FROM mod_everquest_characters WHERE guid = {} AND eqclass <> {}", player->GetGUID().GetCounter(), curEQClass);
+    if (classQueryResult)
+    {
+        do
+        {
+            Field* fields = classQueryResult->Fetch();
+            uint8 returnedClass = fields[0].Get<uint8>();
+            uint8 returnedLevel = fields[1].Get<uint8>();
+            levelsByClass.insert(pair<uint8, uint8>(returnedClass, returnedLevel));
+        } while (classQueryResult->NextRow());
+
+    }
+
+    // Add this class level
+    levelsByClass.insert(pair<uint8, uint8>(player->getClass(), player->GetLevel()));
+
+    return levelsByClass;
+}
+
+std::string GetEQClassStringFromID(uint8 classID)
+{
+    switch (classID)
+    {
+    case EQ_EQCLASS_WARRIOR:        return "EQ Warrior";
+    case EQ_EQCLASS_CLERIC:         return "EQ Cleric";
+    case EQ_EQCLASS_PALADIN:        return "EQ Paladin";
+    case EQ_EQCLASS_RANGER:         return "EQ Ranger";
+    case EQ_EQCLASS_SHADOWKNIGHT:   return "EQ Shadow Knight";
+    case EQ_EQCLASS_DRUID:          return "EQ Druid";
+    case EQ_EQCLASS_MONK:           return "EQ Monk";
+    case EQ_EQCLASS_BARD:           return "EQ Bard";
+    case EQ_EQCLASS_ROGUE:          return "EQ Rogue";
+    case EQ_EQCLASS_SHAMAN:         return "EQ Shaman";
+    case EQ_EQCLASS_NECROMANCER:    return "EQ Necromancer";
+    case EQ_EQCLASS_WIZARD:         return "EQ Wizard";
+    case EQ_EQCLASS_MAGICIAN:       return "EQ Magician";
+    case EQ_EQCLASS_ENCHANTER:      return "EQ Enchanter";
+    default:                        return "Unknown";
+    }
+}

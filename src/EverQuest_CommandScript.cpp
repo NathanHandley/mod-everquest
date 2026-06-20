@@ -102,44 +102,52 @@ public:
 
     static bool HandleMultiClassChangeClass(ChatHandler* handler, const char* args)
     {
-        /*if (MultiClass->ConfigEnabled == false)
+        if (EverQuest->IsEnabled == false)
             return true;
 
         if (!*args)
         {
             handler->PSendSysMessage(".class change 'class'");
-            handler->PSendSysMessage("Changes the player class on next logout.  Example: '.class change warrior'");
-            handler->PSendSysMessage("Valid Class Values: warrior, paladin, hunter, rogue, priest, deathknight, shaman, mage, warlock, druid");
+            handler->PSendSysMessage("Changes the player EverQuest class on next logout.  Example: '.class change warrior'");
+            handler->PSendSysMessage("Valid Class Values: warrior, cleric, paladin, ranger, shadowknight, druid, monk, bard, rogue, shaman, necromancer, wizard, magician, enchanter");
             return true;
         }
 
         uint8 classInt = CLASS_NONE;
         std::string className = strtok((char*)args, " ");
-        if (className.starts_with("Warr") || className.starts_with("warr") || className.starts_with("WARR"))
-            classInt = CLASS_WARRIOR;
-        else if (className.starts_with("Pa") || className.starts_with("pa") || className.starts_with("PA"))
-            classInt = CLASS_PALADIN;
-        else if (className.starts_with("H") || className.starts_with("h"))
-            classInt = CLASS_HUNTER;
-        else if (className.starts_with("R") || className.starts_with("r"))
-            classInt = CLASS_ROGUE;
-        else if (className.starts_with("Pr") || className.starts_with("pr") || className.starts_with("PR"))
-            classInt = CLASS_PRIEST;
-        else if (className.starts_with("De") || className.starts_with("de") || className.starts_with("DE"))
-            classInt = CLASS_DEATH_KNIGHT;
-        else if (className.starts_with("S") || className.starts_with("s"))
-            classInt = CLASS_SHAMAN;
+        if (className.starts_with("Wa") || className.starts_with("wa") || className.starts_with("WA"))
+            classInt = EQ_EQCLASS_WARRIOR;
+        else if (className.starts_with("C") || className.starts_with("c"))
+            classInt = EQ_EQCLASS_CLERIC;
+        else if (className.starts_with("P") || className.starts_with("p"))
+            classInt = EQ_EQCLASS_PALADIN;
+        else if (className.starts_with("Ra") || className.starts_with("ra") || className.starts_with("RA"))
+            classInt = EQ_EQCLASS_RANGER;
+        else if (className.starts_with("Shad") || className.starts_with("shad") || className.starts_with("SHAD"))
+            classInt = EQ_EQCLASS_SHADOWKNIGHT;
+        else if (className.starts_with("D") || className.starts_with("d"))
+            classInt = EQ_EQCLASS_DRUID;
         else if (className.starts_with("M") || className.starts_with("m"))
-            classInt = CLASS_MAGE;
-        else if (className.starts_with("Warl") || className.starts_with("warl") || className.starts_with("WARL"))
-            classInt = CLASS_WARLOCK;
-        else if (className.starts_with("Dr") || className.starts_with("dr") || className.starts_with("DR"))
-            classInt = CLASS_DRUID;
+            classInt = EQ_EQCLASS_MONK;
+        else if (className.starts_with("B") || className.starts_with("b"))
+            classInt = EQ_EQCLASS_BARD;
+        else if (className.starts_with("Ro") || className.starts_with("ro") || className.starts_with("RO"))
+            classInt = EQ_EQCLASS_ROGUE;
+        else if (className.starts_with("Sham") || className.starts_with("sham") || className.starts_with("SHAM"))
+            classInt = EQ_EQCLASS_SHAMAN;
+        else if (className.starts_with("N") || className.starts_with("n"))
+            classInt = EQ_EQCLASS_NECROMANCER;
+        else if (className.starts_with("Wi") || className.starts_with("wi") || className.starts_with("WI"))
+            classInt = EQ_EQCLASS_WIZARD;
+        else if (className.starts_with("M") || className.starts_with("m"))
+            classInt = EQ_EQCLASS_MAGICIAN;
+        else if (className.starts_with("E") || className.starts_with("e"))
+            classInt = EQ_EQCLASS_ENCHANTER;
         else
         {
             handler->PSendSysMessage(".class change 'class'");
             handler->PSendSysMessage("Changes the player class.  Example: '.class change warrior'");
-            handler->PSendSysMessage("Valid Class Values: warrior, paladin, hunter, rogue, priest, deathknight, shaman, mage warlock, druid");
+            handler->PSendSysMessage("Valid Class Values: warrior, cleric, paladin, ranger, shadowknight, druid, monk, bard, rogue, shaman, necromancer, wizard, magician, enchanter");
             std::string enteredValueLine = "Entered Value was ";
             enteredValueLine.append(className);
             handler->PSendSysMessage(enteredValueLine.c_str());
@@ -147,8 +155,8 @@ public:
         }
 
         Player* player = handler->GetPlayer();
-        MultiClass->MarkClassChangeOnNextLogout(handler, player, classInt);
-        player->SaveToDB(false, false);*/
+        EverQuest->MarkClassChangeOnNextLogout(handler, player, classInt);
+        player->SaveToDB(false, false);
 
         // Class change accepted
         return true;
@@ -156,31 +164,21 @@ public:
 
     static bool HandleMultiClassInfo(ChatHandler* handler, const char* /*args*/)
     {
-        //if (MultiClass->ConfigEnabled == false)
-        //    return true;
+        if (EverQuest->IsEnabled == false)
+            return true;
 
-        //handler->PSendSysMessage("Class List:");
+        handler->PSendSysMessage("Class List:");
 
-        //// Get the player data
-        //Player* player = handler->GetPlayer();
-        //map<string, PlayerClassInfoItem> playerClassInfoItems = MultiClass->GetPlayerClassInfoByClassNameForPlayer(player);
+        // Get the player data
+        Player* player = handler->GetPlayer();
+        map<string, EverQuestPlayerClassInfoItem> playerClassInfoItems = EverQuest->GetPlayerClassInfoByClassNameForPlayer(player);
 
-        //// Write the information out
-        //for (auto& playerClassInfoItem : playerClassInfoItems)
-        //{
-        //    string currentLine = " - " + playerClassInfoItem.second.ClassName + "(" + std::to_string(playerClassInfoItem.second.Level) + "), Shared: Quests(";
-        //    if (playerClassInfoItem.second.UseSharedQuests)
-        //        currentLine += "|cff4CFF00ON|r";
-        //    else
-        //        currentLine += "|cffff0000OFF|r";
-        //    currentLine += "), Reputation(";
-        //    if (playerClassInfoItem.second.UseSharedReputation)
-        //        currentLine += "|cff4CFF00ON|r";
-        //    else
-        //        currentLine += "|cffff0000OFF|r";
-        //    currentLine += ")";
-        //    handler->PSendSysMessage(currentLine.c_str());
-        //}
+        // Write the information out
+        for (auto& playerClassInfoItem : playerClassInfoItems)
+        {
+            string currentLine = " - " + playerClassInfoItem.second.ClassName + "(" + std::to_string(playerClassInfoItem.second.Level) + ")";
+            handler->PSendSysMessage(currentLine.c_str());
+        }
 
         return true;
     }
