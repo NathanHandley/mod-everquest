@@ -360,6 +360,15 @@ public:
     uint8 Level = 1;
 };
 
+struct EverQuestPlayerEquipedItemData
+{
+    uint8 Slot;
+    uint32 ItemID;
+    uint32 TempEnchant;
+    uint32 PermEnchant;
+    uint32 ItemInstanceGUID;
+};
+
 class EverQuestMod
 {
 private:
@@ -401,6 +410,7 @@ public:
     std::set<uint32> ConfigCrossClassIncludeSkillIDs;
 
     vector<Player*> AllLoadedPlayers;
+    unordered_map<ObjectGuid, uint8> CurPlayerEQClassByGUID;
     unordered_map<uint32, EverQuestCreature> CreaturesByTemplateID;
     unordered_map<uint32, list<EverQuestCreatureOnkillReputation>> CreatureOnkillReputationsByCreatureTemplateID;
     unordered_map<uint32, EverQuestItemTemplate> ItemTemplatesByEntryID;
@@ -530,6 +540,9 @@ public:
     void CopyModActionTableIntoCharacterAction(Player* player, uint8 pullEQClassID, CharacterDatabaseTransaction& transaction);
     void CopyModSkillTableIntoCharacterSkills(Player* player, uint8 pullEQClassID, CharacterDatabaseTransaction& transaction);
 
+    std::map<uint8, EverQuestPlayerEquipedItemData> GetVisibleItemsBySlotForPlayerClass(Player* player, uint8 classID);
+    bool PerformClassSwitch(Player* player, EverQuestPlayerControllerData controllerData);
+    bool PerformPlayerDelete(ObjectGuid guid);
 };
 
 std::string GetEQClassStringFromID(uint8 classID);

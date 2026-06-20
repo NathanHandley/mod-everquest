@@ -50,6 +50,12 @@ public:
         return std::nullopt;
     }
 
+    bool OnPlayerHasActivePowerType(Player const* /*player*/, Powers /*power*/) override
+    {
+        // Enable all powers for all classes
+        return true;
+    }
+
     void OnPlayerBeforeLoadPetFromDB(Player* player, uint32& petEntry, uint32& petNumber, bool& current, bool& forceLoadFromDB) override
     {
         if (EverQuest->IsEnabled == false)
@@ -288,6 +294,7 @@ public:
             return;
 
         EverQuest->DeletePlayerBindHome(guid);
+        EverQuest->PerformPlayerDelete(guid);
     }
 
     void OnPlayerFirstLogin(Player* player) override
@@ -323,6 +330,14 @@ public:
             return;
 
         EverQuest->AllLoadedPlayers.push_back(player);
+
+        // Grab EQ class info
+        EverQuestPlayerControllerData curPlayerControllerData = EverQuest->GetPlayerControllerData(player);
+        EverQuest->CurPlayerEQClassByGUID[player->GetGUID()] = curPlayerControllerData.NextClass;
+        string text = fmt::format("You are a {}. Type |cff4CFF00.class |rto change or edit classes.", GetEQClassStringFromID(curPlayerControllerData.NextClass));
+        ChatHandler(player->GetSession()).SendSysMessage(text);
+
+        unordered_map<ObjectGuid, uint8> CurPlayerEQClassByGUID;
 
         // Give players the ability to see invis vs undead
         if (EverQuest->ConfigSystemInvisVsUndeadDetectSpellID != 0 && player->HasAura(EverQuest->ConfigSystemInvisVsUndeadDetectSpellID) == false)
@@ -393,6 +408,19 @@ public:
         EverQuest->AllLoadedPlayers.erase(std::remove(EverQuest->AllLoadedPlayers.begin(), EverQuest->AllLoadedPlayers.end(), player), EverQuest->AllLoadedPlayers.end());
         if (EverQuest->ConfigBardMaxConcurrentSongs != 0)
             EverQuest->PlayerCasterConcurrentBardSongs[player->GetGUID()].clear();
+
+        EverQuestPlayerControllerData controllerData = EverQuest->GetPlayerControllerData(player);
+
+        // Class switch
+        if (controllerData.NextClass != player->getClass())
+        {
+            if (!EverQuest->PerformClassSwitch(player, controllerData))
+            {
+                LOG_ERROR("module.EverQuest", "EverQuestMod Could not successfully complete the class switch on logout for player {} with GUID {}", player->GetName(), player->GetGUID().GetCounter());
+            }
+        }
+
+        EverQuest->CurPlayerEQClassByGUID.erase(player->GetGUID());
     }
 
     // Note: this is AFTER the player changes maps
@@ -481,6 +509,30 @@ public:
             return;
 
         EverQuest->RemoveVisualEquippedItemForCreatureGUIDIfExists(player->GetMap(), lootguid, item->GetTemplate()->ItemId);
+    }
+
+    void OnPlayerBeforeLogout(Player* player) override
+    {
+        if (EverQuest->IsEnabled == false)
+            return;
+
+        // If a class change is in progress, update the item visuals
+        EverQuestPlayerControllerData controllerData = EverQuest->GetPlayerControllerData(player);
+        if (controllerData.NextClass != EverQuest->GetEQClassForPlayer(player))
+        {
+            map<uint8, EverQuestPlayerEquipedItemData> visibleItemsBySlot = EverQuest->GetVisibleItemsBySlotForPlayerClass(player, controllerData.NextClass);
+            for (uint8 i = 0; i < 18; ++i)
+            {
+                if (visibleItemsBySlot[i].ItemID == 0)
+                    player->SetVisibleItemSlot(i, NULL);
+                else
+                {
+                    player->SetUInt32Value(PLAYER_VISIBLE_ITEM_1_ENTRYID + (i * 2), visibleItemsBySlot[i].ItemID);
+                    player->SetUInt16Value(PLAYER_VISIBLE_ITEM_1_ENCHANTMENT + (i * 2), 0, visibleItemsBySlot[i].PermEnchant);
+                    player->SetUInt16Value(PLAYER_VISIBLE_ITEM_1_ENCHANTMENT + (i * 2), 1, visibleItemsBySlot[i].TempEnchant);
+                }
+            }
+        }
     }
 };
 

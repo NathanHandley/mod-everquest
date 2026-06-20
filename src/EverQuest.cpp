@@ -19,6 +19,7 @@
 #include "Creature.h"
 #include "CreatureData.h"
 #include "SpellMgr.h"
+#include "Tokenize.h"
 
 #include "EverQuest.h"
 
@@ -1829,8 +1830,8 @@ void EverQuestMod::MoveAuraToModAuraTable(Player* player, CharacterDatabaseTrans
 
     // TODO: Do something about gate
 
-    transaction->Append("DELETE FROM `mod_everquest_character_class_glyphs` WHERE guid = {} and eqclass = {}", player->GetGUID().GetCounter(), curEQClass);
-    transaction->Append("INSERT IGNORE INTO mod_everquest_character_class_glyphs (guid, class, eqclass, casterGuid, itemGuid, spell, effectMask, recalculateMask, stackCount, amount0, amount1, amount2, base_amount0, base_amount1, base_amount2, maxDuration, remainTime, remainCharges) SELECT guid, {}, {}, casterGuid, itemGuid, spell, effectMask, recalculateMask, stackCount, amount0, amount1, amount2, base_amount0, base_amount1, base_amount2, maxDuration, remainTime, remainCharges FROM character_aura WHERE guid = {}", player->getClass(), curEQClass, player->GetGUID().GetCounter());
+    transaction->Append("DELETE FROM `mod_everquest_character_class_aura` WHERE guid = {} and eqclass = {}", player->GetGUID().GetCounter(), curEQClass);
+    transaction->Append("INSERT IGNORE INTO mod_everquest_character_class_aura (guid, class, eqclass, casterGuid, itemGuid, spell, effectMask, recalculateMask, stackCount, amount0, amount1, amount2, base_amount0, base_amount1, base_amount2, maxDuration, remainTime, remainCharges) SELECT guid, {}, {}, casterGuid, itemGuid, spell, effectMask, recalculateMask, stackCount, amount0, amount1, amount2, base_amount0, base_amount1, base_amount2, maxDuration, remainTime, remainCharges FROM character_aura WHERE guid = {}", player->getClass(), curEQClass, player->GetGUID().GetCounter());
     transaction->Append("DELETE FROM `character_aura` WHERE guid = {}", player->GetGUID().GetCounter());
 }
 
@@ -1845,7 +1846,7 @@ void EverQuestMod::MoveEquipToModInventoryTable(Player* player, CharacterDatabas
 
 void EverQuestMod::UpdateCharacterFromModCharacterTable(Player* player, uint8 pullEQClassID, CharacterDatabaseTransaction& transaction)
 {
-    QueryResult queryResult = CharacterDatabase.Query("SELECT `level`, `xp`, `leveltime`, `rest_bonus`, `resettalents_cost`, `resettalents_time`, `health`, `power1`, `power2`, `power3`, `power4`, `power5`, `power6`, `power7`, `talentGroupsCount`, `activeTalentGroup` FROM mod_everquest_character_class_inventory WHERE guid = {} AND eqclass = {}", player->GetGUID().GetCounter(), pullEQClassID);
+    QueryResult queryResult = CharacterDatabase.Query("SELECT `level`, `xp`, `leveltime`, `rest_bonus`, `resettalents_cost`, `resettalents_time`, `health`, `power1`, `power2`, `power3`, `power4`, `power5`, `power6`, `power7`, `talentGroupsCount`, `activeTalentGroup` FROM mod_everquest_characters WHERE guid = {} AND eqclass = {}", player->GetGUID().GetCounter(), pullEQClassID);
     if (!queryResult)
     {
         LOG_ERROR("module.EverQuest", "EverQuestMod Error pulling character data for guid {} eqclass {}", player->GetGUID().GetCounter(), pullEQClassID);
@@ -1960,6 +1961,167 @@ void EverQuestMod::CopyModSkillTableIntoCharacterSkills(Player* player, uint8 pu
 
         } while (queryResult->NextRow());
     }
+}
+
+map<uint8, EverQuestPlayerEquipedItemData> EverQuestMod::GetVisibleItemsBySlotForPlayerClass(Player* player, uint8 eqClassID)
+{
+    // Start with a list of blank inventory display slots
+    map<uint8, EverQuestPlayerEquipedItemData> visibleItems;
+    for (uint8 i = 0; i < 18; ++i)
+    {
+        EverQuestPlayerEquipedItemData curItem;
+        curItem.ItemID = 0;
+        curItem.PermEnchant = 0;
+        curItem.Slot = i;
+        curItem.TempEnchant = 0;
+        curItem.ItemInstanceGUID = 0;
+        visibleItems.insert(pair<uint8, EverQuestPlayerEquipedItemData>(i, curItem));
+    }
+
+    // If current class, grab those items
+    if (GetEQClassForPlayer(player) == eqClassID)
+    {
+        LOG_ERROR("module.EverQuest", "EverQuestMod Getting visible item list for current player is unimplemented");
+    }
+    // Otherwise, retrieve from the database
+    else
+    {
+        QueryResult queryResult = CharacterDatabase.Query("SELECT CI.`slot`, II.`itemEntry`, II.`enchantments`, II.`guid` FROM `mod_everquest_character_class_inventory` CI INNER JOIN `item_instance` II on II.guid = CI.item WHERE CI.`bag` = 0 AND CI.`slot` <= 18 AND CI.`guid` = {} AND `eqclass` = {}", player->GetGUID().GetCounter(), eqClassID);
+        if (queryResult && queryResult->GetRowCount() > 0)
+        {
+            do
+            {
+                Field* fields = queryResult->Fetch();
+                uint8 slot = fields[0].Get<uint8>();
+                uint32 itemID = fields[1].Get<uint32>();
+                string enchantString = fields[2].Get<string>();
+                uint32 itemInstanceGUID = fields[3].Get<uint32>();
+
+                // Break out enchant values
+                std::vector<std::string_view> tokens = Acore::Tokenize(enchantString, ' ', false);
+                uint32 permEnchant = *Acore::StringTo<uint32>(tokens[PERM_ENCHANTMENT_SLOT * MAX_ENCHANTMENT_OFFSET]);
+                uint32 tempEnchant = *Acore::StringTo<uint32>(tokens[TEMP_ENCHANTMENT_SLOT * MAX_ENCHANTMENT_OFFSET]);
+
+                // Store
+                visibleItems[slot].Slot = slot;
+                visibleItems[slot].ItemID = itemID;
+                visibleItems[slot].PermEnchant = permEnchant;
+                visibleItems[slot].TempEnchant = tempEnchant;
+                visibleItems[slot].ItemInstanceGUID = itemInstanceGUID;
+            } while (queryResult->NextRow());
+        }
+    }
+
+    // If we're using the transmog mod, factor for that by pulling those visuals too (TODO: this is always true right now)
+    //if (ConfigUsingTransmogMod)
+    //{
+        QueryResult queryResult = CharacterDatabase.Query("SELECT `GUID`, `FakeEntry` FROM custom_transmogrification WHERE `Owner` = {}", player->GetGUID().GetCounter());
+        if (queryResult && queryResult->GetRowCount() > 0)
+        {
+            do
+            {
+                Field* fields = queryResult->Fetch();
+                uint32 itemInstanceGUID = fields[0].Get<uint32>();
+                uint32 fakeItemID = fields[1].Get<uint32>();
+
+                // Replace any matches
+                for (auto& visibleItem : visibleItems)
+                {
+                    if (visibleItem.second.ItemInstanceGUID == itemInstanceGUID)
+                        visibleItem.second.ItemID = fakeItemID;
+                }
+            } while (queryResult->NextRow());
+        }
+    //}
+
+    return visibleItems;
+}
+
+bool EverQuestMod::PerformClassSwitch(Player* player, EverQuestPlayerControllerData controllerData)
+{
+    uint8 nextEQClass = controllerData.NextClass;
+    bool isNew = !DoesSavedClassDataExistForPlayer(player, controllerData.NextClass);
+
+    // Set up the transaction
+    CharacterDatabaseTransaction transaction = CharacterDatabase.BeginTransaction();
+
+    // Perform moves into the mod tables to reflect this character's class
+    CopyCharacterDataIntoModCharacterTable(player, transaction);
+    MoveTalentsToModTalentsTable(player, transaction);
+    MoveClassSpellsToModSpellsTable(player, transaction);
+    MoveClassSkillsToModSkillsTable(player, transaction);
+    ReplaceModClassActionCopy(player, transaction);
+    MoveGlyphsToModGlyhpsTable(player, transaction);
+    MoveAuraToModAuraTable(player, transaction);
+    MoveEquipToModInventoryTable(player, transaction);
+
+    // Update pet references
+    transaction->Append("UPDATE character_pet SET multi_class_owner = {}, eq_eqclass = {} WHERE owner = {}", player->GetGUID().GetCounter(), GetEQClassForPlayer(player), player->GetGUID().GetCounter());
+    transaction->Append("UPDATE character_pet SET owner = 0 WHERE multi_class_owner = {} AND eq_eqclass = {}", player->GetGUID().GetCounter(), GetEQClassForPlayer(player));
+    transaction->Append("UPDATE character_pet SET owner = {} WHERE multi_class_owner = {} AND eq_eqclass = {}", player->GetGUID().GetCounter(), player->GetGUID().GetCounter(), nextEQClass);
+
+    // New
+    if (isNew)
+    {
+        // Pull needed metadata
+        uint32 startLevel;
+        PlayerClassLevelInfo classInfo;
+        if (isNew)
+        {
+            // For start level
+            startLevel = nextEQClass != CLASS_DEATH_KNIGHT
+                ? sWorld->getIntConfig(CONFIG_START_PLAYER_LEVEL)
+                : sWorld->getIntConfig(CONFIG_START_HEROIC_PLAYER_LEVEL);
+
+            // For health and mana    
+            sObjectMgr->GetPlayerClassLevelInfo(player->getClass(), startLevel, &classInfo);
+        }
+
+        // Update the character core table to reflect the switch
+        transaction->Append("UPDATE characters SET `level` = {}, `xp` = 0, `leveltime` = 0, `rest_bonus` = 0, `resettalents_cost` = 0, `resettalents_time` = 0, health = {}, power1 = {}, power2 = 0, power3 = 0, power4 = 100, power5 = 0, power6 = 0, power7 = 0, `talentGroupsCount` = 1, `activeTalentGroup` = 0 WHERE guid = {}", startLevel, classInfo.basehealth, classInfo.basemana, player->GetGUID().GetCounter());
+
+        // Give blank action mappings
+        transaction->Append("DELETE FROM `character_action` WHERE guid = {}", player->GetGUID().GetCounter());
+    }
+    // Existing
+    else
+    {
+        // Copy in the stored version for existing
+        UpdateCharacterFromModCharacterTable(player, nextEQClass, transaction);
+        CopyModSpellTableIntoCharacterSpells(player, nextEQClass, transaction);
+        CopyModActionTableIntoCharacterAction(player, nextEQClass, transaction);
+        CopyModSkillTableIntoCharacterSkills(player, nextEQClass, transaction);
+
+        transaction->Append("INSERT IGNORE INTO character_talent (guid, spell, specMask) SELECT guid, spell, specMask FROM mod_everquest_character_class_talent WHERE guid = {} AND eqclass = {}", player->GetGUID().GetCounter(), nextEQClass);
+        transaction->Append("INSERT IGNORE INTO character_glyphs (guid, talentGroup, glyph1, glyph2, glyph3, glyph4, glyph5, glyph6) SELECT guid, talentGroup, glyph1, glyph2, glyph3, glyph4, glyph5, glyph6 FROM mod_everquest_character_class_glyphs WHERE guid = {} AND eqclass = {}", player->GetGUID().GetCounter(), nextEQClass);
+        transaction->Append("INSERT IGNORE INTO character_aura (guid, casterGuid, itemGuid, spell, effectMask, recalculateMask, stackCount, amount0, amount1, amount2, base_amount0, base_amount1, base_amount2, maxDuration, remainTime, remainCharges) SELECT guid, casterGuid, itemGuid, spell, effectMask, recalculateMask, stackCount, amount0, amount1, amount2, base_amount0, base_amount1, base_amount2, maxDuration, remainTime, remainCharges FROM mod_everquest_character_class_aura WHERE guid = {} AND eqclass = {}", player->GetGUID().GetCounter(), nextEQClass);
+        transaction->Append("INSERT IGNORE INTO `character_inventory` (`guid`, `bag`, `slot`, `item`) SELECT `guid`, `bag`, `slot`, `item` FROM mod_everquest_character_class_inventory WHERE guid = {} AND eqclass = {}", player->GetGUID().GetCounter(), nextEQClass);
+    }
+
+    // Commit the transaction
+    CharacterDatabase.CommitTransaction(transaction);
+
+    return true;
+}
+
+bool EverQuestMod::PerformPlayerDelete(ObjectGuid guid)
+{
+    // Delete every mod table record with this player guid
+    uint32 playerGUID = guid.GetCounter();
+
+    CharacterDatabaseTransaction transaction = CharacterDatabase.BeginTransaction();
+    transaction->Append("DELETE FROM mod_everquest_characters WHERE guid = {}", playerGUID);
+    transaction->Append("DELETE FROM mod_everquest_character_class_talent WHERE guid = {}", playerGUID);
+    transaction->Append("DELETE FROM mod_everquest_character_class_aura WHERE guid = {}", playerGUID);
+    transaction->Append("DELETE FROM mod_everquest_character_class_spell WHERE guid = {}", playerGUID);
+    transaction->Append("DELETE FROM mod_everquest_character_class_skills WHERE guid = {}", playerGUID);
+    transaction->Append("DELETE FROM mod_everquest_character_class_action WHERE guid = {}", playerGUID);
+    transaction->Append("DELETE FROM mod_everquest_character_class_glyphs WHERE guid = {}", playerGUID);
+    transaction->Append("DELETE FROM mod_everquest_character_class_inventory WHERE guid = {}", playerGUID);
+    transaction->Append("DELETE FROM mod_everquest_character_class_controller WHERE guid = {}", playerGUID);
+    transaction->Append("DELETE FROM character_pet WHERE owner = 0 AND eq_owner = {}", playerGUID);
+    CharacterDatabase.CommitTransaction(transaction);
+    return true;
 }
 
 std::string GetEQClassStringFromID(uint8 classID)
