@@ -580,8 +580,8 @@ void EverQuestMod::LoadCreatePlayerData()
 
 void EverQuestMod::LoadAutoLearnSkillsData()
 {
-    PlayerAutoLearnSkillsByClassID.clear();
-    QueryResult queryResult = WorldDatabase.Query("SELECT class, skill FROM mod_everquest_playerautolearnskills;");
+    PlayerAutoLearnSkillsByEQClassID.clear();
+    QueryResult queryResult = WorldDatabase.Query("SELECT eqclass, skill FROM mod_everquest_playerautolearnskills;");
     if (queryResult)
     {
         do
@@ -590,16 +590,16 @@ void EverQuestMod::LoadAutoLearnSkillsData()
             Field* fields = queryResult->Fetch();
             uint8 classID = fields[0].Get<uint8>();
             uint32 skillID = fields[1].Get<uint32>();
-            PlayerAutoLearnSkillsByClassID[classID].push_back(skillID);
+            PlayerAutoLearnSkillsByEQClassID[classID].push_back(skillID);
         } while (queryResult->NextRow());
     }
 }
 
 const list<uint32>& EverQuestMod::GetAutoLearnSkillsForClass(uint8 classID)
 {
-    if (PlayerAutoLearnSkillsByClassID.find(classID) != PlayerAutoLearnSkillsByClassID.end())
+    if (PlayerAutoLearnSkillsByEQClassID.find(classID) != PlayerAutoLearnSkillsByEQClassID.end())
     {
-        return PlayerAutoLearnSkillsByClassID[classID];
+        return PlayerAutoLearnSkillsByEQClassID[classID];
     }
     else
     {
@@ -611,17 +611,16 @@ const list<uint32>& EverQuestMod::GetAutoLearnSkillsForClass(uint8 classID)
 void EverQuestMod::LoadAutoLearnSpellsData()
 {
     PlayerAutoLearnSpellsByClassID.clear();
-    QueryResult queryResult = WorldDatabase.Query("SELECT class, race, spell, addtobar FROM mod_everquest_playerautolearnspells;");
+    QueryResult queryResult = WorldDatabase.Query("SELECT eqclass, race, spell FROM mod_everquest_playerautolearnspells;");
     if (queryResult)
     {
         do
         {
             EverQuestAutoLearnSpell autoLearnSpell;
             Field* fields = queryResult->Fetch();
-            autoLearnSpell.ClassID = fields[0].Get<uint8>();
+            autoLearnSpell.EQClassID = fields[0].Get<uint8>();
             autoLearnSpell.RaceID = fields[1].Get<uint8>();
             autoLearnSpell.SpellID = fields[2].Get<uint32>();
-            autoLearnSpell.DoAddToBar = fields[3].Get<int8>() == 1 ? true : false;
             PlayerAutoLearnSpellsByClassID[autoLearnSpell.ClassID].push_back(autoLearnSpell);
         } while (queryResult->NextRow());
     }
@@ -1065,6 +1064,37 @@ const vector<EverQuestForageZoneItem>& EverQuestMod::GetForageZoneItemsInMap(uin
     else
     {
         static const vector<EverQuestForageZoneItem> returnEmpty;
+        return returnEmpty;
+    }
+}
+
+void EverQuestMod::LoadClassMapData()
+{
+    ClassMapByWOWClassID.clear();
+
+    QueryResult queryResult = WorldDatabase.Query("SELECT wowclass, eqclass_base, eqclass_defaultsecond FROM mod_everquest_classmap;");
+    if (queryResult)
+    {
+        do
+        {
+            Field* fields = queryResult->Fetch();
+            EverQuestClassMap classMap;
+            classMap.WOWClassID = fields[0].Get<uint8>();
+            classMap.EQClassIDBase = fields[3].Get<uint8>();
+            classMap.EQClassIDDefaultSecond = fields[2].Get<uint8>();
+            ClassMapByWOWClassID[classMap.WOWClassID] = classMap;
+        } while (queryResult->NextRow());
+    }
+}
+
+const EverQuestClassMap& EverQuestMod::GetClassMapForWOWClassID(uint8 wowClassID)
+{
+    if (ClassMapByWOWClassID.find(wowClassID) != ClassMapByWOWClassID.end())
+        return ClassMapByWOWClassID[wowClassID];
+    else
+    {
+        static const EverQuestClassMap returnEmpty;
+        LOG_ERROR("module.EverQuest", "EverQuestMod::GetClassMapForWOWClassID failure, wowClassID {} could not be found", wowClassID);
         return returnEmpty;
     }
 }

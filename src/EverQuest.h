@@ -331,10 +331,9 @@ public:
 class EverQuestAutoLearnSpell
 {
 public:
-    uint8 ClassID = 0;
+    uint8 EQClassID = 0;
     uint8 RaceID = 0;
     uint32 SpellID = 0;
-    bool DoAddToBar = false;
 };
 
 class EverQuestForageZoneItem
@@ -368,6 +367,13 @@ struct EverQuestPlayerEquipedItemData
     uint32 TempEnchant;
     uint32 PermEnchant;
     uint32 ItemInstanceGUID;
+};
+
+struct EverQuestClassMap
+{
+    uint8 WOWClassID;
+    uint8 EQClassIDBase;
+    uint8 EQClassIDDefaultSecond;
 };
 
 class EverQuestMod
@@ -421,7 +427,7 @@ public:
     unordered_map<uint32, list<EverQuestQuestReaction>> QuestReactionListByQuestTemplateID;
     unordered_map<uint32, EverQuestPet> PetDataByCreatureTemplateID;
     unordered_map<uint8, unordered_map<uint8, EverQuestPlayerCreateInfo>> PlayerCreateInfoByRaceIDThenClassID;
-    unordered_map<uint8, list<uint32>> PlayerAutoLearnSkillsByClassID;
+    unordered_map<uint8, list<uint32>> PlayerAutoLearnSkillsByEQClassID;
     unordered_map<uint8, list<EverQuestAutoLearnSpell>> PlayerAutoLearnSpellsByClassID;
     unordered_map<int, unordered_map<int, vector<Creature*>>> AllLoadedCreaturesByMapIDThenCreatureEntryID;
     unordered_map<uint32, EverQuestCreatureSpawnPoint> CreatureSpawnPointsByCreatureGUID;
@@ -440,6 +446,7 @@ public:
     unordered_map<uint32, unordered_map<uint32, vector<EverQuestCreatureWaypoint>>> CreatureWaypointsByMapIDAndWaypointID;
     unordered_map<uint32, vector<EverQuestForageZoneItem>> ForageZoneItemsByMapID;
     unordered_map<uint32, uint32> ForageZoneItemTotalChanceByMapID;
+    unordered_map<uint8, EverQuestClassMap> ClassMapByWOWClassID;
 
     static EverQuestMod* instance()
     {
@@ -499,6 +506,8 @@ public:
     const vector<EverQuestCreatureWaypoint> GetWaypoints(uint32 mapID, uint32 waypointListID);
     void LoadForageData();
     const vector<EverQuestForageZoneItem>& GetForageZoneItemsInMap(uint32 mapID);
+    void LoadClassMapData();
+    const EverQuestClassMap& GetClassMapForWOWClassID(uint8 wowClassID);
 
     void StorePositionAsLastGate(Player* player);
     void SendPlayerToLastGate(Player* player);

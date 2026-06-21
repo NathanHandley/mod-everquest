@@ -38,6 +38,7 @@ public:
             EverQuest->IsEnabled = false;
             return;
         }
+        EverQuest->LoadClassMapData();
         EverQuest->LoadCreatureData();
         EverQuest->LoadCreatureSpawnPoints();
         EverQuest->LoadCreatureOnkillReputations();
