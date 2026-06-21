@@ -330,7 +330,7 @@ void EverQuestMod::LoadItemTemplateData()
 {
     ItemTemplatesByEntryID.clear();
     WornEffectSpellIDs.clear();
-    QueryResult queryResult = WorldDatabase.Query("SELECT ItemTemplateID, NPCEquipItemTemplateID, WornEffectSpellID FROM mod_everquest_item_template ORDER BY ItemTemplateID;");
+    QueryResult queryResult = WorldDatabase.Query("SELECT ItemTemplateID, NPCEquipItemTemplateID, WornEffectSpellID, AllowedEQClassMask FROM mod_everquest_item_template ORDER BY ItemTemplateID;");
     if (queryResult)
     {
         do
@@ -341,6 +341,7 @@ void EverQuestMod::LoadItemTemplateData()
             everQuestItemTemplate.ItemTemplateEntryID = fields[0].Get<uint32>();
             everQuestItemTemplate.ItemTemplateEntryIDForNPCEquip = fields[1].Get<uint32>();
             everQuestItemTemplate.WornEffectSpellID = fields[2].Get<uint32>();
+            everQuestItemTemplate.AllowedEQClassMask = fields[3].Get<uint32>();
             ItemTemplatesByEntryID[everQuestItemTemplate.ItemTemplateEntryID] = everQuestItemTemplate;
             if (everQuestItemTemplate.WornEffectSpellID != 0)
                 WornEffectSpellIDs.insert(everQuestItemTemplate.WornEffectSpellID);
@@ -367,6 +368,26 @@ uint32 EverQuestMod::GetWornEffectSpellIDForItemTemplate(uint32 itemTemplateID)
         return 0;
     else
         return ItemTemplatesByEntryID[itemTemplateID].WornEffectSpellID;
+}
+
+bool EverQuestMod::IsItemEQClassAllowedForPlayer(Player* player, uint32 itemTemplateID)
+{
+    // No EQ template data = allowed
+    auto itemTemplateItr = ItemTemplatesByEntryID.find(itemTemplateID);
+    if (itemTemplateItr == ItemTemplatesByEntryID.end())
+        return true;
+
+    // Zero mask = all
+    uint32 allowedEQClassMask = itemTemplateItr->second.AllowedEQClassMask;
+    if (allowedEQClassMask == 0)
+        return true;
+    uint8 currentEQClass = GetCurrentEQClassForPlayer(player);
+    if (currentEQClass == 0)
+        return true;
+
+    // Compare a class mask to the current class for if they are allowed to wear it
+    uint32 currentEQClassBit = 1u << (currentEQClass - 1);
+    return (allowedEQClassMask & currentEQClassBit) != 0;
 }
 
 void EverQuestMod::LoadSpellData()

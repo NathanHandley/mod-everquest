@@ -56,6 +56,35 @@ public:
         return true;
     }
 
+    bool OnPlayerCanEquipItem(Player* player, uint8 /*slot*/, uint16& /*dest*/, Item* pItem, bool /*swap*/, bool not_loading) override
+    {
+        if (EverQuest->IsEnabled == false)
+            return true;
+        // Don't strip already-equipped items
+        if (not_loading == false)
+            return true;
+        if (pItem == nullptr)
+            return true;
+        if (EverQuest->IsItemEQClassAllowedForPlayer(player, pItem->GetEntry()) == true)
+            return true;
+
+        ChatHandler(player->GetSession()).PSendSysMessage("Your EQ class cannot equip that item.");
+        return false;
+    }
+
+    bool OnPlayerCanUseItem(Player* player, ItemTemplate const* proto, InventoryResult& result) override
+    {
+        if (EverQuest->IsEnabled == false)
+            return true;
+        if (proto == nullptr)
+            return true;
+        if (EverQuest->IsItemEQClassAllowedForPlayer(player, proto->ItemId) == true)
+            return true;
+
+        result = EQUIP_ERR_YOU_CAN_NEVER_USE_THAT_ITEM;
+        return false;
+    }
+
     void OnPlayerBeforeLoadPetFromDB(Player* player, uint32& petEntry, uint32& petNumber, bool& current, bool& forceLoadFromDB) override
     {
         if (EverQuest->IsEnabled == false)

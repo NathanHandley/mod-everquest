@@ -35,7 +35,7 @@ static uint32 ConfigMaxSkillIDCheck = 1000;         // The highest level of skil
 
 class Unit;
 
-#define EQ_MOD_VERSION                              20
+#define EQ_MOD_VERSION                              21
 
 #define EQ_EQCLASS_WARRIOR                          1
 #define EQ_EQCLASS_CLERIC                           2
@@ -211,6 +211,7 @@ public:
     uint32 ItemTemplateEntryID = 0;
     uint32 ItemTemplateEntryIDForNPCEquip = 0;
     uint32 WornEffectSpellID = 0;
+    uint32 AllowedEQClassMask = 0;
 };
 
 class EverQuestPet
@@ -459,6 +460,7 @@ public:
     void LoadItemTemplateData();
     uint32 GetNPCEquipItemTemplateIDForItemTemplate(uint32 itemTemplateID);
     uint32 GetWornEffectSpellIDForItemTemplate(uint32 itemTemplateID);
+    bool IsItemEQClassAllowedForPlayer(Player* player, uint32 itemTemplateID);
     bool IsWornEffectSpell(uint32 spellID);
     void LoadSpellData();
     const EverQuestSpell& GetSpellDataForSpellID(uint32 spellID);
