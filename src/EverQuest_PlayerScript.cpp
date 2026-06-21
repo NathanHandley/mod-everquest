@@ -68,7 +68,7 @@ public:
         if (EverQuest->IsItemEQClassAllowedForPlayer(player, pItem->GetEntry()) == true)
             return true;
 
-        ChatHandler(player->GetSession()).PSendSysMessage("Your EQ class cannot equip that item.");
+        ChatHandler(player->GetSession()).PSendSysMessage("Your EQ classes cannot equip that item.");
         return false;
     }
 
@@ -335,7 +335,14 @@ public:
         if (EverQuest->ConfigDeathKnightsStartLikeOtherClasses == true && player->getClass() == CLASS_DEATH_KNIGHT)
         {
             // If the DK doesn't learn DeathGate, teleport will fail
-            player->learnSpell(50977); 
+            player->learnSpell(50977);
+
+            // Teach runeforging
+            player->learnSpell(53428);
+            if (player->GetSkillValue(776) == 0)
+            {
+                player->SetSkill((uint16)776, 0, 1, 1);
+            }
         }
 
         // If there is create data, move the player to the related zone and set initial bind
@@ -349,7 +356,6 @@ public:
             {
                 player->RemoveAura(48266); // Take off Blood Presence
             }
-
         }
     }
 
@@ -388,18 +394,6 @@ public:
             if (player->HasSpell(autoLearnSpell.SpellID) == false)
             {
                 player->learnSpell(autoLearnSpell.SpellID);
-                if (autoLearnSpell.DoAddToBar == true)
-                {
-                    for (uint8 button = 0; button < 12; ++button)   // 0-11 is just the first action bar row
-                    {
-                        ActionButton const* ab = player->GetActionButton(button);
-                        if (!ab || ab->GetAction() == 0)
-                        {
-                            player->addActionButton(button, autoLearnSpell.SpellID, ACTION_BUTTON_SPELL);
-                            break;
-                        }
-                    }
-                }
                 needsUpdate = true;
             }
         }
@@ -421,8 +415,18 @@ public:
         }
 
         // Grab EQ class info
-        string text = fmt::format("Your EQ class is |cff4CFF00'{}'|r. Type |cff4CFF00.class |rto change or edit classes.", GetEQClassStringFromID(EverQuest->GetCurrentEQClassForPlayer(player)));
-        ChatHandler(player->GetSession()).SendSysMessage(text);
+        EverQuestClassMap classMap = EverQuest->GetClassMapForWOWClassID(player->getClass());
+        uint8 secondClassID = EverQuest->GetCurrentSecondEQClassForPlayer(player);
+        if (secondClassID == EQ_EQCLASS_NONE)
+        {
+            string text = fmt::format("Your EQ class base is |cff4CFF00'{}'|r and secondary is |cff4CFF00'{}'|r. Type |cff4CFF00.class |rto change or edit classes.", GetEQClassStringFromID(classMap.EQClassIDBase), GetEQClassStringFromID(secondClassID));
+            ChatHandler(player->GetSession()).SendSysMessage(text);
+        }
+        else
+        {
+            string text = fmt::format("Your EQ class base is |cff4CFF00'{}'|r. Type |cff4CFF00.class |rto change or edit classes.", GetEQClassStringFromID(secondClassID));
+            ChatHandler(player->GetSession()).SendSysMessage(text);
+        }
     }
 
     void OnPlayerLogout(Player* player) override
@@ -435,7 +439,7 @@ public:
             EverQuest->PlayerCasterConcurrentBardSongs[player->GetGUID()].clear();
 
         // Class switch
-        if (EverQuest->GetCurrentEQClassForPlayer(player) != EverQuest->GetNextEQClassForPlayer(player))
+        if (EverQuest->GetCurrentSecondEQClassForPlayer(player) != EverQuest->GetNextSecondEQClassForPlayer(player))
         {
             if (!EverQuest->PerformClassSwitch(player))
             {
@@ -538,9 +542,9 @@ public:
             return;
 
         // If a class change is in progress, update the item visuals
-        if (EverQuest->GetCurrentEQClassForPlayer(player) != EverQuest->GetNextEQClassForPlayer(player))
+        if (EverQuest->GetCurrentSecondEQClassForPlayer(player) != EverQuest->GetNextSecondEQClassForPlayer(player))
         {
-            map<uint8, EverQuestPlayerEquipedItemData> visibleItemsBySlot = EverQuest->GetVisibleItemsBySlotForPlayerClass(player, EverQuest->GetNextEQClassForPlayer(player));
+            map<uint8, EverQuestPlayerEquipedItemData> visibleItemsBySlot = EverQuest->GetVisibleItemsBySlotForPlayerClass(player, EverQuest->GetNextSecondEQClassForPlayer(player));
             for (uint8 i = 0; i < 18; ++i)
             {
                 if (visibleItemsBySlot[i].ItemID == 0)

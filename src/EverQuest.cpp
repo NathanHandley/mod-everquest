@@ -381,13 +381,22 @@ bool EverQuestMod::IsItemEQClassAllowedForPlayer(Player* player, uint32 itemTemp
     uint32 allowedEQClassMask = itemTemplateItr->second.AllowedEQClassMask;
     if (allowedEQClassMask == 0)
         return true;
-    uint8 currentEQClass = GetCurrentEQClassForPlayer(player);
-    if (currentEQClass == 0)
+
+    // Compare base class
+    const EverQuestClassMap classMap = GetClassMapForWOWClassID(player->getClass());
+    uint32 baseEQClassBit = 1u << (classMap.EQClassIDBase - 1);
+    if ((allowedEQClassMask & baseEQClassBit) != 0)
         return true;
 
-    // Compare a class mask to the current class for if they are allowed to wear it
-    uint32 currentEQClassBit = 1u << (currentEQClass - 1);
-    return (allowedEQClassMask & currentEQClassBit) != 0;
+    // Second class
+    uint8 secondEQClass = GetCurrentSecondEQClassForPlayer(player);
+    if (secondEQClass == EQ_EQCLASS_NONE)
+        return false;
+    uint32 secondEQClassBit = 1u << (secondEQClass - 1);
+    if ((allowedEQClassMask & secondEQClassBit) != 0)
+        return true;
+
+    return false;
 }
 
 void EverQuestMod::LoadSpellData()
@@ -621,7 +630,7 @@ void EverQuestMod::LoadAutoLearnSpellsData()
             autoLearnSpell.EQClassID = fields[0].Get<uint8>();
             autoLearnSpell.RaceID = fields[1].Get<uint8>();
             autoLearnSpell.SpellID = fields[2].Get<uint32>();
-            PlayerAutoLearnSpellsByClassID[autoLearnSpell.ClassID].push_back(autoLearnSpell);
+            PlayerAutoLearnSpellsByClassID[autoLearnSpell.EQClassID].push_back(autoLearnSpell);
         } while (queryResult->NextRow());
     }
 }
@@ -1628,21 +1637,21 @@ void EverQuestMod::ProcessForage(Player* player)
     ChatHandler(player->GetSession()).PSendSysMessage("You fail to locate any food nearby.");
 }
 
-uint8 EverQuestMod::GetCurrentEQClassForPlayer(Player* player)
+uint8 EverQuestMod::GetCurrentSecondEQClassForPlayer(Player* player)
 {
     if (ActivePlayerClassControllerDataByGUID.find(player->GetGUID()) == ActivePlayerClassControllerDataByGUID.end())
         ActivePlayerClassControllerDataByGUID[player->GetGUID()] = GetPlayerControllerData(player);
     return ActivePlayerClassControllerDataByGUID[player->GetGUID()].CurrentClass;
 }
 
-uint8 EverQuestMod::GetNextEQClassForPlayer(Player* player)
+uint8 EverQuestMod::GetNextSecondEQClassForPlayer(Player* player)
 {
     if (ActivePlayerClassControllerDataByGUID.find(player->GetGUID()) == ActivePlayerClassControllerDataByGUID.end())
         ActivePlayerClassControllerDataByGUID[player->GetGUID()] = GetPlayerControllerData(player);
     return ActivePlayerClassControllerDataByGUID[player->GetGUID()].NextClass;
 }
 
-void EverQuestMod::SetNextEQClassForPlayer(Player* player, uint8 nextEQClass)
+void EverQuestMod::SetNextSecondEQClassForPlayer(Player* player, uint8 nextEQClass)
 {
     if (ActivePlayerClassControllerDataByGUID.find(player->GetGUID()) == ActivePlayerClassControllerDataByGUID.end())
         ActivePlayerClassControllerDataByGUID[player->GetGUID()] = GetPlayerControllerData(player);
@@ -1711,7 +1720,7 @@ map<uint8, uint8> EverQuestMod::GetClassLevelsByClassForPlayer(Player* player)
 {
     // Pull the other class levels first
     map<uint8, uint8> levelsByClass;
-    QueryResult classQueryResult = CharacterDatabase.Query("SELECT `eqclass`, `level` FROM mod_everquest_characters WHERE guid = {} AND eqclass <> {}", player->GetGUID().GetCounter(), GetCurrentEQClassForPlayer(player));
+    QueryResult classQueryResult = CharacterDatabase.Query("SELECT `eqclass`, `level` FROM mod_everquest_characters WHERE guid = {} AND eqclass <> {}", player->GetGUID().GetCounter(), GetCurrentSecondEQClassForPlayer(player));
     if (classQueryResult)
     {
         do
@@ -1740,7 +1749,7 @@ bool EverQuestMod::DoesSavedClassDataExistForPlayer(Player* player, uint8 lookup
 
 void EverQuestMod::CopyCharacterDataIntoModCharacterTable(Player* player, CharacterDatabaseTransaction& transaction)
 {
-    uint8 curEQClass = GetCurrentEQClassForPlayer(player);
+    uint8 curEQClass = GetCurrentSecondEQClassForPlayer(player);
 
     transaction->Append("DELETE FROM `mod_everquest_characters` WHERE guid = {} and eqclass = {}", player->GetGUID().GetCounter(), curEQClass);
     QueryResult queryResult = CharacterDatabase.Query("SELECT leveltime, rest_bonus, resettalents_cost, resettalents_time FROM characters WHERE guid = {}", player->GetGUID().GetCounter());
@@ -1779,7 +1788,7 @@ void EverQuestMod::CopyCharacterDataIntoModCharacterTable(Player* player, Charac
 
 void EverQuestMod::MoveTalentsToModTalentsTable(Player* player, CharacterDatabaseTransaction& transaction)
 {
-    uint8 curEQClass = GetCurrentEQClassForPlayer(player);
+    uint8 curEQClass = GetCurrentSecondEQClassForPlayer(player);
 
     transaction->Append("DELETE FROM `mod_everquest_character_class_talent` WHERE guid = {} and eqclass = {}", player->GetGUID().GetCounter(), curEQClass);
     transaction->Append("INSERT IGNORE INTO mod_everquest_character_class_talent (guid, class, eqclass, spell, specMask) SELECT guid, {}, {}, spell, specMask FROM character_talent WHERE guid = {}", player->getClass(), curEQClass, player->GetGUID().GetCounter());
@@ -1788,7 +1797,7 @@ void EverQuestMod::MoveTalentsToModTalentsTable(Player* player, CharacterDatabas
 
 void EverQuestMod::MoveClassSpellsToModSpellsTable(Player* player, CharacterDatabaseTransaction& transaction)
 {
-    uint8 curEQClass = GetCurrentEQClassForPlayer(player);
+    uint8 curEQClass = GetCurrentSecondEQClassForPlayer(player);
 
     // Purge old spell list in mod table
     transaction->Append("DELETE FROM `mod_everquest_character_class_spell` WHERE guid = {} and eqclass = {}", player->GetGUID().GetCounter(), curEQClass);
@@ -1822,7 +1831,7 @@ void EverQuestMod::MoveClassSpellsToModSpellsTable(Player* player, CharacterData
 
 void EverQuestMod::MoveClassSkillsToModSkillsTable(Player* player, CharacterDatabaseTransaction& transaction)
 {
-    uint8 curEQClass = GetCurrentEQClassForPlayer(player);
+    uint8 curEQClass = GetCurrentSecondEQClassForPlayer(player);
 
     // Purge old skill list in mod table
     transaction->Append("DELETE FROM `mod_everquest_character_class_skills` WHERE guid = {} and eqclass = {}", player->GetGUID().GetCounter(), curEQClass);
@@ -1863,7 +1872,7 @@ void EverQuestMod::MoveClassSkillsToModSkillsTable(Player* player, CharacterData
 
 void EverQuestMod::ReplaceModClassActionCopy(Player* player, CharacterDatabaseTransaction& transaction)
 {
-    uint8 curEQClass = GetCurrentEQClassForPlayer(player);
+    uint8 curEQClass = GetCurrentSecondEQClassForPlayer(player);
 
     // Delete the old action entries
     transaction->Append("DELETE FROM `mod_everquest_character_class_action` WHERE guid = {} and eqclass = {}", player->GetGUID().GetCounter(), curEQClass);
@@ -1874,7 +1883,7 @@ void EverQuestMod::ReplaceModClassActionCopy(Player* player, CharacterDatabaseTr
 
 void EverQuestMod::MoveGlyphsToModGlyhpsTable(Player* player, CharacterDatabaseTransaction& transaction)
 {
-    uint8 curEQClass = GetCurrentEQClassForPlayer(player);
+    uint8 curEQClass = GetCurrentSecondEQClassForPlayer(player);
 
     transaction->Append("DELETE FROM `mod_everquest_character_class_glyphs` WHERE guid = {} and eqclass = {}", player->GetGUID().GetCounter(), curEQClass);
     transaction->Append("INSERT IGNORE INTO mod_everquest_character_class_glyphs (guid, class, eqclass, talentGroup, glyph1, glyph2, glyph3, glyph4, glyph5, glyph6) SELECT guid, {}, {}, talentGroup, glyph1, glyph2, glyph3, glyph4, glyph5, glyph6 FROM character_glyphs WHERE guid = {}", player->getClass(), curEQClass, player->GetGUID().GetCounter());
@@ -1883,7 +1892,7 @@ void EverQuestMod::MoveGlyphsToModGlyhpsTable(Player* player, CharacterDatabaseT
 
 void EverQuestMod::MoveAuraToModAuraTable(Player* player, CharacterDatabaseTransaction& transaction)
 {
-    uint8 curEQClass = GetCurrentEQClassForPlayer(player);
+    uint8 curEQClass = GetCurrentSecondEQClassForPlayer(player);
 
     // TODO: Do something about gate
 
@@ -1894,7 +1903,7 @@ void EverQuestMod::MoveAuraToModAuraTable(Player* player, CharacterDatabaseTrans
 
 void EverQuestMod::MoveEquipToModInventoryTable(Player* player, CharacterDatabaseTransaction& transaction)
 {
-    uint8 curEQClass = GetCurrentEQClassForPlayer(player);
+    uint8 curEQClass = GetCurrentSecondEQClassForPlayer(player);
 
     transaction->Append("DELETE FROM `mod_everquest_character_class_inventory` WHERE guid = {} AND eqclass = {} AND `bag` = 0 AND `slot` <= 18;", player->GetGUID().GetCounter(), curEQClass);
     transaction->Append("INSERT IGNORE INTO `mod_everquest_character_class_inventory` (`guid`, `class`, `eqclass`, `bag`, `slot`, `item`) SELECT `guid`, {}, {}, `bag`, `slot`, `item` FROM character_inventory WHERE guid = {} AND `bag` = 0 AND `slot` <= 18", player->getClass(), curEQClass, player->GetGUID().GetCounter());
@@ -2044,7 +2053,7 @@ map<uint8, EverQuestPlayerEquipedItemData> EverQuestMod::GetVisibleItemsBySlotFo
     }
 
     // If current class, grab those items
-    if (GetCurrentEQClassForPlayer(player) == eqClassID)
+    if (GetCurrentSecondEQClassForPlayer(player) == eqClassID)
     {
         LOG_ERROR("module.EverQuest", "EverQuestMod Getting visible item list for current player is unimplemented");
     }
@@ -2104,7 +2113,7 @@ map<uint8, EverQuestPlayerEquipedItemData> EverQuestMod::GetVisibleItemsBySlotFo
 
 bool EverQuestMod::PerformClassSwitch(Player* player)
 {
-    uint8 nextEQClass = GetNextEQClassForPlayer(player);
+    uint8 nextEQClass = GetNextSecondEQClassForPlayer(player);
     bool isNew = !DoesSavedClassDataExistForPlayer(player, nextEQClass);
 
     // Set up the transaction
@@ -2121,8 +2130,8 @@ bool EverQuestMod::PerformClassSwitch(Player* player)
     MoveEquipToModInventoryTable(player, transaction);
 
     // Update pet references
-    transaction->Append("UPDATE character_pet SET multi_class_owner = {}, eq_eqclass = {} WHERE owner = {}", player->GetGUID().GetCounter(), GetCurrentEQClassForPlayer(player), player->GetGUID().GetCounter());
-    transaction->Append("UPDATE character_pet SET owner = 0 WHERE multi_class_owner = {} AND eq_eqclass = {}", player->GetGUID().GetCounter(), GetCurrentEQClassForPlayer(player));
+    transaction->Append("UPDATE character_pet SET multi_class_owner = {}, eq_eqclass = {} WHERE owner = {}", player->GetGUID().GetCounter(), GetCurrentSecondEQClassForPlayer(player), player->GetGUID().GetCounter());
+    transaction->Append("UPDATE character_pet SET owner = 0 WHERE multi_class_owner = {} AND eq_eqclass = {}", player->GetGUID().GetCounter(), GetCurrentSecondEQClassForPlayer(player));
     transaction->Append("UPDATE character_pet SET owner = {} WHERE multi_class_owner = {} AND eq_eqclass = {}", player->GetGUID().GetCounter(), player->GetGUID().GetCounter(), nextEQClass);
 
     // New
@@ -2194,21 +2203,21 @@ std::string GetEQClassStringFromID(uint8 classID)
 {
     switch (classID)
     {
-    case EQ_EQCLASS_WARRIOR:        return "EQ Warrior";
-    case EQ_EQCLASS_CLERIC:         return "EQ Cleric";
-    case EQ_EQCLASS_PALADIN:        return "EQ Paladin";
-    case EQ_EQCLASS_RANGER:         return "EQ Ranger";
-    case EQ_EQCLASS_SHADOWKNIGHT:   return "EQ Shadow Knight";
-    case EQ_EQCLASS_DRUID:          return "EQ Druid";
-    case EQ_EQCLASS_MONK:           return "EQ Monk";
-    case EQ_EQCLASS_BARD:           return "EQ Bard";
-    case EQ_EQCLASS_ROGUE:          return "EQ Rogue";
-    case EQ_EQCLASS_SHAMAN:         return "EQ Shaman";
-    case EQ_EQCLASS_NECROMANCER:    return "EQ Necromancer";
-    case EQ_EQCLASS_WIZARD:         return "EQ Wizard";
-    case EQ_EQCLASS_MAGICIAN:       return "EQ Magician";
-    case EQ_EQCLASS_ENCHANTER:      return "EQ Enchanter";
-    default:                        return "Unknown";
+    case EQ_EQCLASS_WARRIOR:        return "Warrior (WAR)";
+    case EQ_EQCLASS_CLERIC:         return "Cleric (CLR)";
+    case EQ_EQCLASS_PALADIN:        return "Paladin (PAL)";
+    case EQ_EQCLASS_RANGER:         return "Ranger (RNG)";
+    case EQ_EQCLASS_SHADOWKNIGHT:   return "Shadow Knight (SHD)";
+    case EQ_EQCLASS_DRUID:          return "Druid (DRU)";
+    case EQ_EQCLASS_MONK:           return "Monk (MNK)";
+    case EQ_EQCLASS_BARD:           return "Bard (BRD)";
+    case EQ_EQCLASS_ROGUE:          return "Rogue (ROG)";
+    case EQ_EQCLASS_SHAMAN:         return "Shaman (SHM)";
+    case EQ_EQCLASS_NECROMANCER:    return "Necromancer (NEC)";
+    case EQ_EQCLASS_WIZARD:         return "Wizard (WIZ)";
+    case EQ_EQCLASS_MAGICIAN:       return "Magician (MAG)";
+    case EQ_EQCLASS_ENCHANTER:      return "Enchanter (ENC)";
+    default:                        return "None";
     }
 }
 

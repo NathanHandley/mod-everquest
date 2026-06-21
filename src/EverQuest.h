@@ -37,6 +37,7 @@ class Unit;
 
 #define EQ_MOD_VERSION                              21
 
+#define EQ_EQCLASS_NONE                             0
 #define EQ_EQCLASS_WARRIOR                          1
 #define EQ_EQCLASS_CLERIC                           2
 #define EQ_EQCLASS_PALADIN                          3
@@ -529,11 +530,10 @@ public:
     uint32 CalculateSpellFocusBoostValue(Unit* caster, uint32 spellID);
     void ProcessForage(Player* player);
 
-    uint8 GetCurrentEQClassForPlayer(Player* player);
-    uint8 GetNextEQClassForPlayer(Player* player);
-    void SetNextEQClassForPlayer(Player* player, uint8 nextEQClass);
+    uint8 GetCurrentSecondEQClassForPlayer(Player* player);
+    uint8 GetNextSecondEQClassForPlayer(Player* player);
+    void SetNextSecondEQClassForPlayer(Player* player, uint8 nextEQClass);
     EverQuestPlayerControllerData GetPlayerControllerData(Player* player);
-    //void SetPlayerControllerData(EverQuestPlayerControllerData controllerData);
 
     std::map<std::string, EverQuestPlayerClassInfoItem> GetPlayerClassInfoByClassNameForPlayer(Player* player);
     std::map<uint8, uint8> GetClassLevelsByClassForPlayer(Player* player);

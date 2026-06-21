@@ -155,7 +155,7 @@ public:
         }
 
         Player* player = handler->GetPlayer();
-        EverQuest->SetNextEQClassForPlayer(player, classInt);
+        EverQuest->SetNextSecondEQClassForPlayer(player, classInt);
 
         string text = fmt::format("Your EQ class will change to |cff4CFF00{}|r on the next login", GetEQClassStringFromID(classInt));
         ChatHandler(player->GetSession()).SendSysMessage(text);
