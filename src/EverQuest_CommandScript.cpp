@@ -127,7 +127,7 @@ public:
             classInt = EQ_EQCLASS_SHADOWKNIGHT;
         else if (className.starts_with("D") || className.starts_with("d"))
             classInt = EQ_EQCLASS_DRUID;
-        else if (className.starts_with("M") || className.starts_with("m"))
+        else if (className.starts_with("Mo") || className.starts_with("mo") || className.starts_with("MO"))
             classInt = EQ_EQCLASS_MONK;
         else if (className.starts_with("B") || className.starts_with("b"))
             classInt = EQ_EQCLASS_BARD;
@@ -139,7 +139,7 @@ public:
             classInt = EQ_EQCLASS_NECROMANCER;
         else if (className.starts_with("Wi") || className.starts_with("wi") || className.starts_with("WI"))
             classInt = EQ_EQCLASS_WIZARD;
-        else if (className.starts_with("M") || className.starts_with("m"))
+        else if (className.starts_with("Ma") || className.starts_with("ma") || className.starts_with("MA"))
             classInt = EQ_EQCLASS_MAGICIAN;
         else if (className.starts_with("E") || className.starts_with("e"))
             classInt = EQ_EQCLASS_ENCHANTER;

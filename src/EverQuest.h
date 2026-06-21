@@ -349,8 +349,8 @@ public:
 struct EverQuestPlayerControllerData
 {
     uint32 GUID = 0;
-    uint8 CurrentClass = 0;
-    uint8 NextClass = 0;
+    uint8 CurrentSecondClass = 0;
+    uint8 NextSecondClass = 0;
 };
 
 class EverQuestPlayerClassInfoItem
@@ -533,6 +533,7 @@ public:
     uint8 GetCurrentSecondEQClassForPlayer(Player* player);
     uint8 GetNextSecondEQClassForPlayer(Player* player);
     void SetNextSecondEQClassForPlayer(Player* player, uint8 nextEQClass);
+    void SetInitialEQClassesForPlayer(Player* player);
     EverQuestPlayerControllerData GetPlayerControllerData(Player* player);
 
     std::map<std::string, EverQuestPlayerClassInfoItem> GetPlayerClassInfoByClassNameForPlayer(Player* player);

@@ -326,43 +326,44 @@ public:
         EverQuest->PerformPlayerDelete(guid);
     }
 
-    void OnPlayerFirstLogin(Player* player) override
-    {
-        if (EverQuest->IsEnabled == false)
-            return;
-
-        // Special logic for deathknights
-        if (EverQuest->ConfigDeathKnightsStartLikeOtherClasses == true && player->getClass() == CLASS_DEATH_KNIGHT)
-        {
-            // If the DK doesn't learn DeathGate, teleport will fail
-            player->learnSpell(50977);
-
-            // Teach runeforging
-            player->learnSpell(53428);
-            if (player->GetSkillValue(776) == 0)
-            {
-                player->SetSkill((uint16)776, 0, 1, 1);
-            }
-        }
-
-        // If there is create data, move the player to the related zone and set initial bind
-        if (EverQuest->HasCreatePlayerData(player->getRace(), player->getClass()) == true)
-        {
-            EverQuestPlayerCreateInfo createInfo = EverQuest->GetPlayerCreateInfo(player->getRace(), player->getClass());
-            player->TeleportTo(createInfo.MapID, createInfo.PositionX, createInfo.PositionY, createInfo.PositionZ, createInfo.Orientation);
-            EverQuest->SetNewBindHome(player, player->GetGUID().GetCounter(), createInfo.MapID, createInfo.ZoneID, createInfo.PositionX,
-                createInfo.PositionY, createInfo.PositionZ);
-            if (EverQuest->ConfigDeathKnightsStartLikeOtherClasses == true && player->getClass() == CLASS_DEATH_KNIGHT)
-            {
-                player->RemoveAura(48266); // Take off Blood Presence
-            }
-        }
-    }
-
     void OnPlayerLogin(Player* player) override
     {
         if (EverQuest->IsEnabled == false)
             return;
+
+        // First login behavior
+        if (player->HasAtLoginFlag(AT_LOGIN_FIRST) == true)
+        {
+            // Special logic for deathknights
+            if (EverQuest->ConfigDeathKnightsStartLikeOtherClasses == true && player->getClass() == CLASS_DEATH_KNIGHT)
+            {
+                // If the DK doesn't learn DeathGate, teleport will fail
+                player->learnSpell(50977);
+
+                // Teach runeforging
+                player->learnSpell(53428);
+                if (player->GetSkillValue(776) == 0)
+                {
+                    player->SetSkill((uint16)776, 0, 1, 1);
+                }
+            }
+
+            // If there is create data, move the player to the related zone and set initial bind
+            if (EverQuest->HasCreatePlayerData(player->getRace(), player->getClass()) == true)
+            {
+                EverQuestPlayerCreateInfo createInfo = EverQuest->GetPlayerCreateInfo(player->getRace(), player->getClass());
+                player->TeleportTo(createInfo.MapID, createInfo.PositionX, createInfo.PositionY, createInfo.PositionZ, createInfo.Orientation);
+                EverQuest->SetNewBindHome(player, player->GetGUID().GetCounter(), createInfo.MapID, createInfo.ZoneID, createInfo.PositionX,
+                    createInfo.PositionY, createInfo.PositionZ);
+                if (EverQuest->ConfigDeathKnightsStartLikeOtherClasses == true && player->getClass() == CLASS_DEATH_KNIGHT)
+                {
+                    player->RemoveAura(48266); // Take off Blood Presence
+                }
+            }
+
+            // Set EQ class
+            EverQuest->SetInitialEQClassesForPlayer(player);
+        }
 
         EverQuest->AllLoadedPlayers.push_back(player);
 
@@ -417,14 +418,14 @@ public:
         // Grab EQ class info
         EverQuestClassMap classMap = EverQuest->GetClassMapForWOWClassID(player->getClass());
         uint8 secondClassID = EverQuest->GetCurrentSecondEQClassForPlayer(player);
-        if (secondClassID == EQ_EQCLASS_NONE)
+        if (secondClassID != EQ_EQCLASS_NONE)
         {
-            string text = fmt::format("Your EQ class base is |cff4CFF00'{}'|r and secondary is |cff4CFF00'{}'|r. Type |cff4CFF00.class |rto change or edit classes.", GetEQClassStringFromID(classMap.EQClassIDBase), GetEQClassStringFromID(secondClassID));
+            string text = fmt::format("Your EQ class base is |cff4CFF00'{}'|r and secondary is |cff4CFF00'{}'|r. Type |cff4CFF00.class |rto change or edit your secondary EQ class.", GetEQClassStringFromID(classMap.EQClassIDBase), GetEQClassStringFromID(secondClassID));
             ChatHandler(player->GetSession()).SendSysMessage(text);
         }
         else
         {
-            string text = fmt::format("Your EQ class base is |cff4CFF00'{}'|r. Type |cff4CFF00.class |rto change or edit classes.", GetEQClassStringFromID(secondClassID));
+            string text = fmt::format("Your EQ class base is |cff4CFF00'{}'|r and you have no secondary EQ class. Type |cff4CFF00.class |rto change or edit your secondary EQ class.", GetEQClassStringFromID(classMap.EQClassIDBase));
             ChatHandler(player->GetSession()).SendSysMessage(text);
         }
     }

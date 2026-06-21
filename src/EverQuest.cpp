@@ -1089,7 +1089,7 @@ void EverQuestMod::LoadClassMapData()
             Field* fields = queryResult->Fetch();
             EverQuestClassMap classMap;
             classMap.WOWClassID = fields[0].Get<uint8>();
-            classMap.EQClassIDBase = fields[3].Get<uint8>();
+            classMap.EQClassIDBase = fields[1].Get<uint8>();
             classMap.EQClassIDDefaultSecond = fields[2].Get<uint8>();
             ClassMapByWOWClassID[classMap.WOWClassID] = classMap;
         } while (queryResult->NextRow());
@@ -1641,21 +1641,31 @@ uint8 EverQuestMod::GetCurrentSecondEQClassForPlayer(Player* player)
 {
     if (ActivePlayerClassControllerDataByGUID.find(player->GetGUID()) == ActivePlayerClassControllerDataByGUID.end())
         ActivePlayerClassControllerDataByGUID[player->GetGUID()] = GetPlayerControllerData(player);
-    return ActivePlayerClassControllerDataByGUID[player->GetGUID()].CurrentClass;
+    return ActivePlayerClassControllerDataByGUID[player->GetGUID()].CurrentSecondClass;
 }
 
 uint8 EverQuestMod::GetNextSecondEQClassForPlayer(Player* player)
 {
     if (ActivePlayerClassControllerDataByGUID.find(player->GetGUID()) == ActivePlayerClassControllerDataByGUID.end())
         ActivePlayerClassControllerDataByGUID[player->GetGUID()] = GetPlayerControllerData(player);
-    return ActivePlayerClassControllerDataByGUID[player->GetGUID()].NextClass;
+    return ActivePlayerClassControllerDataByGUID[player->GetGUID()].NextSecondClass;
 }
 
 void EverQuestMod::SetNextSecondEQClassForPlayer(Player* player, uint8 nextEQClass)
 {
     if (ActivePlayerClassControllerDataByGUID.find(player->GetGUID()) == ActivePlayerClassControllerDataByGUID.end())
         ActivePlayerClassControllerDataByGUID[player->GetGUID()] = GetPlayerControllerData(player);
-    ActivePlayerClassControllerDataByGUID[player->GetGUID()].NextClass = nextEQClass;
+    ActivePlayerClassControllerDataByGUID[player->GetGUID()].NextSecondClass = nextEQClass;
+}
+
+void EverQuestMod::SetInitialEQClassesForPlayer(Player* player)
+{
+    const EverQuestClassMap classMap = GetClassMapForWOWClassID(player->getClass());
+    EverQuestPlayerControllerData controllerData;
+    controllerData.GUID = player->GetGUID().GetCounter();
+    controllerData.CurrentSecondClass = EQ_EQCLASS_NONE;
+    controllerData.NextSecondClass = EQ_EQCLASS_NONE;
+    ActivePlayerClassControllerDataByGUID[player->GetGUID()] = controllerData;
 }
 
 EverQuestPlayerControllerData EverQuestMod::GetPlayerControllerData(Player* player)
@@ -1665,38 +1675,18 @@ EverQuestPlayerControllerData EverQuestMod::GetPlayerControllerData(Player* play
     QueryResult queryResult = CharacterDatabase.Query("SELECT nextClass, currentClass FROM mod_everquest_character_class_controller WHERE guid = {}", player->GetGUID().GetCounter());
     if (!queryResult || queryResult->GetRowCount() == 0)
     {
-        // TODO: Wire this up from the EQWOW data
-        switch (player->getClass())
-        {
-        case CLASS_WARRIOR: controllerData.NextClass = controllerData.CurrentClass = EQ_EQCLASS_WARRIOR; break;
-        case CLASS_PALADIN: controllerData.NextClass = controllerData.CurrentClass = EQ_EQCLASS_PALADIN; break;
-        case CLASS_HUNTER: controllerData.NextClass = controllerData.CurrentClass = EQ_EQCLASS_RANGER; break;
-        case CLASS_ROGUE: controllerData.NextClass = controllerData.CurrentClass = EQ_EQCLASS_ROGUE; break;
-        case CLASS_PRIEST: controllerData.NextClass = controllerData.CurrentClass = EQ_EQCLASS_CLERIC; break;
-        case CLASS_DEATH_KNIGHT: controllerData.NextClass = controllerData.CurrentClass = EQ_EQCLASS_SHADOWKNIGHT; break;
-        case CLASS_SHAMAN: controllerData.NextClass = controllerData.CurrentClass = EQ_EQCLASS_SHAMAN; break;
-        case CLASS_MAGE: controllerData.NextClass = controllerData.CurrentClass = EQ_EQCLASS_MAGICIAN; break;
-        case CLASS_WARLOCK: controllerData.NextClass = controllerData.CurrentClass = EQ_EQCLASS_NECROMANCER; break;
-        case CLASS_DRUID: controllerData.NextClass = controllerData.CurrentClass = EQ_EQCLASS_DRUID; break;
-        default: controllerData.NextClass = controllerData.CurrentClass = EQ_EQCLASS_WARRIOR; break;
-        }
+        const EverQuestClassMap classMap = GetClassMapForWOWClassID(player->getClass());
+        controllerData.CurrentSecondClass = classMap.EQClassIDDefaultSecond;
+        controllerData.NextSecondClass = classMap.EQClassIDDefaultSecond;
     }
     else
     {
         Field* fields = queryResult->Fetch();
-        controllerData.NextClass = fields[0].Get<uint8>();
-        controllerData.CurrentClass = fields[1].Get<uint8>();
+        controllerData.NextSecondClass = fields[0].Get<uint8>();
+        controllerData.CurrentSecondClass = fields[1].Get<uint8>();
     }
     return controllerData;
 }
-
-//void EverQuestMod::SetPlayerControllerData(EverQuestPlayerControllerData controllerData)
-//{
-//    CharacterDatabase.DirectExecute("REPLACE INTO `mod_everquest_character_class_controller` (`guid`, `nextClass`, `currentClass`) VALUES ({}, {}, {})",
-//        controllerData.GUID,
-//        controllerData.NextClass,
-//        controllerData.CurrentClass);
-//}
 
 map<string, EverQuestPlayerClassInfoItem> EverQuestMod::GetPlayerClassInfoByClassNameForPlayer(Player* player)
 {
@@ -2169,7 +2159,7 @@ bool EverQuestMod::PerformClassSwitch(Player* player)
 
     // Update current class
     UpdatePlayerControllerForClassChange(player, nextEQClass, transaction);
-    ActivePlayerClassControllerDataByGUID[player->GetGUID()].CurrentClass = nextEQClass;
+    ActivePlayerClassControllerDataByGUID[player->GetGUID()].CurrentSecondClass = nextEQClass;
 
     // Commit the transaction
     CharacterDatabase.CommitTransaction(transaction);
