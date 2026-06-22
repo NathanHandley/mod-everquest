@@ -30,6 +30,7 @@
 
 #include <list>
 #include <map>
+#include <vector>
 
 using namespace std;
 
@@ -385,27 +386,41 @@ public:
             }
         }
 
+        // Autolearning is based on EQ classes (primary and secondary)
+        EverQuestClassMap classMap = EverQuest->GetClassMapForWOWClassID(player->getClass());
+        uint8 secondClassID = EverQuest->GetCurrentSecondEQClassForPlayer(player);
+        std::vector<uint8> autoLearnEQClassIDs;
+        autoLearnEQClassIDs.push_back(classMap.EQClassIDBase);
+        if (secondClassID != EQ_EQCLASS_NONE && secondClassID != classMap.EQClassIDBase)
+            autoLearnEQClassIDs.push_back(secondClassID);
+
         // Learn any spells the player may not have
         bool needsUpdate = false;
-        for (auto autoLearnSpell : EverQuest->GetAutoLearnSpellsForClass(player->getClass()))
+        for (uint8 autoLearnEQClassID : autoLearnEQClassIDs)
         {
-            // A race of 0 means the spell is learned regardless of race
-            if (autoLearnSpell.RaceID != 0 && autoLearnSpell.RaceID != player->getRace())
-                continue;
-            if (player->HasSpell(autoLearnSpell.SpellID) == false)
+            for (auto autoLearnSpell : EverQuest->GetAutoLearnSpellsForClass(autoLearnEQClassID))
             {
-                player->learnSpell(autoLearnSpell.SpellID);
-                needsUpdate = true;
+                // A race of 0 means the spell is learned regardless of race
+                if (autoLearnSpell.RaceID != 0 && autoLearnSpell.RaceID != player->getRace())
+                    continue;
+                if (player->HasSpell(autoLearnSpell.SpellID) == false)
+                {
+                    player->learnSpell(autoLearnSpell.SpellID);
+                    needsUpdate = true;
+                }
             }
         }
 
         // Learn any skills the player may not have
-        for (auto skillID : EverQuest->GetAutoLearnSkillsForClass(player->getClass()))
+        for (uint8 autoLearnEQClassID : autoLearnEQClassIDs)
         {
-            if (player->GetSkillValue(skillID) == 0)
+            for (auto skillID : EverQuest->GetAutoLearnSkillsForClass(autoLearnEQClassID))
             {
-                player->SetSkill((uint16)skillID, 0, 1, 1);
-                needsUpdate = true;
+                if (player->GetSkillValue(skillID) == 0)
+                {
+                    player->SetSkill((uint16)skillID, 0, 1, 1);
+                    needsUpdate = true;
+                }
             }
         }
 
@@ -414,10 +429,6 @@ public:
         {
             player->UpdateSkillsForLevel();
         }
-
-        // Grab EQ class info
-        EverQuestClassMap classMap = EverQuest->GetClassMapForWOWClassID(player->getClass());
-        uint8 secondClassID = EverQuest->GetCurrentSecondEQClassForPlayer(player);
         if (secondClassID != EQ_EQCLASS_NONE)
         {
             string text = fmt::format("Your EQ class primary is |cff4CFF00'{}'|r and secondary is |cff4CFF00'{}'|r. Type |cff4CFF00.class |rto change or edit your secondary EQ class.", GetEQClassStringFromID(classMap.EQClassIDBase), GetEQClassStringFromID(secondClassID));

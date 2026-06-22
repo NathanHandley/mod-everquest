@@ -258,9 +258,14 @@ public:
             if (levelItr != levelByEQClassID.end())
                 level = levelItr->second;
 
-            string currentLine = " - |cff4CFF00" + GetEQClassStringFromID(static_cast<uint8>(eqClassID)) + "|r (Level: |cff4CFF00" + std::to_string(level) + "|r)";
+            string currentLine = "";
             if (eqClassID == currentSecondClass)
-                currentLine += " <---- (|cff4CFF00ACTIVE|r)";
+            {
+                currentLine = " - " + std::to_string(level) + " |cff4CFF00" + GetEQClassStringFromID(static_cast<uint8>(eqClassID)) + "|r";
+                currentLine += " (|cff4CFF00ACTIVE|r)";
+            }
+            else
+                currentLine = " - " + std::to_string(level) + " " + GetEQClassStringFromID(static_cast<uint8>(eqClassID));
             handler->PSendSysMessage(currentLine.c_str());
         }
 
