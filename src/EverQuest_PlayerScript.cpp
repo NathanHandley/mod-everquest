@@ -408,6 +408,9 @@ public:
             string text = fmt::format("Your EQ class primary is |cff4CFF00'{}'|r and you have no secondary EQ class. Type |cff4CFF00.class |rto change or edit your secondary EQ class.", GetEQClassStringFromID(classMap.EQClassIDBase));
             ChatHandler(player->GetSession()).SendSysMessage(text);
         }
+
+        // Seed the EQ Class character-pane tab with the player's class state
+        EverQuest->SendClassInfoAddonMessageToPlayer(player);
     }
 
     void OnPlayerLogout(Player* player) override

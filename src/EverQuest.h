@@ -538,6 +538,7 @@ public:
     uint8 GetCurrentSecondEQClassForPlayer(Player* player);
     uint8 GetNextSecondEQClassForPlayer(Player* player);
     void SetNextSecondEQClassForPlayer(Player* player, uint8 nextEQClass);
+    void SendClassInfoAddonMessageToPlayer(Player* player);
     void SetInitialEQClassesForPlayer(Player* player);
     EverQuestPlayerControllerData GetPlayerControllerData(Player* player);
 
@@ -568,6 +569,7 @@ public:
 };
 
 std::string GetEQClassStringFromID(uint8 classID);
+std::string GetEQClassCommandNameFromID(uint8 classID);
 std::set<uint32> GetSetFromConfigString(string configStringName);
 
 #define EverQuest EverQuestMod::instance()

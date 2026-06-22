@@ -2288,6 +2288,79 @@ std::string GetEQClassStringFromID(uint8 classID)
     }
 }
 
+std::string GetEQClassCommandNameFromID(uint8 classID)
+{
+    switch (classID)
+    {
+    case EQ_EQCLASS_WARRIOR:        return "warrior";
+    case EQ_EQCLASS_CLERIC:         return "cleric";
+    case EQ_EQCLASS_PALADIN:        return "paladin";
+    case EQ_EQCLASS_RANGER:         return "ranger";
+    case EQ_EQCLASS_SHADOWKNIGHT:   return "shadowknight";
+    case EQ_EQCLASS_DRUID:          return "druid";
+    case EQ_EQCLASS_MONK:           return "monk";
+    case EQ_EQCLASS_BARD:           return "bard";
+    case EQ_EQCLASS_ROGUE:          return "rogue";
+    case EQ_EQCLASS_SHAMAN:         return "shaman";
+    case EQ_EQCLASS_NECROMANCER:    return "necromancer";
+    case EQ_EQCLASS_WIZARD:         return "wizard";
+    case EQ_EQCLASS_MAGICIAN:       return "magician";
+    case EQ_EQCLASS_ENCHANTER:      return "enchanter";
+    default:                        return "none";
+    }
+}
+
+// Sends the player's EQ class state to the client UI (the EQ Class character tab) as a hidden addon message
+void EverQuestMod::SendClassInfoAddonMessageToPlayer(Player* player)
+{
+    if (player == nullptr)
+        return;
+
+    const EverQuestClassMap classMap = GetClassMapForWOWClassID(player->getClass());
+    uint8 currentSecondClass = GetCurrentSecondEQClassForPlayer(player);
+    uint8 nextSecondClass = GetNextSecondEQClassForPlayer(player);
+
+    // Level lookup by EQ class id.  The active secondary's saved row is excluded while active, so use the
+    // character's live level for it (mirrors the ".class info" command)
+    map<string, EverQuestPlayerClassInfoItem> playerClassInfoItems = GetPlayerClassInfoByClassNameForPlayer(player);
+    map<uint8, uint8> levelByEQClassID;
+    for (auto& playerClassInfoItem : playerClassInfoItems)
+        levelByEQClassID[playerClassInfoItem.second.ClassID] = playerClassInfoItem.second.Level;
+    levelByEQClassID[currentSecondClass] = player->GetLevel();
+
+    // Format (after the "EQCLASS\t" prefix the 3.3.5 client strips):
+    //   H|<baseId>|<baseName>|<currentSecondId>|<nextSecondId>
+    //   ~R|<id>|<name>|<level>|<changecmd>   (one per row: None first, then each eligible secondary class)
+    std::ostringstream payload;
+    payload << "H|" << uint32(classMap.EQClassIDBase) << "|" << GetEQClassStringFromID(classMap.EQClassIDBase)
+            << "|" << uint32(currentSecondClass) << "|" << uint32(nextSecondClass);
+
+    for (int16 eqClassID = EQ_EQCLASS_NONE; eqClassID <= EQ_EQCLASS_ENCHANTER; ++eqClassID)
+    {
+        // None is always listed and every other class must be flagged as an eligible secondary
+        if (eqClassID != EQ_EQCLASS_NONE)
+        {
+            uint32 classBit = 1u << (eqClassID - 1);
+            if ((classMap.EQClassIDEligibleSecondMask & classBit) == 0)
+                continue;
+        }
+
+        uint8 level = 1;
+        auto levelItr = levelByEQClassID.find(static_cast<uint8>(eqClassID));
+        if (levelItr != levelByEQClassID.end())
+            level = levelItr->second;
+
+        payload << "~R|" << uint32(eqClassID) << "|" << GetEQClassStringFromID(static_cast<uint8>(eqClassID))
+                << "|" << uint32(level) << "|" << GetEQClassCommandNameFromID(static_cast<uint8>(eqClassID));
+    }
+
+    // Server->client addon messages are delivered as a whisper tagged LANG_ADDON (the client fires its CHAT_MSG_ADDON event for these)
+    std::string addonMessage = "EQCLASS\t" + payload.str();
+    WorldPacket data;
+    ChatHandler::BuildChatPacket(data, CHAT_MSG_WHISPER, LANG_ADDON, player, player, addonMessage);
+    player->SendDirectMessage(&data);
+}
+
 set<uint32> GetSetFromConfigString(string configStringName)
 {
     string configString = sConfigMgr->GetOption<std::string>(configStringName, "");

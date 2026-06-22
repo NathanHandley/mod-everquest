@@ -42,27 +42,6 @@ static std::string RoundVal(float value, int precision)
     return stream.str();
 }
 
-static string GetEQClassCommandNameFromID(uint8 classID)
-{
-    switch (classID)
-    {
-    case EQ_EQCLASS_WARRIOR:        return "warrior";
-    case EQ_EQCLASS_CLERIC:         return "cleric";
-    case EQ_EQCLASS_PALADIN:        return "paladin";
-    case EQ_EQCLASS_RANGER:         return "ranger";
-    case EQ_EQCLASS_SHADOWKNIGHT:   return "shadowknight";
-    case EQ_EQCLASS_DRUID:          return "druid";
-    case EQ_EQCLASS_MONK:           return "monk";
-    case EQ_EQCLASS_BARD:           return "bard";
-    case EQ_EQCLASS_ROGUE:          return "rogue";
-    case EQ_EQCLASS_SHAMAN:         return "shaman";
-    case EQ_EQCLASS_NECROMANCER:    return "necromancer";
-    case EQ_EQCLASS_WIZARD:         return "wizard";
-    case EQ_EQCLASS_MAGICIAN:       return "magician";
-    case EQ_EQCLASS_ENCHANTER:      return "enchanter";
-    default:                        return "none";
-    }
-}
 
 static string GetEligibleSecondClassListForPlayer(Player* player)
 {
@@ -91,6 +70,7 @@ public:
         {
             { "change", HandleMultiClassChangeClass,    SEC_PLAYER, Console::No },
             { "info",   HandleMultiClassInfo,           SEC_PLAYER, Console::No },
+            { "uiinfo", HandleMultiClassUIInfo,         SEC_PLAYER, Console::No },
         };
 
         static ChatCommandTable commandTable =
@@ -215,7 +195,20 @@ public:
         string text = fmt::format("Your secondary EQ class will change to |cff4CFF00{}|r on the next login", GetEQClassStringFromID(classInt));
         ChatHandler(player->GetSession()).SendSysMessage(text);
 
+        // Refresh the EQ Class UI tab so the chosen class shows as pending
+        EverQuest->SendClassInfoAddonMessageToPlayer(player);
+
         // Class change accepted
+        return true;
+    }
+
+    static bool HandleMultiClassUIInfo(ChatHandler* handler, const char* /*args*/)
+    {
+        if (EverQuest->IsEnabled == false)
+            return true;
+
+        // Pushes the current EQ class state to the client UI (the EQ Class character tab) as an addon message
+        EverQuest->SendClassInfoAddonMessageToPlayer(handler->GetPlayer());
         return true;
     }
 
