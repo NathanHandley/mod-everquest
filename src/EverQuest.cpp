@@ -1154,6 +1154,14 @@ const EverQuestClassMap& EverQuestMod::GetClassMapForWOWClassID(uint8 wowClassID
     }
 }
 
+bool EverQuestMod::IsEQClassABaseEQClass(uint8 eqClassID)
+{
+    for (auto& classMapPair : ClassMapByWOWClassID)
+        if (classMapPair.second.EQClassIDBase == eqClassID)
+            return true;
+    return false;
+}
+
 void EverQuestMod::StorePositionAsLastGate(Player* player)
 {
     // Fail if there is no map, or if the map is invalid

@@ -513,6 +513,7 @@ public:
     const vector<EverQuestForageZoneItem>& GetForageZoneItemsInMap(uint32 mapID);
     void LoadClassMapData();
     const EverQuestClassMap& GetClassMapForWOWClassID(uint8 wowClassID);
+    bool IsEQClassABaseEQClass(uint8 eqClassID);
 
     void StorePositionAsLastGate(Player* player);
     void SendPlayerToLastGate(Player* player);
