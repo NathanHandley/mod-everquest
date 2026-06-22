@@ -226,19 +226,41 @@ public:
 
         // Get the player data
         Player* player = handler->GetPlayer();
+        EverQuestClassMap classMap = EverQuest->GetClassMapForWOWClassID(player->getClass());
+        uint8 currentSecondClass = EverQuest->GetCurrentSecondEQClassForPlayer(player);
+
+        // Eligible classes the player has never been has no stored data, so assume 1
         map<string, EverQuestPlayerClassInfoItem> playerClassInfoItems = EverQuest->GetPlayerClassInfoByClassNameForPlayer(player);
+        map<uint8, uint8> levelByEQClassID;
+        for (auto& playerClassInfoItem : playerClassInfoItems)
+            levelByEQClassID[playerClassInfoItem.second.ClassID] = playerClassInfoItem.second.Level;
+        levelByEQClassID[currentSecondClass] = player->GetLevel();
 
         // Primary Class
-        EverQuestClassMap classMap = EverQuest->GetClassMapForWOWClassID(player->getClass());
         handler->PSendSysMessage("==== Primary and Secondary EQ Classes ====");
         string primaryLine = "Primary EQ Class: |cff4CFF00" + GetEQClassStringFromID(classMap.EQClassIDBase) + "|r";
         handler->PSendSysMessage(primaryLine);
 
         // Secondary Classes
         handler->PSendSysMessage("Secondary EQ Class List:");
-        for (auto& playerClassInfoItem : playerClassInfoItems)
+        for (int16 eqClassID = EQ_EQCLASS_NONE; eqClassID <= EQ_EQCLASS_ENCHANTER; ++eqClassID)
         {
-            string currentLine = " - |cff4CFF00" + playerClassInfoItem.second.ClassName + "|r (Level: |cff4CFF00" + std::to_string(playerClassInfoItem.second.Level) + "|r)";
+            // None is always top result
+            if (eqClassID != EQ_EQCLASS_NONE)
+            {
+                uint32 classBit = 1u << (eqClassID - 1);
+                if ((classMap.EQClassIDEligibleSecondMask & classBit) == 0)
+                    continue;
+            }
+
+            uint8 level = 1;
+            auto levelItr = levelByEQClassID.find(static_cast<uint8>(eqClassID));
+            if (levelItr != levelByEQClassID.end())
+                level = levelItr->second;
+
+            string currentLine = " - |cff4CFF00" + GetEQClassStringFromID(static_cast<uint8>(eqClassID)) + "|r (Level: |cff4CFF00" + std::to_string(level) + "|r)";
+            if (eqClassID == currentSecondClass)
+                currentLine += " <---- (|cff4CFF00ACTIVE|r)";
             handler->PSendSysMessage(currentLine.c_str());
         }
 
