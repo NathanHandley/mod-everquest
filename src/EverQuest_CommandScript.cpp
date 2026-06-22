@@ -42,6 +42,44 @@ static std::string RoundVal(float value, int precision)
     return stream.str();
 }
 
+static string GetEQClassCommandNameFromID(uint8 classID)
+{
+    switch (classID)
+    {
+    case EQ_EQCLASS_WARRIOR:        return "warrior";
+    case EQ_EQCLASS_CLERIC:         return "cleric";
+    case EQ_EQCLASS_PALADIN:        return "paladin";
+    case EQ_EQCLASS_RANGER:         return "ranger";
+    case EQ_EQCLASS_SHADOWKNIGHT:   return "shadowknight";
+    case EQ_EQCLASS_DRUID:          return "druid";
+    case EQ_EQCLASS_MONK:           return "monk";
+    case EQ_EQCLASS_BARD:           return "bard";
+    case EQ_EQCLASS_ROGUE:          return "rogue";
+    case EQ_EQCLASS_SHAMAN:         return "shaman";
+    case EQ_EQCLASS_NECROMANCER:    return "necromancer";
+    case EQ_EQCLASS_WIZARD:         return "wizard";
+    case EQ_EQCLASS_MAGICIAN:       return "magician";
+    case EQ_EQCLASS_ENCHANTER:      return "enchanter";
+    default:                        return "none";
+    }
+}
+
+static string GetEligibleSecondClassListForPlayer(Player* player)
+{
+    const EverQuestClassMap classMap = EverQuest->GetClassMapForWOWClassID(player->getClass());
+    std::string list = "none";
+    for (uint8 eqClassID = EQ_EQCLASS_WARRIOR; eqClassID <= EQ_EQCLASS_ENCHANTER; ++eqClassID)
+    {
+        uint32 classBit = 1u << (eqClassID - 1);
+        if ((classMap.EQClassIDEligibleSecondMask & classBit) != 0)
+        {
+            list.append(", ");
+            list.append(GetEQClassCommandNameFromID(eqClassID));
+        }
+    }
+    return list;
+}
+
 class EverQuest_CommandScript : public CommandScript
 {
 public:
@@ -105,17 +143,22 @@ public:
         if (EverQuest->IsEnabled == false)
             return true;
 
+        Player* player = handler->GetPlayer();
+        std::string eligibleClassList = GetEligibleSecondClassListForPlayer(player);
+
         if (!*args)
         {
             handler->PSendSysMessage(".class change 'class'");
             handler->PSendSysMessage("Changes the player EverQuest class on next logout.  Example: '.class change warrior'");
-            handler->PSendSysMessage("Valid Class Values: warrior, cleric, paladin, ranger, shadowknight, druid, monk, bard, rogue, shaman, necromancer, wizard, magician, enchanter");
+            handler->PSendSysMessage("Valid Class Values: {}", eligibleClassList);
             return true;
         }
 
-        uint8 classInt = CLASS_NONE;
+        uint8 classInt = EQ_EQCLASS_NONE;
         std::string className = strtok((char*)args, " ");
-        if (className.starts_with("Wa") || className.starts_with("wa") || className.starts_with("WA"))
+        if (className.starts_with("No") || className.starts_with("no") || className.starts_with("NO"))
+            classInt = EQ_EQCLASS_NONE;
+        else if (className.starts_with("Wa") || className.starts_with("wa") || className.starts_with("WA"))
             classInt = EQ_EQCLASS_WARRIOR;
         else if (className.starts_with("C") || className.starts_with("c"))
             classInt = EQ_EQCLASS_CLERIC;
@@ -146,18 +189,30 @@ public:
         else
         {
             handler->PSendSysMessage(".class change 'class'");
-            handler->PSendSysMessage("Changes the player class.  Example: '.class change warrior'");
-            handler->PSendSysMessage("Valid Class Values: warrior, cleric, paladin, ranger, shadowknight, druid, monk, bard, rogue, shaman, necromancer, wizard, magician, enchanter");
+            handler->PSendSysMessage("Changes the player secondary class.  Example: '.class change warrior'");
+            handler->PSendSysMessage("Valid Class Values: {}", eligibleClassList);
             std::string enteredValueLine = "Entered Value was ";
             enteredValueLine.append(className);
             handler->PSendSysMessage(enteredValueLine.c_str());
             return true;
         }
 
-        Player* player = handler->GetPlayer();
+        // Restrict to defined eq class list
+        if (classInt != EQ_EQCLASS_NONE)
+        {
+            const EverQuestClassMap classMap = EverQuest->GetClassMapForWOWClassID(player->getClass());
+            uint32 classBit = 1u << (classInt - 1);
+            if ((classMap.EQClassIDEligibleSecondMask & classBit) == 0)
+            {
+                handler->PSendSysMessage("|cffFF0000{}|r is not a valid secondary EQ class for your character.", GetEQClassStringFromID(classInt));
+                handler->PSendSysMessage("Valid EQ Class Values: {}", eligibleClassList);
+                return true;
+            }
+        }
+
         EverQuest->SetNextSecondEQClassForPlayer(player, classInt);
 
-        string text = fmt::format("Your EQ class will change to |cff4CFF00{}|r on the next login", GetEQClassStringFromID(classInt));
+        string text = fmt::format("Your secondary EQ class will change to |cff4CFF00{}|r on the next login", GetEQClassStringFromID(classInt));
         ChatHandler(player->GetSession()).SendSysMessage(text);
 
         // Class change accepted
@@ -169,18 +224,26 @@ public:
         if (EverQuest->IsEnabled == false)
             return true;
 
-        handler->PSendSysMessage("Class List:");
-
         // Get the player data
         Player* player = handler->GetPlayer();
         map<string, EverQuestPlayerClassInfoItem> playerClassInfoItems = EverQuest->GetPlayerClassInfoByClassNameForPlayer(player);
 
-        // Write the information out
+        // Primary Class
+        EverQuestClassMap classMap = EverQuest->GetClassMapForWOWClassID(player->getClass());
+        handler->PSendSysMessage("==== Primary and Secondary EQ Classes ====");
+        string primaryLine = "Primary EQ Class: |cff4CFF00" + GetEQClassStringFromID(classMap.EQClassIDBase) + "|r";
+        handler->PSendSysMessage(primaryLine);
+
+        // Secondary Classes
+        handler->PSendSysMessage("Secondary EQ Class List:");
         for (auto& playerClassInfoItem : playerClassInfoItems)
         {
-            string currentLine = " - " + playerClassInfoItem.second.ClassName + "(" + std::to_string(playerClassInfoItem.second.Level) + ")";
+            string currentLine = " - |cff4CFF00" + playerClassInfoItem.second.ClassName + "|r (Level: |cff4CFF00" + std::to_string(playerClassInfoItem.second.Level) + "|r)";
             handler->PSendSysMessage(currentLine.c_str());
         }
+
+        // Footer
+        handler->PSendSysMessage("Type |cff4CFF00.class |rto change or edit your secondary EQ class.");
 
         return true;
     }

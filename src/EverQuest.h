@@ -35,7 +35,7 @@ static uint32 ConfigMaxSkillIDCheck = 1000;         // The highest level of skil
 
 class Unit;
 
-#define EQ_MOD_VERSION                              21
+#define EQ_MOD_VERSION                              22
 
 #define EQ_EQCLASS_NONE                             0
 #define EQ_EQCLASS_WARRIOR                          1
@@ -375,6 +375,7 @@ struct EverQuestClassMap
     uint8 WOWClassID;
     uint8 EQClassIDBase;
     uint8 EQClassIDDefaultSecond;
+    uint32 EQClassIDEligibleSecondMask;
 };
 
 class EverQuestMod

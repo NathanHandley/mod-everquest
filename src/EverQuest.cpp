@@ -1081,7 +1081,7 @@ void EverQuestMod::LoadClassMapData()
 {
     ClassMapByWOWClassID.clear();
 
-    QueryResult queryResult = WorldDatabase.Query("SELECT wowclass, eqclass_base, eqclass_defaultsecond FROM mod_everquest_classmap;");
+    QueryResult queryResult = WorldDatabase.Query("SELECT wowclass, eqclass_base, eqclass_defaultsecond, eqclass_eligiblesecond_mask FROM mod_everquest_classmap;");
     if (queryResult)
     {
         do
@@ -1091,6 +1091,7 @@ void EverQuestMod::LoadClassMapData()
             classMap.WOWClassID = fields[0].Get<uint8>();
             classMap.EQClassIDBase = fields[1].Get<uint8>();
             classMap.EQClassIDDefaultSecond = fields[2].Get<uint8>();
+            classMap.EQClassIDEligibleSecondMask = fields[3].Get<uint32>();
             ClassMapByWOWClassID[classMap.WOWClassID] = classMap;
         } while (queryResult->NextRow());
     }

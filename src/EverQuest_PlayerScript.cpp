@@ -420,12 +420,12 @@ public:
         uint8 secondClassID = EverQuest->GetCurrentSecondEQClassForPlayer(player);
         if (secondClassID != EQ_EQCLASS_NONE)
         {
-            string text = fmt::format("Your EQ class base is |cff4CFF00'{}'|r and secondary is |cff4CFF00'{}'|r. Type |cff4CFF00.class |rto change or edit your secondary EQ class.", GetEQClassStringFromID(classMap.EQClassIDBase), GetEQClassStringFromID(secondClassID));
+            string text = fmt::format("Your EQ class primary is |cff4CFF00'{}'|r and secondary is |cff4CFF00'{}'|r. Type |cff4CFF00.class |rto change or edit your secondary EQ class.", GetEQClassStringFromID(classMap.EQClassIDBase), GetEQClassStringFromID(secondClassID));
             ChatHandler(player->GetSession()).SendSysMessage(text);
         }
         else
         {
-            string text = fmt::format("Your EQ class base is |cff4CFF00'{}'|r and you have no secondary EQ class. Type |cff4CFF00.class |rto change or edit your secondary EQ class.", GetEQClassStringFromID(classMap.EQClassIDBase));
+            string text = fmt::format("Your EQ class primary is |cff4CFF00'{}'|r and you have no secondary EQ class. Type |cff4CFF00.class |rto change or edit your secondary EQ class.", GetEQClassStringFromID(classMap.EQClassIDBase));
             ChatHandler(player->GetSession()).SendSysMessage(text);
         }
     }
