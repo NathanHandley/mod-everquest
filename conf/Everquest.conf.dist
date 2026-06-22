@@ -99,6 +99,17 @@ EverQuest.CombatSkills.DisableBashKickStunOnPlayers = False
 
 ###################################################################################################
 #
+# 	EverQuest.ShowClassMessageOnLogin
+#		If true, a chat message describing the player's primary (and secondary) EQ class is shown
+#		on login.
+#	Default: False (no class message on login)
+#
+###################################################################################################
+
+EverQuest.ShowClassMessageOnLogin = False
+
+###################################################################################################
+#
 # 	EverQuest.CrossClass.IncludeSkillIDs
 #		Comma delimited list of skill IDs that remain when you switch eq classes
 #	Default: list is related to professions, flying, pick lock, ...

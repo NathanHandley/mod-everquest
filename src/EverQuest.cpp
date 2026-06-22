@@ -51,7 +51,8 @@ EverQuestMod::EverQuestMod() :
     ConfigAlternateGroupExperienceFormulaEnabled(false),
     ConfigAlternateGroupExperienceAddPercentPerAddedMember(20.0f),
     ConfigSpellDisableStackingOfSameDOT(false),
-    ConfigCombatSkillsDisableBashKickStunOnPlayers(false)
+    ConfigCombatSkillsDisableBashKickStunOnPlayers(false),
+    ConfigShowClassMessageOnLogin(false)
 {
 }
 
@@ -172,6 +173,9 @@ void EverQuestMod::LoadConfigurationFile()
 
     // Combat Skills
     ConfigCombatSkillsDisableBashKickStunOnPlayers = sConfigMgr->GetOption<bool>("EverQuest.CombatSkills.DisableBashKickStunOnPlayers", false);
+
+    // Class
+    ConfigShowClassMessageOnLogin = sConfigMgr->GetOption<bool>("EverQuest.ShowClassMessageOnLogin", false);
 
     // Cross-Class values
     ConfigCrossClassIncludeSkillIDs = GetSetFromConfigString("EverQuest.CrossClass.IncludeSkillIDs");

@@ -190,9 +190,14 @@ public:
             }
         }
 
+        uint8 currentSecondClass = EverQuest->GetCurrentSecondEQClassForPlayer(player);
         EverQuest->SetNextSecondEQClassForPlayer(player, classInt);
 
-        string text = fmt::format("Your secondary EQ class will change to |cff4CFF00{}|r on the next login", GetEQClassStringFromID(classInt));
+        string text;
+        if (classInt == currentSecondClass)
+            text = fmt::format("Your secondary EQ class will no longer change at next login, and will remain |cff4CFF00{}|r", GetEQClassStringFromID(classInt));
+        else
+            text = fmt::format("Your secondary EQ class will change to |cff4CFF00{}|r on the next login", GetEQClassStringFromID(classInt));
         ChatHandler(player->GetSession()).SendSysMessage(text);
 
         // Refresh the EQ Class UI tab so the chosen class shows as pending

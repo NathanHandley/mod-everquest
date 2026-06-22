@@ -418,6 +418,7 @@ public:
     float ConfigAlternateGroupExperienceAddPercentPerAddedMember;
     bool ConfigSpellDisableStackingOfSameDOT;
     bool ConfigCombatSkillsDisableBashKickStunOnPlayers;
+    bool ConfigShowClassMessageOnLogin;
     std::set<uint32> ConfigCrossClassIncludeSkillIDs;
 
     vector<Player*> AllLoadedPlayers;
