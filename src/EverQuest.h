@@ -436,6 +436,7 @@ public:
     unordered_map<int, unordered_map<uint32, vector<Creature*>>> AllLoadedCreaturesByMapIDThenSpawnPointID;
     unordered_map<int, unordered_map<uint32, vector<Creature*>>> AllLoadedCreaturesByMapIDThenSpawnGroupID;
     unordered_map<ObjectGuid, deque<uint32>> PlayerCasterConcurrentBardSongs;
+    unordered_set<ObjectGuid> PlayersPendingFirstLoginAutoLearn;
     unordered_map<uint32, vector<EverQuestCreatureLootGroup>> CreatureLootGroupsByCreatureTemplateID;
     unordered_map<ObjectGuid, vector<uint32>> PreloadedLootItemIDsByCreatureGUID;
     unordered_map<ObjectGuid, unordered_map<uint32, uint32>> PreloadedLootCountsByCreatureGUID;
@@ -487,6 +488,7 @@ public:
     const list<uint32>& GetAutoLearnSkillsForClass(uint8 classID);
     void LoadAutoLearnSpellsData();
     const list<EverQuestAutoLearnSpell>& GetAutoLearnSpellsForClass(uint8 classID);
+    void ApplyAutoLearnedClassSkillsAndSpells(Player* player);
     void LoadCreatureLootData();
     bool HasCreatureLootDataForCreatureTemplateEntryID(uint32 creatureTemplateEntryID);
     bool HasPreloadedLootItemIDsForCreatureGUID(ObjectGuid creatureGUID);

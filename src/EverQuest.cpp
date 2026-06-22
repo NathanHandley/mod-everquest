@@ -648,6 +648,50 @@ const list<EverQuestAutoLearnSpell>& EverQuestMod::GetAutoLearnSpellsForClass(ui
     }
 }
 
+void EverQuestMod::ApplyAutoLearnedClassSkillsAndSpells(Player* player)
+{
+    const EverQuestClassMap classMap = GetClassMapForWOWClassID(player->getClass());
+    uint8 secondClassID = GetCurrentSecondEQClassForPlayer(player);
+    vector<uint8> autoLearnEQClassIDs;
+    autoLearnEQClassIDs.push_back(classMap.EQClassIDBase);
+    if (secondClassID != EQ_EQCLASS_NONE && secondClassID != classMap.EQClassIDBase)
+        autoLearnEQClassIDs.push_back(secondClassID);
+
+    // Learn any spells the player may not have
+    bool needsUpdate = false;
+    for (uint8 autoLearnEQClassID : autoLearnEQClassIDs)
+    {
+        for (auto autoLearnSpell : GetAutoLearnSpellsForClass(autoLearnEQClassID))
+        {
+            // A race of 0 means the spell is learned regardless of race
+            if (autoLearnSpell.RaceID != 0 && autoLearnSpell.RaceID != player->getRace())
+                continue;
+            if (player->HasSpell(autoLearnSpell.SpellID) == false)
+            {
+                player->learnSpell(autoLearnSpell.SpellID);
+                needsUpdate = true;
+            }
+        }
+    }
+
+    // Learn any skills the player may not have
+    for (uint8 autoLearnEQClassID : autoLearnEQClassIDs)
+    {
+        for (auto skillID : GetAutoLearnSkillsForClass(autoLearnEQClassID))
+        {
+            if (player->GetSkillValue(skillID) == 0)
+            {
+                player->SetSkill((uint16)skillID, 0, 1, 1);
+                needsUpdate = true;
+            }
+        }
+    }
+
+    // Only force an update to the player if there is one
+    if (needsUpdate == true)
+        player->UpdateSkillsForLevel();
+}
+
 bool EverQuestMod::HasCreatePlayerData(uint8 raceID, uint8 classID)
 {
     if (PlayerCreateInfoByRaceIDThenClassID.find(raceID) == PlayerCreateInfoByRaceIDThenClassID.end())
