@@ -551,11 +551,13 @@ public:
     void MoveGlyphsToModGlyhpsTable(Player* player, CharacterDatabaseTransaction& transaction);
     void MoveAuraToModAuraTable(Player* player, CharacterDatabaseTransaction& transaction);
     void MoveEquipToModInventoryTable(Player* player, CharacterDatabaseTransaction& transaction);
+    void MoveQuestDataToModQuestTables(Player* player, CharacterDatabaseTransaction& transaction);
 
     void UpdateCharacterFromModCharacterTable(Player* player, uint8 pullEQClassID, CharacterDatabaseTransaction& transaction);
     void CopyModSpellTableIntoCharacterSpells(Player* player, uint8 pullEQClassID, CharacterDatabaseTransaction& transaction);
     void CopyModActionTableIntoCharacterAction(Player* player, uint8 pullEQClassID, CharacterDatabaseTransaction& transaction);
     void CopyModSkillTableIntoCharacterSkills(Player* player, uint8 pullEQClassID, CharacterDatabaseTransaction& transaction);
+    void CopyModQuestTablesIntoCharacterQuests(Player* player, uint8 pullEQClassID, CharacterDatabaseTransaction& transaction);
     void UpdatePlayerControllerForClassChange(Player* player, uint8 newEQClassID, CharacterDatabaseTransaction& transaction);
 
     std::map<uint8, EverQuestPlayerEquipedItemData> GetVisibleItemsBySlotForPlayerClass(Player* player, uint8 classID);

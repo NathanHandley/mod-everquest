@@ -1945,6 +1945,19 @@ void EverQuestMod::MoveEquipToModInventoryTable(Player* player, CharacterDatabas
     transaction->Append("DELETE FROM `character_inventory` WHERE guid = {} AND `bag` = 0 AND `slot` <= 18", player->GetGUID().GetCounter());
 }
 
+void EverQuestMod::MoveQuestDataToModQuestTables(Player* player, CharacterDatabaseTransaction& transaction)
+{
+    uint8 curEQClass = GetCurrentSecondEQClassForPlayer(player);
+
+    transaction->Append("DELETE FROM `mod_everquest_character_class_queststatus` WHERE guid = {} AND eqclass = {}", player->GetGUID().GetCounter(), curEQClass);
+    transaction->Append("INSERT IGNORE INTO `mod_everquest_character_class_queststatus` (`guid`, `eqclass`, `quest`, `status`, `explored`, `timer`, `mobcount1`, `mobcount2`, `mobcount3`, `mobcount4`, `itemcount1`, `itemcount2`, `itemcount3`, `itemcount4`, `itemcount5`, `itemcount6`, `playercount`) SELECT {}, {}, `quest`, `status`, `explored`, `timer`, `mobcount1`, `mobcount2`, `mobcount3`, `mobcount4`, `itemcount1`, `itemcount2`, `itemcount3`, `itemcount4`, `itemcount5`, `itemcount6`, `playercount` FROM character_queststatus WHERE guid = {}", player->GetGUID().GetCounter(), curEQClass, player->GetGUID().GetCounter());
+    transaction->Append("DELETE FROM `character_queststatus` WHERE guid = {}", player->GetGUID().GetCounter());
+
+    transaction->Append("DELETE FROM `mod_everquest_character_class_queststatus_rewarded` WHERE guid = {} AND eqclass = {}", player->GetGUID().GetCounter(), curEQClass);
+    transaction->Append("INSERT IGNORE INTO `mod_everquest_character_class_queststatus_rewarded` (`guid`, `eqclass`, `quest`, `active`) SELECT `guid`, {}, `quest`, `active` FROM character_queststatus_rewarded WHERE guid = {}", curEQClass, player->GetGUID().GetCounter());
+    transaction->Append("DELETE FROM `character_queststatus_rewarded` WHERE guid = {}", player->GetGUID().GetCounter());
+}
+
 void EverQuestMod::UpdateCharacterFromModCharacterTable(Player* player, uint8 pullEQClassID, CharacterDatabaseTransaction& transaction)
 {
     QueryResult queryResult = CharacterDatabase.Query("SELECT `level`, `xp`, `leveltime`, `rest_bonus`, `resettalents_cost`, `resettalents_time`, `health`, `power1`, `power2`, `power3`, `power4`, `power5`, `power6`, `power7`, `talentGroupsCount`, `activeTalentGroup` FROM mod_everquest_characters WHERE guid = {} AND eqclass = {}", player->GetGUID().GetCounter(), pullEQClassID);
@@ -2064,6 +2077,12 @@ void EverQuestMod::CopyModSkillTableIntoCharacterSkills(Player* player, uint8 pu
     }
 }
 
+void EverQuestMod::CopyModQuestTablesIntoCharacterQuests(Player* player, uint8 pullEQClassID, CharacterDatabaseTransaction& transaction)
+{
+    transaction->Append("INSERT IGNORE INTO `character_queststatus` (`guid`, `quest`, `status`, `explored`, `timer`, `mobcount1`, `mobcount2`, `mobcount3`, `mobcount4`, `itemcount1`, `itemcount2`, `itemcount3`, `itemcount4`, `itemcount5`, `itemcount6`, `playercount`) SELECT `guid`, `quest`, `status`, `explored`, `timer`, `mobcount1`, `mobcount2`, `mobcount3`, `mobcount4`, `itemcount1`, `itemcount2`, `itemcount3`, `itemcount4`, `itemcount5`, `itemcount6`, `playercount` FROM mod_everquest_character_class_queststatus WHERE guid = {} AND eqclass = {}", player->GetGUID().GetCounter(), pullEQClassID);
+    transaction->Append("INSERT IGNORE INTO `character_queststatus_rewarded` (`guid`, `quest`, `active`) SELECT `guid`, `quest`, `active` FROM mod_everquest_character_class_queststatus_rewarded WHERE guid = {} AND eqclass = {}", player->GetGUID().GetCounter(), pullEQClassID);
+}
+
 void EverQuestMod::UpdatePlayerControllerForClassChange(Player* player, uint8 newEQClassID, CharacterDatabaseTransaction& transaction)
 {
     transaction->Append("REPLACE INTO `mod_everquest_character_class_controller` (`guid`, `nextClass`, `currentClass`) VALUES ({}, {}, {})",
@@ -2148,8 +2167,8 @@ map<uint8, EverQuestPlayerEquipedItemData> EverQuestMod::GetVisibleItemsBySlotFo
 
 bool EverQuestMod::PerformClassSwitch(Player* player)
 {
-    uint8 nextEQClass = GetNextSecondEQClassForPlayer(player);
-    bool isNew = !DoesSavedClassDataExistForPlayer(player, nextEQClass);
+    uint8 nextSecondaryEQClass = GetNextSecondEQClassForPlayer(player);
+    bool isNew = !DoesSavedClassDataExistForPlayer(player, nextSecondaryEQClass);
 
     // Set up the transaction
     CharacterDatabaseTransaction transaction = CharacterDatabase.BeginTransaction();
@@ -2163,17 +2182,18 @@ bool EverQuestMod::PerformClassSwitch(Player* player)
     MoveGlyphsToModGlyhpsTable(player, transaction);
     MoveAuraToModAuraTable(player, transaction);
     MoveEquipToModInventoryTable(player, transaction);
+    MoveQuestDataToModQuestTables(player, transaction);
 
     // Update pet references
     transaction->Append("UPDATE character_pet SET multi_class_owner = {}, eq_eqclass = {} WHERE owner = {}", player->GetGUID().GetCounter(), GetCurrentSecondEQClassForPlayer(player), player->GetGUID().GetCounter());
     transaction->Append("UPDATE character_pet SET owner = 0 WHERE multi_class_owner = {} AND eq_eqclass = {}", player->GetGUID().GetCounter(), GetCurrentSecondEQClassForPlayer(player));
-    transaction->Append("UPDATE character_pet SET owner = {} WHERE multi_class_owner = {} AND eq_eqclass = {}", player->GetGUID().GetCounter(), player->GetGUID().GetCounter(), nextEQClass);
+    transaction->Append("UPDATE character_pet SET owner = {} WHERE multi_class_owner = {} AND eq_eqclass = {}", player->GetGUID().GetCounter(), player->GetGUID().GetCounter(), nextSecondaryEQClass);
 
     // New
     if (isNew)
     {
         // For start level
-        uint32 startLevel = nextEQClass != CLASS_DEATH_KNIGHT
+        uint32 startLevel = nextSecondaryEQClass != CLASS_DEATH_KNIGHT
             ? sWorld->getIntConfig(CONFIG_START_PLAYER_LEVEL)
             : sWorld->getIntConfig(CONFIG_START_HEROIC_PLAYER_LEVEL);
 
@@ -2191,20 +2211,21 @@ bool EverQuestMod::PerformClassSwitch(Player* player)
     else
     {
         // Copy in the stored version for existing
-        UpdateCharacterFromModCharacterTable(player, nextEQClass, transaction);
-        CopyModSpellTableIntoCharacterSpells(player, nextEQClass, transaction);
-        CopyModActionTableIntoCharacterAction(player, nextEQClass, transaction);
-        CopyModSkillTableIntoCharacterSkills(player, nextEQClass, transaction);
+        UpdateCharacterFromModCharacterTable(player, nextSecondaryEQClass, transaction);
+        CopyModSpellTableIntoCharacterSpells(player, nextSecondaryEQClass, transaction);
+        CopyModActionTableIntoCharacterAction(player, nextSecondaryEQClass, transaction);
+        CopyModSkillTableIntoCharacterSkills(player, nextSecondaryEQClass, transaction);
+        CopyModQuestTablesIntoCharacterQuests(player, nextSecondaryEQClass, transaction);
 
-        transaction->Append("INSERT IGNORE INTO character_talent (guid, spell, specMask) SELECT guid, spell, specMask FROM mod_everquest_character_class_talent WHERE guid = {} AND eqclass = {}", player->GetGUID().GetCounter(), nextEQClass);
-        transaction->Append("INSERT IGNORE INTO character_glyphs (guid, talentGroup, glyph1, glyph2, glyph3, glyph4, glyph5, glyph6) SELECT guid, talentGroup, glyph1, glyph2, glyph3, glyph4, glyph5, glyph6 FROM mod_everquest_character_class_glyphs WHERE guid = {} AND eqclass = {}", player->GetGUID().GetCounter(), nextEQClass);
-        transaction->Append("INSERT IGNORE INTO character_aura (guid, casterGuid, itemGuid, spell, effectMask, recalculateMask, stackCount, amount0, amount1, amount2, base_amount0, base_amount1, base_amount2, maxDuration, remainTime, remainCharges) SELECT guid, casterGuid, itemGuid, spell, effectMask, recalculateMask, stackCount, amount0, amount1, amount2, base_amount0, base_amount1, base_amount2, maxDuration, remainTime, remainCharges FROM mod_everquest_character_class_aura WHERE guid = {} AND eqclass = {}", player->GetGUID().GetCounter(), nextEQClass);
-        transaction->Append("INSERT IGNORE INTO `character_inventory` (`guid`, `bag`, `slot`, `item`) SELECT `guid`, `bag`, `slot`, `item` FROM mod_everquest_character_class_inventory WHERE guid = {} AND eqclass = {}", player->GetGUID().GetCounter(), nextEQClass);
+        transaction->Append("INSERT IGNORE INTO character_talent (guid, spell, specMask) SELECT guid, spell, specMask FROM mod_everquest_character_class_talent WHERE guid = {} AND eqclass = {}", player->GetGUID().GetCounter(), nextSecondaryEQClass);
+        transaction->Append("INSERT IGNORE INTO character_glyphs (guid, talentGroup, glyph1, glyph2, glyph3, glyph4, glyph5, glyph6) SELECT guid, talentGroup, glyph1, glyph2, glyph3, glyph4, glyph5, glyph6 FROM mod_everquest_character_class_glyphs WHERE guid = {} AND eqclass = {}", player->GetGUID().GetCounter(), nextSecondaryEQClass);
+        transaction->Append("INSERT IGNORE INTO character_aura (guid, casterGuid, itemGuid, spell, effectMask, recalculateMask, stackCount, amount0, amount1, amount2, base_amount0, base_amount1, base_amount2, maxDuration, remainTime, remainCharges) SELECT guid, casterGuid, itemGuid, spell, effectMask, recalculateMask, stackCount, amount0, amount1, amount2, base_amount0, base_amount1, base_amount2, maxDuration, remainTime, remainCharges FROM mod_everquest_character_class_aura WHERE guid = {} AND eqclass = {}", player->GetGUID().GetCounter(), nextSecondaryEQClass);
+        transaction->Append("INSERT IGNORE INTO `character_inventory` (`guid`, `bag`, `slot`, `item`) SELECT `guid`, `bag`, `slot`, `item` FROM mod_everquest_character_class_inventory WHERE guid = {} AND eqclass = {}", player->GetGUID().GetCounter(), nextSecondaryEQClass);
     }
 
     // Update current class
-    UpdatePlayerControllerForClassChange(player, nextEQClass, transaction);
-    ActivePlayerClassControllerDataByGUID[player->GetGUID()].CurrentSecondClass = nextEQClass;
+    UpdatePlayerControllerForClassChange(player, nextSecondaryEQClass, transaction);
+    ActivePlayerClassControllerDataByGUID[player->GetGUID()].CurrentSecondClass = nextSecondaryEQClass;
 
     // Commit the transaction
     CharacterDatabase.CommitTransaction(transaction);
@@ -2227,6 +2248,8 @@ bool EverQuestMod::PerformPlayerDelete(ObjectGuid guid)
     transaction->Append("DELETE FROM mod_everquest_character_class_glyphs WHERE guid = {}", playerGUID);
     transaction->Append("DELETE FROM mod_everquest_character_class_inventory WHERE guid = {}", playerGUID);
     transaction->Append("DELETE FROM mod_everquest_character_class_controller WHERE guid = {}", playerGUID);
+    transaction->Append("DELETE FROM mod_everquest_character_class_queststatus WHERE guid = {}", playerGUID);
+    transaction->Append("DELETE FROM mod_everquest_character_class_queststatus_rewarded WHERE guid = {}", playerGUID);
     transaction->Append("DELETE FROM character_pet WHERE owner = 0 AND eq_owner = {}", playerGUID);
     CharacterDatabase.CommitTransaction(transaction);
     if (ActivePlayerClassControllerDataByGUID.find(guid) != ActivePlayerClassControllerDataByGUID.end())
