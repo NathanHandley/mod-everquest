@@ -421,6 +421,9 @@ public:
     bool ConfigShowClassMessageOnLogin;
     std::set<uint32> ConfigCrossClassIncludeSkillIDs;
 
+    unordered_set<uint32> CrossClassExemptSpellIDs;
+    bool CrossClassExemptSpellIDsBuilt;
+
     vector<Player*> AllLoadedPlayers;
     unordered_map<uint32, EverQuestCreature> CreaturesByTemplateID;
     unordered_map<uint32, list<EverQuestCreatureOnkillReputation>> CreatureOnkillReputationsByCreatureTemplateID;
@@ -550,6 +553,8 @@ public:
     void CopyCharacterDataIntoModCharacterTable(Player* player, CharacterDatabaseTransaction& transaction);
     void MoveTalentsToModTalentsTable(Player* player, CharacterDatabaseTransaction& transaction);
     void MoveClassSpellsToModSpellsTable(Player* player, CharacterDatabaseTransaction& transaction);
+    void EnsureCrossClassExemptSpellIDsBuilt();
+    bool IsSpellExemptFromClassMove(uint32 spellID);
     void MoveClassSkillsToModSkillsTable(Player* player, CharacterDatabaseTransaction& transaction);
     void ReplaceModClassActionCopy(Player* player, CharacterDatabaseTransaction& transaction);
     void MoveGlyphsToModGlyhpsTable(Player* player, CharacterDatabaseTransaction& transaction);

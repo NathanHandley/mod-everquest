@@ -102,11 +102,11 @@ EverQuest.CombatSkills.DisableBashKickStunOnPlayers = False
 # 	EverQuest.ShowClassMessageOnLogin
 #		If true, a chat message describing the player's primary (and secondary) EQ class is shown
 #		on login.
-#	Default: False (no class message on login)
+#	Default: True (class message on login)
 #
 ###################################################################################################
 
-EverQuest.ShowClassMessageOnLogin = False
+EverQuest.ShowClassMessageOnLogin = True
 
 ###################################################################################################
 #

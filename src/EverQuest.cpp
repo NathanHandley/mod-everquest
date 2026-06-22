@@ -18,6 +18,7 @@
 #include "GameEventMgr.h"
 #include "Creature.h"
 #include "CreatureData.h"
+#include "DBCStores.h"
 #include "SpellMgr.h"
 #include "Tokenize.h"
 
@@ -52,7 +53,8 @@ EverQuestMod::EverQuestMod() :
     ConfigAlternateGroupExperienceAddPercentPerAddedMember(20.0f),
     ConfigSpellDisableStackingOfSameDOT(false),
     ConfigCombatSkillsDisableBashKickStunOnPlayers(false),
-    ConfigShowClassMessageOnLogin(false)
+    ConfigShowClassMessageOnLogin(true),
+    CrossClassExemptSpellIDsBuilt(false)
 {
 }
 
@@ -175,10 +177,14 @@ void EverQuestMod::LoadConfigurationFile()
     ConfigCombatSkillsDisableBashKickStunOnPlayers = sConfigMgr->GetOption<bool>("EverQuest.CombatSkills.DisableBashKickStunOnPlayers", false);
 
     // Class
-    ConfigShowClassMessageOnLogin = sConfigMgr->GetOption<bool>("EverQuest.ShowClassMessageOnLogin", false);
+    ConfigShowClassMessageOnLogin = sConfigMgr->GetOption<bool>("EverQuest.ShowClassMessageOnLogin", true);
 
     // Cross-Class values
     ConfigCrossClassIncludeSkillIDs = GetSetFromConfigString("EverQuest.CrossClass.IncludeSkillIDs");
+
+    // The cross-class exempt spell cache derives from the skill list above
+    CrossClassExemptSpellIDs.clear();
+    CrossClassExemptSpellIDsBuilt = false;
 }
 
 void EverQuestMod::LoadCreatureData()
@@ -1843,20 +1849,60 @@ void EverQuestMod::MoveTalentsToModTalentsTable(Player* player, CharacterDatabas
     transaction->Append("DELETE FROM `character_talent` WHERE guid = {}", player->GetGUID().GetCounter());
 }
 
+void EverQuestMod::EnsureCrossClassExemptSpellIDsBuilt()
+{
+    if (CrossClassExemptSpellIDsBuilt == true)
+        return;
+    CrossClassExemptSpellIDsBuilt = true;
+
+    // Cache every spell that is tied to a cross-class skill, so that they don't wipe on secondary class switch
+    if (ConfigCrossClassIncludeSkillIDs.empty() == true)
+        return;
+    for (SkillLineAbilityEntry const* skillLineAbility : sSkillLineAbilityStore)
+    {
+        if (skillLineAbility == nullptr)
+            continue;
+        if (ConfigCrossClassIncludeSkillIDs.find(skillLineAbility->SkillLine) != ConfigCrossClassIncludeSkillIDs.end())
+            CrossClassExemptSpellIDs.insert(skillLineAbility->Spell);
+    }
+}
+
+bool EverQuestMod::IsSpellExemptFromClassMove(uint32 spellID)
+{
+    // Recipes / abilities mapped to a cross-class skill line via SkillLineAbility
+    if (CrossClassExemptSpellIDs.find(spellID) != CrossClassExemptSpellIDs.end())
+        return true;
+
+    // Profession rank / development spells are not in SkillLineAbility, but grant a skill line through a skill effect
+    SpellInfo const* spellInfo = sSpellMgr->GetSpellInfo(spellID);
+    if (spellInfo != nullptr)
+    {
+        for (uint8 i = 0; i < MAX_SPELL_EFFECTS; ++i)
+        {
+            if (spellInfo->Effects[i].Effect != SPELL_EFFECT_SKILL_STEP && spellInfo->Effects[i].Effect != SPELL_EFFECT_SKILL)
+                continue;
+            if (ConfigCrossClassIncludeSkillIDs.find((uint32)spellInfo->Effects[i].MiscValue) != ConfigCrossClassIncludeSkillIDs.end())
+                return true;
+        }
+    }
+    return false;
+}
+
 void EverQuestMod::MoveClassSpellsToModSpellsTable(Player* player, CharacterDatabaseTransaction& transaction)
 {
     uint8 curEQClass = GetCurrentSecondEQClassForPlayer(player);
 
+    // Build (once) the set of profession/tradeskill-bound spells that should not migrate
+    EnsureCrossClassExemptSpellIDsBuilt();
+
     // Purge old spell list in mod table
     transaction->Append("DELETE FROM `mod_everquest_character_class_spell` WHERE guid = {} and eqclass = {}", player->GetGUID().GetCounter(), curEQClass);
 
-    // Move class spells from the character table into the mod table
+    // Move class spells (including EverQuest spells) from the character table into the mod table
     for (auto& curSpell : player->GetSpellMap())
     {
-        // Skip non-class spells
-        // TODO: Make this work
-        //if (ClassSpellIDs.find(curSpell.first) == ClassSpellIDs.end())
-        //    continue;
+        if (IsSpellExemptFromClassMove(curSpell.first) == true)
+            continue;
 
         // Skip deleting spells
         if (curSpell.second->State == PLAYERSPELL_REMOVED)
