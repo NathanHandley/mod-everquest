@@ -101,6 +101,8 @@ bool EverQuestMod::LoadConfigurationSystemDataFromDB()
                 ConfigDeathKnightsStartLikeOtherClasses = value == "1" ? true : false;
             else if (key == "GameObjectTemplateIDMin")
                 ConfigSystemGameObjectTemplateIDMin = (uint32)atoi(value.c_str());
+            else if (key == "GateTetherAuraSpellID")
+                ConfigSystemGateTetherSpellID = (uint32)atoi(value.c_str());
             else if (key == "GameObjectTemplateIDMax")
                 ConfigSystemGameObjectTemplateIDMax = (uint32)atoi(value.c_str());
             else if (key == "InvisVsUndeadDetectSpellID")
@@ -2005,8 +2007,8 @@ void EverQuestMod::MoveAuraToModAuraTable(Player* player, CharacterDatabaseTrans
     // TODO: Do something about gate
 
     transaction->Append("DELETE FROM `mod_everquest_character_class_aura` WHERE guid = {} and eqclass = {}", player->GetGUID().GetCounter(), curEQClass);
-    transaction->Append("INSERT IGNORE INTO mod_everquest_character_class_aura (guid, class, eqclass, casterGuid, itemGuid, spell, effectMask, recalculateMask, stackCount, amount0, amount1, amount2, base_amount0, base_amount1, base_amount2, maxDuration, remainTime, remainCharges) SELECT guid, {}, {}, casterGuid, itemGuid, spell, effectMask, recalculateMask, stackCount, amount0, amount1, amount2, base_amount0, base_amount1, base_amount2, maxDuration, remainTime, remainCharges FROM character_aura WHERE guid = {}", player->getClass(), curEQClass, player->GetGUID().GetCounter());
-    transaction->Append("DELETE FROM `character_aura` WHERE guid = {}", player->GetGUID().GetCounter());
+    transaction->Append("INSERT IGNORE INTO mod_everquest_character_class_aura (guid, class, eqclass, casterGuid, itemGuid, spell, effectMask, recalculateMask, stackCount, amount0, amount1, amount2, base_amount0, base_amount1, base_amount2, maxDuration, remainTime, remainCharges) SELECT guid, {}, {}, casterGuid, itemGuid, spell, effectMask, recalculateMask, stackCount, amount0, amount1, amount2, base_amount0, base_amount1, base_amount2, maxDuration, remainTime, remainCharges FROM character_aura WHERE guid = {} AND spell != {}", player->getClass(), curEQClass, player->GetGUID().GetCounter(), EverQuest->ConfigSystemGateTetherSpellID);
+    transaction->Append("DELETE FROM `character_aura` WHERE guid = {} AND spell != {}", player->GetGUID().GetCounter(), EverQuest->ConfigSystemGateTetherSpellID);
 }
 
 void EverQuestMod::MoveEquipToModInventoryTable(Player* player, CharacterDatabaseTransaction& transaction)
