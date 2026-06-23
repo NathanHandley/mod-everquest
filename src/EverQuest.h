@@ -35,7 +35,7 @@ static uint32 ConfigMaxSkillIDCheck = 1000;         // The highest level of skil
 
 class Unit;
 
-#define EQ_MOD_VERSION                              23
+#define EQ_MOD_VERSION                              24
 
 #define EQ_EQCLASS_NONE                             0
 #define EQ_EQCLASS_WARRIOR                          1
@@ -336,6 +336,7 @@ public:
     uint8 EQClassID = 0;
     uint8 RaceID = 0;
     uint32 SpellID = 0;
+    uint8 Level = 1;
 };
 
 class EverQuestForageZoneItem

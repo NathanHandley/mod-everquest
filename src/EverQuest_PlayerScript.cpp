@@ -416,6 +416,15 @@ public:
         EverQuest->SendClassInfoAddonMessageToPlayer(player);
     }
 
+    void OnPlayerLevelChanged(Player* player, uint8 /*oldlevel*/) override
+    {
+        if (EverQuest->IsEnabled == false)
+            return;
+
+        // Grant any auto-learned class spells/skills that unlock at the player's new level
+        EverQuest->ApplyAutoLearnedClassSkillsAndSpells(player);
+    }
+
     void OnPlayerLogout(Player* player) override
     {
         if (EverQuest->IsEnabled == false)
