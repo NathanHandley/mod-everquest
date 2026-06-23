@@ -1164,7 +1164,7 @@ const EverQuestClassMap& EverQuestMod::GetClassMapForWOWClassID(uint8 wowClassID
         return ClassMapByWOWClassID[wowClassID];
     else
     {
-        static const EverQuestClassMap returnEmpty;
+        static const EverQuestClassMap returnEmpty{};
         LOG_ERROR("module.EverQuest", "EverQuestMod::GetClassMapForWOWClassID failure, wowClassID {} could not be found", wowClassID);
         return returnEmpty;
     }
