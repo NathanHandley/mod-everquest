@@ -1804,7 +1804,7 @@ map<uint8, uint8> EverQuestMod::GetClassLevelsByClassForPlayer(Player* player)
     }
 
     // Add this class level
-    levelsByClass.insert(pair<uint8, uint8>(player->getClass(), player->GetLevel()));
+    levelsByClass.insert(pair<uint8, uint8>(GetCurrentSecondEQClassForPlayer(player), player->GetLevel()));
 
     return levelsByClass;
 }
