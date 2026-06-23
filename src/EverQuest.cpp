@@ -2260,9 +2260,9 @@ bool EverQuestMod::PerformClassSwitch(Player* player)
     MoveQuestDataToModQuestTables(player, transaction);
 
     // Update pet references
-    transaction->Append("UPDATE character_pet SET multi_class_owner = {}, eq_eqclass = {} WHERE owner = {}", player->GetGUID().GetCounter(), GetCurrentSecondEQClassForPlayer(player), player->GetGUID().GetCounter());
-    transaction->Append("UPDATE character_pet SET owner = 0 WHERE multi_class_owner = {} AND eq_eqclass = {}", player->GetGUID().GetCounter(), GetCurrentSecondEQClassForPlayer(player));
-    transaction->Append("UPDATE character_pet SET owner = {} WHERE multi_class_owner = {} AND eq_eqclass = {}", player->GetGUID().GetCounter(), player->GetGUID().GetCounter(), nextSecondaryEQClass);
+    transaction->Append("UPDATE character_pet SET eq_owner = {}, eq_eqclass = {} WHERE owner = {}", player->GetGUID().GetCounter(), GetCurrentSecondEQClassForPlayer(player), player->GetGUID().GetCounter());
+    transaction->Append("UPDATE character_pet SET owner = 0 WHERE eq_owner = {} AND eq_eqclass = {}", player->GetGUID().GetCounter(), GetCurrentSecondEQClassForPlayer(player));
+    transaction->Append("UPDATE character_pet SET owner = {} WHERE eq_owner = {} AND eq_eqclass = {}", player->GetGUID().GetCounter(), player->GetGUID().GetCounter(), nextSecondaryEQClass);
 
     // New
     if (isNew)
