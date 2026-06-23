@@ -372,8 +372,9 @@ struct EverQuestPlayerEquipedItemData
     uint32 ItemInstanceGUID;
 };
 
-struct EverQuestClassMap
+class EverQuestClassMap
 {
+public:
     uint8 WOWClassID;
     uint8 EQClassIDBase;
     uint8 EQClassIDDefaultSecond;
