@@ -327,13 +327,20 @@ public:
         EverQuest->PerformPlayerDelete(guid);
     }
 
+    void OnPlayerCreate(Player* player) override
+    {
+        if (EverQuest->IsEnabled == false)
+            return;
+
+        EverQuest->SetInitialCreatePositionForPlayer(player);
+    }
+
     void OnPlayerLogin(Player* player) override
     {
         if (EverQuest->IsEnabled == false)
             return;
 
         // First login behavior
-        bool firstLoginTeleported = false;
         if (player->HasAtLoginFlag(AT_LOGIN_FIRST) == true)
         {
             // Special logic for deathknights
@@ -350,14 +357,11 @@ public:
                 }
             }
 
-            // If there is create data, move the player to the related zone and set initial bind
             if (EverQuest->HasCreatePlayerData(player->getRace(), player->getClass()) == true)
             {
                 EverQuestPlayerCreateInfo createInfo = EverQuest->GetPlayerCreateInfo(player->getRace(), player->getClass());
-                player->TeleportTo(createInfo.MapID, createInfo.PositionX, createInfo.PositionY, createInfo.PositionZ, createInfo.Orientation);
                 EverQuest->SetNewBindHome(player, player->GetGUID().GetCounter(), createInfo.MapID, createInfo.ZoneID, createInfo.PositionX,
                     createInfo.PositionY, createInfo.PositionZ);
-                firstLoginTeleported = true;
                 if (EverQuest->ConfigDeathKnightsStartLikeOtherClasses == true && player->getClass() == CLASS_DEATH_KNIGHT)
                 {
                     player->RemoveAura(48266); // Take off Blood Presence
@@ -389,11 +393,7 @@ public:
         }
 
         // Autolearning is based on EQ classes (primary and secondary)
-        // Note: First login teleport messes with this a bit, so there need sto be a delay in that case
-        if (firstLoginTeleported == true)
-            EverQuest->PlayersPendingFirstLoginAutoLearn.insert(player->GetGUID());
-        else
-            EverQuest->ApplyAutoLearnedClassSkillsAndSpells(player);
+        EverQuest->ApplyAutoLearnedClassSkillsAndSpells(player);
 
         // Grab EQ class info for the login summary message
         EverQuestClassMap classMap = EverQuest->GetClassMapForWOWClassID(player->getClass());
@@ -412,9 +412,8 @@ public:
             }
         }
 
-        // First login causes a teleport so the addon UI isn't available to catch the data
-        if (firstLoginTeleported == false)
-            EverQuest->SendClassInfoAddonMessageToPlayer(player);
+        // Seed the EQ Class character-pane tab with the player's class state
+        EverQuest->SendClassInfoAddonMessageToPlayer(player);
     }
 
     void OnPlayerLevelChanged(Player* player, uint8 /*oldlevel*/) override
@@ -426,25 +425,6 @@ public:
         EverQuest->ApplyAutoLearnedClassSkillsAndSpells(player);
     }
 
-    void OnPlayerUpdate(Player* player, uint32 p_time) override
-    {
-        if (EverQuest->IsEnabled == false)
-            return;
-
-        // Queue the EQ class-pane push so that it only fires when the player is in the world
-        auto pendingPushItr = EverQuest->PlayersPendingClassInfoPushMs.find(player->GetGUID());
-        if (pendingPushItr != EverQuest->PlayersPendingClassInfoPushMs.end())
-        {
-            if (pendingPushItr->second > p_time)
-                pendingPushItr->second -= p_time;
-            else if (player->IsInWorld() == true)
-            {
-                EverQuest->PlayersPendingClassInfoPushMs.erase(pendingPushItr);
-                EverQuest->SendClassInfoAddonMessageToPlayer(player);
-            }
-        }
-    }
-
     void OnPlayerLogout(Player* player) override
     {
         if (EverQuest->IsEnabled == false)
@@ -453,8 +433,6 @@ public:
         EverQuest->AllLoadedPlayers.erase(std::remove(EverQuest->AllLoadedPlayers.begin(), EverQuest->AllLoadedPlayers.end(), player), EverQuest->AllLoadedPlayers.end());
         if (EverQuest->ConfigBardMaxConcurrentSongs != 0)
             EverQuest->PlayerCasterConcurrentBardSongs[player->GetGUID()].clear();
-        EverQuest->PlayersPendingFirstLoginAutoLearn.erase(player->GetGUID());
-        EverQuest->PlayersPendingClassInfoPushMs.erase(player->GetGUID());
 
         // Class switch
         if (EverQuest->GetCurrentSecondEQClassForPlayer(player) != EverQuest->GetNextSecondEQClassForPlayer(player))
@@ -471,16 +449,6 @@ public:
     {
         if (EverQuest->IsEnabled == false)
             return;
-
-        // Handle any delayed first-login skill/spell adds
-        auto pendingAutoLearnItr = EverQuest->PlayersPendingFirstLoginAutoLearn.find(player->GetGUID());
-        if (pendingAutoLearnItr != EverQuest->PlayersPendingFirstLoginAutoLearn.end())
-        {
-            EverQuest->PlayersPendingFirstLoginAutoLearn.erase(pendingAutoLearnItr);
-            EverQuest->ApplyAutoLearnedClassSkillsAndSpells(player);
-            // Delay the EQ class pane data push since it seems to get 'lost' for new characters otherwise
-            EverQuest->PlayersPendingClassInfoPushMs[player->GetGUID()] = 2500;
-        }
 
         // Restrict non-GMs to norrath if set
         if (EverQuest->ConfigMapRestrictPlayersToNorrath == true && player->IsGameMaster() == false)

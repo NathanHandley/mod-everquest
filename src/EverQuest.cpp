@@ -1736,6 +1736,16 @@ void EverQuestMod::SetInitialEQClassesForPlayer(Player* player)
     ActivePlayerClassControllerDataByGUID[player->GetGUID()] = controllerData;
 }
 
+void EverQuestMod::SetInitialCreatePositionForPlayer(Player* player)
+{
+    if (HasCreatePlayerData(player->getRace(), player->getClass()) == false)
+        return;
+
+    const EverQuestPlayerCreateInfo& createInfo = GetPlayerCreateInfo(player->getRace(), player->getClass());
+    CharacterDatabase.Execute("UPDATE `characters` SET `map` = {}, `zone` = {}, `position_x` = {}, `position_y` = {}, `position_z` = {}, `orientation` = {} WHERE `guid` = {}",
+        createInfo.MapID, createInfo.ZoneID, createInfo.PositionX, createInfo.PositionY, createInfo.PositionZ, createInfo.Orientation, player->GetGUID().GetCounter());
+}
+
 EverQuestPlayerControllerData EverQuestMod::GetPlayerControllerData(Player* player)
 {
     EverQuestPlayerControllerData controllerData;
