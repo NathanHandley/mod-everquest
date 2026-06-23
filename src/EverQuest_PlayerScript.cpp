@@ -412,8 +412,9 @@ public:
             }
         }
 
-        // Seed the EQ Class character-pane tab with the player's class state
-        EverQuest->SendClassInfoAddonMessageToPlayer(player);
+        // First login causes a teleport so the addon UI isn't available to catch the data
+        if (firstLoginTeleported == false)
+            EverQuest->SendClassInfoAddonMessageToPlayer(player);
     }
 
     void OnPlayerLevelChanged(Player* player, uint8 /*oldlevel*/) override
@@ -425,6 +426,25 @@ public:
         EverQuest->ApplyAutoLearnedClassSkillsAndSpells(player);
     }
 
+    void OnPlayerUpdate(Player* player, uint32 p_time) override
+    {
+        if (EverQuest->IsEnabled == false)
+            return;
+
+        // Queue the EQ class-pane push so that it only fires when the player is in the world
+        auto pendingPushItr = EverQuest->PlayersPendingClassInfoPushMs.find(player->GetGUID());
+        if (pendingPushItr != EverQuest->PlayersPendingClassInfoPushMs.end())
+        {
+            if (pendingPushItr->second > p_time)
+                pendingPushItr->second -= p_time;
+            else if (player->IsInWorld() == true)
+            {
+                EverQuest->PlayersPendingClassInfoPushMs.erase(pendingPushItr);
+                EverQuest->SendClassInfoAddonMessageToPlayer(player);
+            }
+        }
+    }
+
     void OnPlayerLogout(Player* player) override
     {
         if (EverQuest->IsEnabled == false)
@@ -434,6 +454,7 @@ public:
         if (EverQuest->ConfigBardMaxConcurrentSongs != 0)
             EverQuest->PlayerCasterConcurrentBardSongs[player->GetGUID()].clear();
         EverQuest->PlayersPendingFirstLoginAutoLearn.erase(player->GetGUID());
+        EverQuest->PlayersPendingClassInfoPushMs.erase(player->GetGUID());
 
         // Class switch
         if (EverQuest->GetCurrentSecondEQClassForPlayer(player) != EverQuest->GetNextSecondEQClassForPlayer(player))
@@ -457,6 +478,8 @@ public:
         {
             EverQuest->PlayersPendingFirstLoginAutoLearn.erase(pendingAutoLearnItr);
             EverQuest->ApplyAutoLearnedClassSkillsAndSpells(player);
+            // Delay the EQ class pane data push since it seems to get 'lost' for new characters otherwise
+            EverQuest->PlayersPendingClassInfoPushMs[player->GetGUID()] = 2500;
         }
 
         // Restrict non-GMs to norrath if set

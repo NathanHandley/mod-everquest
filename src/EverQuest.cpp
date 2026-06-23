@@ -2408,10 +2408,9 @@ void EverQuestMod::SendClassInfoAddonMessageToPlayer(Player* player)
                 << "|" << uint32(level) << "|" << GetEQClassCommandNameFromID(static_cast<uint8>(eqClassID));
     }
 
-    // Server->client addon messages are delivered as a whisper tagged LANG_ADDON (the client fires its CHAT_MSG_ADDON event for these)
     std::string addonMessage = "EQCLASS\t" + payload.str();
     WorldPacket data;
-    ChatHandler::BuildChatPacket(data, CHAT_MSG_WHISPER, LANG_ADDON, player, player, addonMessage);
+    ChatHandler::BuildChatPacket(data, CHAT_MSG_SYSTEM, LANG_ADDON, nullptr, nullptr, addonMessage);
     player->SendDirectMessage(&data);
 }
 
