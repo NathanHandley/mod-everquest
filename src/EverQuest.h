@@ -352,6 +352,7 @@ struct EverQuestPlayerControllerData
     uint32 GUID = 0;
     uint8 CurrentSecondClass = 0;
     uint8 NextSecondClass = 0;
+    uint32 SecondaryExpPool = 0;
 };
 
 class EverQuestPlayerClassInfoItem
@@ -421,6 +422,8 @@ public:
     bool ConfigSpellDisableStackingOfSameDOT;
     bool ConfigCombatSkillsDisableBashKickStunOnPlayers;
     bool ConfigShowClassMessageOnLogin;
+    float ConfigSecondaryExpPoolGainPercent;
+    uint32 ConfigSecondaryExpPoolMaxPooled;
     std::set<uint32> ConfigCrossClassIncludeSkillIDs;
 
     unordered_set<uint32> CrossClassExemptSpellIDs;
@@ -544,6 +547,11 @@ public:
     uint8 GetNextSecondEQClassForPlayer(Player* player);
     void SetNextSecondEQClassForPlayer(Player* player, uint8 nextEQClass);
     void SendClassInfoAddonMessageToPlayer(Player* player);
+    uint32 GetSecondaryExpPoolForPlayer(Player* player);
+    uint32 AddToSecondaryExpPoolForPlayer(Player* player, uint32 grantedExp);
+    uint32 SpendSecondaryExpPoolForPlayer(Player* player);
+    void SaveSecondaryExpPoolForPlayer(Player* player);
+    void SendExpPoolAddonMessageToPlayer(Player* player, uint32 gainedExp);
     void SetInitialEQClassesForPlayer(Player* player);
     void SetInitialCreatePositionForPlayer(Player* player);
     EverQuestPlayerControllerData GetPlayerControllerData(Player* player);

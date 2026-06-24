@@ -109,6 +109,26 @@ EverQuest.CombatSkills.DisableBashKickStunOnPlayers = False
 EverQuest.ShowClassMessageOnLogin = True
 
 ###################################################################################################
+# Secondary Experience Pool Settings
+#
+# 	EverQuest.SecondaryExpPool.GainPercent
+#		When a character kills a creature, this percent of the kill's experience is added to a per-character 
+#       "secondary bonus experience pool" as EXTRA experience.  The experience earned by the killing
+#       character is NOT reduced to produce it.  The player can later apply the pooled experience
+#       to the active character from the EQ Class character tab. Set to 0 to disable the pool entirely.
+#	Default: 25 (quarter of the kill's experience is also banked into the pool)
+#
+# 	EverQuest.SecondaryExpPool.MaxPooled
+#		Maximum amount of experience that can be held in the pool.  Once full, further kills add nothing
+#		to the pool until some is spent.
+#	Default: 1000000
+#
+###################################################################################################
+
+EverQuest.SecondaryExpPool.GainPercent = 25
+EverQuest.SecondaryExpPool.MaxPooled = 1000000
+
+###################################################################################################
 #
 # 	EverQuest.CrossClass.IncludeSkillIDs
 #		Comma delimited list of skill IDs that remain when you switch eq classes

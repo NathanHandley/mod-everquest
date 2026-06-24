@@ -68,9 +68,10 @@ public:
     {
         static ChatCommandTable classCommandTable =
         {
-            { "change", HandleMultiClassChangeClass,    SEC_PLAYER, Console::No },
-            { "info",   HandleMultiClassInfo,           SEC_PLAYER, Console::No },
-            { "uiinfo", HandleMultiClassUIInfo,         SEC_PLAYER, Console::No },
+            { "change",    HandleMultiClassChangeClass,     SEC_PLAYER, Console::No },
+            { "info",      HandleMultiClassInfo,            SEC_PLAYER, Console::No },
+            { "uiinfo",    HandleMultiClassUIInfo,          SEC_PLAYER, Console::No },
+            { "poolspend", HandleSecondaryExpPoolSpend,     SEC_PLAYER, Console::No },
         };
 
         static ChatCommandTable commandTable =
@@ -214,6 +215,23 @@ public:
 
         // Pushes the current EQ class state to the client UI (the EQ Class character tab) as an addon message
         EverQuest->SendClassInfoAddonMessageToPlayer(handler->GetPlayer());
+        return true;
+    }
+
+    static bool HandleSecondaryExpPoolSpend(ChatHandler* handler, const char* /*args*/)
+    {
+        if (EverQuest->IsEnabled == false)
+            return true;
+
+        Player* player = handler->GetPlayer();
+        uint32 spent = EverQuest->SpendSecondaryExpPoolForPlayer(player);
+        if (spent > 0)
+            handler->PSendSysMessage("Applied |cff4CFF00{}|r experience from your secondary bonus experience pool.", spent);
+        else
+            handler->PSendSysMessage("No experience could be applied from your secondary bonus experience pool.");
+
+        // Refresh the EQ Class UI so the pool readout (and the experience bar) reflect the spend
+        EverQuest->SendClassInfoAddonMessageToPlayer(player);
         return true;
     }
 

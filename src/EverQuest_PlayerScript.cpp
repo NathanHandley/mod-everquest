@@ -185,6 +185,24 @@ public:
         }
     }
 
+    void OnPlayerGiveXP(Player* player, uint32& amount, Unit* victim, uint8 xpSource) override
+    {
+        if (EverQuest->IsEnabled == false)
+            return;
+        if (EverQuest->ConfigSecondaryExpPoolGainPercent <= 0.0f)
+            return;
+
+        // Pool only fills from creature kills
+        if (xpSource != PlayerXPSource::XPSOURCE_KILL)
+            return;
+        if (victim == nullptr || victim->IsCreature() == false)
+            return;
+
+        uint32 added = EverQuest->AddToSecondaryExpPoolForPlayer(player, amount);
+        if (added > 0)
+            EverQuest->SendExpPoolAddonMessageToPlayer(player, added);
+    }
+
     void OnPlayerRewardKillRewarder(Player* player, KillRewarder* rewarder, bool /*isDungeon*/, float& rate) override
     {
         if (EverQuest->IsEnabled == false)

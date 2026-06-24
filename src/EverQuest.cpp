@@ -54,6 +54,8 @@ EverQuestMod::EverQuestMod() :
     ConfigSpellDisableStackingOfSameDOT(false),
     ConfigCombatSkillsDisableBashKickStunOnPlayers(false),
     ConfigShowClassMessageOnLogin(true),
+    ConfigSecondaryExpPoolGainPercent(25.0f),
+    ConfigSecondaryExpPoolMaxPooled(1000000),
     CrossClassExemptSpellIDsBuilt(false)
 {
 }
@@ -180,6 +182,10 @@ void EverQuestMod::LoadConfigurationFile()
 
     // Class
     ConfigShowClassMessageOnLogin = sConfigMgr->GetOption<bool>("EverQuest.ShowClassMessageOnLogin", true);
+
+    // Secondary Experience Pool
+    ConfigSecondaryExpPoolGainPercent = sConfigMgr->GetOption<float>("EverQuest.SecondaryExpPool.GainPercent", 25);
+    ConfigSecondaryExpPoolMaxPooled = sConfigMgr->GetOption<uint32>("EverQuest.SecondaryExpPool.MaxPooled", 1000000);
 
     // Cross-Class values
     ConfigCrossClassIncludeSkillIDs = GetSetFromConfigString("EverQuest.CrossClass.IncludeSkillIDs");
@@ -1751,20 +1757,104 @@ EverQuestPlayerControllerData EverQuestMod::GetPlayerControllerData(Player* play
 {
     EverQuestPlayerControllerData controllerData;
     controllerData.GUID = player->GetGUID().GetCounter();
-    QueryResult queryResult = CharacterDatabase.Query("SELECT nextClass, currentClass FROM mod_everquest_character_class_controller WHERE guid = {}", player->GetGUID().GetCounter());
+    QueryResult queryResult = CharacterDatabase.Query("SELECT nextClass, currentClass, secondaryExpPool FROM mod_everquest_character_class_controller WHERE guid = {}", player->GetGUID().GetCounter());
     if (!queryResult || queryResult->GetRowCount() == 0)
     {
         const EverQuestClassMap classMap = GetClassMapForWOWClassID(player->getClass());
         controllerData.CurrentSecondClass = classMap.EQClassIDDefaultSecond;
         controllerData.NextSecondClass = classMap.EQClassIDDefaultSecond;
+        controllerData.SecondaryExpPool = 0;
     }
     else
     {
         Field* fields = queryResult->Fetch();
         controllerData.NextSecondClass = fields[0].Get<uint8>();
         controllerData.CurrentSecondClass = fields[1].Get<uint8>();
+        controllerData.SecondaryExpPool = fields[2].Get<uint32>();
     }
     return controllerData;
+}
+
+uint32 EverQuestMod::GetSecondaryExpPoolForPlayer(Player* player)
+{
+    if (ActivePlayerClassControllerDataByGUID.find(player->GetGUID()) == ActivePlayerClassControllerDataByGUID.end())
+        ActivePlayerClassControllerDataByGUID[player->GetGUID()] = GetPlayerControllerData(player);
+    return ActivePlayerClassControllerDataByGUID[player->GetGUID()].SecondaryExpPool;
+}
+
+uint32 EverQuestMod::AddToSecondaryExpPoolForPlayer(Player* player, uint32 grantedExp)
+{
+    if (ConfigSecondaryExpPoolGainPercent <= 0.0f)
+        return 0;
+
+    if (ActivePlayerClassControllerDataByGUID.find(player->GetGUID()) == ActivePlayerClassControllerDataByGUID.end())
+        ActivePlayerClassControllerDataByGUID[player->GetGUID()] = GetPlayerControllerData(player);
+    EverQuestPlayerControllerData& controllerData = ActivePlayerClassControllerDataByGUID[player->GetGUID()];
+
+    uint32 gain = static_cast<uint32>(static_cast<float>(grantedExp) * (ConfigSecondaryExpPoolGainPercent * 0.01f));
+    if (gain == 0)
+        return 0;
+
+    // Clamp to the configured maximum pool size
+    if (controllerData.SecondaryExpPool >= ConfigSecondaryExpPoolMaxPooled)
+        return 0;
+    uint32 room = ConfigSecondaryExpPoolMaxPooled - controllerData.SecondaryExpPool;
+    if (gain > room)
+        gain = room;
+
+    controllerData.SecondaryExpPool += gain;
+    SaveSecondaryExpPoolForPlayer(player);
+    return gain;
+}
+
+uint32 EverQuestMod::SpendSecondaryExpPoolForPlayer(Player* player)
+{
+    if (ActivePlayerClassControllerDataByGUID.find(player->GetGUID()) == ActivePlayerClassControllerDataByGUID.end())
+        ActivePlayerClassControllerDataByGUID[player->GetGUID()] = GetPlayerControllerData(player);
+    EverQuestPlayerControllerData& controllerData = ActivePlayerClassControllerDataByGUID[player->GetGUID()];
+
+    if (controllerData.SecondaryExpPool == 0)
+        return 0;
+
+    // Player::GiveXP silently drops the grant for a dead player, which would burn the pool for nothing
+    if (player->IsAlive() == false)
+        return 0;
+
+    // Nothing to fill at (or frozen short of) the level cap
+    if (player->GetLevel() >= sWorld->getIntConfig(CONFIG_MAX_PLAYER_LEVEL))
+        return 0;
+    if (player->HasPlayerFlag(PLAYER_FLAGS_NO_XP_GAIN))
+        return 0;
+
+    uint32 curXP = player->GetUInt32Value(PLAYER_XP);
+    uint32 nextLevelXP = player->GetUInt32Value(PLAYER_NEXT_LEVEL_XP);
+    if (nextLevelXP <= curXP)
+        return 0;
+    uint32 needed = nextLevelXP - curXP;
+
+    uint32 spend = (controllerData.SecondaryExpPool < needed) ? controllerData.SecondaryExpPool : needed;
+    if (spend == 0)
+        return 0;
+
+    controllerData.SecondaryExpPool -= spend;
+    SaveSecondaryExpPoolForPlayer(player);
+
+    player->GiveXP(spend, nullptr);
+    return spend;
+}
+
+void EverQuestMod::SaveSecondaryExpPoolForPlayer(Player* player)
+{
+    if (ActivePlayerClassControllerDataByGUID.find(player->GetGUID()) == ActivePlayerClassControllerDataByGUID.end())
+        return;
+    const EverQuestPlayerControllerData& controllerData = ActivePlayerClassControllerDataByGUID[player->GetGUID()];
+
+    CharacterDatabase.Execute("INSERT INTO `mod_everquest_character_class_controller` (`guid`, `currentClass`, `nextClass`, `secondaryExpPool`) VALUES ({}, {}, {}, {}) ON DUPLICATE KEY UPDATE `secondaryExpPool` = {}",
+        player->GetGUID().GetCounter(),
+        controllerData.CurrentSecondClass,
+        controllerData.NextSecondClass,
+        controllerData.SecondaryExpPool,
+        controllerData.SecondaryExpPool);
 }
 
 map<string, EverQuestPlayerClassInfoItem> EverQuestMod::GetPlayerClassInfoByClassNameForPlayer(Player* player)
@@ -2159,10 +2249,11 @@ void EverQuestMod::CopyModQuestTablesIntoCharacterQuests(Player* player, uint8 p
 
 void EverQuestMod::UpdatePlayerControllerForClassChange(Player* player, uint8 newEQClassID, CharacterDatabaseTransaction& transaction)
 {
-    transaction->Append("REPLACE INTO `mod_everquest_character_class_controller` (`guid`, `nextClass`, `currentClass`) VALUES ({}, {}, {})",
+    transaction->Append("REPLACE INTO `mod_everquest_character_class_controller` (`guid`, `nextClass`, `currentClass`, `secondaryExpPool`) VALUES ({}, {}, {}, {})",
         player->GetGUID().GetCounter(),
         newEQClassID,
-        newEQClassID); // Overwriting current with next
+        newEQClassID, // Overwriting current with next
+        GetSecondaryExpPoolForPlayer(player));
 }
 
 map<uint8, EverQuestPlayerEquipedItemData> EverQuestMod::GetVisibleItemsBySlotForPlayerClass(Player* player, uint8 eqClassID)
@@ -2394,11 +2485,12 @@ void EverQuestMod::SendClassInfoAddonMessageToPlayer(Player* player)
     levelByEQClassID[currentSecondClass] = player->GetLevel();
 
     // Format (after the "EQCLASS\t" prefix the 3.3.5 client strips):
-    //   H|<baseId>|<baseName>|<currentSecondId>|<nextSecondId>
+    //   H|<baseId>|<baseName>|<currentSecondId>|<nextSecondId>|<expPoolCurrent>|<expPoolMax>
     //   ~R|<id>|<name>|<level>|<changecmd>   (one per row: None first, then each eligible secondary class)
     std::ostringstream payload;
     payload << "H|" << uint32(classMap.EQClassIDBase) << "|" << GetEQClassStringFromID(classMap.EQClassIDBase)
-            << "|" << uint32(currentSecondClass) << "|" << uint32(nextSecondClass);
+            << "|" << uint32(currentSecondClass) << "|" << uint32(nextSecondClass)
+            << "|" << GetSecondaryExpPoolForPlayer(player) << "|" << ConfigSecondaryExpPoolMaxPooled;
 
     for (int16 eqClassID = EQ_EQCLASS_NONE; eqClassID <= EQ_EQCLASS_ENCHANTER; ++eqClassID)
     {
@@ -2420,6 +2512,21 @@ void EverQuestMod::SendClassInfoAddonMessageToPlayer(Player* player)
     }
 
     std::string addonMessage = "EQCLASS\t" + payload.str();
+    WorldPacket data;
+    ChatHandler::BuildChatPacket(data, CHAT_MSG_SYSTEM, LANG_ADDON, nullptr, nullptr, addonMessage);
+    player->SendDirectMessage(&data);
+}
+
+// Pushes a live secondary-experience-pool update to the client "(+X exp added to exp pool)"
+// Payload (after the "EQEXPPOOL\t" prefix): <gainedExp>|<poolCurrent>|<poolMax>
+void EverQuestMod::SendExpPoolAddonMessageToPlayer(Player* player, uint32 gainedExp)
+{
+    if (player == nullptr)
+        return;
+
+    std::string addonMessage = "EQEXPPOOL\t" + std::to_string(gainedExp) + "|"
+        + std::to_string(GetSecondaryExpPoolForPlayer(player)) + "|"
+        + std::to_string(ConfigSecondaryExpPoolMaxPooled);
     WorldPacket data;
     ChatHandler::BuildChatPacket(data, CHAT_MSG_SYSTEM, LANG_ADDON, nullptr, nullptr, addonMessage);
     player->SendDirectMessage(&data);
