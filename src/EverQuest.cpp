@@ -1982,6 +1982,10 @@ bool EverQuestMod::IsSpellExemptFromClassMove(uint32 spellID)
     SpellInfo const* spellInfo = sSpellMgr->GetSpellInfo(spellID);
     if (spellInfo != nullptr)
     {
+        // Mounts are shared across all of a character's secondary classes, just like the riding skill they depend on
+        if (spellInfo->HasAura(SPELL_AURA_MOUNTED) == true)
+            return true;
+
         for (uint8 i = 0; i < MAX_SPELL_EFFECTS; ++i)
         {
             if (spellInfo->Effects[i].Effect != SPELL_EFFECT_SKILL_STEP && spellInfo->Effects[i].Effect != SPELL_EFFECT_SKILL)
