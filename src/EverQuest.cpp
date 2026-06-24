@@ -714,6 +714,61 @@ void EverQuestMod::ApplyAutoLearnedClassSkillsAndSpells(Player* player)
         player->UpdateSkillsForLevel();
 }
 
+void EverQuestMod::LoadAutoAddItemsData()
+{
+    PlayerAutoAddItemsByEQClassID.clear();
+    QueryResult queryResult = WorldDatabase.Query("SELECT eqclass, item FROM mod_everquest_playerautoadditems;");
+    if (queryResult)
+    {
+        do
+        {
+            // Pull the data out
+            Field* fields = queryResult->Fetch();
+            uint8 classID = fields[0].Get<uint8>();
+            uint32 itemID = fields[1].Get<uint32>();
+            PlayerAutoAddItemsByEQClassID[classID].push_back(itemID);
+        } while (queryResult->NextRow());
+    }
+}
+
+const list<uint32>& EverQuestMod::GetAutoAddItemsForClass(uint8 classID)
+{
+    if (PlayerAutoAddItemsByEQClassID.find(classID) != PlayerAutoAddItemsByEQClassID.end())
+    {
+        return PlayerAutoAddItemsByEQClassID[classID];
+    }
+    else
+    {
+        static const list<uint32> returnEmpty;
+        return returnEmpty;
+    }
+}
+
+void EverQuestMod::ApplyAutoAddedClassItems(Player* player)
+{
+    const EverQuestClassMap classMap = GetClassMapForWOWClassID(player->getClass());
+    uint8 secondClassID = GetCurrentSecondEQClassForPlayer(player);
+    vector<uint8> autoAddEQClassIDs;
+    autoAddEQClassIDs.push_back(classMap.EQClassIDBase);
+    if (secondClassID != EQ_EQCLASS_NONE && secondClassID != classMap.EQClassIDBase)
+        autoAddEQClassIDs.push_back(secondClassID);
+
+    // Grant any items the player does not already have carried (equipped or inventory, ignoring the bank)
+    for (uint8 autoAddEQClassID : autoAddEQClassIDs)
+    {
+        for (auto itemID : GetAutoAddItemsForClass(autoAddEQClassID))
+        {
+            if (player->HasItemCount(itemID, 1, false) == true)
+                continue;
+
+            ItemPosCountVec destPosition;
+            InventoryResult invResult = player->CanStoreNewItem(NULL_BAG, NULL_SLOT, destPosition, itemID, 1);
+            if (invResult == EQUIP_ERR_OK)
+                player->StoreNewItem(destPosition, itemID, true);
+        }
+    }
+}
+
 bool EverQuestMod::HasCreatePlayerData(uint8 raceID, uint8 classID)
 {
     if (PlayerCreateInfoByRaceIDThenClassID.find(raceID) == PlayerCreateInfoByRaceIDThenClassID.end())

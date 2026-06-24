@@ -35,7 +35,7 @@ static uint32 ConfigMaxSkillIDCheck = 1000;         // The highest level of skil
 
 class Unit;
 
-#define EQ_MOD_VERSION                              26
+#define EQ_MOD_VERSION                              27
 
 #define EQ_EQCLASS_NONE                             0
 #define EQ_EQCLASS_WARRIOR                          1
@@ -441,6 +441,7 @@ public:
     unordered_map<uint8, unordered_map<uint8, EverQuestPlayerCreateInfo>> PlayerCreateInfoByRaceIDThenClassID;
     unordered_map<uint8, list<uint32>> PlayerAutoLearnSkillsByEQClassID;
     unordered_map<uint8, list<EverQuestAutoLearnSpell>> PlayerAutoLearnSpellsByClassID;
+    unordered_map<uint8, list<uint32>> PlayerAutoAddItemsByEQClassID;
     unordered_map<int, unordered_map<int, vector<Creature*>>> AllLoadedCreaturesByMapIDThenCreatureEntryID;
     unordered_map<uint32, EverQuestCreatureSpawnPoint> CreatureSpawnPointsByCreatureGUID;
     unordered_map<int, unordered_map<uint32, vector<Creature*>>> AllLoadedCreaturesByMapIDThenSpawnPointID;
@@ -498,6 +499,9 @@ public:
     void LoadAutoLearnSpellsData();
     const list<EverQuestAutoLearnSpell>& GetAutoLearnSpellsForClass(uint8 classID);
     void ApplyAutoLearnedClassSkillsAndSpells(Player* player);
+    void LoadAutoAddItemsData();
+    const list<uint32>& GetAutoAddItemsForClass(uint8 classID);
+    void ApplyAutoAddedClassItems(Player* player);
     void LoadCreatureLootData();
     bool HasCreatureLootDataForCreatureTemplateEntryID(uint32 creatureTemplateEntryID);
     bool HasPreloadedLootItemIDsForCreatureGUID(ObjectGuid creatureGUID);

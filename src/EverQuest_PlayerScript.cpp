@@ -413,6 +413,9 @@ public:
         // Autolearning is based on EQ classes (primary and secondary)
         EverQuest->ApplyAutoLearnedClassSkillsAndSpells(player);
 
+        // Auto-add class items based on EQ classes (primary and secondary)
+        EverQuest->ApplyAutoAddedClassItems(player);
+
         // Grab EQ class info for the login summary message
         EverQuestClassMap classMap = EverQuest->GetClassMapForWOWClassID(player->getClass());
         uint8 secondClassID = EverQuest->GetCurrentSecondEQClassForPlayer(player);
