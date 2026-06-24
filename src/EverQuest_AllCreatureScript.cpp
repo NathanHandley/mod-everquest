@@ -17,8 +17,6 @@
 #include "Configuration/Config.h"
 #include "ObjectMgr.h"
 #include "ScriptMgr.h"
-#include "ScriptedGossip.h"
-#include "WorldSession.h"
 #include "LootMgr.h"
 #include "ItemTemplate.h"
 
@@ -26,66 +24,10 @@
 
 using namespace std;
 
-// Unique gossip action for mod-injected secondary class train options
-#define EQ_GOSSIP_ACTION_SECONDARY_TRAIN    0xEC0001
-
 class EverQuest_AllCreatureScript : public AllCreatureScript
 {
 public:
     EverQuest_AllCreatureScript() : AllCreatureScript("EverQuest_AllCreatureScript") {}
-
-    // When a player has the current secondary eq class that matches a guild master, offer the native trainer
-    // option.  Base / Primary class non-matching guild masters use normal behavior
-    bool CanCreatureGossipHello(Player* player, Creature* creature) override
-    {
-        if (EverQuest->IsEnabled == false)
-            return false;
-        if (EverQuest->HasCreatureDataForCreatureTemplateID(creature->GetEntry()) == false)
-            return false;
-        uint8 trainerEQClass = EverQuest->GetCreatureDataForCreatureTemplateID(creature->GetEntry()).EQClassTrainerType;
-        if (trainerEQClass == EQ_EQCLASS_NONE)
-            return false;
-
-        // When the player's current secondary EQ class matches, offer the native trainer for their logged-in class
-        if (ShouldOfferSecondaryClassTraining(player, creature) == true)
-        {
-            ClearGossipMenuFor(player);
-            AddGossipItemFor(player, GOSSIP_ICON_TRAINER, "I would like to train.", GOSSIP_SENDER_MAIN, EQ_GOSSIP_ACTION_SECONDARY_TRAIN);
-
-            // Preserve quest access for guild masters that also give quests (our custom menu replaces the default)
-            if (creature->HasNpcFlag(UNIT_NPC_FLAG_QUESTGIVER))
-                player->PrepareQuestMenu(creature->GetGUID());
-
-            SendGossipMenuFor(player, player->GetGossipTextId(creature), creature->GetGUID());
-            return true;
-        }
-
-        // On no-match, use the original gossip menu.  Secondary have gossip menu, so fall to a generic train option
-        if (EverQuest->IsEQClassABaseEQClass(trainerEQClass) == true)
-            return false;
-
-        ClearGossipMenuFor(player);
-        if (creature->HasNpcFlag(UNIT_NPC_FLAG_QUESTGIVER))
-            player->PrepareQuestMenu(creature->GetGUID());
-        SendGossipMenuFor(player, player->GetGossipTextId(creature), creature->GetGUID());
-        return true;
-    }
-
-    bool CanCreatureGossipSelect(Player* player, Creature* creature, uint32 sender, uint32 action) override
-    {
-        if (EverQuest->IsEnabled == false)
-            return false;
-        if (sender != GOSSIP_SENDER_MAIN || action != EQ_GOSSIP_ACTION_SECONDARY_TRAIN)
-            return false;
-
-        // Re-validate so the trainer is only opened for a genuine current secondary match
-        if (ShouldOfferSecondaryClassTraining(player, creature) == false)
-            return false;
-
-        // Mirror the GOSSIP_OPTION_TRAINER handler exactly
-        player->GetSession()->SendTrainerList(creature);
-        return true;
-    }
 
     void OnCreatureAddWorld(Creature* creature) override
     {
@@ -119,23 +61,6 @@ public:
     }
 
 private:
-    bool ShouldOfferSecondaryClassTraining(Player* player, Creature* creature)
-    {
-        if (EverQuest->HasCreatureDataForCreatureTemplateID(creature->GetEntry()) == false)
-            return false;
-        uint8 trainerEQClass = EverQuest->GetCreatureDataForCreatureTemplateID(creature->GetEntry()).EQClassTrainerType;
-        if (trainerEQClass == EQ_EQCLASS_NONE)
-            return false;
-
-        const EverQuestClassMap classMap = EverQuest->GetClassMapForWOWClassID(player->getClass());
-        if (trainerEQClass == classMap.EQClassIDBase)
-            return false;
-        if (trainerEQClass != EverQuest->GetCurrentSecondEQClassForPlayer(player))
-            return false;
-
-        return true;
-    }
-
     void ApplyLootWornEffectAuras(Creature* creature)
     {
         if (EverQuest->HasPreloadedLootItemIDsForCreatureGUID(creature->GetGUID()) == false)

@@ -192,7 +192,7 @@ void EverQuestMod::LoadConfigurationFile()
 void EverQuestMod::LoadCreatureData()
 {
     CreaturesByTemplateID.clear();
-    QueryResult queryResult = WorldDatabase.Query("SELECT CreatureTemplateID, CanShowHeldLootItems, CanShowHeldLootShields, SpawnLimit, EQClassTrainerType FROM mod_everquest_creature ORDER BY CreatureTemplateID;");
+    QueryResult queryResult = WorldDatabase.Query("SELECT CreatureTemplateID, CanShowHeldLootItems, CanShowHeldLootShields, SpawnLimit FROM mod_everquest_creature ORDER BY CreatureTemplateID;");
     if (queryResult)
     {
         do
@@ -204,7 +204,6 @@ void EverQuestMod::LoadCreatureData()
             everQuestCreature.CanShowHeldLootItems = fields[1].Get<bool>();
             everQuestCreature.CanShowHeldLootShields = fields[2].Get<bool>();
             everQuestCreature.SpawnLimit = fields[3].Get<uint32>();
-            everQuestCreature.EQClassTrainerType = fields[4].Get<uint8>();
             CreaturesByTemplateID[everQuestCreature.CreatureTemplateID] = everQuestCreature;
         } while (queryResult->NextRow());
     }

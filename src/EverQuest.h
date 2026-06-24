@@ -35,7 +35,7 @@ static uint32 ConfigMaxSkillIDCheck = 1000;         // The highest level of skil
 
 class Unit;
 
-#define EQ_MOD_VERSION                              25
+#define EQ_MOD_VERSION                              26
 
 #define EQ_EQCLASS_NONE                             0
 #define EQ_EQCLASS_WARRIOR                          1
@@ -186,7 +186,6 @@ public:
     bool CanShowHeldLootItems = 0;
     bool CanShowHeldLootShields = 0;
     uint32 SpawnLimit = 0;
-    uint8 EQClassTrainerType = 0;
 };
 
 class EverQuestCreatureSpawnPoint
