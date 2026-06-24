@@ -1993,6 +1993,16 @@ bool EverQuestMod::IsSpellExemptFromClassMove(uint32 spellID)
             if (ConfigCrossClassIncludeSkillIDs.find((uint32)spellInfo->Effects[i].MiscValue) != ConfigCrossClassIncludeSkillIDs.end())
                 return true;
         }
+
+        // Companion (vanity) pets are shared across all secondary classes, just like mounts
+        for (uint8 i = 0; i < MAX_SPELL_EFFECTS; ++i)
+        {
+            if (spellInfo->Effects[i].Effect != SPELL_EFFECT_SUMMON)
+                continue;
+            SummonPropertiesEntry const* summonProperties = sSummonPropertiesStore.LookupEntry(spellInfo->Effects[i].MiscValueB);
+            if (summonProperties != nullptr && summonProperties->Type == SUMMON_TYPE_MINIPET)
+                return true;
+        }
     }
     return false;
 }
