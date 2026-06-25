@@ -48,6 +48,7 @@ public:
         }
         SetVisualEquipment(creature);
         ApplyLootWornEffectAuras(creature);
+        SetupRangedAttack(creature);
     }
 
     void OnCreatureRemoveWorld(Creature* creature) override
@@ -58,9 +59,81 @@ public:
         uint32 mapID = creature->GetMap()->GetId();
         if (mapID >= EverQuest->ConfigSystemMapDBCIDMin && mapID <= EverQuest->ConfigSystemMapDBCIDMax)
             EverQuest->RemoveCreatureAsLoaded(mapID, creature);
+        EverQuest->RemoveCreatureRangedAttackState(creature->GetGUID());
+    }
+
+    void OnAllCreatureUpdate(Creature* creature, uint32 diff) override
+    {
+        if (EverQuest->IsEnabled == false)
+            return;
+        EverQuest->UpdateCreatureRangedAttack(creature, diff);
     }
 
 private:
+    // Ranged attack is either if the creature has the special ability for it, or they have a bow+arrow in inventory
+    // Note: This is based on TAKP's GetSpecialAbility / HasBowAndArrowEquipped logic
+    void SetupRangedAttack(Creature* creature)
+    {
+        // Reset the ranged visual slot in case this creature object is being recycled
+        creature->SetUInt32Value(UNIT_VIRTUAL_ITEM_SLOT_ID + 2, 0);
+
+        if (EverQuest->ConfigCombatSkillsRangedAttackEnabled == false || EverQuest->ConfigSystemRangedAttackSpellID == 0)
+            return;
+
+        // Special ability path
+        bool hasSpecialAbility = false;
+        float minRange = 0.0f;
+        float maxRange = 0.0f;
+        int32 damageModPct = 0;
+        if (EverQuest->HasCreatureDataForCreatureTemplateID(creature->GetEntry()) == true)
+        {
+            EverQuestCreature eqCreature = EverQuest->GetCreatureDataForCreatureTemplateID(creature->GetEntry());
+            if (eqCreature.RangedAttackEnabled == true)
+            {
+                hasSpecialAbility = true;
+                minRange = (float)eqCreature.RangedAttackMinRange;
+                maxRange = (float)eqCreature.RangedAttackMaxRange;
+                damageModPct = eqCreature.RangedAttackDamageModPct;
+            }
+        }
+
+        // Bow + arrow path
+        bool hasBow = false;
+        bool hasArrow = false;
+        uint32 bowVisualItemID = 0;
+        if (EverQuest->HasPreloadedLootItemIDsForCreatureGUID(creature->GetGUID()) == true)
+        {
+            for (uint32 itemTemplateID : EverQuest->GetPreloadedLootIDsForCreatureGUID(creature->GetGUID()))
+            {
+                uint32 itemTemplateForNPCEquipID = EverQuest->GetNPCEquipItemTemplateIDForItemTemplate(itemTemplateID);
+                ItemTemplate const* itemTemplate = sObjectMgr->GetItemTemplate(itemTemplateForNPCEquipID);
+                if (!itemTemplate)
+                    continue;
+                if (itemTemplate->Class == ITEM_CLASS_WEAPON && itemTemplate->SubClass == ITEM_SUBCLASS_WEAPON_BOW)
+                {
+                    hasBow = true;
+                    bowVisualItemID = itemTemplate->ItemId;
+                }
+                else if (itemTemplate->Class == ITEM_CLASS_PROJECTILE && itemTemplate->SubClass == ITEM_SUBCLASS_ARROW)
+                    hasArrow = true;
+            }
+        }
+
+        if (hasSpecialAbility == false && (hasBow == false || hasArrow == false))
+            return;
+
+        // Show the bow (in the ranged virtual slot) so the client renders the arrow projectile when the shot is cast
+        // Note, some (all?) creatures don't have a mount point in the cast animation so it disappears. Will try to fix.
+        if (hasBow == true)
+        {
+            creature->SetUInt32Value(UNIT_VIRTUAL_ITEM_SLOT_ID + 2, bowVisualItemID);
+            if (creature->GetUInt32Value(UNIT_VIRTUAL_ITEM_SLOT_ID + 0) == 0)
+                creature->SetSheath(SHEATH_STATE_RANGED);
+        }
+
+        EverQuest->StoreCreatureRangedAttackState(creature->GetGUID(), minRange, maxRange, damageModPct);
+    }
+
     void ApplyLootWornEffectAuras(Creature* creature)
     {
         if (EverQuest->HasPreloadedLootItemIDsForCreatureGUID(creature->GetGUID()) == false)

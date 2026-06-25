@@ -35,7 +35,7 @@ static uint32 ConfigMaxSkillIDCheck = 1000;         // The highest level of skil
 
 class Unit;
 
-#define EQ_MOD_VERSION                              27
+#define EQ_MOD_VERSION                              28
 
 #define EQ_EQCLASS_NONE                             0
 #define EQ_EQCLASS_WARRIOR                          1
@@ -186,6 +186,10 @@ public:
     bool CanShowHeldLootItems = 0;
     bool CanShowHeldLootShields = 0;
     uint32 SpawnLimit = 0;
+    bool RangedAttackEnabled = false;
+    uint32 RangedAttackMinRange = 0;
+    uint32 RangedAttackMaxRange = 0;
+    int32 RangedAttackDamageModPct = 0;
 };
 
 class EverQuestCreatureSpawnPoint
@@ -204,6 +208,15 @@ public:
     uint32 MainhandItemID = 0;
     uint32 OffhandItemID = 0;
     bool IsDualWielding = false;
+};
+
+class EverQuestCreatureRangedAttackState
+{
+public:
+    float MinRange = 0.0f;
+    float MaxRange = 0.0f;
+    int32 DamageModPct = 0;
+    uint32 SwingTimerRemainingMS = 0;
 };
 
 class EverQuestItemTemplate
@@ -409,6 +422,7 @@ public:
     uint32 ConfigSystemShipEntryTemplateIDMin;
     uint32 ConfigSystemShipEntryTemplateIDMax;
     uint32 ConfigSystemInvisVsUndeadDetectSpellID;
+    uint32 ConfigSystemRangedAttackSpellID;
 
     // Configs (from server file)
     bool ConfigMapRestrictPlayersToNorrath;
@@ -421,6 +435,10 @@ public:
     float ConfigAlternateGroupExperienceAddPercentPerAddedMember;
     bool ConfigSpellDisableStackingOfSameDOT;
     bool ConfigCombatSkillsDisableBashKickStunOnPlayers;
+    bool ConfigCombatSkillsRangedAttackEnabled;
+    float ConfigCombatSkillsRangedAttackDefaultMinRange;
+    float ConfigCombatSkillsRangedAttackDefaultMaxRange;
+    float ConfigCombatSkillsRangedAttackDamageMultiplier;
     bool ConfigShowClassMessageOnLogin;
     float ConfigSecondaryExpPoolGainPercent;
     uint32 ConfigSecondaryExpPoolMaxPooled;
@@ -451,6 +469,7 @@ public:
     unordered_map<ObjectGuid, vector<uint32>> PreloadedLootItemIDsByCreatureGUID;
     unordered_map<ObjectGuid, unordered_map<uint32, uint32>> PreloadedLootCountsByCreatureGUID;
     unordered_map<ObjectGuid, EverQuestLoadedCreatureEquippedVisualItems> VisualEquippedItemsByCreatureGUID;
+    unordered_map<ObjectGuid, EverQuestCreatureRangedAttackState> RangedAttackStateByCreatureGUID;
     unordered_set<ObjectGuid> CreaturesResolvingEQMeleeExtraAttacks;
     unordered_map<uint32, vector<EverQuestTransportShipTrigger>> ShipTriggersByTriggeringGameObjectTemplateEntryID;
     unordered_map<uint32, int> ShipWaitNodesByGameObjectTemplateEntryID;
@@ -514,6 +533,9 @@ public:
     bool IsCreatureDualWielding(ObjectGuid creatureGUID);
     uint32 GetEQNPCMeleeWeaponSkillForLevel(uint32 level);
     void TryDoCreatureEQMeleeExtraAttacks(Unit* attacker, Unit* victim);
+    void StoreCreatureRangedAttackState(ObjectGuid creatureGUID, float minRange, float maxRange, int32 damageModPct);
+    void RemoveCreatureRangedAttackState(ObjectGuid creatureGUID);
+    void UpdateCreatureRangedAttack(Creature* creature, uint32 diff);
     void RemoveVisualEquippedItemForCreatureGUIDIfExists(Map* map, ObjectGuid creatureGUID, uint32 itemTemplateID);
     void LoadShipTriggerData();
     const vector<EverQuestTransportShipTrigger>& GetShipTriggersForShip(int triggeringGameObjectTemplateEntryID);

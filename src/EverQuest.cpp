@@ -121,6 +121,8 @@ bool EverQuestMod::LoadConfigurationSystemDataFromDB()
                 ConfigSystemSpellDBCIDMin = (uint32)atoi(value.c_str());
             else if (key == "SpellDBCIDMax")
                 ConfigSystemSpellDBCIDMax = (uint32)atoi(value.c_str());
+            else if (key == "RangedAttackSpellID")
+                ConfigSystemRangedAttackSpellID = (uint32)atoi(value.c_str());
             else if (key == "QuestSQLIDMin")
                 ConfigSystemQuestSQLIDMin = (uint32)atoi(value.c_str());
             else if (key == "QuestSQLIDMax")
@@ -179,6 +181,10 @@ void EverQuestMod::LoadConfigurationFile()
 
     // Combat Skills
     ConfigCombatSkillsDisableBashKickStunOnPlayers = sConfigMgr->GetOption<bool>("EverQuest.CombatSkills.DisableBashKickStunOnPlayers", false);
+    ConfigCombatSkillsRangedAttackEnabled = sConfigMgr->GetOption<bool>("EverQuest.CombatSkills.RangedAttackEnabled", true);
+    ConfigCombatSkillsRangedAttackDefaultMinRange = sConfigMgr->GetOption<float>("EverQuest.CombatSkills.RangedAttackDefaultMinRange", 25.0f);
+    ConfigCombatSkillsRangedAttackDefaultMaxRange = sConfigMgr->GetOption<float>("EverQuest.CombatSkills.RangedAttackDefaultMaxRange", 250.0f);
+    ConfigCombatSkillsRangedAttackDamageMultiplier = sConfigMgr->GetOption<float>("EverQuest.CombatSkills.RangedAttackDamageMultiplier", 1.0f);
 
     // Class
     ConfigShowClassMessageOnLogin = sConfigMgr->GetOption<bool>("EverQuest.ShowClassMessageOnLogin", true);
@@ -198,7 +204,7 @@ void EverQuestMod::LoadConfigurationFile()
 void EverQuestMod::LoadCreatureData()
 {
     CreaturesByTemplateID.clear();
-    QueryResult queryResult = WorldDatabase.Query("SELECT CreatureTemplateID, CanShowHeldLootItems, CanShowHeldLootShields, SpawnLimit FROM mod_everquest_creature ORDER BY CreatureTemplateID;");
+    QueryResult queryResult = WorldDatabase.Query("SELECT CreatureTemplateID, CanShowHeldLootItems, CanShowHeldLootShields, SpawnLimit, RangedAttackEnabled, RangedAttackMinRange, RangedAttackMaxRange, RangedAttackDamageModPct FROM mod_everquest_creature ORDER BY CreatureTemplateID;");
     if (queryResult)
     {
         do
@@ -210,6 +216,10 @@ void EverQuestMod::LoadCreatureData()
             everQuestCreature.CanShowHeldLootItems = fields[1].Get<bool>();
             everQuestCreature.CanShowHeldLootShields = fields[2].Get<bool>();
             everQuestCreature.SpawnLimit = fields[3].Get<uint32>();
+            everQuestCreature.RangedAttackEnabled = fields[4].Get<bool>();
+            everQuestCreature.RangedAttackMinRange = fields[5].Get<uint32>();
+            everQuestCreature.RangedAttackMaxRange = fields[6].Get<uint32>();
+            everQuestCreature.RangedAttackDamageModPct = fields[7].Get<int32>();
             CreaturesByTemplateID[everQuestCreature.CreatureTemplateID] = everQuestCreature;
         } while (queryResult->NextRow());
     }
@@ -980,6 +990,85 @@ void EverQuestMod::TryDoCreatureEQMeleeExtraAttacks(Unit* attacker, Unit* victim
     }
 
     CreaturesResolvingEQMeleeExtraAttacks.erase(attackerGUID);
+}
+
+void EverQuestMod::StoreCreatureRangedAttackState(ObjectGuid creatureGUID, float minRange, float maxRange, int32 damageModPct)
+{
+    EverQuestCreatureRangedAttackState state;
+    state.MinRange = minRange;
+    state.MaxRange = maxRange;
+    state.DamageModPct = damageModPct;
+    state.SwingTimerRemainingMS = 0; // Ready to fire as soon as a valid target is in range
+    RangedAttackStateByCreatureGUID[creatureGUID] = state;
+}
+
+void EverQuestMod::RemoveCreatureRangedAttackState(ObjectGuid creatureGUID)
+{
+    RangedAttackStateByCreatureGUID.erase(creatureGUID);
+}
+
+// Logic reference was TAKP's NPC::RangedAttack. Creature will always try to get in melee range, but shoot while going towards them
+void EverQuestMod::UpdateCreatureRangedAttack(Creature* creature, uint32 diff)
+{
+    if (creature == nullptr)
+        return;
+    if (ConfigCombatSkillsRangedAttackEnabled == false || ConfigSystemRangedAttackSpellID == 0)
+        return;
+    if (RangedAttackStateByCreatureGUID.empty() == true)
+        return;
+
+    auto stateIt = RangedAttackStateByCreatureGUID.find(creature->GetGUID());
+    if (stateIt == RangedAttackStateByCreatureGUID.end())
+        return;
+    EverQuestCreatureRangedAttackState& state = stateIt->second;
+
+    // Use creature swing for timing. Probably right.
+    if (state.SwingTimerRemainingMS > diff)
+    {
+        state.SwingTimerRemainingMS -= diff;
+        return;
+    }
+    state.SwingTimerRemainingMS = 0;
+
+    // Don't shoot if crowd controlled or casting
+    if (creature->IsAlive() == false || creature->IsInCombat() == false)
+        return;
+    if (creature->HasUnitState(UNIT_STATE_CASTING) || creature->IsNonMeleeSpellCast(false))
+        return;
+    if (creature->HasUnitState(UNIT_STATE_STUNNED | UNIT_STATE_FLEEING | UNIT_STATE_CONFUSED))
+        return;
+
+    Unit* victim = creature->GetVictim();
+    if (victim == nullptr || victim->IsAlive() == false)
+        return;
+    if (creature->IsValidAttackTarget(victim) == false)
+        return;
+
+    // Only shoot a target that is out of melee reach but inside the ranged band, with line of sight
+    if (creature->IsWithinMeleeRange(victim) == true)
+        return;
+    float minRange = state.MinRange > 0.0f ? state.MinRange : ConfigCombatSkillsRangedAttackDefaultMinRange * EverQuest->ConfigWorldScale;
+    float maxRange = state.MaxRange > 0.0f ? state.MaxRange : ConfigCombatSkillsRangedAttackDefaultMaxRange * EverQuest->ConfigWorldScale;
+    float distance = creature->GetExactDist2d(victim);
+    if (distance < minRange || distance > maxRange)
+        return;
+    if (creature->IsWithinLOSInMap(victim) == false)
+        return;
+
+    // Damage from the creature's own (melee) weapon output, scaled by the archery multiplier and the special ability modifier
+    int32 damage = (int32)creature->CalculateDamage(BASE_ATTACK, false, true);
+    damage = (int32)(damage * ConfigCombatSkillsRangedAttackDamageMultiplier);
+    damage += damage * state.DamageModPct / 100;
+    if (damage < 1)
+        damage = 1;
+
+    creature->CastCustomSpell(ConfigSystemRangedAttackSpellID, SPELLVALUE_BASE_POINT0, damage, victim, false);
+
+    // Avoid machine gun type events
+    uint32 swingTime = creature->GetAttackTime(BASE_ATTACK);
+    if (swingTime < 1000)
+        swingTime = 1000;
+    state.SwingTimerRemainingMS = swingTime;
 }
 
 // Reference is EQMacEmu/TAKP Mob::TryBashKickStun
