@@ -19,12 +19,14 @@
 #include "Group.h"
 #include "ObjectAccessor.h"
 #include "ObjectGuid.h"
+#include "ObjectMgr.h"
 #include "Pet.h"
 #include "Player.h"
 #include "ReputationMgr.h"
 #include "ScriptMgr.h"
 #include "Spell.h"
 #include "QuestDef.h"
+#include "World.h"
 
 #include "EverQuest.h"
 
@@ -498,20 +500,38 @@ public:
             if (player->GetMap()->GetId() < EverQuest->ConfigSystemMapDBCIDMin || player->GetMap()->GetId() > EverQuest->ConfigSystemMapDBCIDMax)
                 return;
 
-            // Calculate how much experience to lose
-            int nextLevelTotalEXP = player->GetUInt32Value(PLAYER_NEXT_LEVEL_XP);
-            int expToLose = (int)((float)nextLevelTotalEXP * (0.01 * EverQuest->ConfigExpLossOnDeathLossPercent));
+            // Determine the XP span of the current level
+            uint32 levelXPSpan = player->GetUInt32Value(PLAYER_NEXT_LEVEL_XP);
+            if (levelXPSpan == 0 && playerLevel > 1)
+                levelXPSpan = sObjectMgr->GetXPForLevel(playerLevel - 1);
 
-            // Reduce experience
+            // Calculate how much experience to lose
+            int expToLose = (int)((float)levelXPSpan * (0.01 * EverQuest->ConfigExpLossOnDeathLossPercent));
+
             int curLevelEXP = player->GetUInt32Value(PLAYER_XP);
-            if (curLevelEXP > expToLose)
+            int expLost = expToLose;
+
+            if (playerLevel >= sWorld->getIntConfig(CONFIG_MAX_PLAYER_LEVEL))
             {
+                uint8 newLevel = playerLevel - 1;
+                uint32 belowLevelSpan = sObjectMgr->GetXPForLevel(newLevel);
+                int newExperience = (belowLevelSpan > 1 ? (int)belowLevelSpan - 1 : 0) - expToLose;
+                if (newExperience < 0)
+                    newExperience = 0;
+                player->SetLevel(newLevel, true);
+                player->SetUInt32Value(PLAYER_NEXT_LEVEL_XP, belowLevelSpan);
+                player->SetUInt32Value(PLAYER_XP, (uint32)newExperience);
+                ChatHandler(player->GetSession()).PSendSysMessage("You lost|cffFF0000 {} |rexperience for releasing your spirit, which dropped your level to |cffFF0000{}|r!", expToLose, newLevel);
+            }
+            else if (curLevelEXP > expToLose)
+            {
+                // Reduce experience within the current level
                 player->SetUInt32Value(PLAYER_XP, curLevelEXP - expToLose);
                 ChatHandler(player->GetSession()).PSendSysMessage("You lost|cffFF0000 {} |rexperience for releasing your spirit!", expToLose);
             }
             else
             {
-                // Underflow, so drop level if above level 1                
+                // Underflow, so drop level if above level 1
                 if (playerLevel == 1)
                 {
                     player->SetUInt32Value(PLAYER_XP, 0);
@@ -528,7 +548,7 @@ public:
 
             // If set, give it back as rest exp
             if (EverQuest->ConfigExpLossOnDeathAddLostExpToRestExp == true)
-                player->SetRestBonus(player->GetRestBonus() + expToLose);
+                player->SetRestBonus(player->GetRestBonus() + expLost);
         }
     }
 
