@@ -35,7 +35,7 @@ static uint32 ConfigMaxSkillIDCheck = 1000;         // The highest level of skil
 
 class Unit;
 
-#define EQ_MOD_VERSION                              28
+#define EQ_MOD_VERSION                              29
 
 #define EQ_EQCLASS_NONE                             0
 #define EQ_EQCLASS_WARRIOR                          1
@@ -190,6 +190,7 @@ public:
     uint32 RangedAttackMinRange = 0;
     uint32 RangedAttackMaxRange = 0;
     int32 RangedAttackDamageModPct = 0;
+    float AgroSocialDistanceMod = 1.0f;
 };
 
 class EverQuestCreatureSpawnPoint
@@ -228,6 +229,12 @@ public:
     uint32 StuckTimerMS = 0;
     uint32 SettleRemainingMS = 0;
     uint32 TeleportAttemptsUsed = 0;
+};
+
+class EverQuestCreatureSocialAggroState
+{
+public:
+    uint32 RecallTimerMS = 0;
 };
 
 class EverQuestItemTemplate
@@ -487,6 +494,7 @@ public:
     unordered_map<ObjectGuid, EverQuestLoadedCreatureEquippedVisualItems> VisualEquippedItemsByCreatureGUID;
     unordered_map<ObjectGuid, EverQuestCreatureRangedAttackState> RangedAttackStateByCreatureGUID;
     unordered_map<ObjectGuid, EverQuestCreatureUnstickState> UnstickStateByCreatureGUID;
+    unordered_map<ObjectGuid, EverQuestCreatureSocialAggroState> SocialAggroStateByCreatureGUID;
     unordered_set<ObjectGuid> CreaturesResolvingEQMeleeExtraAttacks;
     unordered_map<uint32, vector<EverQuestTransportShipTrigger>> ShipTriggersByTriggeringGameObjectTemplateEntryID;
     unordered_map<uint32, int> ShipWaitNodesByGameObjectTemplateEntryID;
@@ -555,6 +563,11 @@ public:
     void UpdateCreatureRangedAttack(Creature* creature, uint32 diff);
     void RemoveCreatureUnstickState(ObjectGuid creatureGUID);
     void UpdateCreatureUnstick(Creature* creature, uint32 diff);
+    bool TryGetCustomSocialAggroScale(Creature* creature, float& scaleOut);
+    void DoScaledSocialAggroSearch(Creature* caller, Unit* victim, float scale);
+    void ApplyScaledCreatureSocialAggroOnEngage(Creature* creature, Unit* victim);
+    void UpdateCreatureScaledSocialAggro(Creature* creature, uint32 diff);
+    void RemoveCreatureSocialAggroState(ObjectGuid creatureGUID);
     void RemoveVisualEquippedItemForCreatureGUIDIfExists(Map* map, ObjectGuid creatureGUID, uint32 itemTemplateID);
     void LoadShipTriggerData();
     const vector<EverQuestTransportShipTrigger>& GetShipTriggersForShip(int triggeringGameObjectTemplateEntryID);

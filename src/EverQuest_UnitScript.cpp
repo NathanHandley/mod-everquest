@@ -74,6 +74,18 @@ public:
         return true;
     }
 
+    void OnUnitEnterCombat(Unit* unit, Unit* victim) override
+    {
+        if (EverQuest->IsEnabled == false)
+            return;
+        if (unit == nullptr || victim == nullptr)
+            return;
+        Creature* creature = unit->ToCreature();
+        if (creature == nullptr)
+            return;
+        EverQuest->ApplyScaledCreatureSocialAggroOnEngage(creature, victim);
+    }
+
     void OnAuraApply(Unit* unit, Aura* aura) override
     {
         if (EverQuest->IsEnabled == false)

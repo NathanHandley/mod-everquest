@@ -61,6 +61,7 @@ public:
             EverQuest->RemoveCreatureAsLoaded(mapID, creature);
         EverQuest->RemoveCreatureRangedAttackState(creature->GetGUID());
         EverQuest->RemoveCreatureUnstickState(creature->GetGUID());
+        EverQuest->RemoveCreatureSocialAggroState(creature->GetGUID());
     }
 
     void OnAllCreatureUpdate(Creature* creature, uint32 diff) override
@@ -69,6 +70,7 @@ public:
             return;
         EverQuest->UpdateCreatureRangedAttack(creature, diff);
         EverQuest->UpdateCreatureUnstick(creature, diff);
+        EverQuest->UpdateCreatureScaledSocialAggro(creature, diff);
     }
 
 private:

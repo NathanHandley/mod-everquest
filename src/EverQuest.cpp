@@ -22,6 +22,9 @@
 #include "DBCStores.h"
 #include "SpellMgr.h"
 #include "Tokenize.h"
+#include "CellImpl.h"
+#include "GridNotifiers.h"
+#include "GridNotifiersImpl.h"
 
 #include "EverQuest.h"
 
@@ -218,7 +221,7 @@ void EverQuestMod::LoadConfigurationFile()
 void EverQuestMod::LoadCreatureData()
 {
     CreaturesByTemplateID.clear();
-    QueryResult queryResult = WorldDatabase.Query("SELECT CreatureTemplateID, CanShowHeldLootItems, CanShowHeldLootShields, SpawnLimit, RangedAttackEnabled, RangedAttackMinRange, RangedAttackMaxRange, RangedAttackDamageModPct FROM mod_everquest_creature ORDER BY CreatureTemplateID;");
+    QueryResult queryResult = WorldDatabase.Query("SELECT CreatureTemplateID, CanShowHeldLootItems, CanShowHeldLootShields, SpawnLimit, RangedAttackEnabled, RangedAttackMinRange, RangedAttackMaxRange, RangedAttackDamageModPct, AgroSocialDistanceMod FROM mod_everquest_creature ORDER BY CreatureTemplateID;");
     if (queryResult)
     {
         do
@@ -234,6 +237,7 @@ void EverQuestMod::LoadCreatureData()
             everQuestCreature.RangedAttackMinRange = fields[5].Get<uint32>();
             everQuestCreature.RangedAttackMaxRange = fields[6].Get<uint32>();
             everQuestCreature.RangedAttackDamageModPct = fields[7].Get<int32>();
+            everQuestCreature.AgroSocialDistanceMod = fields[8].Get<float>();
             CreaturesByTemplateID[everQuestCreature.CreatureTemplateID] = everQuestCreature;
         } while (queryResult->NextRow());
     }
@@ -1209,6 +1213,100 @@ void EverQuestMod::UpdateCreatureUnstick(Creature* creature, uint32 diff)
             creature->AI()->EnterEvadeMode(CreatureAI::EVADE_REASON_NO_PATH);
         RemoveCreatureUnstickState(creature->GetGUID());
     }
+}
+
+bool EverQuestMod::TryGetCustomSocialAggroScale(Creature* creature, float& scaleOut)
+{
+    if (creature == nullptr)
+        return false;
+    if (HasCreatureDataForCreatureTemplateID(creature->GetEntry()) == false)
+        return false;
+    float scale = GetCreatureDataForCreatureTemplateID(creature->GetEntry()).AgroSocialDistanceMod;
+    if (std::fabs(scale - 1.0f) <= 0.0001f) // Should probably use epsilon...
+        return false;
+    scaleOut = scale;
+    return true;
+}
+
+// Kinda-sorta a mirror of Creature:CallAssistance, but need to override to make custom social behavior
+void EverQuestMod::DoScaledSocialAggroSearch(Creature* caller, Unit* victim, float scale)
+{
+    if (caller == nullptr || victim == nullptr)
+        return;
+
+    float radius = sWorld->getFloatConfig(CONFIG_CREATURE_FAMILY_ASSISTANCE_RADIUS) * scale;
+    if (radius <= 0.0f)
+        return;
+
+    std::list<Creature*> assistList;
+    Acore::AnyAssistCreatureInRangeCheck check(caller, victim, radius);
+    Acore::CreatureListSearcher<Acore::AnyAssistCreatureInRangeCheck> searcher(caller, assistList, check);
+    Cell::VisitObjects(caller, searcher, radius);
+
+    for (Creature* assistant : assistList)
+    {
+        // Suppress immediate call, link leash timers
+        assistant->SetNoCallAssistance(true);
+        assistant->EngageWithTarget(victim);
+        if (assistant->IsEngaged() == true)
+            assistant->SetLastLeashExtensionTimePtr(caller->GetLastLeashExtensionTimePtr());
+    }
+}
+
+void EverQuestMod::ApplyScaledCreatureSocialAggroOnEngage(Creature* creature, Unit* victim)
+{
+    // Only apply if a creature has a custom setting
+    float scale = 1.0f;
+    if (TryGetCustomSocialAggroScale(creature, scale) == false)
+        return;
+
+    creature->SetNoCallAssistance(true);
+    DoScaledSocialAggroSearch(creature, victim, scale);
+}
+
+void EverQuestMod::RemoveCreatureSocialAggroState(ObjectGuid creatureGUID)
+{
+    SocialAggroStateByCreatureGUID.erase(creatureGUID);
+}
+
+void EverQuestMod::UpdateCreatureScaledSocialAggro(Creature* creature, uint32 diff)
+{
+    if (creature == nullptr)
+        return;
+
+    float scale = 1.0f;
+    bool eligible = TryGetCustomSocialAggroScale(creature, scale) == true &&
+        creature->IsAlive() == true && creature->IsInCombat() == true &&
+        creature->IsPet() == false && creature->IsControlledByPlayer() == false;
+    Unit* victim = creature->GetVictim();
+    if (victim == nullptr || victim->IsAlive() == false)
+        eligible = false;
+
+    if (eligible == false)
+    {
+        RemoveCreatureSocialAggroState(creature->GetGUID());
+        return;
+    }
+
+    // Stop the engine's full-radius periodic re-call (its block is skipped when the timer is zero)
+    creature->SetAssistanceTimer(0);
+
+    // Honor the disabled-periodic config (0) the same way the core does
+    uint32 periodMS = sWorld->getIntConfig(CONFIG_CREATURE_FAMILY_ASSISTANCE_PERIOD);
+    if (periodMS == 0)
+    {
+        RemoveCreatureSocialAggroState(creature->GetGUID());
+        return;
+    }
+
+    EverQuestCreatureSocialAggroState& state = SocialAggroStateByCreatureGUID[creature->GetGUID()];
+    if (state.RecallTimerMS <= diff)
+    {
+        DoScaledSocialAggroSearch(creature, victim, scale);
+        state.RecallTimerMS = periodMS;
+    }
+    else
+        state.RecallTimerMS -= diff;
 }
 
 // Reference is EQMacEmu/TAKP Mob::TryBashKickStun
