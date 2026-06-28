@@ -124,6 +124,43 @@ EverQuest.CombatSkills.RangedAttackDefaultMaxRange = 250
 EverQuest.CombatSkills.RangedAttackDamageMultiplier = 1.0
 
 ###################################################################################################
+# Evade / Unstick Settings (EverQuest maps only)
+#
+# 	EverQuest.Evade.Enabled
+#		If true, EverQuest maps use the EQ-style unreachable handling below instead of the core's
+#		fixed unreachable-evade behavior. Non-EverQuest maps are never affected
+#	Default: True
+#
+# 	EverQuest.Evade.UnreachableEvadeSeconds
+#		Base timer, in seconds, a creature may remain genuinely stuck (out of melee, not casting, not
+#		movement impaired, not moving) before it evades. Reached only once unstick teleport attempts
+#		are exhausted, since each attempt resets this timer
+#	Default: 10
+#
+# 	EverQuest.Evade.UnstickStallSeconds
+#		Seconds a creature must be stuck (as above, and not moved more than one world unit on X or Y)
+#		before it one-time teleports onto its target to unstick itself
+#	Default: 3
+#
+# 	EverQuest.Evade.UnstickSettleSeconds
+#		After an unstick teleport, seconds the creature stops chasing and delays its melee swing before
+#		resuming aggression (an AI spellcast may still fire)
+#	Default: 1
+#
+# 	EverQuest.Evade.UnstickMaxAttempts
+#		Maximum unstick teleports per aggro session. The counter resets when the creature evades, loses
+#		aggro, dies, or respawns. Set to 0 to disable teleporting (creatures simply evade on the base timer)
+#	Default: 3
+#
+###################################################################################################
+
+EverQuest.Evade.Enabled = True
+EverQuest.Evade.UnreachableEvadeSeconds = 10
+EverQuest.Evade.UnstickStallSeconds = 3
+EverQuest.Evade.UnstickSettleSeconds = 1
+EverQuest.Evade.UnstickMaxAttempts = 3
+
+###################################################################################################
 #
 # 	EverQuest.ShowClassMessageOnLogin
 #		If true, a chat message describing the player's primary (and secondary) EQ class is shown

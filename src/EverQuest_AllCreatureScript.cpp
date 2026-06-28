@@ -60,6 +60,7 @@ public:
         if (mapID >= EverQuest->ConfigSystemMapDBCIDMin && mapID <= EverQuest->ConfigSystemMapDBCIDMax)
             EverQuest->RemoveCreatureAsLoaded(mapID, creature);
         EverQuest->RemoveCreatureRangedAttackState(creature->GetGUID());
+        EverQuest->RemoveCreatureUnstickState(creature->GetGUID());
     }
 
     void OnAllCreatureUpdate(Creature* creature, uint32 diff) override
@@ -67,6 +68,7 @@ public:
         if (EverQuest->IsEnabled == false)
             return;
         EverQuest->UpdateCreatureRangedAttack(creature, diff);
+        EverQuest->UpdateCreatureUnstick(creature, diff);
     }
 
 private:

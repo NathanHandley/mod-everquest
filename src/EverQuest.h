@@ -219,6 +219,17 @@ public:
     uint32 SwingTimerRemainingMS = 0;
 };
 
+class EverQuestCreatureUnstickState
+{
+public:
+    float LastX = 0.0f;
+    float LastY = 0.0f;
+    bool HasLastPos = false;
+    uint32 StuckTimerMS = 0;
+    uint32 SettleRemainingMS = 0;
+    uint32 TeleportAttemptsUsed = 0;
+};
+
 class EverQuestItemTemplate
 {
 public:
@@ -439,6 +450,11 @@ public:
     float ConfigCombatSkillsRangedAttackDefaultMinRange;
     float ConfigCombatSkillsRangedAttackDefaultMaxRange;
     float ConfigCombatSkillsRangedAttackDamageMultiplier;
+    bool ConfigEvadeEnabled;
+    float ConfigEvadeUnreachableSeconds;
+    float ConfigEvadeUnstickStallSeconds;
+    float ConfigEvadeUnstickSettleSeconds;
+    uint32 ConfigEvadeUnstickMaxAttempts;
     bool ConfigShowClassMessageOnLogin;
     float ConfigSecondaryExpPoolGainPercent;
     uint32 ConfigSecondaryExpPoolMaxPooled;
@@ -470,6 +486,7 @@ public:
     unordered_map<ObjectGuid, unordered_map<uint32, uint32>> PreloadedLootCountsByCreatureGUID;
     unordered_map<ObjectGuid, EverQuestLoadedCreatureEquippedVisualItems> VisualEquippedItemsByCreatureGUID;
     unordered_map<ObjectGuid, EverQuestCreatureRangedAttackState> RangedAttackStateByCreatureGUID;
+    unordered_map<ObjectGuid, EverQuestCreatureUnstickState> UnstickStateByCreatureGUID;
     unordered_set<ObjectGuid> CreaturesResolvingEQMeleeExtraAttacks;
     unordered_map<uint32, vector<EverQuestTransportShipTrigger>> ShipTriggersByTriggeringGameObjectTemplateEntryID;
     unordered_map<uint32, int> ShipWaitNodesByGameObjectTemplateEntryID;
@@ -536,6 +553,8 @@ public:
     void StoreCreatureRangedAttackState(ObjectGuid creatureGUID, float minRange, float maxRange, int32 damageModPct);
     void RemoveCreatureRangedAttackState(ObjectGuid creatureGUID);
     void UpdateCreatureRangedAttack(Creature* creature, uint32 diff);
+    void RemoveCreatureUnstickState(ObjectGuid creatureGUID);
+    void UpdateCreatureUnstick(Creature* creature, uint32 diff);
     void RemoveVisualEquippedItemForCreatureGUIDIfExists(Map* map, ObjectGuid creatureGUID, uint32 itemTemplateID);
     void LoadShipTriggerData();
     const vector<EverQuestTransportShipTrigger>& GetShipTriggersForShip(int triggeringGameObjectTemplateEntryID);

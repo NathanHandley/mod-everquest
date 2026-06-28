@@ -17,6 +17,7 @@
 #include "Chat.h"
 #include "GameEventMgr.h"
 #include "Creature.h"
+#include "CreatureAI.h"
 #include "CreatureData.h"
 #include "DBCStores.h"
 #include "SpellMgr.h"
@@ -25,6 +26,7 @@
 #include "EverQuest.h"
 
 #include <algorithm>
+#include <cmath>
 #include <random>
 
 using namespace std;
@@ -53,6 +55,11 @@ EverQuestMod::EverQuestMod() :
     ConfigAlternateGroupExperienceAddPercentPerAddedMember(20.0f),
     ConfigSpellDisableStackingOfSameDOT(false),
     ConfigCombatSkillsDisableBashKickStunOnPlayers(false),
+    ConfigEvadeEnabled(true),
+    ConfigEvadeUnreachableSeconds(10.0f),
+    ConfigEvadeUnstickStallSeconds(3.0f),
+    ConfigEvadeUnstickSettleSeconds(1.0f),
+    ConfigEvadeUnstickMaxAttempts(3),
     ConfigShowClassMessageOnLogin(true),
     ConfigSecondaryExpPoolGainPercent(25.0f),
     ConfigSecondaryExpPoolMaxPooled(1000000),
@@ -185,6 +192,13 @@ void EverQuestMod::LoadConfigurationFile()
     ConfigCombatSkillsRangedAttackDefaultMinRange = sConfigMgr->GetOption<float>("EverQuest.CombatSkills.RangedAttackDefaultMinRange", 25.0f);
     ConfigCombatSkillsRangedAttackDefaultMaxRange = sConfigMgr->GetOption<float>("EverQuest.CombatSkills.RangedAttackDefaultMaxRange", 250.0f);
     ConfigCombatSkillsRangedAttackDamageMultiplier = sConfigMgr->GetOption<float>("EverQuest.CombatSkills.RangedAttackDamageMultiplier", 1.0f);
+
+    // Evade / unstick (EverQuest maps only)
+    ConfigEvadeEnabled = sConfigMgr->GetOption<bool>("EverQuest.Evade.Enabled", true);
+    ConfigEvadeUnreachableSeconds = sConfigMgr->GetOption<float>("EverQuest.Evade.UnreachableEvadeSeconds", 10.0f);
+    ConfigEvadeUnstickStallSeconds = sConfigMgr->GetOption<float>("EverQuest.Evade.UnstickStallSeconds", 3.0f);
+    ConfigEvadeUnstickSettleSeconds = sConfigMgr->GetOption<float>("EverQuest.Evade.UnstickSettleSeconds", 1.0f);
+    ConfigEvadeUnstickMaxAttempts = sConfigMgr->GetOption<uint32>("EverQuest.Evade.UnstickMaxAttempts", 3);
 
     // Class
     ConfigShowClassMessageOnLogin = sConfigMgr->GetOption<bool>("EverQuest.ShowClassMessageOnLogin", true);
@@ -1069,6 +1083,132 @@ void EverQuestMod::UpdateCreatureRangedAttack(Creature* creature, uint32 diff)
     if (swingTime < 1000)
         swingTime = 1000;
     state.SwingTimerRemainingMS = swingTime;
+}
+
+void EverQuestMod::RemoveCreatureUnstickState(ObjectGuid creatureGUID)
+{
+    UnstickStateByCreatureGUID.erase(creatureGUID);
+}
+
+// Added this unstuck logic due to pathing errors in converted EQ content
+void EverQuestMod::UpdateCreatureUnstick(Creature* creature, uint32 diff)
+{
+    if (creature == nullptr)
+        return;
+    if (ConfigEvadeEnabled == false)
+        return;
+
+    // Only do this special unstuck for EQ zones
+    uint32 mapID = creature->GetMap()->GetId();
+    if (mapID < ConfigSystemMapDBCIDMin || mapID > ConfigSystemMapDBCIDMax)
+        return;
+
+    // Only for living in-combat creatures should we do anything
+    bool eligible = creature->IsAlive() == true && creature->IsInCombat() == true &&
+        creature->IsPet() == false && creature->IsControlledByPlayer() == false;
+    Unit* victim = creature->GetVictim();
+    if (victim == nullptr || victim->IsAlive() == false)
+        eligible = false;
+
+    if (eligible == false)
+    {
+        auto existingIt = UnstickStateByCreatureGUID.find(creature->GetGUID());
+        if (existingIt != UnstickStateByCreatureGUID.end())
+        {
+            if (existingIt->second.SettleRemainingMS > 0)
+                creature->ClearUnitState(UNIT_STATE_NO_COMBAT_MOVEMENT);
+            UnstickStateByCreatureGUID.erase(existingIt);
+        }
+        return;
+    }
+
+    EverQuestCreatureUnstickState& state = UnstickStateByCreatureGUID[creature->GetGUID()];
+    // Take over 'cannot reach' to avoid early evades
+    if (creature->CanNotReachTarget() == true)
+        creature->SetCannotReachTarget();
+
+    // Settle window after a teleport.  Stop chasing and delay next swing, but do allow spellcast
+    if (state.SettleRemainingMS > 0)
+    {
+        if (state.SettleRemainingMS > diff)
+            state.SettleRemainingMS -= diff;
+        else
+            state.SettleRemainingMS = 0;
+
+        creature->AddUnitState(UNIT_STATE_NO_COMBAT_MOVEMENT);
+        creature->StopMoving();
+        creature->setAttackTimer(BASE_ATTACK, (int32)state.SettleRemainingMS);
+        creature->setAttackTimer(OFF_ATTACK, (int32)state.SettleRemainingMS);
+
+        if (state.SettleRemainingMS == 0)
+        {
+            creature->ClearUnitState(UNIT_STATE_NO_COMBAT_MOVEMENT);
+            state.HasLastPos = false;
+            state.StuckTimerMS = 0;
+        }
+        return;
+    }
+
+    // Clear if target is reached
+    if (creature->IsWithinMeleeRange(victim) == true)
+    {
+        state.StuckTimerMS = 0;
+        state.LastX = creature->GetPositionX();
+        state.LastY = creature->GetPositionY();
+        state.HasLastPos = true;
+        return;
+    }
+
+    // If a creature is casting or moving, then it's not really stuck it's just not at the player yet
+    bool casting = creature->HasUnitState(UNIT_STATE_CASTING) || creature->IsNonMeleeSpellCast(false) ||
+        creature->IsMovementPreventedByCasting();
+    bool impaired = creature->HasUnitState(UNIT_STATE_ROOT | UNIT_STATE_STUNNED | UNIT_STATE_CONFUSED |
+        UNIT_STATE_FLEEING | UNIT_STATE_DISTRACTED) || creature->HasAuraType(SPELL_AURA_MOD_DECREASE_SPEED);
+    float currentX = creature->GetPositionX();
+    float currentY = creature->GetPositionY();
+    bool moved = state.HasLastPos == true &&
+        (std::fabs(currentX - state.LastX) > 1.0f || std::fabs(currentY - state.LastY) > 1.0f);
+    if (casting == true || impaired == true || moved == true)
+    {
+        state.StuckTimerMS = 0;
+        state.LastX = currentX;
+        state.LastY = currentY;
+        state.HasLastPos = true;
+        return;
+    }
+
+    // If we got here, it's actually stuck
+    state.StuckTimerMS += diff;
+    state.LastX = currentX;
+    state.LastY = currentY;
+    state.HasLastPos = true;
+    uint32 stallThresholdMS = (uint32)(ConfigEvadeUnstickStallSeconds * 1000.0f);
+    if (state.StuckTimerMS >= stallThresholdMS && state.TeleportAttemptsUsed < ConfigEvadeUnstickMaxAttempts)
+    {
+        // Teleport to the player and pause action in an attempt to unstick
+        creature->NearTeleportTo(victim->GetPositionX(), victim->GetPositionY(), victim->GetPositionZ(),
+            creature->GetAngle(victim));
+        state.TeleportAttemptsUsed += 1;
+        state.StuckTimerMS = 0;
+        state.LastX = creature->GetPositionX();
+        state.LastY = creature->GetPositionY();
+        state.HasLastPos = true;
+        state.SettleRemainingMS = (uint32)(ConfigEvadeUnstickSettleSeconds * 1000.0f);
+        creature->AddUnitState(UNIT_STATE_NO_COMBAT_MOVEMENT);
+        creature->StopMoving();
+        creature->setAttackTimer(BASE_ATTACK, (int32)state.SettleRemainingMS);
+        creature->setAttackTimer(OFF_ATTACK, (int32)state.SettleRemainingMS);
+        return;
+    }
+
+    // Just go into evade if all teleport attempts are exausted
+    uint32 evadeThresholdMS = (uint32)(ConfigEvadeUnreachableSeconds * 1000.0f);
+    if (state.StuckTimerMS >= evadeThresholdMS)
+    {
+        if (creature->AI() != nullptr)
+            creature->AI()->EnterEvadeMode(CreatureAI::EVADE_REASON_NO_PATH);
+        RemoveCreatureUnstickState(creature->GetGUID());
+    }
 }
 
 // Reference is EQMacEmu/TAKP Mob::TryBashKickStun
