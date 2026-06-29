@@ -62,6 +62,7 @@ EverQuestMod::EverQuestMod() :
     ConfigEvadeUnreachableSeconds(10.0f),
     ConfigEvadeUnstickStallSeconds(3.0f),
     ConfigEvadeUnstickSettleSeconds(1.0f),
+    ConfigEvadeUnstickMoveThreshold(3.0f),
     ConfigEvadeUnstickMaxAttempts(3),
     ConfigShowClassMessageOnLogin(true),
     ConfigSecondaryExpPoolGainPercent(25.0f),
@@ -201,6 +202,7 @@ void EverQuestMod::LoadConfigurationFile()
     ConfigEvadeUnreachableSeconds = sConfigMgr->GetOption<float>("EverQuest.Evade.UnreachableEvadeSeconds", 10.0f);
     ConfigEvadeUnstickStallSeconds = sConfigMgr->GetOption<float>("EverQuest.Evade.UnstickStallSeconds", 3.0f);
     ConfigEvadeUnstickSettleSeconds = sConfigMgr->GetOption<float>("EverQuest.Evade.UnstickSettleSeconds", 1.0f);
+    ConfigEvadeUnstickMoveThreshold = sConfigMgr->GetOption<float>("EverQuest.Evade.UnstickMoveThreshold", 3.0f);
     ConfigEvadeUnstickMaxAttempts = sConfigMgr->GetOption<uint32>("EverQuest.Evade.UnstickMaxAttempts", 3);
 
     // Class
@@ -1147,7 +1149,7 @@ void EverQuestMod::UpdateCreatureUnstick(Creature* creature, uint32 diff)
         if (state.SettleRemainingMS == 0)
         {
             creature->ClearUnitState(UNIT_STATE_NO_COMBAT_MOVEMENT);
-            state.HasLastPos = false;
+            state.HasAnchor = false;
             state.StuckTimerMS = 0;
         }
         return;
@@ -1157,35 +1159,37 @@ void EverQuestMod::UpdateCreatureUnstick(Creature* creature, uint32 diff)
     if (creature->IsWithinMeleeRange(victim) == true)
     {
         state.StuckTimerMS = 0;
-        state.LastX = creature->GetPositionX();
-        state.LastY = creature->GetPositionY();
-        state.HasLastPos = true;
+        state.HasAnchor = false;
         return;
     }
 
-    // If a creature is casting or moving, then it's not really stuck it's just not at the player yet
+    // If a creature is casting or movement-impaired, then it's not really stuck
     bool casting = creature->HasUnitState(UNIT_STATE_CASTING) || creature->IsNonMeleeSpellCast(false) ||
         creature->IsMovementPreventedByCasting();
     bool impaired = creature->HasUnitState(UNIT_STATE_ROOT | UNIT_STATE_STUNNED | UNIT_STATE_CONFUSED |
         UNIT_STATE_FLEEING | UNIT_STATE_DISTRACTED) || creature->HasAuraType(SPELL_AURA_MOD_DECREASE_SPEED);
-    float currentX = creature->GetPositionX();
-    float currentY = creature->GetPositionY();
-    bool moved = state.HasLastPos == true &&
-        (std::fabs(currentX - state.LastX) > 1.0f || std::fabs(currentY - state.LastY) > 1.0f);
-    if (casting == true || impaired == true || moved == true)
+    if (casting == true || impaired == true)
     {
         state.StuckTimerMS = 0;
-        state.LastX = currentX;
-        state.LastY = currentY;
-        state.HasLastPos = true;
+        state.HasAnchor = false;
+        return;
+    }
+
+    // Genuinely stuck creatures don't actually move
+    float currentX = creature->GetPositionX();
+    float currentY = creature->GetPositionY();
+    if (state.HasAnchor == false ||
+        creature->GetExactDist2d(state.AnchorX, state.AnchorY) > ConfigEvadeUnstickMoveThreshold)
+    {
+        state.StuckTimerMS = 0;
+        state.AnchorX = currentX;
+        state.AnchorY = currentY;
+        state.HasAnchor = true;
         return;
     }
 
     // If we got here, it's actually stuck
     state.StuckTimerMS += diff;
-    state.LastX = currentX;
-    state.LastY = currentY;
-    state.HasLastPos = true;
     uint32 stallThresholdMS = (uint32)(ConfigEvadeUnstickStallSeconds * 1000.0f);
     if (state.StuckTimerMS >= stallThresholdMS && state.TeleportAttemptsUsed < ConfigEvadeUnstickMaxAttempts)
     {
@@ -1194,9 +1198,7 @@ void EverQuestMod::UpdateCreatureUnstick(Creature* creature, uint32 diff)
             creature->GetAngle(victim));
         state.TeleportAttemptsUsed += 1;
         state.StuckTimerMS = 0;
-        state.LastX = creature->GetPositionX();
-        state.LastY = creature->GetPositionY();
-        state.HasLastPos = true;
+        state.HasAnchor = false;
         state.SettleRemainingMS = (uint32)(ConfigEvadeUnstickSettleSeconds * 1000.0f);
         creature->AddUnitState(UNIT_STATE_NO_COMBAT_MOVEMENT);
         creature->StopMoving();

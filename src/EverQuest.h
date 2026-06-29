@@ -223,9 +223,9 @@ public:
 class EverQuestCreatureUnstickState
 {
 public:
-    float LastX = 0.0f;
-    float LastY = 0.0f;
-    bool HasLastPos = false;
+    float AnchorX = 0.0f;
+    float AnchorY = 0.0f;
+    bool HasAnchor = false;
     uint32 StuckTimerMS = 0;
     uint32 SettleRemainingMS = 0;
     uint32 TeleportAttemptsUsed = 0;
@@ -461,6 +461,7 @@ public:
     float ConfigEvadeUnreachableSeconds;
     float ConfigEvadeUnstickStallSeconds;
     float ConfigEvadeUnstickSettleSeconds;
+    float ConfigEvadeUnstickMoveThreshold;
     uint32 ConfigEvadeUnstickMaxAttempts;
     bool ConfigShowClassMessageOnLogin;
     float ConfigSecondaryExpPoolGainPercent;
