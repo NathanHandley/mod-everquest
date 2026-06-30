@@ -46,6 +46,7 @@ public:
             }
             EverQuest->AddCreatureAsLoaded(mapID, creature);
         }
+        RestrictCreatureOwnedPetAggroRange(creature);
         SetVisualEquipment(creature);
         ApplyLootWornEffectAuras(creature);
         SetupRangedAttack(creature);
@@ -74,6 +75,15 @@ public:
     }
 
 private:
+    void RestrictCreatureOwnedPetAggroRange(Creature* creature)
+    {
+        if (creature->IsPet() == false && creature->IsSummon() == false)
+            return;
+        if (creature->GetCharmerOrOwnerGUID().IsCreature() == false)
+            return;
+        creature->SetDetectionDistance(0.0f);
+    }
+
     // Ranged attack is either if the creature has the special ability for it, or they have a bow+arrow in inventory
     // Note: This is based on TAKP's GetSpecialAbility / HasBowAndArrowEquipped logic
     void SetupRangedAttack(Creature* creature)
