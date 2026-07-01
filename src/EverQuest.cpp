@@ -2009,31 +2009,31 @@ uint32 EverQuestMod::CalculateSpellFocusBoostValue(Unit* caster, uint32 spellID)
             int auraDummyType = auraInfo->Effects[effIndex].MiscValue;
 
             // Match up focus types and add the boost
-            if (curSpell.FocusBoostType == EQ_SPELLFOCUSBOOSTTYPE_BARDBRASS && (auraDummyType == EQ_SPELLDUMMYTYPE_BARDFOCUSBRASS || auraDummyType == EQ_SPELLDUMMYTYPE_BARDFOCUSALL))
+            bool focusMatchesSong = false;
+            switch (curSpell.FocusBoostType)
             {
-                boostValue += auraInfo->Effects[effIndex].MiscValueB;
-                continue;
+                case EQ_SPELLFOCUSBOOSTTYPE_BARDBRASS:
+                    focusMatchesSong = (auraDummyType == EQ_SPELLDUMMYTYPE_BARDFOCUSBRASS || auraDummyType == EQ_SPELLDUMMYTYPE_BARDFOCUSALL);
+                    break;
+                case EQ_SPELLFOCUSBOOSTTYPE_BARDSTRINGED:
+                    focusMatchesSong = (auraDummyType == EQ_SPELLDUMMYTYPE_BARDFOCUSSTRING || auraDummyType == EQ_SPELLDUMMYTYPE_BARDFOCUSALL);
+                    break;
+                case EQ_SPELLFOCUSBOOSTTYPE_BARDWIND:
+                    focusMatchesSong = (auraDummyType == EQ_SPELLDUMMYTYPE_BARDFOCUSWIND || auraDummyType == EQ_SPELLDUMMYTYPE_BARDFOCUSALL);
+                    break;
+                case EQ_SPELLFOCUSBOOSTTYPE_BARDPERCUSSION:
+                    focusMatchesSong = (auraDummyType == EQ_SPELLDUMMYTYPE_BARDFOCUSPERCUSSION || auraDummyType == EQ_SPELLDUMMYTYPE_BARDFOCUSALL);
+                    break;
+                case EQ_SPELLFOCUSBOOSTTYPE_BARDSINGING:
+                    focusMatchesSong = (auraDummyType == EQ_SPELLDUMMYTYPE_BARDFOCUSALL);
+                    break;
+                default:
+                    break;
             }
-            else if (curSpell.FocusBoostType == EQ_SPELLFOCUSBOOSTTYPE_BARDSTRINGED && (auraDummyType == EQ_SPELLDUMMYTYPE_BARDFOCUSSTRING || auraDummyType == EQ_SPELLDUMMYTYPE_BARDFOCUSALL))
-            {
-                boostValue += auraInfo->Effects[effIndex].MiscValueB;
-                continue;
-            }
-            else if (curSpell.FocusBoostType == EQ_SPELLFOCUSBOOSTTYPE_BARDWIND && (auraDummyType == EQ_SPELLDUMMYTYPE_BARDFOCUSWIND || auraDummyType == EQ_SPELLDUMMYTYPE_BARDFOCUSALL))
-            {
-                boostValue += auraInfo->Effects[effIndex].MiscValueB;
-                continue;
-            }
-            else if (curSpell.FocusBoostType == EQ_SPELLFOCUSBOOSTTYPE_BARDPERCUSSION && (auraDummyType == EQ_SPELLDUMMYTYPE_BARDFOCUSPERCUSSION || auraDummyType == EQ_SPELLDUMMYTYPE_BARDFOCUSALL))
-            {
-                boostValue += auraInfo->Effects[effIndex].MiscValueB;
-                continue;
-            }
-            else if (curSpell.FocusBoostType == EQ_SPELLFOCUSBOOSTTYPE_BARDSINGING && auraDummyType == EQ_SPELLDUMMYTYPE_BARDFOCUSALL)
-            {
-                boostValue += auraInfo->Effects[effIndex].MiscValueB;
-                continue;
-            }
+
+            // Keep the best (highest) matching instrument
+            if (focusMatchesSong && static_cast<uint32>(auraInfo->Effects[effIndex].MiscValueB) > boostValue)
+                boostValue = auraInfo->Effects[effIndex].MiscValueB;
         }
     }
     return boostValue;
