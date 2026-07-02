@@ -35,7 +35,7 @@ static uint32 ConfigMaxSkillIDCheck = 1000;         // The highest level of skil
 
 class Unit;
 
-#define EQ_MOD_VERSION                              30
+#define EQ_MOD_VERSION                              31
 
 #define EQ_EQCLASS_NONE                             0
 #define EQ_EQCLASS_WARRIOR                          1
@@ -178,6 +178,7 @@ public:
     uint32 EffectFailableType = 0;
     bool StunUsesBashKickChance = false;
     uint32 SpellIDCastOnTargetWhenStunLands = 0;
+    bool AuraStaysOnSecondaryClassSwitch = false;
 };
 
 class EverQuestCreature
@@ -445,7 +446,6 @@ public:
     uint32 ConfigSystemCreatureTemplateIDMax;
     bool ConfigDeathKnightsStartLikeOtherClasses;
     bool ConfigDazeEnabledInEQZones;
-    uint32 ConfigSystemGateTetherSpellID;
     uint32 ConfigSystemGameObjectTemplateIDMin;
     uint32 ConfigSystemGameObjectTemplateIDMax;
     uint32 ConfigSystemShipEntryTemplateIDMin;

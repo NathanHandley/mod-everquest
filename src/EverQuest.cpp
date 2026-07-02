@@ -115,8 +115,6 @@ bool EverQuestMod::LoadConfigurationSystemDataFromDB()
                 ConfigDeathKnightsStartLikeOtherClasses = value == "1" ? true : false;
             else if (key == "GameObjectTemplateIDMin")
                 ConfigSystemGameObjectTemplateIDMin = (uint32)atoi(value.c_str());
-            else if (key == "GateTetherAuraSpellID")
-                ConfigSystemGateTetherSpellID = (uint32)atoi(value.c_str());
             else if (key == "GameObjectTemplateIDMax")
                 ConfigSystemGameObjectTemplateIDMax = (uint32)atoi(value.c_str());
             else if (key == "InvisVsUndeadDetectSpellID")
@@ -451,7 +449,7 @@ bool EverQuestMod::IsItemEQClassAllowedForPlayer(Player* player, uint32 itemTemp
 void EverQuestMod::LoadSpellData()
 {
     SpellDataBySpellID.clear();
-    QueryResult queryResult = WorldDatabase.Query("SELECT SpellID, AuraDurationBaseInMS, AuraDurationAddPerLevelInMS, AuraDurationMaxInMS, AuraDurationCalcMinLevel, AuraDurationCalcMaxLevel, RecourseSpellID, SpellIDCastOnMeleeAttacker, FocusBoostType, PeriodicAuraSpellID, PeriodicAuraSpellRadius, MaleFormSpellID, FemaleFormSpellID, EffectFailChancePercent, EffectFailableType, StunUsesBashKickChance, SpellIDCastOnTargetWhenStunLands FROM mod_everquest_spell ORDER BY SpellID;");
+    QueryResult queryResult = WorldDatabase.Query("SELECT SpellID, AuraDurationBaseInMS, AuraDurationAddPerLevelInMS, AuraDurationMaxInMS, AuraDurationCalcMinLevel, AuraDurationCalcMaxLevel, RecourseSpellID, SpellIDCastOnMeleeAttacker, FocusBoostType, PeriodicAuraSpellID, PeriodicAuraSpellRadius, MaleFormSpellID, FemaleFormSpellID, EffectFailChancePercent, EffectFailableType, StunUsesBashKickChance, SpellIDCastOnTargetWhenStunLands, AuraStaysOnSecondaryClassSwitch FROM mod_everquest_spell ORDER BY SpellID;");
     if (queryResult)
     {
         do
@@ -476,6 +474,7 @@ void EverQuestMod::LoadSpellData()
             everQuestSpell.EffectFailableType = fields[14].Get<uint32>();
             everQuestSpell.StunUsesBashKickChance = fields[15].Get<bool>();
             everQuestSpell.SpellIDCastOnTargetWhenStunLands = fields[16].Get<uint32>();
+            everQuestSpell.AuraStaysOnSecondaryClassSwitch = fields[17].Get<bool>();
             SpellDataBySpellID[everQuestSpell.SpellID] = everQuestSpell;
         } while (queryResult->NextRow());
     }
@@ -2547,11 +2546,23 @@ void EverQuestMod::MoveAuraToModAuraTable(Player* player, CharacterDatabaseTrans
 {
     uint8 curEQClass = GetCurrentSecondEQClassForPlayer(player);
 
-    // TODO: Do something about gate
+    // Build the list of spells that should remain on character_aura across a secondary class switch (like gate tether)
+    string keptSpellsList = "";
+    for (auto const& spellPair : SpellDataBySpellID)
+    {
+        if (spellPair.second.AuraStaysOnSecondaryClassSwitch == true)
+        {
+            if (keptSpellsList.empty() == false)
+                keptSpellsList += ",";
+            keptSpellsList += std::to_string(spellPair.second.SpellID);
+        }
+    }
+    if (keptSpellsList.empty() == true)
+        keptSpellsList = "0"; // No spell uses id 0, so NOT IN (0) keeps nothing
 
     transaction->Append("DELETE FROM `mod_everquest_character_class_aura` WHERE guid = {} and eqclass = {}", player->GetGUID().GetCounter(), curEQClass);
-    transaction->Append("INSERT IGNORE INTO mod_everquest_character_class_aura (guid, class, eqclass, casterGuid, itemGuid, spell, effectMask, recalculateMask, stackCount, amount0, amount1, amount2, base_amount0, base_amount1, base_amount2, maxDuration, remainTime, remainCharges) SELECT guid, {}, {}, casterGuid, itemGuid, spell, effectMask, recalculateMask, stackCount, amount0, amount1, amount2, base_amount0, base_amount1, base_amount2, maxDuration, remainTime, remainCharges FROM character_aura WHERE guid = {} AND spell != {}", player->getClass(), curEQClass, player->GetGUID().GetCounter(), EverQuest->ConfigSystemGateTetherSpellID);
-    transaction->Append("DELETE FROM `character_aura` WHERE guid = {} AND spell != {}", player->GetGUID().GetCounter(), EverQuest->ConfigSystemGateTetherSpellID);
+    transaction->Append("INSERT IGNORE INTO mod_everquest_character_class_aura (guid, class, eqclass, casterGuid, itemGuid, spell, effectMask, recalculateMask, stackCount, amount0, amount1, amount2, base_amount0, base_amount1, base_amount2, maxDuration, remainTime, remainCharges) SELECT guid, {}, {}, casterGuid, itemGuid, spell, effectMask, recalculateMask, stackCount, amount0, amount1, amount2, base_amount0, base_amount1, base_amount2, maxDuration, remainTime, remainCharges FROM character_aura WHERE guid = {} AND spell NOT IN ({})", player->getClass(), curEQClass, player->GetGUID().GetCounter(), keptSpellsList);
+    transaction->Append("DELETE FROM `character_aura` WHERE guid = {} AND spell NOT IN ({})", player->GetGUID().GetCounter(), keptSpellsList);
 }
 
 void EverQuestMod::MoveEquipToModInventoryTable(Player* player, CharacterDatabaseTransaction& transaction)
