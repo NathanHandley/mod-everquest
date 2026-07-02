@@ -56,6 +56,7 @@ public:
         EverQuest->LoadAutoLearnSpellsData();
         EverQuest->LoadAutoAddItemsData();
         EverQuest->LoadForageData();
+        EverQuest->LoadZoneSafePointData();
     }
 };
 

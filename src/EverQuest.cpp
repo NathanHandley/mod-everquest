@@ -16,6 +16,7 @@
 
 #include "Chat.h"
 #include "GameEventMgr.h"
+#include "Group.h"
 #include "Creature.h"
 #include "CreatureAI.h"
 #include "CreatureData.h"
@@ -1524,6 +1525,61 @@ const vector<EverQuestForageZoneItem>& EverQuestMod::GetForageZoneItemsInMap(uin
     {
         static const vector<EverQuestForageZoneItem> returnEmpty;
         return returnEmpty;
+    }
+}
+
+void EverQuestMod::LoadZoneSafePointData()
+{
+    ZoneSafePointByMapID.clear();
+
+    QueryResult queryResult = WorldDatabase.Query("SELECT MapID, X, Y, Z, Orientation FROM mod_everquest_zone_safe_point;");
+    if (queryResult)
+    {
+        do
+        {
+            Field* fields = queryResult->Fetch();
+            EverQuestZoneSafePoint zoneSafePoint;
+            zoneSafePoint.MapID = fields[0].Get<uint32>();
+            zoneSafePoint.X = fields[1].Get<float>();
+            zoneSafePoint.Y = fields[2].Get<float>();
+            zoneSafePoint.Z = fields[3].Get<float>();
+            zoneSafePoint.Orientation = fields[4].Get<float>();
+            ZoneSafePointByMapID[zoneSafePoint.MapID] = zoneSafePoint;
+        } while (queryResult->NextRow());
+    }
+}
+
+void EverQuestMod::SendPlayerToZoneSafePoint(Player* player, bool includeGroup)
+{
+    // In-zone succor sends to the safe point of the zone the caster is currently in
+    uint32 mapID = player->GetMapId();
+    if (ZoneSafePointByMapID.find(mapID) == ZoneSafePointByMapID.end())
+    {
+        ChatHandler(player->GetSession()).PSendSysMessage("There is no safe location in this zone. Spell failed.");
+        return;
+    }
+
+    const EverQuestZoneSafePoint& zoneSafePoint = ZoneSafePointByMapID[mapID];
+    player->TeleportTo({ mapID, {zoneSafePoint.X, zoneSafePoint.Y, zoneSafePoint.Z, zoneSafePoint.Orientation} });
+
+    // Party-target succor also pulls the caster's living group members that share the same zone to the safe point
+    if (includeGroup == true)
+    {
+        Group* group = player->GetGroup();
+        if (group != nullptr)
+        {
+            for (GroupReference* itr = group->GetFirstMember(); itr != nullptr; itr = itr->next())
+            {
+                Player* member = itr->GetSource();
+                if (member == nullptr || member == player)
+                    continue;
+                if (member->IsAlive() == false || member->IsInWorld() == false)
+                    continue;
+                if (member->GetMapId() != mapID)
+                    continue;
+                member->TeleportTo({ mapID, {zoneSafePoint.X, zoneSafePoint.Y, zoneSafePoint.Z, zoneSafePoint.Orientation} });
+            }
+        }
     }
 }
 

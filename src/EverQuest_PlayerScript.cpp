@@ -292,9 +292,24 @@ public:
 
         if (spell == nullptr)
             return;
-        else if (spell->m_spellInfo->Id < EverQuest->ConfigSystemSpellDBCIDMin || spell->m_spellInfo->Id > EverQuest->ConfigSystemSpellDBCIDMax)
+        if (spell->m_spellInfo->Id < EverQuest->ConfigSystemSpellDBCIDMin || spell->m_spellInfo->Id > EverQuest->ConfigSystemSpellDBCIDMax)
             return;
-        else if (spell->m_spellInfo->Effects[EFFECT_0].Effect == SPELL_EFFECT_DUMMY ||
+
+        for (uint8 effectIndex = EFFECT_0; effectIndex <= EFFECT_2; effectIndex++)
+        {
+            auto const& succorEffect = spell->m_spellInfo->Effects[effectIndex];
+            if ((succorEffect.Effect == SPELL_EFFECT_DUMMY ||
+                (succorEffect.Effect == SPELL_EFFECT_APPLY_AURA && succorEffect.ApplyAuraName == SPELL_AURA_DUMMY)) &&
+                succorEffect.MiscValue == EQ_SPELLDUMMYTYPE_SUCCOR)
+            {
+                // Party target succor (evacuate) moves the group, where self is only the caster
+                bool includeGroup = (succorEffect.TargetA.GetTarget() == TARGET_UNIT_CASTER_AREA_PARTY);
+                EverQuest->SendPlayerToZoneSafePoint(player, includeGroup);
+                return;
+            }
+        }
+
+        if (spell->m_spellInfo->Effects[EFFECT_0].Effect == SPELL_EFFECT_DUMMY ||
             (spell->m_spellInfo->Effects[EFFECT_0].Effect == SPELL_EFFECT_APPLY_AURA && spell->m_spellInfo->Effects[EFFECT_0].ApplyAuraName == SPELL_AURA_DUMMY))
         {
             if (spell->m_spellInfo->Effects[EFFECT_0].MiscValue == EQ_SPELLDUMMYTYPE_BINDSELF) // Bind Self

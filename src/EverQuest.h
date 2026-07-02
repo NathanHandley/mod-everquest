@@ -35,7 +35,7 @@ static uint32 ConfigMaxSkillIDCheck = 1000;         // The highest level of skil
 
 class Unit;
 
-#define EQ_MOD_VERSION                              29
+#define EQ_MOD_VERSION                              30
 
 #define EQ_EQCLASS_NONE                             0
 #define EQ_EQCLASS_WARRIOR                          1
@@ -77,6 +77,7 @@ class Unit;
 #define EQ_SPELLDUMMYTYPE_ILLUSIONPARENT            15
 #define EQ_SPELLDUMMYTYPE_FORAGE                    16
 #define EQ_SPELLDUMMYTYPE_SUMMONACTIVE              17
+#define EQ_SPELLDUMMYTYPE_SUCCOR                    18
 
 #define EQ_BARDSONGAURATARGET_ENEMYAREA             1
 #define EQ_BARDSONGAURATARGET_FRIENDLYPARTY         2
@@ -378,6 +379,16 @@ public:
     uint32 ForageType = EQ_FORAGE_TYPE_FOOD;
 };
 
+class EverQuestZoneSafePoint
+{
+public:
+    uint32 MapID = 0;
+    float X = 0;
+    float Y = 0;
+    float Z = 0;
+    float Orientation = 0;
+};
+
 struct EverQuestPlayerControllerData
 {
     uint32 GUID = 0;
@@ -504,6 +515,7 @@ public:
     unordered_map<uint32, unordered_map<uint32, vector<EverQuestCreatureWaypoint>>> CreatureWaypointsByMapIDAndWaypointID;
     unordered_map<uint32, vector<EverQuestForageZoneItem>> ForageZoneItemsByMapID;
     unordered_map<uint32, uint32> ForageZoneItemTotalChanceByMapID;
+    unordered_map<uint32, EverQuestZoneSafePoint> ZoneSafePointByMapID;
     unordered_map<uint8, EverQuestClassMap> ClassMapByWOWClassID;
 
     static EverQuestMod* instance()
@@ -578,6 +590,8 @@ public:
     const vector<EverQuestCreatureWaypoint> GetWaypoints(uint32 mapID, uint32 waypointListID);
     void LoadForageData();
     const vector<EverQuestForageZoneItem>& GetForageZoneItemsInMap(uint32 mapID);
+    void LoadZoneSafePointData();
+    void SendPlayerToZoneSafePoint(Player* player, bool includeGroup);
     void LoadClassMapData();
     const EverQuestClassMap& GetClassMapForWOWClassID(uint8 wowClassID);
     bool IsEQClassABaseEQClass(uint8 eqClassID);
