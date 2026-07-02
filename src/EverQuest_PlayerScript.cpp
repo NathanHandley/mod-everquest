@@ -370,6 +370,16 @@ public:
         EverQuest->SetInitialCreatePositionForPlayer(player);
     }
 
+    bool OnPlayerCheckItemInSlotAtLoadInventory(Player* player, Item* /*item*/, uint8 /*slot*/, uint8& /*err*/, uint16& /*dest*/) override
+    {
+        if (EverQuest->IsEnabled == false)
+            return true;
+
+        // Equipped items load before login autolearn, so without this some items can go away if you switch sub classes (for the first time) in some situations
+        EverQuest->ApplyAutoLearnedClassSkillsAndSpells(player);
+        return true;
+    }
+
     void OnPlayerLogin(Player* player) override
     {
         if (EverQuest->IsEnabled == false)
