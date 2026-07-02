@@ -86,6 +86,26 @@ public:
         EverQuest->ApplyScaledCreatureSocialAggroOnEngage(creature, victim);
     }
 
+    void OnUnitEnterEvadeMode(Unit* unit, uint8 /*evadeReason*/) override
+    {
+        if (EverQuest->IsEnabled == false)
+            return;
+        if (unit == nullptr)
+            return;
+        Creature* creature = unit->ToCreature();
+        if (creature == nullptr)
+            return;
+        uint32 mapID = creature->GetMapId();
+        if (mapID < EverQuest->ConfigSystemMapDBCIDMin || mapID > EverQuest->ConfigSystemMapDBCIDMax)
+            return;
+
+        // When a creature evades, let the player break charm so they aren't stuck
+        Unit* charmed = creature->GetCharm();
+        if (charmed == nullptr || charmed->IsPlayer() == false)
+            return;
+        charmed->RemoveCharmAuras();
+    }
+
     void OnAuraApply(Unit* unit, Aura* aura) override
     {
         if (EverQuest->IsEnabled == false)
