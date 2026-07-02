@@ -61,6 +61,23 @@ public:
         return EverQuest->GetSpellDataForSpellID(spellInfo->Id).EffectFailChancePercent;
     }
 
+    void OnSpellCheckCast(Spell* spell, bool /*strict*/, SpellCastResult& res) override
+    {
+        if (EverQuest->IsEnabled == false)
+            return;
+        if (res != SPELL_CAST_OK)
+            return;
+        if (spell == nullptr || spell->GetCaster() == nullptr)
+            return;
+
+        // Enforce buff restriction up front to avoid mana/cooldown triggers
+        Unit* target = spell->m_targets.GetUnitTarget();
+        if (target == nullptr)
+            return;
+        if (EverQuest->IsSpellBlockedByMinTargetLevel(spell->GetSpellInfo()->Id, target, spell->GetCaster()) == true)
+            res = SPELL_FAILED_LOWLEVEL;
+    }
+
     void OnSpellPrepare(Spell* /*spell*/, Unit* caster, SpellInfo const* spellInfo) override
     {
         uint32 failChancePercent = GetEffectFailChance(caster, spellInfo);

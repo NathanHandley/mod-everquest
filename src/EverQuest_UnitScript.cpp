@@ -14,6 +14,7 @@
 //  You should have received a copy of the GNU General Public License
 //  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+#include "Chat.h"
 #include "Player.h"
 #include "Unit.h"
 #include "ScriptMgr.h"
@@ -131,6 +132,16 @@ public:
 
         Player* player = unit->ToPlayer();
         uint32 spellID = aura->GetId();
+
+        if (EverQuest->IsSpellBlockedByMinTargetLevel(spellID, unit, aura->GetCaster()) == true)
+        {
+            Unit* auraCaster = aura->GetCaster();
+            unit->RemoveAura(aura);
+            if (auraCaster != nullptr && auraCaster->IsPlayer() == true)
+                ChatHandler(auraCaster->ToPlayer()->GetSession()).PSendSysMessage("Your spell is too powerful for your intended target.");
+            return;
+        }
+
         if (EverQuest->IsSpellAnEQBardSong(spellID) == true && EverQuest->ConfigBardMaxConcurrentSongs != 0)
         {
             auto& queue = EverQuest->PlayerCasterConcurrentBardSongs[player->GetGUID()];

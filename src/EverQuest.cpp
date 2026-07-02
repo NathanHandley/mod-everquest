@@ -58,6 +58,7 @@ EverQuestMod::EverQuestMod() :
     ConfigAlternateGroupExperienceFormulaEnabled(false),
     ConfigAlternateGroupExperienceAddPercentPerAddedMember(20.0f),
     ConfigSpellDisableStackingOfSameDOT(false),
+    ConfigSpellBuffLevelRestrictionsEnabled(true),
     ConfigCombatSkillsDisableBashKickStunOnPlayers(false),
     ConfigEvadeEnabled(true),
     ConfigEvadeUnreachableSeconds(10.0f),
@@ -188,6 +189,7 @@ void EverQuestMod::LoadConfigurationFile()
 
     // Spells
     ConfigSpellDisableStackingOfSameDOT = sConfigMgr->GetOption<bool>("EverQuest.Spells.DisableStackingOfSameDOT", false);
+    ConfigSpellBuffLevelRestrictionsEnabled = sConfigMgr->GetOption<bool>("EverQuest.Spells.BuffLevelRestrictionsEnabled", true);
 
     // Combat Skills
     ConfigCombatSkillsDisableBashKickStunOnPlayers = sConfigMgr->GetOption<bool>("EverQuest.CombatSkills.DisableBashKickStunOnPlayers", false);
@@ -449,7 +451,7 @@ bool EverQuestMod::IsItemEQClassAllowedForPlayer(Player* player, uint32 itemTemp
 void EverQuestMod::LoadSpellData()
 {
     SpellDataBySpellID.clear();
-    QueryResult queryResult = WorldDatabase.Query("SELECT SpellID, AuraDurationBaseInMS, AuraDurationAddPerLevelInMS, AuraDurationMaxInMS, AuraDurationCalcMinLevel, AuraDurationCalcMaxLevel, RecourseSpellID, SpellIDCastOnMeleeAttacker, FocusBoostType, PeriodicAuraSpellID, PeriodicAuraSpellRadius, MaleFormSpellID, FemaleFormSpellID, EffectFailChancePercent, EffectFailableType, StunUsesBashKickChance, SpellIDCastOnTargetWhenStunLands, AuraStaysOnSecondaryClassSwitch FROM mod_everquest_spell ORDER BY SpellID;");
+    QueryResult queryResult = WorldDatabase.Query("SELECT SpellID, AuraDurationBaseInMS, AuraDurationAddPerLevelInMS, AuraDurationMaxInMS, AuraDurationCalcMinLevel, AuraDurationCalcMaxLevel, RecourseSpellID, SpellIDCastOnMeleeAttacker, FocusBoostType, PeriodicAuraSpellID, PeriodicAuraSpellRadius, MaleFormSpellID, FemaleFormSpellID, EffectFailChancePercent, EffectFailableType, StunUsesBashKickChance, SpellIDCastOnTargetWhenStunLands, AuraStaysOnSecondaryClassSwitch, MinTargetLevel FROM mod_everquest_spell ORDER BY SpellID;");
     if (queryResult)
     {
         do
@@ -475,6 +477,7 @@ void EverQuestMod::LoadSpellData()
             everQuestSpell.StunUsesBashKickChance = fields[15].Get<bool>();
             everQuestSpell.SpellIDCastOnTargetWhenStunLands = fields[16].Get<uint32>();
             everQuestSpell.AuraStaysOnSecondaryClassSwitch = fields[17].Get<bool>();
+            everQuestSpell.MinTargetLevel = fields[18].Get<uint32>();
             SpellDataBySpellID[everQuestSpell.SpellID] = everQuestSpell;
         } while (queryResult->NextRow());
     }
@@ -491,6 +494,22 @@ const EverQuestSpell& EverQuestMod::GetSpellDataForSpellID(uint32 spellID)
         static const EverQuestSpell returnEmpty;
         return returnEmpty;
     }
+}
+
+bool EverQuestMod::IsSpellBlockedByMinTargetLevel(uint32 spellID, Unit* target, Unit* caster)
+{
+    if (ConfigSpellBuffLevelRestrictionsEnabled == false)
+        return false;
+    if (target == nullptr || target->IsPlayer() == false)
+        return false;
+    const EverQuestSpell& spellData = GetSpellDataForSpellID(spellID);
+    if (spellData.MinTargetLevel == 0)
+        return false;
+    if (target->GetLevel() >= spellData.MinTargetLevel)
+        return false;
+    if (caster != nullptr && caster->IsPlayer() == true && caster->ToPlayer()->IsGameMaster() == true)
+        return false;
+    return true;
 }
 
 void EverQuestMod::LoadQuestCompletionReputations()

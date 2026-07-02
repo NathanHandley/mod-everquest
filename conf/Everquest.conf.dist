@@ -89,6 +89,18 @@ EverQuest.Spells.DisableStackingOfSameDOT = False
 
 ###################################################################################################
 #
+# 	EverQuest.Spells.BuffLevelRestrictionsEnabled
+#		If true, beneficial buffs above spell level 50 will not land on players below level
+#		(spell level / 2) + 15, matching EverQuest behavior. Applies to direct casts, group and
+#		area landings, item clickies, and procs. Bard songs are exempt.
+#	Default: True (use EverQuest behavior)
+#
+###################################################################################################
+
+EverQuest.Spells.BuffLevelRestrictionsEnabled = True
+
+###################################################################################################
+#
 # 	EverQuest.CombatSkills.DisableBashKickStunOnPlayers
 #		If true, the stun part of Bash/Kick/Slam combat skills will never land on player targets.
 #	Default: False (players can be stunned by these combat skills)

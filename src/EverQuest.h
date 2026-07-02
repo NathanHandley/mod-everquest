@@ -35,7 +35,7 @@ static uint32 ConfigMaxSkillIDCheck = 1000;         // The highest level of skil
 
 class Unit;
 
-#define EQ_MOD_VERSION                              31
+#define EQ_MOD_VERSION                              32
 
 #define EQ_EQCLASS_NONE                             0
 #define EQ_EQCLASS_WARRIOR                          1
@@ -179,6 +179,7 @@ public:
     bool StunUsesBashKickChance = false;
     uint32 SpellIDCastOnTargetWhenStunLands = 0;
     bool AuraStaysOnSecondaryClassSwitch = false;
+    uint32 MinTargetLevel = 0;
 };
 
 class EverQuestCreature
@@ -463,6 +464,7 @@ public:
     bool ConfigAlternateGroupExperienceFormulaEnabled;
     float ConfigAlternateGroupExperienceAddPercentPerAddedMember;
     bool ConfigSpellDisableStackingOfSameDOT;
+    bool ConfigSpellBuffLevelRestrictionsEnabled;
     bool ConfigCombatSkillsDisableBashKickStunOnPlayers;
     bool ConfigCombatSkillsRangedAttackEnabled;
     float ConfigCombatSkillsRangedAttackDefaultMinRange;
@@ -541,6 +543,7 @@ public:
     bool IsWornEffectSpell(uint32 spellID);
     void LoadSpellData();
     const EverQuestSpell& GetSpellDataForSpellID(uint32 spellID);
+    bool IsSpellBlockedByMinTargetLevel(uint32 spellID, Unit* target, Unit* caster);
     void LoadQuestCompletionReputations();
     const list<EverQuestQuestCompletionReputation>& GetQuestCompletionReputationsForQuestTemplate(uint32 questTemplateID);
     void LoadQuestReactions();
