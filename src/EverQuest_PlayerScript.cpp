@@ -27,6 +27,7 @@
 #include "Spell.h"
 #include "QuestDef.h"
 #include "World.h"
+#include "WorldSession.h"
 
 #include "EverQuest.h"
 
@@ -80,6 +81,9 @@ public:
         if (EverQuest->IsEnabled == false)
             return true;
         if (proto == nullptr)
+            return true;
+        // Don't remove already-equipped items during inventory load
+        if (player->GetSession() != nullptr && player->GetSession()->PlayerLoading() == true)
             return true;
         if (EverQuest->IsItemEQClassAllowedForPlayer(player, proto->ItemId) == true)
             return true;

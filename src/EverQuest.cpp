@@ -2266,12 +2266,23 @@ void EverQuestMod::SetNextSecondEQClassForPlayer(Player* player, uint8 nextEQCla
 
 void EverQuestMod::SetInitialEQClassesForPlayer(Player* player)
 {
+    const EverQuestClassMap classMap = GetClassMapForWOWClassID(player->getClass());
     EverQuestPlayerControllerData controllerData;
     controllerData.GUID = player->GetGUID().GetCounter();
-    controllerData.CurrentSecondClass = EQ_EQCLASS_NONE;
-    controllerData.NextSecondClass = EQ_EQCLASS_NONE;
-    std::lock_guard<std::mutex> lock(RuntimeStateMutex);
-    ActivePlayerClassControllerDataByGUID[player->GetGUID()] = controllerData;
+    controllerData.CurrentSecondClass = classMap.EQClassIDDefaultSecond;
+    controllerData.NextSecondClass = classMap.EQClassIDDefaultSecond;
+    controllerData.SecondaryExpPool = 0;
+    {
+        std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+        ActivePlayerClassControllerDataByGUID[player->GetGUID()] = controllerData;
+    }
+
+    // Persist the controller row immediately
+    CharacterDatabase.Execute("REPLACE INTO `mod_everquest_character_class_controller` (`guid`, `nextClass`, `currentClass`, `secondaryExpPool`) VALUES ({}, {}, {}, {})",
+        controllerData.GUID,
+        controllerData.NextSecondClass,
+        controllerData.CurrentSecondClass,
+        controllerData.SecondaryExpPool);
 }
 
 void EverQuestMod::SetInitialCreatePositionForPlayer(Player* player)
