@@ -252,11 +252,18 @@ public:
             for (uint32 i = 0; i < CreatureWaypoints.size(); ++i)
                 allIndices.push_back(i);
 
-            static mt19937 rng(random_device{}());
+            // thread_local since creature AIs run on parallel map update threads and mt19937 state is not thread safe
+            thread_local mt19937 rng(random_device{}());
             shuffle(allIndices.begin(), allIndices.end(), rng);
 
             uint32 count = min<uint32>(10u, allIndices.size());
             WaypointRandom10Indices.assign(allIndices.begin(), allIndices.begin() + count);
+
+            if (WaypointRandom10Indices.empty() == true)
+            {
+                WaypointPriorTargetWaypointIndex = 0;
+                return;
+            }
 
             // Set prior position to the nearest
             uint32 nearestIndex = 0;
@@ -271,7 +278,10 @@ public:
                     nearestIndex = i;
                 }
             }
-            WaypointPriorTargetWaypointIndex = nearestIndex;
+
+            // Store the actual waypoint index, not the position in the random-10 list, since the prior index
+            // is used against the full waypoint list everywhere else
+            WaypointPriorTargetWaypointIndex = WaypointRandom10Indices[nearestIndex];
         }
 
         bool BuildPathAndStartPointMovementToTarget(float initialTargetX, float initialTargetY, float initialTargetZ, uint32 moveType, bool run = false)
@@ -510,6 +520,12 @@ public:
 
         void PerformWaypointMovementForRandomPath()
         {
+            // A single-waypoint path can never step, and the index math below would underflow
+            if (CreatureWaypoints.size() < 2)
+                return;
+            if (WaypointPriorTargetWaypointIndex >= CreatureWaypoints.size())
+                WaypointPriorTargetWaypointIndex = FindNearestWaypointIndex();
+
             if (WaypointPriorTargetWaypointIndex == WaypointRandomPathFinalTargetIndex)
                 WaypointRandomPathFinalTargetIndex = GetUniqueRandomWaypointIndex(WaypointCurrentTargetWaypointIndex);
 

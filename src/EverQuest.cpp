@@ -293,6 +293,7 @@ bool EverQuestMod::ShouldDespawnCreatureDueToSpawnRestrictions(int mapID, Creatu
     if (creature->GetSpawnId() != 0 && CreatureSpawnPointsByCreatureGUID.find(creature->GetSpawnId()) != CreatureSpawnPointsByCreatureGUID.end())
     {
         const EverQuestCreatureSpawnPoint& creatureSpawnPoint = CreatureSpawnPointsByCreatureGUID[creature->GetSpawnId()];
+        std::lock_guard<std::mutex> lock(RuntimeStateMutex);
         if (AllLoadedCreaturesByMapIDThenSpawnPointID.find(mapID) != AllLoadedCreaturesByMapIDThenSpawnPointID.end())
         {
             unordered_map<uint32, vector<Creature*>>& spawnPointMap = AllLoadedCreaturesByMapIDThenSpawnPointID[mapID];
@@ -431,8 +432,10 @@ bool EverQuestMod::IsItemEQClassAllowedForPlayer(Player* player, uint32 itemTemp
     if (allowedEQClassMask == 0)
         return true;
 
-    // Compare base class
+    // Compare base class (no class map row means the shift below would be undefined, so allow the item)
     const EverQuestClassMap classMap = GetClassMapForWOWClassID(player->getClass());
+    if (classMap.EQClassIDBase == 0)
+        return true;
     uint32 baseEQClassBit = 1u << (classMap.EQClassIDBase - 1);
     if ((allowedEQClassMask & baseEQClassBit) != 0)
         return true;
@@ -891,6 +894,7 @@ bool EverQuestMod::HasCreatureLootDataForCreatureTemplateEntryID(uint32 creature
 
 bool EverQuestMod::HasPreloadedLootItemIDsForCreatureGUID(ObjectGuid creatureGUID)
 {
+    std::lock_guard<std::mutex> lock(RuntimeStateMutex);
     if (PreloadedLootItemIDsByCreatureGUID.find(creatureGUID) != PreloadedLootItemIDsByCreatureGUID.end())
         return true;
     else
@@ -899,10 +903,12 @@ bool EverQuestMod::HasPreloadedLootItemIDsForCreatureGUID(ObjectGuid creatureGUI
 
 bool EverQuestMod::HasPreloadedLootItemIDForCreatureGUID(ObjectGuid creatureGUID, uint32 itemTemplateID)
 {
-    if (HasPreloadedLootItemIDsForCreatureGUID(creatureGUID) == false)
+    std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+    auto preloadedIt = PreloadedLootItemIDsByCreatureGUID.find(creatureGUID);
+    if (preloadedIt == PreloadedLootItemIDsByCreatureGUID.end())
         return false;
 
-    for (uint32 preloadedLootItemTemplateID : EverQuest->GetPreloadedLootIDsForCreatureGUID(creatureGUID))
+    for (uint32 preloadedLootItemTemplateID : preloadedIt->second)
     {
         if (preloadedLootItemTemplateID == itemTemplateID)
             return true;
@@ -912,6 +918,7 @@ bool EverQuestMod::HasPreloadedLootItemIDForCreatureGUID(ObjectGuid creatureGUID
 
 uint32 EverQuestMod::GetPreloadedLootCountForCreatureGUID(ObjectGuid creatureGUID, uint32 itemTemplateID)
 {
+    std::lock_guard<std::mutex> lock(RuntimeStateMutex);
     auto countsByItem = PreloadedLootCountsByCreatureGUID.find(creatureGUID);
     if (countsByItem == PreloadedLootCountsByCreatureGUID.end())
         return 0;
@@ -923,38 +930,38 @@ uint32 EverQuestMod::GetPreloadedLootCountForCreatureGUID(ObjectGuid creatureGUI
 
 const vector<uint32>& EverQuestMod::GetPreloadedLootIDsForCreatureGUID(ObjectGuid creatureGUID)
 {
-    if (PreloadedLootItemIDsByCreatureGUID.find(creatureGUID) != PreloadedLootItemIDsByCreatureGUID.end())
+    std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+    auto preloadedIt = PreloadedLootItemIDsByCreatureGUID.find(creatureGUID);
+    if (preloadedIt != PreloadedLootItemIDsByCreatureGUID.end())
     {
-        return PreloadedLootItemIDsByCreatureGUID[creatureGUID];
+        return preloadedIt->second;
     }
     else
     {
-        static vector<uint32> returnEmpty;
+        static const vector<uint32> returnEmpty;
         return returnEmpty;
     }
 }
 
 void EverQuestMod::ClearPreloadedLootIDsForCreatureGUID(ObjectGuid creatureGUID)
 {
-    if (PreloadedLootItemIDsByCreatureGUID.find(creatureGUID) != PreloadedLootItemIDsByCreatureGUID.end())
-    {
-        PreloadedLootItemIDsByCreatureGUID.erase(creatureGUID);
-    }
-    if (PreloadedLootCountsByCreatureGUID.find(creatureGUID) != PreloadedLootCountsByCreatureGUID.end())
-    {
-        PreloadedLootCountsByCreatureGUID.erase(creatureGUID);
-    }
+    std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+    PreloadedLootItemIDsByCreatureGUID.erase(creatureGUID);
+    PreloadedLootCountsByCreatureGUID.erase(creatureGUID);
 }
 
 void EverQuestMod::TrackVisualEquippedItemsForCreatureGUID(ObjectGuid creatureGUID, uint32 mainhandItemID, uint32 offhandItemID, bool isDualWielding)
 {
-    VisualEquippedItemsByCreatureGUID[creatureGUID].MainhandItemID = mainhandItemID;
-    VisualEquippedItemsByCreatureGUID[creatureGUID].OffhandItemID = offhandItemID;
-    VisualEquippedItemsByCreatureGUID[creatureGUID].IsDualWielding = isDualWielding;
+    std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+    EverQuestLoadedCreatureEquippedVisualItems& visualItems = VisualEquippedItemsByCreatureGUID[creatureGUID];
+    visualItems.MainhandItemID = mainhandItemID;
+    visualItems.OffhandItemID = offhandItemID;
+    visualItems.IsDualWielding = isDualWielding;
 }
 
 bool EverQuestMod::IsCreatureDualWielding(ObjectGuid creatureGUID)
 {
+    std::lock_guard<std::mutex> lock(RuntimeStateMutex);
     auto it = VisualEquippedItemsByCreatureGUID.find(creatureGUID);
     if (it == VisualEquippedItemsByCreatureGUID.end())
         return false;
@@ -983,8 +990,11 @@ void EverQuestMod::TryDoCreatureEQMeleeExtraAttacks(Unit* attacker, Unit* victim
 
     // Prevent injected swings from repeating
     ObjectGuid attackerGUID = attacker->GetGUID();
-    if (CreaturesResolvingEQMeleeExtraAttacks.count(attackerGUID) > 0)
-        return;
+    {
+        std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+        if (CreaturesResolvingEQMeleeExtraAttacks.count(attackerGUID) > 0)
+            return;
+    }
 
     Creature* creature = attacker->ToCreature();
 
@@ -1002,7 +1012,10 @@ void EverQuestMod::TryDoCreatureEQMeleeExtraAttacks(Unit* attacker, Unit* victim
     if (level > 35)
         effectiveSkill += level;
 
-    CreaturesResolvingEQMeleeExtraAttacks.insert(attackerGUID);
+    {
+        std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+        CreaturesResolvingEQMeleeExtraAttacks.insert(attackerGUID);
+    }
 
     // Main-hand double attack. "effectiveSkill" out of 500. Warrior creatures 60+ rolls for a triple attack at 13.5%
     if (effectiveSkill > urand(0, 499))
@@ -1028,7 +1041,10 @@ void EverQuestMod::TryDoCreatureEQMeleeExtraAttacks(Unit* attacker, Unit* victim
         }
     }
 
-    CreaturesResolvingEQMeleeExtraAttacks.erase(attackerGUID);
+    {
+        std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+        CreaturesResolvingEQMeleeExtraAttacks.erase(attackerGUID);
+    }
 }
 
 void EverQuestMod::StoreCreatureRangedAttackState(ObjectGuid creatureGUID, float minRange, float maxRange, int32 damageModPct)
@@ -1038,11 +1054,13 @@ void EverQuestMod::StoreCreatureRangedAttackState(ObjectGuid creatureGUID, float
     state.MaxRange = maxRange;
     state.DamageModPct = damageModPct;
     state.SwingTimerRemainingMS = 0; // Ready to fire as soon as a valid target is in range
+    std::lock_guard<std::mutex> lock(RuntimeStateMutex);
     RangedAttackStateByCreatureGUID[creatureGUID] = state;
 }
 
 void EverQuestMod::RemoveCreatureRangedAttackState(ObjectGuid creatureGUID)
 {
+    std::lock_guard<std::mutex> lock(RuntimeStateMutex);
     RangedAttackStateByCreatureGUID.erase(creatureGUID);
 }
 
@@ -1053,21 +1071,23 @@ void EverQuestMod::UpdateCreatureRangedAttack(Creature* creature, uint32 diff)
         return;
     if (ConfigCombatSkillsRangedAttackEnabled == false || ConfigSystemRangedAttackSpellID == 0)
         return;
-    if (RangedAttackStateByCreatureGUID.empty() == true)
-        return;
 
-    auto stateIt = RangedAttackStateByCreatureGUID.find(creature->GetGUID());
-    if (stateIt == RangedAttackStateByCreatureGUID.end())
-        return;
-    EverQuestCreatureRangedAttackState& state = stateIt->second;
+    EverQuestCreatureRangedAttackState* state = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+        auto stateIt = RangedAttackStateByCreatureGUID.find(creature->GetGUID());
+        if (stateIt == RangedAttackStateByCreatureGUID.end())
+            return;
+        state = &stateIt->second;
+    }
 
     // Use creature swing for timing. Probably right.
-    if (state.SwingTimerRemainingMS > diff)
+    if (state->SwingTimerRemainingMS > diff)
     {
-        state.SwingTimerRemainingMS -= diff;
+        state->SwingTimerRemainingMS -= diff;
         return;
     }
-    state.SwingTimerRemainingMS = 0;
+    state->SwingTimerRemainingMS = 0;
 
     // Don't shoot if crowd controlled or casting
     if (creature->IsAlive() == false || creature->IsInCombat() == false)
@@ -1086,8 +1106,8 @@ void EverQuestMod::UpdateCreatureRangedAttack(Creature* creature, uint32 diff)
     // Only shoot a target that is out of melee reach but inside the ranged band, with line of sight
     if (creature->IsWithinMeleeRange(victim) == true)
         return;
-    float minRange = state.MinRange > 0.0f ? state.MinRange : ConfigCombatSkillsRangedAttackDefaultMinRange * EverQuest->ConfigWorldScale;
-    float maxRange = state.MaxRange > 0.0f ? state.MaxRange : ConfigCombatSkillsRangedAttackDefaultMaxRange * EverQuest->ConfigWorldScale;
+    float minRange = state->MinRange > 0.0f ? state->MinRange : ConfigCombatSkillsRangedAttackDefaultMinRange * EverQuest->ConfigWorldScale;
+    float maxRange = state->MaxRange > 0.0f ? state->MaxRange : ConfigCombatSkillsRangedAttackDefaultMaxRange * EverQuest->ConfigWorldScale;
     float distance = creature->GetExactDist2d(victim);
     if (distance < minRange || distance > maxRange)
         return;
@@ -1097,21 +1117,26 @@ void EverQuestMod::UpdateCreatureRangedAttack(Creature* creature, uint32 diff)
     // Damage from the creature's own (melee) weapon output, scaled by the archery multiplier and the special ability modifier
     int32 damage = (int32)creature->CalculateDamage(BASE_ATTACK, false, true);
     damage = (int32)(damage * ConfigCombatSkillsRangedAttackDamageMultiplier);
-    damage += damage * state.DamageModPct / 100;
+    damage += damage * state->DamageModPct / 100;
     if (damage < 1)
         damage = 1;
 
     creature->CastCustomSpell(ConfigSystemRangedAttackSpellID, SPELLVALUE_BASE_POINT0, damage, victim, false);
 
-    // Avoid machine gun type events
+    // Avoid machine gun type events. The cast above can despawn creatures (and erase state) through scripted
+    // side effects, so look the state up fresh instead of writing through the earlier pointer
     uint32 swingTime = creature->GetAttackTime(BASE_ATTACK);
     if (swingTime < 1000)
         swingTime = 1000;
-    state.SwingTimerRemainingMS = swingTime;
+    std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+    auto stateAfterCastIt = RangedAttackStateByCreatureGUID.find(creature->GetGUID());
+    if (stateAfterCastIt != RangedAttackStateByCreatureGUID.end())
+        stateAfterCastIt->second.SwingTimerRemainingMS = swingTime;
 }
 
 void EverQuestMod::RemoveCreatureUnstickState(ObjectGuid creatureGUID)
 {
+    std::lock_guard<std::mutex> lock(RuntimeStateMutex);
     UnstickStateByCreatureGUID.erase(creatureGUID);
 }
 
@@ -1137,39 +1162,48 @@ void EverQuestMod::UpdateCreatureUnstick(Creature* creature, uint32 diff)
 
     if (eligible == false)
     {
-        auto existingIt = UnstickStateByCreatureGUID.find(creature->GetGUID());
-        if (existingIt != UnstickStateByCreatureGUID.end())
+        bool wasSettling = false;
         {
-            if (existingIt->second.SettleRemainingMS > 0)
-                creature->ClearUnitState(UNIT_STATE_NO_COMBAT_MOVEMENT);
-            UnstickStateByCreatureGUID.erase(existingIt);
+            std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+            auto existingIt = UnstickStateByCreatureGUID.find(creature->GetGUID());
+            if (existingIt != UnstickStateByCreatureGUID.end())
+            {
+                wasSettling = existingIt->second.SettleRemainingMS > 0;
+                UnstickStateByCreatureGUID.erase(existingIt);
+            }
         }
+        if (wasSettling == true)
+            creature->ClearUnitState(UNIT_STATE_NO_COMBAT_MOVEMENT);
         return;
     }
 
-    EverQuestCreatureUnstickState& state = UnstickStateByCreatureGUID[creature->GetGUID()];
+    EverQuestCreatureUnstickState* state = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+        state = &UnstickStateByCreatureGUID[creature->GetGUID()];
+    }
     // Take over 'cannot reach' to avoid early evades
     if (creature->CanNotReachTarget() == true)
         creature->SetCannotReachTarget();
 
     // Settle window after a teleport.  Stop chasing and delay next swing, but do allow spellcast
-    if (state.SettleRemainingMS > 0)
+    if (state->SettleRemainingMS > 0)
     {
-        if (state.SettleRemainingMS > diff)
-            state.SettleRemainingMS -= diff;
+        if (state->SettleRemainingMS > diff)
+            state->SettleRemainingMS -= diff;
         else
-            state.SettleRemainingMS = 0;
+            state->SettleRemainingMS = 0;
 
         creature->AddUnitState(UNIT_STATE_NO_COMBAT_MOVEMENT);
         creature->StopMoving();
-        creature->setAttackTimer(BASE_ATTACK, (int32)state.SettleRemainingMS);
-        creature->setAttackTimer(OFF_ATTACK, (int32)state.SettleRemainingMS);
+        creature->setAttackTimer(BASE_ATTACK, (int32)state->SettleRemainingMS);
+        creature->setAttackTimer(OFF_ATTACK, (int32)state->SettleRemainingMS);
 
-        if (state.SettleRemainingMS == 0)
+        if (state->SettleRemainingMS == 0)
         {
             creature->ClearUnitState(UNIT_STATE_NO_COMBAT_MOVEMENT);
-            state.HasAnchor = false;
-            state.StuckTimerMS = 0;
+            state->HasAnchor = false;
+            state->StuckTimerMS = 0;
         }
         return;
     }
@@ -1177,8 +1211,8 @@ void EverQuestMod::UpdateCreatureUnstick(Creature* creature, uint32 diff)
     // Clear if target is reached
     if (creature->IsWithinMeleeRange(victim) == true)
     {
-        state.StuckTimerMS = 0;
-        state.HasAnchor = false;
+        state->StuckTimerMS = 0;
+        state->HasAnchor = false;
         return;
     }
 
@@ -1189,46 +1223,46 @@ void EverQuestMod::UpdateCreatureUnstick(Creature* creature, uint32 diff)
         UNIT_STATE_FLEEING | UNIT_STATE_DISTRACTED) || creature->HasAuraType(SPELL_AURA_MOD_DECREASE_SPEED);
     if (casting == true || impaired == true)
     {
-        state.StuckTimerMS = 0;
-        state.HasAnchor = false;
+        state->StuckTimerMS = 0;
+        state->HasAnchor = false;
         return;
     }
 
     // Genuinely stuck creatures don't actually move
     float currentX = creature->GetPositionX();
     float currentY = creature->GetPositionY();
-    if (state.HasAnchor == false ||
-        creature->GetExactDist2d(state.AnchorX, state.AnchorY) > ConfigEvadeUnstickMoveThreshold)
+    if (state->HasAnchor == false ||
+        creature->GetExactDist2d(state->AnchorX, state->AnchorY) > ConfigEvadeUnstickMoveThreshold)
     {
-        state.StuckTimerMS = 0;
-        state.AnchorX = currentX;
-        state.AnchorY = currentY;
-        state.HasAnchor = true;
+        state->StuckTimerMS = 0;
+        state->AnchorX = currentX;
+        state->AnchorY = currentY;
+        state->HasAnchor = true;
         return;
     }
 
     // If we got here, it's actually stuck
-    state.StuckTimerMS += diff;
+    state->StuckTimerMS += diff;
     uint32 stallThresholdMS = (uint32)(ConfigEvadeUnstickStallSeconds * 1000.0f);
-    if (state.StuckTimerMS >= stallThresholdMS && state.TeleportAttemptsUsed < ConfigEvadeUnstickMaxAttempts)
+    if (state->StuckTimerMS >= stallThresholdMS && state->TeleportAttemptsUsed < ConfigEvadeUnstickMaxAttempts)
     {
         // Teleport to the player and pause action in an attempt to unstick
         creature->NearTeleportTo(victim->GetPositionX(), victim->GetPositionY(), victim->GetPositionZ(),
             creature->GetAngle(victim));
-        state.TeleportAttemptsUsed += 1;
-        state.StuckTimerMS = 0;
-        state.HasAnchor = false;
-        state.SettleRemainingMS = (uint32)(ConfigEvadeUnstickSettleSeconds * 1000.0f);
+        state->TeleportAttemptsUsed += 1;
+        state->StuckTimerMS = 0;
+        state->HasAnchor = false;
+        state->SettleRemainingMS = (uint32)(ConfigEvadeUnstickSettleSeconds * 1000.0f);
         creature->AddUnitState(UNIT_STATE_NO_COMBAT_MOVEMENT);
         creature->StopMoving();
-        creature->setAttackTimer(BASE_ATTACK, (int32)state.SettleRemainingMS);
-        creature->setAttackTimer(OFF_ATTACK, (int32)state.SettleRemainingMS);
+        creature->setAttackTimer(BASE_ATTACK, (int32)state->SettleRemainingMS);
+        creature->setAttackTimer(OFF_ATTACK, (int32)state->SettleRemainingMS);
         return;
     }
 
     // Just go into evade if all teleport attempts are exausted
     uint32 evadeThresholdMS = (uint32)(ConfigEvadeUnreachableSeconds * 1000.0f);
-    if (state.StuckTimerMS >= evadeThresholdMS)
+    if (state->StuckTimerMS >= evadeThresholdMS)
     {
         if (creature->AI() != nullptr)
             creature->AI()->EnterEvadeMode(CreatureAI::EVADE_REASON_NO_PATH);
@@ -1287,6 +1321,7 @@ void EverQuestMod::ApplyScaledCreatureSocialAggroOnEngage(Creature* creature, Un
 
 void EverQuestMod::RemoveCreatureSocialAggroState(ObjectGuid creatureGUID)
 {
+    std::lock_guard<std::mutex> lock(RuntimeStateMutex);
     SocialAggroStateByCreatureGUID.erase(creatureGUID);
 }
 
@@ -1320,14 +1355,18 @@ void EverQuestMod::UpdateCreatureScaledSocialAggro(Creature* creature, uint32 di
         return;
     }
 
-    EverQuestCreatureSocialAggroState& state = SocialAggroStateByCreatureGUID[creature->GetGUID()];
-    if (state.RecallTimerMS <= diff)
+    EverQuestCreatureSocialAggroState* state = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+        state = &SocialAggroStateByCreatureGUID[creature->GetGUID()];
+    }
+    if (state->RecallTimerMS <= diff)
     {
         DoScaledSocialAggroSearch(creature, victim, scale);
-        state.RecallTimerMS = periodMS;
+        state->RecallTimerMS = periodMS;
     }
     else
-        state.RecallTimerMS -= diff;
+        state->RecallTimerMS -= diff;
 }
 
 // Reference is EQMacEmu/TAKP Mob::TryBashKickStun
@@ -1364,14 +1403,20 @@ bool EverQuestMod::RollBashKickStunLands(Unit* attacker, Unit* defender)
 
 void EverQuestMod::ClearVisualEquippedItemsForCreatureGUID(ObjectGuid creatureGUID)
 {
-    if (VisualEquippedItemsByCreatureGUID.find(creatureGUID) != VisualEquippedItemsByCreatureGUID.end())
-        VisualEquippedItemsByCreatureGUID.erase(creatureGUID);
+    std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+    VisualEquippedItemsByCreatureGUID.erase(creatureGUID);
 }
 
 void EverQuestMod::RemoveVisualEquippedItemForCreatureGUIDIfExists(Map* map, ObjectGuid creatureGUID, uint32 itemTemplateID)
 {
-    if (VisualEquippedItemsByCreatureGUID.find(creatureGUID) == VisualEquippedItemsByCreatureGUID.end())
-        return;
+    EverQuestLoadedCreatureEquippedVisualItems* visualItems = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+        auto visualItemsIt = VisualEquippedItemsByCreatureGUID.find(creatureGUID);
+        if (visualItemsIt == VisualEquippedItemsByCreatureGUID.end())
+            return;
+        visualItems = &visualItemsIt->second;
+    }
 
     Creature* creature = map->GetCreature(creatureGUID);
     if (!creature)
@@ -1383,15 +1428,15 @@ void EverQuestMod::RemoveVisualEquippedItemForCreatureGUIDIfExists(Map* map, Obj
     uint32 npcItemTemplateID = EverQuest->GetNPCEquipItemTemplateIDForItemTemplate(itemTemplateID);
 
     // Mainhand first, then offhand
-    if (VisualEquippedItemsByCreatureGUID[creatureGUID].MainhandItemID == npcItemTemplateID)
+    if (visualItems->MainhandItemID == npcItemTemplateID)
     {
         creature->SetUInt32Value(UNIT_VIRTUAL_ITEM_SLOT_ID + 0, 0);
-        VisualEquippedItemsByCreatureGUID[creatureGUID].MainhandItemID = 0;
+        visualItems->MainhandItemID = 0;
     }
-    else if (VisualEquippedItemsByCreatureGUID[creatureGUID].OffhandItemID == npcItemTemplateID)
+    else if (visualItems->OffhandItemID == npcItemTemplateID)
     {
         creature->SetUInt32Value(UNIT_VIRTUAL_ITEM_SLOT_ID + 1, 0);
-        VisualEquippedItemsByCreatureGUID[creatureGUID].OffhandItemID = 0;
+        visualItems->OffhandItemID = 0;
     }
 }
 
@@ -1691,7 +1736,7 @@ void EverQuestMod::SendPlayerToLastGate(Player* player)
     float posX = fields[2].Get<float>();
     float posY = fields[3].Get<float>();
     float posZ = fields[4].Get<float>();
-    float orientation = fields[4].Get<float>();
+    float orientation = fields[5].Get<float>();
 
     // Teleport the player
     player->TeleportTo({ mapId, {posX, posY, posZ, orientation} });
@@ -1725,13 +1770,6 @@ void EverQuestMod::SetNewBindHome(Player* player)
     if (player->GetMap() == nullptr)
         return;
 
-    // Set up the transaction
-    CharacterDatabaseTransaction transaction = CharacterDatabase.BeginTransaction();
-
-    // Delete the old record, if it exists
-    transaction->Append("DELETE FROM `mod_everquest_character_homebind` WHERE guid = {}", player->GetGUID().GetCounter());
-
-    // Add the new binding
     float playerX = player->GetPosition().GetPositionX();
     float playerY = player->GetPosition().GetPositionY();
     float playerZ = player->GetPosition().GetPositionZ();
@@ -1776,12 +1814,8 @@ void EverQuestMod::DeletePlayerBindHome(ObjectGuid guid)
 
 void EverQuestMod::AddCreatureAsLoaded(int mapID, Creature* creature)
 {
-    if (AllLoadedCreaturesByMapIDThenCreatureEntryID.find(mapID) == AllLoadedCreaturesByMapIDThenCreatureEntryID.end())
-        AllLoadedCreaturesByMapIDThenCreatureEntryID[mapID];
-    unordered_map<int, vector<Creature*>>& innerMap = AllLoadedCreaturesByMapIDThenCreatureEntryID[mapID];
-    if (innerMap.find(creature->GetEntry()) != innerMap.end())
-        innerMap[creature->GetEntry()];
-    innerMap[creature->GetEntry()].push_back(creature);
+    std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+    AllLoadedCreaturesByMapIDThenCreatureEntryID[mapID][creature->GetEntry()].push_back(creature);
 
     // Track by spawn point and spawn group, if this creature has one
     if (creature->GetSpawnId() != 0 && CreatureSpawnPointsByCreatureGUID.find(creature->GetSpawnId()) != CreatureSpawnPointsByCreatureGUID.end())
@@ -1794,23 +1828,38 @@ void EverQuestMod::AddCreatureAsLoaded(int mapID, Creature* creature)
 
 void EverQuestMod::RemoveCreatureAsLoaded(int mapID, Creature* creature)
 {
-    if (AllLoadedCreaturesByMapIDThenCreatureEntryID.find(mapID) == AllLoadedCreaturesByMapIDThenCreatureEntryID.end())
-        return;
-    unordered_map<int, vector<Creature*>>& innerMap = AllLoadedCreaturesByMapIDThenCreatureEntryID[mapID];
-    int creatureEntryID = creature->GetEntry();
-    if (innerMap.find(creatureEntryID) == innerMap.end())
-        return;
-
-    vector<Creature*>& creatureVector = innerMap[creatureEntryID];
-    vector<Creature*>::iterator it = find(creatureVector.begin(), creatureVector.end(), creature);
-    if (it != creatureVector.end())
+    std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+    auto entryMapIt = AllLoadedCreaturesByMapIDThenCreatureEntryID.find(mapID);
+    if (entryMapIt != AllLoadedCreaturesByMapIDThenCreatureEntryID.end())
     {
-        creatureVector.erase(it);
-        if (creatureVector.empty())
+        unordered_map<int, vector<Creature*>>& innerMap = entryMapIt->second;
+
+        // The entry can change while the creature is tracked (Creature::UpdateEntry), so if it's not under its
+        // current entry then scan the other buckets, otherwise a dangling pointer is left behind
+        auto bucketIt = innerMap.find((int)creature->GetEntry());
+        if (bucketIt == innerMap.end() || find(bucketIt->second.begin(), bucketIt->second.end(), creature) == bucketIt->second.end())
         {
-            innerMap.erase(creatureEntryID);
-            if (innerMap.empty())
-                AllLoadedCreaturesByMapIDThenCreatureEntryID.erase(mapID);
+            bucketIt = innerMap.end();
+            for (auto candidateIt = innerMap.begin(); candidateIt != innerMap.end(); ++candidateIt)
+            {
+                if (find(candidateIt->second.begin(), candidateIt->second.end(), creature) != candidateIt->second.end())
+                {
+                    bucketIt = candidateIt;
+                    break;
+                }
+            }
+        }
+
+        if (bucketIt != innerMap.end())
+        {
+            vector<Creature*>& creatureVector = bucketIt->second;
+            creatureVector.erase(find(creatureVector.begin(), creatureVector.end(), creature));
+            if (creatureVector.empty())
+            {
+                innerMap.erase(bucketIt);
+                if (innerMap.empty())
+                    AllLoadedCreaturesByMapIDThenCreatureEntryID.erase(entryMapIt);
+            }
         }
     }
 
@@ -1858,29 +1907,36 @@ void EverQuestMod::RemoveCreatureAsLoaded(int mapID, Creature* creature)
         }
     }
 
-    if (EverQuest->PreloadedLootItemIDsByCreatureGUID.find(creature->GetGUID()) != EverQuest->PreloadedLootItemIDsByCreatureGUID.end())
-        EverQuest->PreloadedLootItemIDsByCreatureGUID.erase(creature->GetGUID());
-    if (EverQuest->VisualEquippedItemsByCreatureGUID.find(creature->GetGUID()) != EverQuest->VisualEquippedItemsByCreatureGUID.end())
-        EverQuest->VisualEquippedItemsByCreatureGUID.erase(creature->GetGUID());
+    PreloadedLootItemIDsByCreatureGUID.erase(creature->GetGUID());
+    PreloadedLootCountsByCreatureGUID.erase(creature->GetGUID());
+    VisualEquippedItemsByCreatureGUID.erase(creature->GetGUID());
 }
 
 vector<Creature*> EverQuestMod::GetLoadedCreaturesWithEntryID(int mapID, uint32 entryID)
 {
-    if (AllLoadedCreaturesByMapIDThenCreatureEntryID.find(mapID) == AllLoadedCreaturesByMapIDThenCreatureEntryID.end())
+    std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+    auto entryMapIt = AllLoadedCreaturesByMapIDThenCreatureEntryID.find(mapID);
+    if (entryMapIt == AllLoadedCreaturesByMapIDThenCreatureEntryID.end())
         return vector<Creature*>();
-    unordered_map<int, vector<Creature*>>& innerMap = AllLoadedCreaturesByMapIDThenCreatureEntryID[mapID];
-    if (innerMap.find(entryID) == innerMap.end())
+    auto bucketIt = entryMapIt->second.find(entryID);
+    if (bucketIt == entryMapIt->second.end())
         return vector<Creature*>();
-    return innerMap[entryID];
+    return bucketIt->second;
 }
 
 void EverQuestMod::RollLootItemsForCreature(ObjectGuid creatureGUID, uint32 creatureTemplateEntryID)
 {
-    // Clear previous rolls (and empty counts map means it drops nothing)
-    vector<uint32>& preloadedItemIDs = PreloadedLootItemIDsByCreatureGUID[creatureGUID];
-    preloadedItemIDs.clear();
-    unordered_map<uint32, uint32>& counts = PreloadedLootCountsByCreatureGUID[creatureGUID];
-    counts.clear();
+    // Clear previous rolls (and empty counts map means it drops nothing). The values are only touched by this
+    // creature's own map thread after this, so only the lookups need the lock
+    vector<uint32>* preloadedItemIDs = nullptr;
+    unordered_map<uint32, uint32>* counts = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+        preloadedItemIDs = &PreloadedLootItemIDsByCreatureGUID[creatureGUID];
+        counts = &PreloadedLootCountsByCreatureGUID[creatureGUID];
+    }
+    preloadedItemIDs->clear();
+    counts->clear();
 
     // Skip creatures with no loot data
     auto creatureLootGroups = CreatureLootGroupsByCreatureTemplateID.find(creatureTemplateEntryID);
@@ -1898,13 +1954,13 @@ void EverQuestMod::RollLootItemsForCreature(ObjectGuid creatureGUID, uint32 crea
             if (lootGroup.GroupProbability < 100.0f && float(rand_chance()) > lootGroup.GroupProbability)
                 continue;
 
-            RollLootGroupIntoCounts(lootGroup, counts);
+            RollLootGroupIntoCounts(lootGroup, *counts);
         }
     }
 
     // Track preloaded items for visuals and OnItemRoll checks
-    for (const auto& itemCount : counts)
-        preloadedItemIDs.push_back(itemCount.first);
+    for (const auto& itemCount : *counts)
+        preloadedItemIDs->push_back(itemCount.first);
 }
 
 void EverQuestMod::RollLootGroupIntoCounts(const EverQuestCreatureLootGroup& lootGroup, unordered_map<uint32, uint32>& counts)
@@ -2011,7 +2067,11 @@ void EverQuestMod::SpawnCreature(uint32 entryID, Map* map, float x, float y, flo
         return;
     }
     sObjectMgr->AddCreatureToGrid(spawnId, sObjectMgr->GetCreatureData(spawnId));
-    creature->DeleteFromDB();
+
+    // Remove only the database rows so the spawn doesn't persist across restarts. Creature::DeleteFromDB would also
+    // erase the in-memory CreatureData that the live creature still holds a pointer to (a use-after-free later)
+    WorldDatabase.Execute("DELETE FROM `creature_addon` WHERE `guid` = {}", spawnId);
+    WorldDatabase.Execute("DELETE FROM `creature` WHERE `guid` = {}", spawnId);
 }
 
 void EverQuestMod::DespawnCreature(uint32 entryID, Map* map)
@@ -2170,34 +2230,47 @@ void EverQuestMod::ProcessForage(Player* player)
     ChatHandler(player->GetSession()).PSendSysMessage("You fail to locate any food nearby.");
 }
 
+// Returns the cached controller data for the player, loading it from the database first if needed. The returned
+// pointer stays valid after the lock releases (unordered_map nodes are stable), and the value is only touched by
+// the owning player's thread
+EverQuestPlayerControllerData* EverQuestMod::GetOrLoadActivePlayerClassControllerData(Player* player)
+{
+    {
+        std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+        auto controllerDataIt = ActivePlayerClassControllerDataByGUID.find(player->GetGUID());
+        if (controllerDataIt != ActivePlayerClassControllerDataByGUID.end())
+            return &controllerDataIt->second;
+    }
+
+    // Load outside the lock, since this queries the database
+    EverQuestPlayerControllerData loadedControllerData = GetPlayerControllerData(player);
+
+    std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+    return &ActivePlayerClassControllerDataByGUID.emplace(player->GetGUID(), loadedControllerData).first->second;
+}
+
 uint8 EverQuestMod::GetCurrentSecondEQClassForPlayer(Player* player)
 {
-    if (ActivePlayerClassControllerDataByGUID.find(player->GetGUID()) == ActivePlayerClassControllerDataByGUID.end())
-        ActivePlayerClassControllerDataByGUID[player->GetGUID()] = GetPlayerControllerData(player);
-    return ActivePlayerClassControllerDataByGUID[player->GetGUID()].CurrentSecondClass;
+    return GetOrLoadActivePlayerClassControllerData(player)->CurrentSecondClass;
 }
 
 uint8 EverQuestMod::GetNextSecondEQClassForPlayer(Player* player)
 {
-    if (ActivePlayerClassControllerDataByGUID.find(player->GetGUID()) == ActivePlayerClassControllerDataByGUID.end())
-        ActivePlayerClassControllerDataByGUID[player->GetGUID()] = GetPlayerControllerData(player);
-    return ActivePlayerClassControllerDataByGUID[player->GetGUID()].NextSecondClass;
+    return GetOrLoadActivePlayerClassControllerData(player)->NextSecondClass;
 }
 
 void EverQuestMod::SetNextSecondEQClassForPlayer(Player* player, uint8 nextEQClass)
 {
-    if (ActivePlayerClassControllerDataByGUID.find(player->GetGUID()) == ActivePlayerClassControllerDataByGUID.end())
-        ActivePlayerClassControllerDataByGUID[player->GetGUID()] = GetPlayerControllerData(player);
-    ActivePlayerClassControllerDataByGUID[player->GetGUID()].NextSecondClass = nextEQClass;
+    GetOrLoadActivePlayerClassControllerData(player)->NextSecondClass = nextEQClass;
 }
 
 void EverQuestMod::SetInitialEQClassesForPlayer(Player* player)
 {
-    const EverQuestClassMap classMap = GetClassMapForWOWClassID(player->getClass());
     EverQuestPlayerControllerData controllerData;
     controllerData.GUID = player->GetGUID().GetCounter();
     controllerData.CurrentSecondClass = EQ_EQCLASS_NONE;
     controllerData.NextSecondClass = EQ_EQCLASS_NONE;
+    std::lock_guard<std::mutex> lock(RuntimeStateMutex);
     ActivePlayerClassControllerDataByGUID[player->GetGUID()] = controllerData;
 }
 
@@ -2235,9 +2308,7 @@ EverQuestPlayerControllerData EverQuestMod::GetPlayerControllerData(Player* play
 
 uint32 EverQuestMod::GetSecondaryExpPoolForPlayer(Player* player)
 {
-    if (ActivePlayerClassControllerDataByGUID.find(player->GetGUID()) == ActivePlayerClassControllerDataByGUID.end())
-        ActivePlayerClassControllerDataByGUID[player->GetGUID()] = GetPlayerControllerData(player);
-    return ActivePlayerClassControllerDataByGUID[player->GetGUID()].SecondaryExpPool;
+    return GetOrLoadActivePlayerClassControllerData(player)->SecondaryExpPool;
 }
 
 uint32 EverQuestMod::AddToSecondaryExpPoolForPlayer(Player* player, uint32 grantedExp)
@@ -2245,9 +2316,7 @@ uint32 EverQuestMod::AddToSecondaryExpPoolForPlayer(Player* player, uint32 grant
     if (ConfigSecondaryExpPoolGainPercent <= 0.0f)
         return 0;
 
-    if (ActivePlayerClassControllerDataByGUID.find(player->GetGUID()) == ActivePlayerClassControllerDataByGUID.end())
-        ActivePlayerClassControllerDataByGUID[player->GetGUID()] = GetPlayerControllerData(player);
-    EverQuestPlayerControllerData& controllerData = ActivePlayerClassControllerDataByGUID[player->GetGUID()];
+    EverQuestPlayerControllerData& controllerData = *GetOrLoadActivePlayerClassControllerData(player);
 
     uint32 gain = static_cast<uint32>(static_cast<float>(grantedExp) * (ConfigSecondaryExpPoolGainPercent * 0.01f));
     if (gain == 0)
@@ -2267,9 +2336,7 @@ uint32 EverQuestMod::AddToSecondaryExpPoolForPlayer(Player* player, uint32 grant
 
 uint32 EverQuestMod::SpendSecondaryExpPoolForPlayer(Player* player)
 {
-    if (ActivePlayerClassControllerDataByGUID.find(player->GetGUID()) == ActivePlayerClassControllerDataByGUID.end())
-        ActivePlayerClassControllerDataByGUID[player->GetGUID()] = GetPlayerControllerData(player);
-    EverQuestPlayerControllerData& controllerData = ActivePlayerClassControllerDataByGUID[player->GetGUID()];
+    EverQuestPlayerControllerData& controllerData = *GetOrLoadActivePlayerClassControllerData(player);
 
     if (controllerData.SecondaryExpPool == 0)
         return 0;
@@ -2303,9 +2370,14 @@ uint32 EverQuestMod::SpendSecondaryExpPoolForPlayer(Player* player)
 
 void EverQuestMod::SaveSecondaryExpPoolForPlayer(Player* player)
 {
-    if (ActivePlayerClassControllerDataByGUID.find(player->GetGUID()) == ActivePlayerClassControllerDataByGUID.end())
-        return;
-    const EverQuestPlayerControllerData& controllerData = ActivePlayerClassControllerDataByGUID[player->GetGUID()];
+    EverQuestPlayerControllerData controllerData;
+    {
+        std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+        auto controllerDataIt = ActivePlayerClassControllerDataByGUID.find(player->GetGUID());
+        if (controllerDataIt == ActivePlayerClassControllerDataByGUID.end())
+            return;
+        controllerData = controllerDataIt->second;
+    }
 
     CharacterDatabase.Execute("INSERT INTO `mod_everquest_character_class_controller` (`guid`, `currentClass`, `nextClass`, `secondaryExpPool`) VALUES ({}, {}, {}, {}) ON DUPLICATE KEY UPDATE `secondaryExpPool` = {}",
         player->GetGUID().GetCounter(),
@@ -2774,10 +2846,14 @@ map<uint8, EverQuestPlayerEquipedItemData> EverQuestMod::GetVisibleItemsBySlotFo
                 string enchantString = fields[2].Get<string>();
                 uint32 itemInstanceGUID = fields[3].Get<uint32>();
 
-                // Break out enchant values
+                // Break out enchant values, guarding against short or malformed enchantment strings
                 std::vector<std::string_view> tokens = Acore::Tokenize(enchantString, ' ', false);
-                uint32 permEnchant = *Acore::StringTo<uint32>(tokens[PERM_ENCHANTMENT_SLOT * MAX_ENCHANTMENT_OFFSET]);
-                uint32 tempEnchant = *Acore::StringTo<uint32>(tokens[TEMP_ENCHANTMENT_SLOT * MAX_ENCHANTMENT_OFFSET]);
+                uint32 permEnchant = 0;
+                uint32 tempEnchant = 0;
+                if (tokens.size() > PERM_ENCHANTMENT_SLOT * MAX_ENCHANTMENT_OFFSET)
+                    permEnchant = Acore::StringTo<uint32>(tokens[PERM_ENCHANTMENT_SLOT * MAX_ENCHANTMENT_OFFSET]).value_or(0);
+                if (tokens.size() > TEMP_ENCHANTMENT_SLOT * MAX_ENCHANTMENT_OFFSET)
+                    tempEnchant = Acore::StringTo<uint32>(tokens[TEMP_ENCHANTMENT_SLOT * MAX_ENCHANTMENT_OFFSET]).value_or(0);
 
                 // Store
                 visibleItems[slot].Slot = slot;
@@ -2874,7 +2950,7 @@ bool EverQuestMod::PerformClassSwitch(Player* player)
 
     // Update current class
     UpdatePlayerControllerForClassChange(player, nextSecondaryEQClass, transaction);
-    ActivePlayerClassControllerDataByGUID[player->GetGUID()].CurrentSecondClass = nextSecondaryEQClass;
+    GetOrLoadActivePlayerClassControllerData(player)->CurrentSecondClass = nextSecondaryEQClass;
 
     // Commit the transaction
     CharacterDatabase.CommitTransaction(transaction);
@@ -2901,8 +2977,10 @@ bool EverQuestMod::PerformPlayerDelete(ObjectGuid guid)
     transaction->Append("DELETE FROM mod_everquest_character_class_queststatus_rewarded WHERE guid = {}", playerGUID);
     transaction->Append("DELETE FROM character_pet WHERE owner = 0 AND eq_owner = {}", playerGUID);
     CharacterDatabase.CommitTransaction(transaction);
-    if (ActivePlayerClassControllerDataByGUID.find(guid) != ActivePlayerClassControllerDataByGUID.end())
+    {
+        std::lock_guard<std::mutex> lock(RuntimeStateMutex);
         ActivePlayerClassControllerDataByGUID.erase(guid);
+    }
     return true;
 }
 

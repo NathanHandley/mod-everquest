@@ -27,6 +27,7 @@
 #include <string>
 #include <list>
 #include <map>
+#include <mutex>
 #include <unordered_set>
 
 using namespace std;
@@ -484,7 +485,13 @@ public:
     unordered_set<uint32> CrossClassExemptSpellIDs;
     bool CrossClassExemptSpellIDsBuilt;
 
-    vector<Player*> AllLoadedPlayers;
+    // Guards the runtime state containers (the trackers keyed by creature/player GUID below). Maps update on parallel
+    // worker threads, so any insert/erase/find on these must hold this lock. Never hold it across engine calls
+    // (casts, teleports, evades, etc.), since those can re-enter mod hooks that also take it. Values obtained under
+    // the lock stay valid after release (unordered containers do not move nodes), and are only mutated by the
+    // owning entity's thread.
+    std::mutex RuntimeStateMutex;
+
     unordered_map<uint32, EverQuestCreature> CreaturesByTemplateID;
     unordered_map<uint32, list<EverQuestCreatureOnkillReputation>> CreatureOnkillReputationsByCreatureTemplateID;
     unordered_map<uint32, EverQuestItemTemplate> ItemTemplatesByEntryID;
@@ -631,6 +638,7 @@ public:
     void SetInitialEQClassesForPlayer(Player* player);
     void SetInitialCreatePositionForPlayer(Player* player);
     EverQuestPlayerControllerData GetPlayerControllerData(Player* player);
+    EverQuestPlayerControllerData* GetOrLoadActivePlayerClassControllerData(Player* player);
 
     std::map<std::string, EverQuestPlayerClassInfoItem> GetPlayerClassInfoByClassNameForPlayer(Player* player);
     std::map<uint8, uint8> GetClassLevelsByClassForPlayer(Player* player);

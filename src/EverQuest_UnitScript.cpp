@@ -144,19 +144,24 @@ public:
 
         if (EverQuest->IsSpellAnEQBardSong(spellID) == true && EverQuest->ConfigBardMaxConcurrentSongs != 0)
         {
-            auto& queue = EverQuest->PlayerCasterConcurrentBardSongs[player->GetGUID()];
+            // Only the lookup needs the lock; the queue itself is only touched by this player's own thread
+            deque<uint32>* queue = nullptr;
+            {
+                std::lock_guard<std::mutex> lock(EverQuest->RuntimeStateMutex);
+                queue = &EverQuest->PlayerCasterConcurrentBardSongs[player->GetGUID()];
+            }
 
             // Refresh the cast
-            auto it = std::find(queue.begin(), queue.end(), spellID);
-            if (it != queue.end())
-                queue.erase(it);
-            queue.push_back(spellID);
+            auto it = std::find(queue->begin(), queue->end(), spellID);
+            if (it != queue->end())
+                queue->erase(it);
+            queue->push_back(spellID);
 
             // Enforce a limit
-            while (queue.size() > EverQuest->ConfigBardMaxConcurrentSongs)
+            while (queue->size() > EverQuest->ConfigBardMaxConcurrentSongs)
             {
-                uint32 oldest = queue.front();
-                queue.pop_front();
+                uint32 oldest = queue->front();
+                queue->pop_front();
                 player->RemoveAurasDueToSpell(oldest);
             }
         }
@@ -194,14 +199,22 @@ public:
             {
                 Player* player = unit->ToPlayer();
 
-                // Concurrence restrict                
+                // Concurrence restrict
                 if (EverQuest->ConfigBardMaxConcurrentSongs != 0)
                 {
-                    
-                    auto& queue = EverQuest->PlayerCasterConcurrentBardSongs[player->GetGUID()];
-                    auto it = std::find(queue.begin(), queue.end(), spellID);
-                    if (it != queue.end())
-                        queue.erase(it);
+                    deque<uint32>* queue = nullptr;
+                    {
+                        std::lock_guard<std::mutex> lock(EverQuest->RuntimeStateMutex);
+                        auto queueIt = EverQuest->PlayerCasterConcurrentBardSongs.find(player->GetGUID());
+                        if (queueIt != EverQuest->PlayerCasterConcurrentBardSongs.end())
+                            queue = &queueIt->second;
+                    }
+                    if (queue != nullptr)
+                    {
+                        auto it = std::find(queue->begin(), queue->end(), spellID);
+                        if (it != queue->end())
+                            queue->erase(it);
+                    }
                 }
             }
         }
@@ -243,7 +256,9 @@ public:
         if (damage <= 0)
             return;
 
-        // Check auras for any melee attacker behavior
+        // Check auras for any melee attacker behavior. Snapshot the spell IDs first, since the casts can mutate
+        // the target's aura map (procs, charge consumption) and invalidate the iterator mid-loop
+        vector<uint32> spellIDsToCastOnAttacker;
         Unit::AuraApplicationMap& auraMap = target->GetAppliedAuras();
         for (Unit::AuraApplicationMap::iterator iter = auraMap.begin(); iter != auraMap.end(); ++iter)
         {
@@ -261,8 +276,10 @@ public:
             const EverQuestSpell& curSpell = EverQuest->GetSpellDataForSpellID(spellID);
             if (curSpell.SpellIDCastOnMeleeAttacker == 0)
                 continue;
-            attacker->CastSpell(attacker, curSpell.SpellIDCastOnMeleeAttacker);
+            spellIDsToCastOnAttacker.push_back(curSpell.SpellIDCastOnMeleeAttacker);
         }
+        for (uint32 spellIDToCastOnAttacker : spellIDsToCastOnAttacker)
+            attacker->CastSpell(attacker, spellIDToCastOnAttacker);
     }
 
     void OnBeforeRollMeleeOutcomeAgainst(Unit const* /*attacker*/, Unit const* victim, WeaponAttackType /*attType*/,

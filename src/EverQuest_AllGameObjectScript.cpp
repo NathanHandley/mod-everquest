@@ -55,7 +55,7 @@ public:
     {
         if (EverQuest->IsEnabled == false)
             return;
-        if (go->GetEntry() < EverQuest->ConfigSystemGameObjectTemplateIDMin &&
+        if (go->GetEntry() < EverQuest->ConfigSystemGameObjectTemplateIDMin ||
             go->GetEntry() > EverQuest->ConfigSystemGameObjectTemplateIDMax)
         {
             return;
@@ -77,7 +77,24 @@ public:
         if (go->GetEntry() >= EverQuest->ConfigSystemShipEntryTemplateIDMin &&
             go->GetEntry() <= EverQuest->ConfigSystemShipEntryTemplateIDMax)
         {
+            std::lock_guard<std::mutex> lock(EverQuest->RuntimeStateMutex);
             EverQuest->ShipGameObjectsByTemplateEntryID[go->GetEntry()] = go;
+        }
+    }
+
+    void OnGameObjectRemoveWorld(GameObject* go) override
+    {
+        if (EverQuest->IsEnabled == false)
+            return;
+
+        // Unregister ships so the trigger system can't call through a deleted GameObject
+        if (go->GetEntry() >= EverQuest->ConfigSystemShipEntryTemplateIDMin &&
+            go->GetEntry() <= EverQuest->ConfigSystemShipEntryTemplateIDMax)
+        {
+            std::lock_guard<std::mutex> lock(EverQuest->RuntimeStateMutex);
+            auto shipIt = EverQuest->ShipGameObjectsByTemplateEntryID.find(go->GetEntry());
+            if (shipIt != EverQuest->ShipGameObjectsByTemplateEntryID.end() && shipIt->second == go)
+                EverQuest->ShipGameObjectsByTemplateEntryID.erase(shipIt);
         }
     }
 
@@ -99,7 +116,7 @@ public:
     {
         if (EverQuest->IsEnabled == false)
             return;
-        if (go->GetEntry() < EverQuest->ConfigSystemGameObjectTemplateIDMin &&
+        if (go->GetEntry() < EverQuest->ConfigSystemGameObjectTemplateIDMin ||
             go->GetEntry() > EverQuest->ConfigSystemGameObjectTemplateIDMax)
         {
             return;

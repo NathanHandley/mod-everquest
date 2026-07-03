@@ -136,7 +136,8 @@ public:
         }
 
         uint8 classInt = EQ_EQCLASS_NONE;
-        std::string className = strtok((char*)args, " ");
+        char* classNameToken = strtok((char*)args, " ");
+        std::string className = classNameToken != nullptr ? classNameToken : "";
         if (className.starts_with("No") || className.starts_with("no") || className.starts_with("NO"))
             classInt = EQ_EQCLASS_NONE;
         else if (className.starts_with("Wa") || className.starts_with("wa") || className.starts_with("WA"))

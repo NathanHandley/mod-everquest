@@ -331,8 +331,11 @@ public:
                 ObjectGuid const target = player->GetTarget();
                 if (target.IsPlayer())
                 {
+                    // The target can log out, die and release, or leave the map during the cast
                     Player* targetPlayer = ObjectAccessor::GetPlayer(player->GetMap(), target);
-                    if (targetPlayer->GetGUID().GetCounter() == player->GetGUID().GetCounter())
+                    if (targetPlayer == nullptr)
+                        ChatHandler(player->GetSession()).PSendSysMessage("The spell failed, as the target player could not be found.");
+                    else if (targetPlayer->GetGUID().GetCounter() == player->GetGUID().GetCounter())
                         EverQuest->SetNewBindHome(player);
                     else
                         EverQuest->SetNewBindHome(targetPlayer);
@@ -417,8 +420,6 @@ public:
             EverQuest->SetInitialEQClassesForPlayer(player);
         }
 
-        EverQuest->AllLoadedPlayers.push_back(player);
-
         // Give players the ability to see invis vs undead
         if (EverQuest->ConfigSystemInvisVsUndeadDetectSpellID != 0 && player->HasAura(EverQuest->ConfigSystemInvisVsUndeadDetectSpellID) == false)
             player->CastSpell(player, EverQuest->ConfigSystemInvisVsUndeadDetectSpellID, true);
@@ -426,14 +427,18 @@ public:
         // Grab any cast bard songs for the player
         if (EverQuest->ConfigBardMaxConcurrentSongs != 0)
         {
-            auto& queue = EverQuest->PlayerCasterConcurrentBardSongs[player->GetGUID()];
-            queue.clear();
+            deque<uint32>* queue = nullptr;
+            {
+                std::lock_guard<std::mutex> lock(EverQuest->RuntimeStateMutex);
+                queue = &EverQuest->PlayerCasterConcurrentBardSongs[player->GetGUID()];
+            }
+            queue->clear();
             for (auto const& itr : player->GetAppliedAuras())
             {
                 AuraApplication const* aurApp = itr.second;
                 uint32 spellID = aurApp->GetBase()->GetId();
                 if (EverQuest->IsSpellAnEQBardSong(spellID) == true)
-                    queue.push_back(spellID);
+                    queue->push_back(spellID);
             }
         }
 
@@ -478,9 +483,11 @@ public:
         if (EverQuest->IsEnabled == false)
             return;
 
-        EverQuest->AllLoadedPlayers.erase(std::remove(EverQuest->AllLoadedPlayers.begin(), EverQuest->AllLoadedPlayers.end(), player), EverQuest->AllLoadedPlayers.end());
         if (EverQuest->ConfigBardMaxConcurrentSongs != 0)
-            EverQuest->PlayerCasterConcurrentBardSongs[player->GetGUID()].clear();
+        {
+            std::lock_guard<std::mutex> lock(EverQuest->RuntimeStateMutex);
+            EverQuest->PlayerCasterConcurrentBardSongs.erase(player->GetGUID());
+        }
 
         // Class switch
         if (EverQuest->GetCurrentSecondEQClassForPlayer(player) != EverQuest->GetNextSecondEQClassForPlayer(player))

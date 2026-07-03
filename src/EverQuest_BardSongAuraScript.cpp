@@ -48,8 +48,9 @@ class EverQuest_BardSongAuraScript: public AuraScript
         if (ftEntry == nullptr)
             return true;
 
+        // The parent faction can be absent from Faction.dbc (faction 0 or trimmed rows), treat that like no-reputation
         FactionEntry const* fEntry = sFactionStore.LookupEntry(ftEntry->faction);
-        if (fEntry->reputationListID == -1)
+        if (fEntry == nullptr || fEntry->reputationListID == -1)
             return true;
         if (player->GetReputationMgr().IsAtWar(fEntry->ID) == true || player->GetReputationRank(fEntry->ID) <= REP_HOSTILE)
             return true;
@@ -78,8 +79,9 @@ class EverQuest_BardSongAuraScript: public AuraScript
                 return true;
         }
 
+        // The parent faction can be absent from Faction.dbc (faction 0 or trimmed rows), treat that like no-reputation
         FactionEntry const* fEntry = sFactionStore.LookupEntry(ftEntry->faction);
-        if (fEntry->reputationListID == -1)
+        if (fEntry == nullptr || fEntry->reputationListID == -1)
         {
             if (caster->IsValidAttackTarget(target) == true)
                 return false;

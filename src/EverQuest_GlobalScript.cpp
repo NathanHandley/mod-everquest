@@ -126,6 +126,9 @@ public:
         {
             // Clamp so a large quantity doesn't truncate vs the uint8 limit
             uint8 clampedCount = prerolledCount > 255 ? 255 : uint8(prerolledCount);
+            // Note: this writes to the SHARED loot store item, which the core reads right after this hook returns.
+            // Every drop sets it before use so it self-corrects, but two maps looting the same template at the same
+            // instant can cross counts (worst case: wrong stack size). Fixing that fully needs a core hook change.
             lootStoreItem->mincount = clampedCount;
             lootStoreItem->maxcount = clampedCount;
         }

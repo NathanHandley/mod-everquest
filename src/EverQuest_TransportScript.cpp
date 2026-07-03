@@ -27,7 +27,10 @@ using namespace std;
 class EverQuest_TransportScript : public TransportScript
 {
 private:
+    // Ships on different maps relocate/update on different map threads, so guard this shared map
+    std::mutex PendingResyncMutex;
     std::map<uint32, GOState> PendingResync;
+
     void ForceTransportResyncToPlayers(Transport* transport)
     {
         // Force updates with client so that players see the server values set
@@ -42,6 +45,31 @@ private:
         }
     }
 
+    // Looks up a registered ship and returns it as a MotionTransport, or nullptr if it was never registered
+    // (its map may not be loaded yet) or isn't a moving transport
+    MotionTransport* GetRegisteredShipMotionTransport(uint32 shipGameObjectTemplateEntryID)
+    {
+        GameObject* shipGameObject = nullptr;
+        {
+            std::lock_guard<std::mutex> lock(EverQuest->RuntimeStateMutex);
+            auto shipIt = EverQuest->ShipGameObjectsByTemplateEntryID.find(shipGameObjectTemplateEntryID);
+            if (shipIt != EverQuest->ShipGameObjectsByTemplateEntryID.end())
+                shipGameObject = shipIt->second;
+        }
+        if (shipGameObject == nullptr)
+            return nullptr;
+        Transport* shipTransport = shipGameObject->ToTransport();
+        if (shipTransport == nullptr)
+            return nullptr;
+        return dynamic_cast<MotionTransport*>(shipTransport);
+    }
+
+    void StorePendingResync(uint32 shipGameObjectTemplateEntryID, GOState goState)
+    {
+        std::lock_guard<std::mutex> lock(PendingResyncMutex);
+        PendingResync[shipGameObjectTemplateEntryID] = goState;
+    }
+
 public:
     EverQuest_TransportScript() : TransportScript("EverQuest_TransportScript") {}
 
@@ -51,47 +79,48 @@ public:
             return;
 
         // Pause any triggered ships
-        if (EverQuest->ShipWaitNodesByGameObjectTemplateEntryID.find((int)transport->GetEntry()) != EverQuest->ShipWaitNodesByGameObjectTemplateEntryID.end())
+        auto waitNodeIt = EverQuest->ShipWaitNodesByGameObjectTemplateEntryID.find(transport->GetEntry());
+        if (waitNodeIt != EverQuest->ShipWaitNodesByGameObjectTemplateEntryID.end() && waypointId == (uint32)waitNodeIt->second)
         {
-            if (waypointId == EverQuest->ShipWaitNodesByGameObjectTemplateEntryID[(int)transport->GetEntry()])
+            MotionTransport* waitingShipMotionTransport = GetRegisteredShipMotionTransport(transport->GetEntry());
+            if (waitingShipMotionTransport != nullptr)
             {
-                GameObject* triggeredShipGameObject = EverQuest->ShipGameObjectsByTemplateEntryID[transport->GetEntry()];
-                Transport* triggerShipTransport = triggeredShipGameObject->ToTransport();
-                MotionTransport* triggerShipMotionTransport = dynamic_cast<MotionTransport*>(triggerShipTransport);
-                triggerShipMotionTransport->EnableMovement(false);
-                PendingResync[transport->GetEntry()] = GO_STATE_READY;
+                waitingShipMotionTransport->EnableMovement(false);
+                StorePendingResync(transport->GetEntry(), GO_STATE_READY);
             }
         }
 
         // Trigger any dependent ships
-        for (EverQuestTransportShipTrigger shipTrigger : EverQuest->GetShipTriggersForShip(transport->GetEntry()))
+        for (const EverQuestTransportShipTrigger& shipTrigger : EverQuest->GetShipTriggersForShip(transport->GetEntry()))
         {
             // Only trigger if a trigger point was reached
             if (waypointId != shipTrigger.TriggeringNodeID)
                 continue;
 
             // Get the triggered ship, respawning if needed
-            GameObject* triggeredShipGameObject = EverQuest->ShipGameObjectsByTemplateEntryID[shipTrigger.TriggeredShipGameObjectTemplateEntryID];
-            Transport* triggerShipTransport = triggeredShipGameObject->ToTransport();
-            if (triggerShipTransport->IsInWorld() == false)
-                triggerShipTransport->Respawn();
-            MotionTransport* triggerShipMotionTransport = dynamic_cast<MotionTransport*>(triggerShipTransport);
+            MotionTransport* triggeredShipMotionTransport = GetRegisteredShipMotionTransport(shipTrigger.TriggeredShipGameObjectTemplateEntryID);
+            if (triggeredShipMotionTransport == nullptr)
+                continue;
+            if (triggeredShipMotionTransport->IsInWorld() == false)
+                triggeredShipMotionTransport->Respawn();
 
             // Restart movement
-            triggerShipMotionTransport->EnableMovement(true);
-            PendingResync[shipTrigger.TriggeredShipGameObjectTemplateEntryID] = GO_STATE_ACTIVE;
-        }          
+            triggeredShipMotionTransport->EnableMovement(true);
+            StorePendingResync(shipTrigger.TriggeredShipGameObjectTemplateEntryID, GO_STATE_ACTIVE);
+        }
     }
 
     void OnUpdate(Transport* transport, uint32 /*diff*/) override
     {
         // Force any needed client states
-        auto it = PendingResync.find(transport->GetEntry());
-        if (it != PendingResync.end() && transport->GetGoState() == it->second)
         {
-            ForceTransportResyncToPlayers(transport);
+            std::lock_guard<std::mutex> lock(PendingResyncMutex);
+            auto it = PendingResync.find(transport->GetEntry());
+            if (it == PendingResync.end() || transport->GetGoState() != it->second)
+                return;
             PendingResync.erase(it);
         }
+        ForceTransportResyncToPlayers(transport);
     }
 };
 

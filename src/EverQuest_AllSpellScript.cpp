@@ -85,7 +85,10 @@ public:
             return;
 
         // Clear any stale pending failure from a previous failure
-        PendingSpellFailuresByCasterGUID.erase(caster->GetGUID());
+        {
+            std::lock_guard<std::mutex> lock(PendingSpellFailuresMutex);
+            PendingSpellFailuresByCasterGUID.erase(caster->GetGUID());
+        }
 
         if (roll_chance_i((int)failChancePercent) == false)
             return; // Behave normally
@@ -102,6 +105,7 @@ public:
             default:
                 break;
         }
+        std::lock_guard<std::mutex> lock(PendingSpellFailuresMutex);
         PendingSpellFailuresByCasterGUID[caster->GetGUID()] = std::move(pendingFailure);
     }
 
@@ -109,6 +113,7 @@ public:
     {
         if (caster == nullptr)
             return;
+        std::lock_guard<std::mutex> lock(PendingSpellFailuresMutex);
         PendingSpellFailuresByCasterGUID.erase(caster->GetGUID());
     }
 
@@ -216,15 +221,24 @@ public:
             return;
         EverQuestSpell curSpell = EverQuest->GetSpellDataForSpellID(spellInfo->Id);
 
-        // Handle a rolled effect failure (decided at cast start in OnSpellPrepare)
+        // Handle a rolled effect failure (decided at cast start in OnSpellPrepare). Pull the entry out under the
+        // lock, then apply it after release since applying casts/engages targets
         if (caster->IsPlayer())
         {
-            std::unordered_map<ObjectGuid, PendingSpellFailure>::iterator pendingFailureItr = PendingSpellFailuresByCasterGUID.find(caster->GetGUID());
-            if (pendingFailureItr != PendingSpellFailuresByCasterGUID.end())
+            bool hasPendingFailure = false;
+            PendingSpellFailure pendingFailure;
             {
-                ApplySpellFailure(caster->ToPlayer(), spellInfo->Id, pendingFailureItr->second);
-                PendingSpellFailuresByCasterGUID.erase(pendingFailureItr);
+                std::lock_guard<std::mutex> lock(PendingSpellFailuresMutex);
+                std::unordered_map<ObjectGuid, PendingSpellFailure>::iterator pendingFailureItr = PendingSpellFailuresByCasterGUID.find(caster->GetGUID());
+                if (pendingFailureItr != PendingSpellFailuresByCasterGUID.end())
+                {
+                    hasPendingFailure = true;
+                    pendingFailure = std::move(pendingFailureItr->second);
+                    PendingSpellFailuresByCasterGUID.erase(pendingFailureItr);
+                }
             }
+            if (hasPendingFailure == true)
+                ApplySpellFailure(caster->ToPlayer(), spellInfo->Id, pendingFailure);
         }
 
         // Handle any recourse
@@ -265,6 +279,8 @@ public:
     }
 
 private:
+    // Casts process on parallel map update threads, so guard this shared map
+    std::mutex PendingSpellFailuresMutex;
     std::unordered_map<ObjectGuid, PendingSpellFailure> PendingSpellFailuresByCasterGUID;
 };
 

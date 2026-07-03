@@ -26,11 +26,21 @@ class EverQuest_WorldScript: public WorldScript
 public:
     EverQuest_WorldScript() : WorldScript("EverQuest_WorldScript") {}
 
-    void OnAfterConfigLoad(bool /*reload*/) override
+    void OnAfterConfigLoad(bool reload) override
     {
         EverQuest->LoadConfigurationFile();
         if (EverQuest->IsEnabled == false)
             return;
+
+        // The data tables below are read lock-free by the map update threads, so rebuilding them on a live
+        // ".reload config" would be a use-after-free for any thread mid-read. Only load them at startup;
+        // a live reload still refreshes the file-based config values above
+        if (reload == true)
+        {
+            LOG_INFO("module.EverQuest", "EverQuestMod skipped reloading its data tables (loaded at startup only); file config values were refreshed. Restart the server to apply data table changes.");
+            return;
+        }
+
         if (EverQuest->LoadConfigurationSystemDataFromDB() == false)
         {
             int neededVersion = EQ_MOD_VERSION;
