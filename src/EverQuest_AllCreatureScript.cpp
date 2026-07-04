@@ -88,6 +88,11 @@ private:
     // Note: This is based on TAKP's GetSpecialAbility / HasBowAndArrowEquipped logic
     void SetupRangedAttack(Creature* creature)
     {
+        // Only apply this to EQ creatures
+        if (EverQuest->HasCreatureDataForCreatureTemplateID(creature->GetEntry()) == false
+            && EverQuest->HasCreatureLootDataForCreatureTemplateEntryID(creature->GetEntry()) == false)
+            return;
+
         // Reset the ranged visual slot in case this creature object is being recycled
         creature->SetUInt32Value(UNIT_VIRTUAL_ITEM_SLOT_ID + 2, 0);
 
@@ -165,18 +170,18 @@ private:
 
     void SetVisualEquipment(Creature* creature)
     {
-        // Reset first
-        creature->SetUInt32Value(UNIT_VIRTUAL_ITEM_SLOT_ID + 0, 0);
-        creature->SetUInt32Value(UNIT_VIRTUAL_ITEM_SLOT_ID + 1, 0);
-        EverQuest->ClearVisualEquippedItemsForCreatureGUID(creature->GetGUID());
+        // Skip non-eq creatures
+        if (EverQuest->HasCreatureDataForCreatureTemplateID(creature->GetEntry()) == false)
+            return;
 
-        // Roll items
+        // Roll items for only EQ creatures
         if (EverQuest->HasCreatureLootDataForCreatureTemplateEntryID(creature->GetEntry()))
             EverQuest->RollLootItemsForCreature(creature->GetGUID(), creature->GetEntry());
 
-        // Add visual information
-        if (EverQuest->HasCreatureDataForCreatureTemplateID(creature->GetEntry()) == false)
-            return;
+        // Reset
+        creature->SetUInt32Value(UNIT_VIRTUAL_ITEM_SLOT_ID + 0, 0);
+        creature->SetUInt32Value(UNIT_VIRTUAL_ITEM_SLOT_ID + 1, 0);
+        EverQuest->ClearVisualEquippedItemsForCreatureGUID(creature->GetGUID());
 
         EverQuestCreature eqCreature = EverQuest->GetCreatureDataForCreatureTemplateID(creature->GetEntry());
         if (eqCreature.CanShowHeldLootItems == false || EverQuest->HasPreloadedLootItemIDsForCreatureGUID(creature->GetGUID()) == false)
