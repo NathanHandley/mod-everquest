@@ -20,6 +20,7 @@ void AddEverQuestUnitScripts();
 void AddEverQuestAllGameObjectScripts();
 void AddEverQuestGameEventScripts();
 void AddEverQuestAllCreatureScripts();
+void AddEverQuestAllMapScripts();
 void AddEverQuestAllSpellScripts();
 void AddEverQuestFocusBoostAuraScripts();
 void AddEverQuestFocusBoostNonAuraScripts();
@@ -40,6 +41,7 @@ void Addmod_everquestScripts()
     AddEverQuestAllGameObjectScripts();
     AddEverQuestGameEventScripts();
     AddEverQuestAllCreatureScripts();
+    AddEverQuestAllMapScripts();
     AddEverQuestAllSpellScripts();
     AddEverQuestFocusBoostAuraScripts();
     AddEverQuestFocusBoostNonAuraScripts();

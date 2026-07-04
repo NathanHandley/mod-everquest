@@ -87,6 +87,21 @@ public:
         EverQuest->ApplyScaledCreatureSocialAggroOnEngage(creature, victim);
     }
 
+    void OnUnitDeath(Unit* unit, Unit* killer) override
+    {
+        if (EverQuest->IsEnabled == false)
+            return;
+        if (unit == nullptr)
+            return;
+        Creature* creature = unit->ToCreature();
+        if (creature == nullptr)
+            return;
+        uint32 mapID = creature->GetMapId();
+        if (mapID < EverQuest->ConfigSystemMapDBCIDMin || mapID > EverQuest->ConfigSystemMapDBCIDMax)
+            return;
+        EverQuest->ProcessKillSpawnsForCreatureDeath(creature, killer);
+    }
+
     void OnUnitEnterEvadeMode(Unit* unit, uint8 /*evadeReason*/) override
     {
         if (EverQuest->IsEnabled == false)

@@ -23,6 +23,8 @@
 #include "DBCStores.h"
 #include "SpellMgr.h"
 #include "Tokenize.h"
+#include "ObjectAccessor.h"
+#include "TemporarySummon.h"
 #include "CellImpl.h"
 #include "GridNotifiers.h"
 #include "GridNotifiersImpl.h"
@@ -339,6 +341,275 @@ const EverQuestCreature& EverQuestMod::GetCreatureDataForCreatureTemplateID(uint
         static const EverQuestCreature returnEmpty;
         return returnEmpty;
     }
+}
+
+void EverQuestMod::LoadCreatureKillSpawnData()
+{
+    CreatureKillSpawnsByTriggerCreatureTemplateID.clear();
+
+    QueryResult queryResult = WorldDatabase.Query("SELECT ID, TriggerCreatureTemplateID, MapID, ActionType, TargetCreatureTemplateID, Chance, AltGroup, AltID, AltWeight, SpawnAtCorpse, PositionX, PositionY, PositionZ, Orientation, DelayMinMS, DelayMaxMS, OnlyIfNotAliveCreatureTemplateID, RequireDeadCreatureTemplateIDs, RequireAliveCreatureTemplateIDs, AddToHateList, TriggerMinLevel, TriggerMaxLevel FROM mod_everquest_creature_kill_spawn;");
+    if (queryResult)
+    {
+        do
+        {
+            Field* fields = queryResult->Fetch();
+            EverQuestCreatureKillSpawn killSpawn;
+            killSpawn.ID = fields[0].Get<uint32>();
+            killSpawn.TriggerCreatureTemplateID = fields[1].Get<uint32>();
+            killSpawn.MapID = fields[2].Get<uint32>();
+            killSpawn.ActionType = fields[3].Get<uint8>();
+            killSpawn.TargetCreatureTemplateID = fields[4].Get<uint32>();
+            killSpawn.Chance = fields[5].Get<float>();
+            killSpawn.AltGroup = fields[6].Get<uint32>();
+            killSpawn.AltID = fields[7].Get<uint32>();
+            killSpawn.AltWeight = fields[8].Get<float>();
+            killSpawn.SpawnAtCorpse = fields[9].Get<uint8>() != 0;
+            killSpawn.PositionX = fields[10].Get<float>();
+            killSpawn.PositionY = fields[11].Get<float>();
+            killSpawn.PositionZ = fields[12].Get<float>();
+            killSpawn.Orientation = fields[13].Get<float>();
+            killSpawn.DelayMinMS = fields[14].Get<uint32>();
+            killSpawn.DelayMaxMS = fields[15].Get<uint32>();
+            killSpawn.OnlyIfNotAliveCreatureTemplateID = fields[16].Get<uint32>();
+            string requireDeadString = fields[17].Get<string>();
+            for (std::string_view idToken : Acore::Tokenize(requireDeadString, ',', false))
+                killSpawn.RequireDeadCreatureTemplateIDs.push_back(Acore::StringTo<uint32>(idToken).value_or(0));
+            string requireAliveString = fields[18].Get<string>();
+            for (std::string_view idToken : Acore::Tokenize(requireAliveString, ',', false))
+                killSpawn.RequireAliveCreatureTemplateIDs.push_back(Acore::StringTo<uint32>(idToken).value_or(0));
+            killSpawn.AddToHateList = fields[19].Get<uint8>() != 0;
+            killSpawn.TriggerMinLevel = fields[20].Get<uint32>();
+            killSpawn.TriggerMaxLevel = fields[21].Get<uint32>();
+            CreatureKillSpawnsByTriggerCreatureTemplateID[killSpawn.TriggerCreatureTemplateID].push_back(killSpawn);
+        } while (queryResult->NextRow());
+    }
+}
+
+bool EverQuestMod::HasAliveCreatureWithEntryInMap(uint32 mapID, uint32 creatureTemplateID, Creature* ignoreCreature)
+{
+    std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+    auto mapIter = AllLoadedCreaturesByMapIDThenCreatureEntryID.find(mapID);
+    if (mapIter == AllLoadedCreaturesByMapIDThenCreatureEntryID.end())
+        return false;
+    auto entryIter = mapIter->second.find(creatureTemplateID);
+    if (entryIter == mapIter->second.end())
+        return false;
+    for (Creature* creature : entryIter->second)
+    {
+        if (creature == ignoreCreature)
+            continue;
+        if (creature->IsAlive() == true)
+            return true;
+    }
+    return false;
+}
+
+void EverQuestMod::ProcessKillSpawnsForCreatureDeath(Creature* deadCreature, Unit* killer)
+{
+    auto killSpawnIter = CreatureKillSpawnsByTriggerCreatureTemplateID.find(deadCreature->GetEntry());
+    if (killSpawnIter == CreatureKillSpawnsByTriggerCreatureTemplateID.end())
+        return;
+    Map* map = deadCreature->GetMap();
+    uint32 mapID = map->GetId();
+    uint32 deadCreatureLevel = deadCreature->GetLevel();
+
+    // Roll which alternative wins in each alt group (weighted across distinct alt IDs)
+    unordered_map<uint32, vector<pair<uint32, float>>> altWeightsByGroup;
+    for (const EverQuestCreatureKillSpawn& killSpawn : killSpawnIter->second)
+    {
+        if (killSpawn.MapID != mapID || killSpawn.AltGroup == 0)
+            continue;
+        bool altSeen = false;
+        for (pair<uint32, float>& altWeight : altWeightsByGroup[killSpawn.AltGroup])
+            if (altWeight.first == killSpawn.AltID)
+                altSeen = true;
+        if (altSeen == false)
+            altWeightsByGroup[killSpawn.AltGroup].push_back(pair<uint32, float>(killSpawn.AltID, killSpawn.AltWeight));
+    }
+    unordered_map<uint32, uint32> chosenAltIDByGroup;
+    for (auto& altGroup : altWeightsByGroup)
+    {
+        float totalWeight = 0;
+        for (pair<uint32, float>& altWeight : altGroup.second)
+            totalWeight += altWeight.second;
+        float weightRoll = frand(0, totalWeight);
+        for (pair<uint32, float>& altWeight : altGroup.second)
+        {
+            weightRoll -= altWeight.second;
+            if (weightRoll <= 0)
+            {
+                chosenAltIDByGroup[altGroup.first] = altWeight.first;
+                break;
+            }
+        }
+    }
+
+    for (const EverQuestCreatureKillSpawn& killSpawn : killSpawnIter->second)
+    {
+        if (killSpawn.MapID != mapID)
+            continue;
+        if (killSpawn.TriggerMinLevel > 0 && deadCreatureLevel < killSpawn.TriggerMinLevel)
+            continue;
+        if (killSpawn.TriggerMaxLevel > 0 && deadCreatureLevel > killSpawn.TriggerMaxLevel)
+            continue;
+        if (killSpawn.AltGroup != 0 && chosenAltIDByGroup[killSpawn.AltGroup] != killSpawn.AltID)
+            continue;
+        if (killSpawn.Chance < 100 && roll_chance_f(killSpawn.Chance) == false)
+            continue;
+        bool requirementFailed = false;
+        for (uint32 creatureTemplateID : killSpawn.RequireDeadCreatureTemplateIDs)
+            if (HasAliveCreatureWithEntryInMap(mapID, creatureTemplateID, deadCreature) == true)
+                requirementFailed = true;
+        for (uint32 creatureTemplateID : killSpawn.RequireAliveCreatureTemplateIDs)
+            if (HasAliveCreatureWithEntryInMap(mapID, creatureTemplateID, deadCreature) == false)
+                requirementFailed = true;
+        if (requirementFailed == true)
+            continue;
+
+        EverQuestPendingKillSpawnAction action;
+        action.ActionType = killSpawn.ActionType;
+        action.TargetCreatureTemplateID = killSpawn.TargetCreatureTemplateID;
+        action.OnlyIfNotAliveCreatureTemplateID = killSpawn.OnlyIfNotAliveCreatureTemplateID;
+        action.AddToHateList = killSpawn.AddToHateList;
+        if (killer != nullptr)
+            action.KillerGUID = killer->GetGUID();
+        if (killSpawn.ActionType == EQ_KILLSPAWN_ACTION_RESPAWNSELF)
+        {
+            action.RespawnSpawnID = deadCreature->GetSpawnId();
+            if (action.RespawnSpawnID == 0)
+                continue;
+        }
+        else if (killSpawn.SpawnAtCorpse == true)
+        {
+            action.PositionX = deadCreature->GetPositionX() + killSpawn.PositionX;
+            action.PositionY = deadCreature->GetPositionY() + killSpawn.PositionY;
+            action.PositionZ = deadCreature->GetPositionZ() + killSpawn.PositionZ;
+            action.Orientation = deadCreature->GetOrientation();
+        }
+        else
+        {
+            action.PositionX = killSpawn.PositionX;
+            action.PositionY = killSpawn.PositionY;
+            action.PositionZ = killSpawn.PositionZ;
+            action.Orientation = killSpawn.Orientation;
+            if (killSpawn.ActionType == EQ_KILLSPAWN_ACTION_DESPAWN && (killSpawn.PositionX != 0 || killSpawn.PositionY != 0))
+                action.DespawnNearestToPositionOnly = true;
+        }
+
+        uint32 delayMS = killSpawn.DelayMinMS;
+        if (killSpawn.DelayMaxMS > killSpawn.DelayMinMS)
+            delayMS = urand(killSpawn.DelayMinMS, killSpawn.DelayMaxMS);
+        if (delayMS == 0)
+            ExecuteKillSpawnAction(map, action);
+        else
+        {
+            action.RemainingMS = (int32)delayMS;
+            std::lock_guard<std::mutex> lock(PendingKillSpawnActionsMutex);
+            PendingKillSpawnActionsByMapID[mapID].push_back(action);
+        }
+    }
+}
+
+void EverQuestMod::ExecuteKillSpawnAction(Map* map, EverQuestPendingKillSpawnAction& action)
+{
+    switch (action.ActionType)
+    {
+        case EQ_KILLSPAWN_ACTION_SPAWN:
+        {
+            if (action.OnlyIfNotAliveCreatureTemplateID != 0 && HasAliveCreatureWithEntryInMap(map->GetId(), action.OnlyIfNotAliveCreatureTemplateID, nullptr) == true)
+                return;
+            Position spawnPosition(action.PositionX, action.PositionY, action.PositionZ, action.Orientation);
+            TempSummon* summonedCreature = map->SummonCreature(action.TargetCreatureTemplateID, spawnPosition);
+            if (summonedCreature == nullptr)
+            {
+                LOG_ERROR("module.EverQuest", "EverQuestMod::ExecuteKillSpawnAction failed to summon creature with template ID {}", action.TargetCreatureTemplateID);
+                return;
+            }
+            if (action.AddToHateList == true && action.KillerGUID.IsEmpty() == false)
+            {
+                Unit* killer = ObjectAccessor::GetUnit(*summonedCreature, action.KillerGUID);
+                if (killer != nullptr && killer->IsAlive() == true)
+                {
+                    summonedCreature->SetInCombatWith(killer);
+                    summonedCreature->AddThreat(killer, 1.0f);
+                }
+            }
+        } break;
+        case EQ_KILLSPAWN_ACTION_DESPAWN:
+        {
+            // Copy out under the lock, since DespawnOrUnsummon re-enters hooks that also take RuntimeStateMutex
+            vector<Creature*> despawnCandidates;
+            {
+                std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+                auto mapIter = AllLoadedCreaturesByMapIDThenCreatureEntryID.find(map->GetId());
+                if (mapIter != AllLoadedCreaturesByMapIDThenCreatureEntryID.end())
+                {
+                    auto entryIter = mapIter->second.find(action.TargetCreatureTemplateID);
+                    if (entryIter != mapIter->second.end())
+                        for (Creature* creature : entryIter->second)
+                            if (creature->IsAlive() == true)
+                                despawnCandidates.push_back(creature);
+                }
+            }
+            if (despawnCandidates.empty() == true)
+                return;
+            if (action.DespawnNearestToPositionOnly == true)
+            {
+                Creature* nearestCreature = despawnCandidates[0];
+                float nearestDistance = 0;
+                for (Creature* creature : despawnCandidates)
+                {
+                    float curDistance = creature->GetExactDist2dSq(action.PositionX, action.PositionY);
+                    if (creature == despawnCandidates[0] || curDistance < nearestDistance)
+                    {
+                        nearestCreature = creature;
+                        nearestDistance = curDistance;
+                    }
+                }
+                nearestCreature->DespawnOrUnsummon();
+            }
+            else
+            {
+                for (Creature* creature : despawnCandidates)
+                    creature->DespawnOrUnsummon();
+            }
+        } break;
+        case EQ_KILLSPAWN_ACTION_RESPAWNSELF:
+        {
+            auto spawnIDRange = map->GetCreatureBySpawnIdStore().equal_range(action.RespawnSpawnID);
+            for (auto spawnIDIter = spawnIDRange.first; spawnIDIter != spawnIDRange.second; ++spawnIDIter)
+                if (spawnIDIter->second->IsAlive() == false)
+                    spawnIDIter->second->Respawn(true);
+        } break;
+        default: break;
+    }
+}
+
+void EverQuestMod::UpdatePendingKillSpawnActions(Map* map, uint32 diff)
+{
+    uint32 mapID = map->GetId();
+    vector<EverQuestPendingKillSpawnAction> dueActions;
+    {
+        std::lock_guard<std::mutex> lock(PendingKillSpawnActionsMutex);
+        auto pendingIter = PendingKillSpawnActionsByMapID.find(mapID);
+        if (pendingIter == PendingKillSpawnActionsByMapID.end())
+            return;
+        vector<EverQuestPendingKillSpawnAction>& pendingActions = pendingIter->second;
+        for (size_t i = pendingActions.size(); i > 0; --i)
+        {
+            EverQuestPendingKillSpawnAction& action = pendingActions[i - 1];
+            action.RemainingMS -= (int32)diff;
+            if (action.RemainingMS <= 0)
+            {
+                dueActions.push_back(action);
+                pendingActions.erase(pendingActions.begin() + (i - 1));
+            }
+        }
+        if (pendingActions.empty() == true)
+            PendingKillSpawnActionsByMapID.erase(pendingIter);
+    }
+    for (EverQuestPendingKillSpawnAction& action : dueActions)
+        ExecuteKillSpawnAction(map, action);
 }
 
 void EverQuestMod::LoadCreatureOnkillReputations()

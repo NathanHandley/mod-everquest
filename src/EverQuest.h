@@ -36,7 +36,7 @@ static uint32 ConfigMaxSkillIDCheck = 1000;         // The highest level of skil
 
 class Unit;
 
-#define EQ_MOD_VERSION                              32
+#define EQ_MOD_VERSION                              33
 
 #define EQ_EQCLASS_NONE                             0
 #define EQ_EQCLASS_WARRIOR                          1
@@ -109,6 +109,10 @@ class Unit;
 #define EQ_QUEST_REACTION_SPAWN                     5
 #define EQ_QUEST_REACTION_SPAWNUNIQUE               6
 #define EQ_QUEST_REACTION_YELL                      7
+
+#define EQ_KILLSPAWN_ACTION_SPAWN                   0
+#define EQ_KILLSPAWN_ACTION_DESPAWN                 1
+#define EQ_KILLSPAWN_ACTION_RESPAWNSELF             2
 
 #define EQ_NONE                                     -1
 #define EQ_GRID_CIRCULAR                            0
@@ -205,6 +209,50 @@ public:
     uint32 SpawnPointID = 0;
     uint32 SpawnGroupID = 0;
     uint32 SpawnGroupLimit = 0;
+};
+
+class EverQuestCreatureKillSpawn
+{
+public:
+    uint32 ID = 0;
+    uint32 TriggerCreatureTemplateID = 0;
+    uint32 MapID = 0;
+    uint8 ActionType = EQ_KILLSPAWN_ACTION_SPAWN;
+    uint32 TargetCreatureTemplateID = 0;
+    float Chance = 100;
+    uint32 AltGroup = 0;
+    uint32 AltID = 0;
+    float AltWeight = 0;
+    bool SpawnAtCorpse = false;
+    float PositionX = 0;
+    float PositionY = 0;
+    float PositionZ = 0;
+    float Orientation = 0;
+    uint32 DelayMinMS = 0;
+    uint32 DelayMaxMS = 0;
+    uint32 OnlyIfNotAliveCreatureTemplateID = 0;
+    vector<uint32> RequireDeadCreatureTemplateIDs;
+    vector<uint32> RequireAliveCreatureTemplateIDs;
+    bool AddToHateList = false;
+    uint32 TriggerMinLevel = 0;
+    uint32 TriggerMaxLevel = 0;
+};
+
+class EverQuestPendingKillSpawnAction
+{
+public:
+    int32 RemainingMS = 0;
+    uint8 ActionType = EQ_KILLSPAWN_ACTION_SPAWN;
+    uint32 TargetCreatureTemplateID = 0;
+    ObjectGuid::LowType RespawnSpawnID = 0;
+    float PositionX = 0;
+    float PositionY = 0;
+    float PositionZ = 0;
+    float Orientation = 0;
+    uint32 OnlyIfNotAliveCreatureTemplateID = 0;
+    bool DespawnNearestToPositionOnly = false;
+    bool AddToHateList = false;
+    ObjectGuid KillerGUID;
 };
 
 class EverQuestLoadedCreatureEquippedVisualItems
@@ -494,6 +542,10 @@ public:
 
     unordered_map<uint32, EverQuestCreature> CreaturesByTemplateID;
     unordered_map<uint32, list<EverQuestCreatureOnkillReputation>> CreatureOnkillReputationsByCreatureTemplateID;
+    unordered_map<uint32, vector<EverQuestCreatureKillSpawn>> CreatureKillSpawnsByTriggerCreatureTemplateID;
+
+    std::mutex PendingKillSpawnActionsMutex;
+    unordered_map<uint32, vector<EverQuestPendingKillSpawnAction>> PendingKillSpawnActionsByMapID;
     unordered_map<uint32, EverQuestItemTemplate> ItemTemplatesByEntryID;
     unordered_set<uint32> WornEffectSpellIDs;
     unordered_map<uint32, EverQuestSpell> SpellDataBySpellID;
@@ -541,6 +593,11 @@ public:
     const EverQuestCreature& GetCreatureDataForCreatureTemplateID(uint32 creatureTemplateID);
     void LoadCreatureSpawnPoints();
     bool ShouldDespawnCreatureDueToSpawnRestrictions(int mapID, Creature* creature);
+    void LoadCreatureKillSpawnData();
+    void ProcessKillSpawnsForCreatureDeath(Creature* deadCreature, Unit* killer);
+    void UpdatePendingKillSpawnActions(Map* map, uint32 diff);
+    bool HasAliveCreatureWithEntryInMap(uint32 mapID, uint32 creatureTemplateID, Creature* ignoreCreature);
+    void ExecuteKillSpawnAction(Map* map, EverQuestPendingKillSpawnAction& action);
     void LoadCreatureOnkillReputations();
     const list<EverQuestCreatureOnkillReputation>& GetOnkillReputationsForCreatureTemplate(uint32 creatureTemplateID);
     void LoadItemTemplateData();

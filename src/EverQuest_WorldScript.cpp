@@ -51,6 +51,7 @@ public:
         EverQuest->LoadClassMapData();
         EverQuest->LoadCreatureData();
         EverQuest->LoadCreatureSpawnPoints();
+        EverQuest->LoadCreatureKillSpawnData();
         EverQuest->LoadCreatureOnkillReputations();
         EverQuest->LoadItemTemplateData();
         EverQuest->LoadSpellData();
