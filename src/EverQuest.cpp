@@ -1119,7 +1119,7 @@ void EverQuestMod::LoadCreatureLootData()
     CreatureLootGroupsByCreatureTemplateID.clear();
 
     // Rows are ordered so that all entries of a creature's loot group are next to each other
-    QueryResult queryResult = WorldDatabase.Query("SELECT CreatureTemplateID, LootGroupID, GroupMultiplier, GroupProbability, DropLimit, MinDrop, ItemTemplateID, Chance, ItemMultiplier, ItemCharges FROM mod_everquest_creature_loot ORDER BY CreatureTemplateID, LootGroupID");
+    QueryResult queryResult = WorldDatabase.Query("SELECT CreatureTemplateID, LootGroupID, GroupMultiplier, GroupMultiplierMin, GroupProbability, DropLimit, MinDrop, ItemTemplateID, Chance, ItemMultiplier, ItemCharges FROM mod_everquest_creature_loot ORDER BY CreatureTemplateID, LootGroupID");
     if (queryResult)
     {
         do
@@ -1139,18 +1139,19 @@ void EverQuestMod::LoadCreatureLootData()
                 EverQuestCreatureLootGroup newLootGroup;
                 newLootGroup.LootGroupID = lootGroupID;
                 newLootGroup.GroupMultiplier = fields[2].Get<uint32>();
-                newLootGroup.GroupProbability = fields[3].Get<float>();
-                newLootGroup.DropLimit = fields[4].Get<uint32>();
-                newLootGroup.MinDrop = fields[5].Get<uint32>();
+                newLootGroup.GroupMultiplierMin = fields[3].Get<uint32>();
+                newLootGroup.GroupProbability = fields[4].Get<float>();
+                newLootGroup.DropLimit = fields[5].Get<uint32>();
+                newLootGroup.MinDrop = fields[6].Get<uint32>();
                 lootGroups.push_back(newLootGroup);
                 lootGroup = &lootGroups.back();
             }
 
             EverQuestCreatureLootEntry lootEntry;
-            lootEntry.ItemTemplateID = fields[6].Get<uint32>();
-            lootEntry.Chance = fields[7].Get<float>();
-            lootEntry.ItemMultiplier = fields[8].Get<uint32>();
-            lootEntry.ItemCharges = fields[9].Get<uint32>();
+            lootEntry.ItemTemplateID = fields[7].Get<uint32>();
+            lootEntry.Chance = fields[8].Get<float>();
+            lootEntry.ItemMultiplier = fields[9].Get<uint32>();
+            lootEntry.ItemCharges = fields[10].Get<uint32>();
             lootGroup->Entries.push_back(lootEntry);
         } while (queryResult->NextRow());
     }
@@ -2222,7 +2223,9 @@ void EverQuestMod::RollLootItemsForCreature(ObjectGuid creatureGUID, uint32 crea
         {
             if (lootGroup.GroupProbability <= 0.0f)
                 continue;
-            if (lootGroup.GroupProbability < 100.0f && float(rand_chance()) > lootGroup.GroupProbability)
+
+            // The first GroupMultiplierMin iterations are guaranteed and skip the probability roll (EQ loottable_entries.multiplier_min)
+            if (t >= lootGroup.GroupMultiplierMin && lootGroup.GroupProbability < 100.0f && float(rand_chance()) > lootGroup.GroupProbability)
                 continue;
 
             RollLootGroupIntoCounts(lootGroup, *counts);
@@ -2275,7 +2278,7 @@ void EverQuestMod::RollLootGroupIntoCounts(const EverQuestCreatureLootGroup& loo
     uint32 drops = 0;
     for (uint32 i = 0; i < dropLimit; i++)
     {
-        // Keep rolling while below MinDrop or a guaranteed item exists; otherwise stop with probability noLootProb
+        // Keep rolling while below MinDrop or a guaranteed item exists, otherwise stop with probability noLootProb
         if (drops < lootGroup.MinDrop || chanceBypass == true || frand(0.0f, 1.0f) >= noLootProb)
         {
             float roll = frand(0.0f, rollTotal);

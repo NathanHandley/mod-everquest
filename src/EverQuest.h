@@ -36,7 +36,7 @@ static uint32 ConfigMaxSkillIDCheck = 1000;         // The highest level of skil
 
 class Unit;
 
-#define EQ_MOD_VERSION                              33
+#define EQ_MOD_VERSION                              34
 
 #define EQ_EQCLASS_NONE                             0
 #define EQ_EQCLASS_WARRIOR                          1
@@ -364,6 +364,7 @@ class EverQuestCreatureLootGroup
 public:
     uint32 LootGroupID = 0;
     uint32 GroupMultiplier = 1;
+    uint32 GroupMultiplierMin = 0;
     float GroupProbability = 100;
     uint32 DropLimit = 0;
     uint32 MinDrop = 0;
