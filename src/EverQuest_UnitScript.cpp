@@ -100,6 +100,7 @@ public:
         if (mapID < EverQuest->ConfigSystemMapDBCIDMin || mapID > EverQuest->ConfigSystemMapDBCIDMax)
             return;
         EverQuest->ProcessKillSpawnsForCreatureDeath(creature, killer);
+        EverQuest->ProcessTriggeredQuestKillSpawnsForCreatureDeath(creature, killer);
     }
 
     void OnUnitEnterEvadeMode(Unit* unit, uint8 /*evadeReason*/) override

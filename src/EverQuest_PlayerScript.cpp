@@ -175,15 +175,40 @@ public:
                 } break;
                 case EQ_QUEST_REACTION_DESPAWN:
                 {
-                    EverQuest->DespawnCreature(questReaction.CreatureTemplateID, map);
+                    if (questReaction.DelayInMS > 0)
+                    {
+                        EverQuestPendingKillSpawnAction action;
+                        action.ActionType = EQ_KILLSPAWN_ACTION_DESPAWN;
+                        action.TargetCreatureTemplateID = questReaction.CreatureTemplateID;
+                        action.RemainingMS = (int32)questReaction.DelayInMS;
+                        EverQuest->EnqueuePendingKillSpawnAction(map->GetId(), action);
+                    }
+                    else
+                        EverQuest->DespawnCreature(questReaction.CreatureTemplateID, map);
                 } break;
                 case EQ_QUEST_REACTION_SPAWN:
-                {
-                    EverQuest->SpawnCreature(questReaction.CreatureTemplateID, map, x, y, z, orientation, false);
-                } break;
                 case EQ_QUEST_REACTION_SPAWNUNIQUE:
                 {
-                    EverQuest->SpawnCreature(questReaction.CreatureTemplateID, map, x, y, z, orientation, true);
+                    if (questReaction.DelayInMS > 0)
+                    {
+                        EverQuestPendingKillSpawnAction action;
+                        action.ActionType = EQ_KILLSPAWN_ACTION_SPAWN;
+                        action.TargetCreatureTemplateID = questReaction.CreatureTemplateID;
+                        if (questReaction.ReactionType == EQ_QUEST_REACTION_SPAWNUNIQUE)
+                            action.OnlyIfNotAliveCreatureTemplateID = questReaction.CreatureTemplateID;
+                        action.PositionX = x;
+                        action.PositionY = y;
+                        action.PositionZ = z;
+                        action.Orientation = orientation;
+                        action.RemainingMS = (int32)questReaction.DelayInMS;
+                        EverQuest->EnqueuePendingKillSpawnAction(map->GetId(), action);
+                    }
+                    else
+                        EverQuest->SpawnCreature(questReaction.CreatureTemplateID, map, x, y, z, orientation, questReaction.ReactionType == EQ_QUEST_REACTION_SPAWNUNIQUE);
+                } break;
+                case EQ_QUEST_REACTION_KILLSPAWN:
+                {
+                    EverQuest->TriggerQuestKillSpawn(map->GetId(), questReaction);
                 } break;
                 default: break; // Nothing
                 }

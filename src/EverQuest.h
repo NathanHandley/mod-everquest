@@ -36,7 +36,7 @@ static uint32 ConfigMaxSkillIDCheck = 1000;         // The highest level of skil
 
 class Unit;
 
-#define EQ_MOD_VERSION                              34
+#define EQ_MOD_VERSION                              35
 
 #define EQ_EQCLASS_NONE                             0
 #define EQ_EQCLASS_WARRIOR                          1
@@ -109,6 +109,7 @@ class Unit;
 #define EQ_QUEST_REACTION_SPAWN                     5
 #define EQ_QUEST_REACTION_SPAWNUNIQUE               6
 #define EQ_QUEST_REACTION_YELL                      7
+#define EQ_QUEST_REACTION_KILLSPAWN                 8
 
 #define EQ_KILLSPAWN_ACTION_SPAWN                   0
 #define EQ_KILLSPAWN_ACTION_DESPAWN                 1
@@ -346,8 +347,21 @@ public:
     float PositionX = 0;
     float PositionY = 0;
     float PositionZ = 0;
-    float Orientation = 0;    
+    float Orientation = 0;
     uint32 CreatureTemplateID = 0;
+    uint32 QuestgiverCreatureTemplateID = 0;
+    uint32 DelayInMS = 0;
+};
+
+class EverQuestTriggeredQuestKillSpawn
+{
+public:
+    uint32 TriggerCreatureTemplateID = 0;
+    uint32 TargetCreatureTemplateID = 0;
+    float PositionX = 0;
+    float PositionY = 0;
+    float PositionZ = 0;
+    float Orientation = 0;
 };
 
 class EverQuestCreatureLootEntry
@@ -547,6 +561,7 @@ public:
 
     std::mutex PendingKillSpawnActionsMutex;
     unordered_map<uint32, vector<EverQuestPendingKillSpawnAction>> PendingKillSpawnActionsByMapID;
+    unordered_map<uint32, vector<EverQuestTriggeredQuestKillSpawn>> TriggeredQuestKillSpawnsByMapID;
     unordered_map<uint32, EverQuestItemTemplate> ItemTemplatesByEntryID;
     unordered_set<uint32> WornEffectSpellIDs;
     unordered_map<uint32, EverQuestSpell> SpellDataBySpellID;
@@ -596,6 +611,9 @@ public:
     bool ShouldDespawnCreatureDueToSpawnRestrictions(int mapID, Creature* creature);
     void LoadCreatureKillSpawnData();
     void ProcessKillSpawnsForCreatureDeath(Creature* deadCreature, Unit* killer);
+    void ProcessTriggeredQuestKillSpawnsForCreatureDeath(Creature* deadCreature, Unit* killer);
+    void TriggerQuestKillSpawn(uint32 mapID, const EverQuestQuestReaction& questReaction);
+    void EnqueuePendingKillSpawnAction(uint32 mapID, EverQuestPendingKillSpawnAction& action);
     void UpdatePendingKillSpawnActions(Map* map, uint32 diff);
     bool HasAliveCreatureWithEntryInMap(uint32 mapID, uint32 creatureTemplateID, Creature* ignoreCreature);
     void ExecuteKillSpawnAction(Map* map, EverQuestPendingKillSpawnAction& action);

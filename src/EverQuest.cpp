@@ -612,6 +612,65 @@ void EverQuestMod::UpdatePendingKillSpawnActions(Map* map, uint32 diff)
         ExecuteKillSpawnAction(map, action);
 }
 
+void EverQuestMod::TriggerQuestKillSpawn(uint32 mapID, const EverQuestQuestReaction& questReaction)
+{
+    EverQuestTriggeredQuestKillSpawn triggeredKillSpawn;
+    triggeredKillSpawn.TriggerCreatureTemplateID = questReaction.QuestgiverCreatureTemplateID;
+    triggeredKillSpawn.TargetCreatureTemplateID = questReaction.CreatureTemplateID;
+    triggeredKillSpawn.PositionX = questReaction.PositionX;
+    triggeredKillSpawn.PositionY = questReaction.PositionY;
+    triggeredKillSpawn.PositionZ = questReaction.PositionZ;
+    triggeredKillSpawn.Orientation = questReaction.Orientation;
+
+    // Repeat turn-ins only trigger one spawn, like the flag in the EQ quest scripts
+    std::lock_guard<std::mutex> lock(PendingKillSpawnActionsMutex);
+    for (EverQuestTriggeredQuestKillSpawn& existing : TriggeredQuestKillSpawnsByMapID[mapID])
+        if (existing.TriggerCreatureTemplateID == triggeredKillSpawn.TriggerCreatureTemplateID && existing.TargetCreatureTemplateID == triggeredKillSpawn.TargetCreatureTemplateID)
+            return;
+    TriggeredQuestKillSpawnsByMapID[mapID].push_back(triggeredKillSpawn);
+}
+
+void EverQuestMod::ProcessTriggeredQuestKillSpawnsForCreatureDeath(Creature* deadCreature, Unit* killer)
+{
+    uint32 mapID = deadCreature->GetMapId();
+    vector<EverQuestPendingKillSpawnAction> dueActions;
+    {
+        std::lock_guard<std::mutex> lock(PendingKillSpawnActionsMutex);
+        auto triggeredIter = TriggeredQuestKillSpawnsByMapID.find(mapID);
+        if (triggeredIter == TriggeredQuestKillSpawnsByMapID.end())
+            return;
+        vector<EverQuestTriggeredQuestKillSpawn>& triggeredKillSpawns = triggeredIter->second;
+        for (size_t i = triggeredKillSpawns.size(); i > 0; --i)
+        {
+            EverQuestTriggeredQuestKillSpawn& triggeredKillSpawn = triggeredKillSpawns[i - 1];
+            if (triggeredKillSpawn.TriggerCreatureTemplateID != deadCreature->GetEntry())
+                continue;
+            EverQuestPendingKillSpawnAction action;
+            action.ActionType = EQ_KILLSPAWN_ACTION_SPAWN;
+            action.TargetCreatureTemplateID = triggeredKillSpawn.TargetCreatureTemplateID;
+            action.PositionX = triggeredKillSpawn.PositionX;
+            action.PositionY = triggeredKillSpawn.PositionY;
+            action.PositionZ = triggeredKillSpawn.PositionZ;
+            action.Orientation = triggeredKillSpawn.Orientation;
+            action.AddToHateList = true;
+            if (killer != nullptr)
+                action.KillerGUID = killer->GetGUID();
+            dueActions.push_back(action);
+            triggeredKillSpawns.erase(triggeredKillSpawns.begin() + (i - 1));
+        }
+        if (triggeredKillSpawns.empty() == true)
+            TriggeredQuestKillSpawnsByMapID.erase(triggeredIter);
+    }
+    for (EverQuestPendingKillSpawnAction& action : dueActions)
+        ExecuteKillSpawnAction(deadCreature->GetMap(), action);
+}
+
+void EverQuestMod::EnqueuePendingKillSpawnAction(uint32 mapID, EverQuestPendingKillSpawnAction& action)
+{
+    std::lock_guard<std::mutex> lock(PendingKillSpawnActionsMutex);
+    PendingKillSpawnActionsByMapID[mapID].push_back(action);
+}
+
 void EverQuestMod::LoadCreatureOnkillReputations()
 {
     CreatureOnkillReputationsByCreatureTemplateID.clear();
@@ -822,7 +881,7 @@ const list<EverQuestQuestCompletionReputation>& EverQuestMod::GetQuestCompletion
 void EverQuestMod::LoadQuestReactions()
 {
     QuestReactionListByQuestTemplateID.clear();
-    QueryResult queryResult = WorldDatabase.Query("SELECT QuestTemplateID, ReactionType, UsePlayerX, UsePlayerY, UsePlayerZ, AddedPlayerX, AddedPlayerY, UsePlayerOrientation, PositionX, PositionY, PositionZ, Orientation, CreatureTemplateID FROM mod_everquest_quest_reaction;");
+    QueryResult queryResult = WorldDatabase.Query("SELECT QuestTemplateID, ReactionType, UsePlayerX, UsePlayerY, UsePlayerZ, AddedPlayerX, AddedPlayerY, UsePlayerOrientation, PositionX, PositionY, PositionZ, Orientation, CreatureTemplateID, QuestgiverCreatureTemplateID, DelayInMS FROM mod_everquest_quest_reaction;");
     if (queryResult)
     {
         do
@@ -843,6 +902,8 @@ void EverQuestMod::LoadQuestReactions()
             everQuestQuestReaction.PositionZ = fields[10].Get<float>();
             everQuestQuestReaction.Orientation = fields[11].Get<float>();
             everQuestQuestReaction.CreatureTemplateID = fields[12].Get<uint32>();
+            everQuestQuestReaction.QuestgiverCreatureTemplateID = fields[13].Get<uint32>();
+            everQuestQuestReaction.DelayInMS = fields[14].Get<uint32>();
             QuestReactionListByQuestTemplateID[everQuestQuestReaction.QuestTemplateID].push_back(everQuestQuestReaction);
         } while (queryResult->NextRow());
     }
