@@ -600,10 +600,14 @@ void EverQuestMod::ExecuteKillSpawnAction(Map* map, EverQuestPendingKillSpawnAct
         } break;
         case EQ_KILLSPAWN_ACTION_RESPAWNSELF:
         {
+            // Copy out the respawning since respawn goes back to engine code and doesn't handle threading well
+            vector<Creature*> respawnCandidates;
             auto spawnIDRange = map->GetCreatureBySpawnIdStore().equal_range(action.RespawnSpawnID);
             for (auto spawnIDIter = spawnIDRange.first; spawnIDIter != spawnIDRange.second; ++spawnIDIter)
                 if (spawnIDIter->second->IsAlive() == false)
-                    spawnIDIter->second->Respawn(true);
+                    respawnCandidates.push_back(spawnIDIter->second);
+            for (Creature* respawnCandidate : respawnCandidates)
+                respawnCandidate->Respawn(true);
         } break;
         default: break;
     }
