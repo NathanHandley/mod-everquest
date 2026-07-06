@@ -26,6 +26,7 @@
 #include "SpellAuras.h"
 #include "SpellMgr.h"
 #include "Tokenize.h"
+#include "Map.h"
 #include "ObjectAccessor.h"
 #include "TemporarySummon.h"
 #include "CellImpl.h"
@@ -74,6 +75,8 @@ EverQuestMod::EverQuestMod() :
     ConfigEvadeUnstickSettleSeconds(1.0f),
     ConfigEvadeUnstickMoveThreshold(3.0f),
     ConfigEvadeUnstickMaxAttempts(3),
+    ConfigCharmCreatureCharmLimitsEnabled(true),
+    ConfigCharmUncharmedPlayerCheckRadius(100.0f),
     ConfigShowClassMessageOnLogin(true),
     ConfigSecondaryExpPoolGainPercent(25.0f),
     ConfigSecondaryExpPoolMaxPooled(1000000),
@@ -216,6 +219,10 @@ void EverQuestMod::LoadConfigurationFile()
     ConfigEvadeUnstickSettleSeconds = sConfigMgr->GetOption<float>("EverQuest.Evade.UnstickSettleSeconds", 1.0f);
     ConfigEvadeUnstickMoveThreshold = sConfigMgr->GetOption<float>("EverQuest.Evade.UnstickMoveThreshold", 3.0f);
     ConfigEvadeUnstickMaxAttempts = sConfigMgr->GetOption<uint32>("EverQuest.Evade.UnstickMaxAttempts", 3);
+
+    // Charm
+    ConfigCharmCreatureCharmLimitsEnabled = sConfigMgr->GetOption<bool>("EverQuest.Charm.CreatureCharmLimitsEnabled", true);
+    ConfigCharmUncharmedPlayerCheckRadius = sConfigMgr->GetOption<float>("EverQuest.Charm.UncharmedPlayerCheckRadius", 100.0f);
 
     // Class
     ConfigShowClassMessageOnLogin = sConfigMgr->GetOption<bool>("EverQuest.ShowClassMessageOnLogin", true);
@@ -871,6 +878,46 @@ bool EverQuestMod::IsSpellBlockedByMaxCreatureTargetLevel(uint32 spellID, Unit* 
         return false;
     if (target->GetLevel() <= spellData.MaxCreatureTargetLevel)
         return false;
+    return true;
+}
+
+bool EverQuestMod::IsCreatureCharmBlockedByCharmLimits(uint32 spellID, Unit* target, Unit* caster)
+{
+    if (ConfigCharmCreatureCharmLimitsEnabled == false)
+        return false;
+    if (caster == nullptr || caster->IsCreature() == false)
+        return false;
+    if (spellID < ConfigSystemSpellDBCIDMin || spellID > ConfigSystemSpellDBCIDMax)
+        return false;
+    if (IsSpellAnEQSpell(spellID) == false)
+        return false;
+    SpellInfo const* spellInfo = sSpellMgr->GetSpellInfo(spellID);
+    if (spellInfo == nullptr || spellInfo->HasAura(SPELL_AURA_MOD_CHARM) == false)
+        return false;
+
+    // Block if the creature already has a player charmed
+    Unit* existingCharm = caster->GetCharm();
+    if (existingCharm != nullptr && existingCharm->IsPlayer() == true)
+        return true;
+
+    // Block charming a player unless at least one other uncharmed player is nearby (the target counts as one)
+    if (target == nullptr || target->IsPlayer() == false)
+        return false;
+    uint32 nearbyUncharmedPlayerCount = 0;
+    Map::PlayerList const& mapPlayers = caster->GetMap()->GetPlayers();
+    for (Map::PlayerList::const_iterator playerIter = mapPlayers.begin(); playerIter != mapPlayers.end(); ++playerIter)
+    {
+        Player* mapPlayer = playerIter->GetSource();
+        if (mapPlayer == nullptr || mapPlayer->IsAlive() == false || mapPlayer->IsGameMaster() == true)
+            continue;
+        if (mapPlayer->IsCharmed() == true)
+            continue;
+        if (caster->IsWithinDistInMap(mapPlayer, ConfigCharmUncharmedPlayerCheckRadius) == false)
+            continue;
+        nearbyUncharmedPlayerCount++;
+        if (nearbyUncharmedPlayerCount >= 2)
+            return false;
+    }
     return true;
 }
 

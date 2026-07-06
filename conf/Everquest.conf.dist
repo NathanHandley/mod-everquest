@@ -213,6 +213,26 @@ EverQuest.Evade.UnstickMoveThreshold = 3
 EverQuest.Evade.UnstickMaxAttempts = 3
 
 ###################################################################################################
+# Charm Settings (creature-cast charms only, player charms are unaffected)
+#
+# 	EverQuest.Charm.CreatureCharmLimitsEnabled
+#		If true, creatures casting charm spells follow two extra rules: a creature can only have one
+#		player charmed at a time (so a recharming creature can't chain-charm player after player), and
+#		a creature will only charm a player when at least one other uncharmed player is nearby (so the
+#		last free player in a group is never charmed)
+#	Default: True
+#
+# 	EverQuest.Charm.UncharmedPlayerCheckRadius
+#		Distance, in WOW world units from the casting creature, used when counting nearby uncharmed
+#		players for the rule above. Dead players, charmed players, and game masters never count
+#	Default: 100
+#
+###################################################################################################
+
+EverQuest.Charm.CreatureCharmLimitsEnabled = True
+EverQuest.Charm.UncharmedPlayerCheckRadius = 100
+
+###################################################################################################
 #
 # 	EverQuest.ShowClassMessageOnLogin
 #		If true, a chat message describing the player's primary (and secondary) EQ class is shown

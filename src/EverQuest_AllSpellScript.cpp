@@ -70,8 +70,15 @@ public:
         if (spell == nullptr || spell->GetCaster() == nullptr)
             return;
 
-        // Enforce buff restriction up front to avoid mana/cooldown triggers
+        // Creature-cast charms follow extra limit rules
         Unit* target = spell->m_targets.GetUnitTarget();
+        if (EverQuest->IsCreatureCharmBlockedByCharmLimits(spell->GetSpellInfo()->Id, target, spell->GetCaster()) == true)
+        {
+            res = SPELL_FAILED_DONT_REPORT;
+            return;
+        }
+
+        // Enforce buff restriction up front to avoid mana/cooldown triggers
         if (target == nullptr)
             return;
         if (EverQuest->IsSpellBlockedByMinTargetLevel(spell->GetSpellInfo()->Id, target, spell->GetCaster()) == true)

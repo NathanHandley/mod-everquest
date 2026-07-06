@@ -554,6 +554,8 @@ public:
     float ConfigEvadeUnstickSettleSeconds;
     float ConfigEvadeUnstickMoveThreshold;
     uint32 ConfigEvadeUnstickMaxAttempts;
+    bool ConfigCharmCreatureCharmLimitsEnabled;
+    float ConfigCharmUncharmedPlayerCheckRadius;
     bool ConfigShowClassMessageOnLogin;
     float ConfigSecondaryExpPoolGainPercent;
     uint32 ConfigSecondaryExpPoolMaxPooled;
@@ -643,6 +645,7 @@ public:
     const EverQuestSpell& GetSpellDataForSpellID(uint32 spellID);
     bool IsSpellBlockedByMinTargetLevel(uint32 spellID, Unit* target, Unit* caster);
     bool IsSpellBlockedByMaxCreatureTargetLevel(uint32 spellID, Unit* target, Unit* caster);
+    bool IsCreatureCharmBlockedByCharmLimits(uint32 spellID, Unit* target, Unit* caster);
     void TrackEQHasteAurasAndEnforceCapOnAuraApply(Unit* unit, Aura* aura);
     void UntrackEQHasteAurasAndEnforceCapOnAuraRemove(Unit* unit, Aura* aura);
     void EnforceEQHastePercentCapOnUnit(Unit* unit, vector<EverQuestUnitHasteAuraEffect>& trackedHasteAuraEffects);
