@@ -77,6 +77,7 @@ EverQuestMod::EverQuestMod() :
     ConfigEvadeUnstickSettleSeconds(1.0f),
     ConfigEvadeUnstickMoveThreshold(3.0f),
     ConfigEvadeUnstickMaxAttempts(3),
+    ConfigEvadeUnstickStepPercent(25),
     ConfigCharmCreatureCharmLimitsEnabled(true),
     ConfigCharmUncharmedPlayerCheckRadius(100.0f),
     ConfigShowClassMessageOnLogin(true),
@@ -221,6 +222,11 @@ void EverQuestMod::LoadConfigurationFile()
     ConfigEvadeUnstickSettleSeconds = sConfigMgr->GetOption<float>("EverQuest.Evade.UnstickSettleSeconds", 1.0f);
     ConfigEvadeUnstickMoveThreshold = sConfigMgr->GetOption<float>("EverQuest.Evade.UnstickMoveThreshold", 3.0f);
     ConfigEvadeUnstickMaxAttempts = sConfigMgr->GetOption<uint32>("EverQuest.Evade.UnstickMaxAttempts", 3);
+    ConfigEvadeUnstickStepPercent = sConfigMgr->GetOption<uint32>("EverQuest.Evade.UnstickStepPercent", 25);
+    if (ConfigEvadeUnstickStepPercent < 1)
+        ConfigEvadeUnstickStepPercent = 1;
+    if (ConfigEvadeUnstickStepPercent > 100)
+        ConfigEvadeUnstickStepPercent = 100;
 
     // Charm
     ConfigCharmCreatureCharmLimitsEnabled = sConfigMgr->GetOption<bool>("EverQuest.Charm.CreatureCharmLimitsEnabled", true);
@@ -1880,6 +1886,66 @@ void EverQuestMod::RemoveCreatureUnstickState(ObjectGuid creatureGUID)
     UnstickStateByCreatureGUID.erase(creatureGUID);
 }
 
+void EverQuestMod::CalculateUnstickTeleportPosition(Creature* creature, Unit* victim, float& xOut, float& yOut, float& zOut)
+{
+    float creatureX = creature->GetPositionX();
+    float creatureY = creature->GetPositionY();
+    float creatureZ = creature->GetPositionZ();
+    float victimX = victim->GetPositionX();
+    float victimY = victim->GetPositionY();
+    float victimZ = victim->GetPositionZ();
+
+    // Fall back to the victim's exact position if no stepped candidate qualifies
+    xOut = victimX;
+    yOut = victimY;
+    zOut = victimZ;
+
+    float stepFraction = (float)ConfigEvadeUnstickStepPercent / 100.0f;
+    if (stepFraction >= 1.0f)
+        return;
+
+    // Lift floor probes slightly so a spot exactly at floor level isn't borderline-rejected
+    float floorTestZLift = 0.5f;
+
+    // A floor must be within this distance below a probe to count as floor at that spot
+    float floorSearchDistance = 10.0f;
+
+    bool victimIsAbove = victimZ > (creatureZ + floorTestZLift);
+    for (float fraction = stepFraction; fraction < 0.999f; fraction += stepFraction)
+    {
+        float candidateX = creatureX + ((victimX - creatureX) * fraction);
+        float candidateY = creatureY + ((victimY - creatureY) * fraction);
+        float candidateZ = creatureZ + ((victimZ - creatureZ) * fraction);
+
+        // Level or downward teleports skip floor validation, so the first step is always taken
+        if (victimIsAbove == false)
+        {
+            xOut = candidateX;
+            yOut = candidateY;
+            zOut = candidateZ;
+            return;
+        }
+
+        // Prefer a floor at the candidate's own height, otherwise accept one at the player's height
+        float floorZ = creature->GetMapHeight(candidateX, candidateY, candidateZ + floorTestZLift, true, floorSearchDistance);
+        if (floorZ > INVALID_HEIGHT)
+        {
+            xOut = candidateX;
+            yOut = candidateY;
+            zOut = floorZ;
+            return;
+        }
+        floorZ = creature->GetMapHeight(candidateX, candidateY, victimZ + floorTestZLift, true, floorSearchDistance);
+        if (floorZ > INVALID_HEIGHT)
+        {
+            xOut = candidateX;
+            yOut = candidateY;
+            zOut = floorZ;
+            return;
+        }
+    }
+}
+
 // Added this unstuck logic due to pathing errors in converted EQ content
 void EverQuestMod::UpdateCreatureUnstick(Creature* creature, uint32 diff)
 {
@@ -1986,9 +2052,12 @@ void EverQuestMod::UpdateCreatureUnstick(Creature* creature, uint32 diff)
     uint32 stallThresholdMS = (uint32)(ConfigEvadeUnstickStallSeconds * 1000.0f);
     if (state->StuckTimerMS >= stallThresholdMS && state->TeleportAttemptsUsed < ConfigEvadeUnstickMaxAttempts)
     {
-        // Teleport to the player and pause action in an attempt to unstick
-        creature->NearTeleportTo(victim->GetPositionX(), victim->GetPositionY(), victim->GetPositionZ(),
-            creature->GetAngle(victim));
+        // Teleport partway towards the player and pause action in an attempt to unstick
+        float teleportX;
+        float teleportY;
+        float teleportZ;
+        CalculateUnstickTeleportPosition(creature, victim, teleportX, teleportY, teleportZ);
+        creature->NearTeleportTo(teleportX, teleportY, teleportZ, creature->GetAngle(victim));
         state->TeleportAttemptsUsed += 1;
         state->StuckTimerMS = 0;
         state->HasAnchor = false;

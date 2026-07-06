@@ -581,6 +581,7 @@ public:
     float ConfigEvadeUnstickSettleSeconds;
     float ConfigEvadeUnstickMoveThreshold;
     uint32 ConfigEvadeUnstickMaxAttempts;
+    uint32 ConfigEvadeUnstickStepPercent;
     bool ConfigCharmCreatureCharmLimitsEnabled;
     float ConfigCharmUncharmedPlayerCheckRadius;
     bool ConfigShowClassMessageOnLogin;
@@ -715,6 +716,7 @@ public:
     void RemoveCreatureRangedAttackState(ObjectGuid creatureGUID);
     void UpdateCreatureRangedAttack(Creature* creature, uint32 diff);
     void RemoveCreatureUnstickState(ObjectGuid creatureGUID);
+    void CalculateUnstickTeleportPosition(Creature* creature, Unit* victim, float& xOut, float& yOut, float& zOut);
     void UpdateCreatureUnstick(Creature* creature, uint32 diff);
     bool TryGetCustomSocialAggroScale(Creature* creature, float& scaleOut);
     void DoScaledSocialAggroSearch(Creature* caller, Unit* victim, float scale);

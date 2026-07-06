@@ -183,8 +183,9 @@ EverQuest.CombatSkills.RangedAttackDamageMultiplier = 1.0
 #
 # 	EverQuest.Evade.UnstickStallSeconds
 #		Seconds a creature must be stuck (as above, staying within UnstickMoveThreshold yards of where
-#		it was when the stall window opened) before it one-time teleports onto its target to unstick
-#		itself. A creature that keeps relocating (actively chasing) never reaches this
+#		it was when the stall window opened) before it teleports partway towards its target (see
+#		UnstickStepPercent) to unstick itself. A creature that keeps relocating (actively chasing)
+#		never reaches this
 #	Default: 3
 #
 # 	EverQuest.Evade.UnstickSettleSeconds
@@ -203,6 +204,14 @@ EverQuest.CombatSkills.RangedAttackDamageMultiplier = 1.0
 #		aggro, dies, or respawns. Set to 0 to disable teleporting (creatures simply evade on the base timer)
 #	Default: 3
 #
+# 	EverQuest.Evade.UnstickStepPercent
+#		Percent of the distance towards the target each unstick teleport covers, clamped to 1-100. When
+#		the target is above the creature, a stepped spot only qualifies if it has a floor (at the spot's
+#		height, or failing that at the target's height). if neither exists the step advances by this
+#		percent again (50%, 75%, ...) until a floor is found, with the target's own position as the final
+#		fallback. 100 always teleports directly onto the target player.
+#	Default: 25
+#
 ###################################################################################################
 
 EverQuest.Evade.Enabled = True
@@ -211,6 +220,7 @@ EverQuest.Evade.UnstickStallSeconds = 3
 EverQuest.Evade.UnstickSettleSeconds = 1
 EverQuest.Evade.UnstickMoveThreshold = 3
 EverQuest.Evade.UnstickMaxAttempts = 3
+EverQuest.Evade.UnstickStepPercent = 25
 
 ###################################################################################################
 # Charm Settings (creature-cast charms only, player charms are unaffected)
