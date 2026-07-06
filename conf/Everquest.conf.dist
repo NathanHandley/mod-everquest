@@ -101,6 +101,19 @@ EverQuest.Spells.BuffLevelRestrictionsEnabled = True
 
 ###################################################################################################
 #
+# 	EverQuest.Spells.CrowdControlLevelRestrictionsEnabled
+#		If true, player-cast stun, mesmerize, and charm spells will not land on creatures above the
+#       spell's EverQuest max target level (stuns default to a max of level 55 when the	EverQuest
+#       spell had none), matching EverQuest behavior.  Creature casters (including player pets) are
+#       exempt.  Stuns only lose the stun portion, not any other effect (like damage).
+#	Default: True (use EverQuest behavior)
+#
+###################################################################################################
+
+EverQuest.Spells.CrowdControlLevelRestrictionsEnabled = True
+
+###################################################################################################
+#
 # 	EverQuest.Spells.HasteCapEnabled
 #		If true, the combined attack speed bonus ("haste") a unit has from EverQuest sources
 #		(cast spells, bard songs, worn item effects, potions and other clickies) is capped at

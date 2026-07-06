@@ -37,7 +37,7 @@ static uint32 ConfigMaxSkillIDCheck = 1000;         // The highest level of skil
 class Unit;
 class Aura;
 
-#define EQ_MOD_VERSION                              35
+#define EQ_MOD_VERSION                              36
 
 #define EQ_EQCLASS_NONE                             0
 #define EQ_EQCLASS_WARRIOR                          1
@@ -187,6 +187,7 @@ public:
     uint32 SpellIDCastOnTargetWhenStunLands = 0;
     bool AuraStaysOnSecondaryClassSwitch = false;
     uint32 MinTargetLevel = 0;
+    uint32 MaxCreatureTargetLevel = 0;
 };
 
 class EverQuestCreature
@@ -539,6 +540,7 @@ public:
     float ConfigAlternateGroupExperienceAddPercentPerAddedMember;
     bool ConfigSpellDisableStackingOfSameDOT;
     bool ConfigSpellBuffLevelRestrictionsEnabled;
+    bool ConfigSpellCrowdControlLevelRestrictionsEnabled;
     bool ConfigSpellHasteCapEnabled;
     float ConfigSpellHasteCapPercent;
     bool ConfigCombatSkillsDisableBashKickStunOnPlayers;
@@ -640,6 +642,7 @@ public:
     void LoadSpellData();
     const EverQuestSpell& GetSpellDataForSpellID(uint32 spellID);
     bool IsSpellBlockedByMinTargetLevel(uint32 spellID, Unit* target, Unit* caster);
+    bool IsSpellBlockedByMaxCreatureTargetLevel(uint32 spellID, Unit* target, Unit* caster);
     void TrackEQHasteAurasAndEnforceCapOnAuraApply(Unit* unit, Aura* aura);
     void UntrackEQHasteAurasAndEnforceCapOnAuraRemove(Unit* unit, Aura* aura);
     void EnforceEQHastePercentCapOnUnit(Unit* unit, vector<EverQuestUnitHasteAuraEffect>& trackedHasteAuraEffects);

@@ -64,6 +64,7 @@ EverQuestMod::EverQuestMod() :
     ConfigAlternateGroupExperienceAddPercentPerAddedMember(20.0f),
     ConfigSpellDisableStackingOfSameDOT(false),
     ConfigSpellBuffLevelRestrictionsEnabled(true),
+    ConfigSpellCrowdControlLevelRestrictionsEnabled(true),
     ConfigSpellHasteCapEnabled(true),
     ConfigSpellHasteCapPercent(100.0f),
     ConfigCombatSkillsDisableBashKickStunOnPlayers(false),
@@ -197,6 +198,7 @@ void EverQuestMod::LoadConfigurationFile()
     // Spells
     ConfigSpellDisableStackingOfSameDOT = sConfigMgr->GetOption<bool>("EverQuest.Spells.DisableStackingOfSameDOT", false);
     ConfigSpellBuffLevelRestrictionsEnabled = sConfigMgr->GetOption<bool>("EverQuest.Spells.BuffLevelRestrictionsEnabled", true);
+    ConfigSpellCrowdControlLevelRestrictionsEnabled = sConfigMgr->GetOption<bool>("EverQuest.Spells.CrowdControlLevelRestrictionsEnabled", true);
     ConfigSpellHasteCapEnabled = sConfigMgr->GetOption<bool>("EverQuest.Spells.HasteCapEnabled", true);
     ConfigSpellHasteCapPercent = sConfigMgr->GetOption<float>("EverQuest.Spells.HasteCapPercent", 100.0f);
 
@@ -791,7 +793,7 @@ bool EverQuestMod::IsItemEQClassAllowedForPlayer(Player* player, uint32 itemTemp
 void EverQuestMod::LoadSpellData()
 {
     SpellDataBySpellID.clear();
-    QueryResult queryResult = WorldDatabase.Query("SELECT SpellID, AuraDurationBaseInMS, AuraDurationAddPerLevelInMS, AuraDurationMaxInMS, AuraDurationCalcMinLevel, AuraDurationCalcMaxLevel, RecourseSpellID, SpellIDCastOnMeleeAttacker, FocusBoostType, PeriodicAuraSpellID, PeriodicAuraSpellRadius, MaleFormSpellID, FemaleFormSpellID, EffectFailChancePercent, EffectFailableType, StunUsesBashKickChance, SpellIDCastOnTargetWhenStunLands, AuraStaysOnSecondaryClassSwitch, MinTargetLevel FROM mod_everquest_spell ORDER BY SpellID;");
+    QueryResult queryResult = WorldDatabase.Query("SELECT SpellID, AuraDurationBaseInMS, AuraDurationAddPerLevelInMS, AuraDurationMaxInMS, AuraDurationCalcMinLevel, AuraDurationCalcMaxLevel, RecourseSpellID, SpellIDCastOnMeleeAttacker, FocusBoostType, PeriodicAuraSpellID, PeriodicAuraSpellRadius, MaleFormSpellID, FemaleFormSpellID, EffectFailChancePercent, EffectFailableType, StunUsesBashKickChance, SpellIDCastOnTargetWhenStunLands, AuraStaysOnSecondaryClassSwitch, MinTargetLevel, MaxCreatureTargetLevel FROM mod_everquest_spell ORDER BY SpellID;");
     if (queryResult)
     {
         do
@@ -818,6 +820,7 @@ void EverQuestMod::LoadSpellData()
             everQuestSpell.SpellIDCastOnTargetWhenStunLands = fields[16].Get<uint32>();
             everQuestSpell.AuraStaysOnSecondaryClassSwitch = fields[17].Get<bool>();
             everQuestSpell.MinTargetLevel = fields[18].Get<uint32>();
+            everQuestSpell.MaxCreatureTargetLevel = fields[19].Get<uint32>();
             SpellDataBySpellID[everQuestSpell.SpellID] = everQuestSpell;
         } while (queryResult->NextRow());
     }
@@ -848,6 +851,25 @@ bool EverQuestMod::IsSpellBlockedByMinTargetLevel(uint32 spellID, Unit* target, 
     if (target->GetLevel() >= spellData.MinTargetLevel)
         return false;
     if (caster != nullptr && caster->IsPlayer() == true && caster->ToPlayer()->IsGameMaster() == true)
+        return false;
+    return true;
+}
+
+bool EverQuestMod::IsSpellBlockedByMaxCreatureTargetLevel(uint32 spellID, Unit* target, Unit* caster)
+{
+    // TAKP blocks player-cast stun/mez/charm on NPCs above the spell's max level, NPC casters (including player pets) are exempt
+    if (ConfigSpellCrowdControlLevelRestrictionsEnabled == false)
+        return false;
+    if (target == nullptr || target->IsCreature() == false)
+        return false;
+    if (caster == nullptr || caster->IsPlayer() == false)
+        return false;
+    if (caster->ToPlayer()->IsGameMaster() == true)
+        return false;
+    const EverQuestSpell& spellData = GetSpellDataForSpellID(spellID);
+    if (spellData.MaxCreatureTargetLevel == 0)
+        return false;
+    if (target->GetLevel() <= spellData.MaxCreatureTargetLevel)
         return false;
     return true;
 }

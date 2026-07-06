@@ -76,6 +76,8 @@ public:
             return;
         if (EverQuest->IsSpellBlockedByMinTargetLevel(spell->GetSpellInfo()->Id, target, spell->GetCaster()) == true)
             res = SPELL_FAILED_LOWLEVEL;
+        else if (EverQuest->IsSpellBlockedByMaxCreatureTargetLevel(spell->GetSpellInfo()->Id, target, spell->GetCaster()) == true)
+            res = SPELL_FAILED_HIGHLEVEL;
     }
 
     void OnSpellPrepare(Spell* /*spell*/, Unit* caster, SpellInfo const* spellInfo) override

@@ -145,6 +145,15 @@ public:
 
         EverQuest->TrackEQHasteAurasAndEnforceCapOnAuraApply(unit, aura);
 
+        if (EverQuest->IsSpellBlockedByMaxCreatureTargetLevel(aura->GetId(), unit, aura->GetCaster()) == true)
+        {
+            Unit* ccAuraCaster = aura->GetCaster();
+            unit->RemoveAura(aura);
+            if (ccAuraCaster != nullptr && ccAuraCaster->IsPlayer() == true)
+                ChatHandler(ccAuraCaster->ToPlayer()->GetSession()).PSendSysMessage("Your target is too high of a level for your spell to affect.");
+            return;
+        }
+
         if (!unit->IsPlayer())
             return;
 
