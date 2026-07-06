@@ -21,6 +21,9 @@
 #include "CreatureAI.h"
 #include "CreatureData.h"
 #include "DBCStores.h"
+#include "SpellAuraDefines.h"
+#include "SpellAuraEffects.h"
+#include "SpellAuras.h"
 #include "SpellMgr.h"
 #include "Tokenize.h"
 #include "ObjectAccessor.h"
@@ -61,6 +64,8 @@ EverQuestMod::EverQuestMod() :
     ConfigAlternateGroupExperienceAddPercentPerAddedMember(20.0f),
     ConfigSpellDisableStackingOfSameDOT(false),
     ConfigSpellBuffLevelRestrictionsEnabled(true),
+    ConfigSpellHasteCapEnabled(true),
+    ConfigSpellHasteCapPercent(100.0f),
     ConfigCombatSkillsDisableBashKickStunOnPlayers(false),
     ConfigEvadeEnabled(true),
     ConfigEvadeUnreachableSeconds(10.0f),
@@ -192,6 +197,8 @@ void EverQuestMod::LoadConfigurationFile()
     // Spells
     ConfigSpellDisableStackingOfSameDOT = sConfigMgr->GetOption<bool>("EverQuest.Spells.DisableStackingOfSameDOT", false);
     ConfigSpellBuffLevelRestrictionsEnabled = sConfigMgr->GetOption<bool>("EverQuest.Spells.BuffLevelRestrictionsEnabled", true);
+    ConfigSpellHasteCapEnabled = sConfigMgr->GetOption<bool>("EverQuest.Spells.HasteCapEnabled", true);
+    ConfigSpellHasteCapPercent = sConfigMgr->GetOption<float>("EverQuest.Spells.HasteCapPercent", 100.0f);
 
     // Combat Skills
     ConfigCombatSkillsDisableBashKickStunOnPlayers = sConfigMgr->GetOption<bool>("EverQuest.CombatSkills.DisableBashKickStunOnPlayers", false);
@@ -843,6 +850,150 @@ bool EverQuestMod::IsSpellBlockedByMinTargetLevel(uint32 spellID, Unit* target, 
     if (caster != nullptr && caster->IsPlayer() == true && caster->ToPlayer()->IsGameMaster() == true)
         return false;
     return true;
+}
+
+void EverQuestMod::TrackEQHasteAurasAndEnforceCapOnAuraApply(Unit* unit, Aura* aura)
+{
+    if (ConfigSpellHasteCapEnabled == false)
+        return;
+    uint32 spellID = aura->GetId();
+    if (spellID < ConfigSystemSpellDBCIDMin || spellID > ConfigSystemSpellDBCIDMax)
+        return;
+    if (IsSpellAnEQSpell(spellID) == false)
+        return;
+
+    // Only positive melee/ranged haste effects count against the cap (slows stay untouched)
+    bool hasPositiveHasteEffect = false;
+    for (uint8 i = 0; i < MAX_SPELL_EFFECTS; ++i)
+    {
+        AuraEffect* auraEffect = aura->GetEffect(i);
+        if (auraEffect == nullptr)
+            continue;
+        AuraType auraType = auraEffect->GetAuraType();
+        if (auraType != SPELL_AURA_MOD_MELEE_HASTE && auraType != SPELL_AURA_MOD_RANGED_HASTE)
+            continue;
+        if (auraEffect->GetAmount() <= 0)
+            continue;
+        hasPositiveHasteEffect = true;
+        break;
+    }
+    if (hasPositiveHasteEffect == false)
+        return;
+
+    // Only the lookup needs the lock (the vector itself is only touched by the unit's own map thread)
+    vector<EverQuestUnitHasteAuraEffect>* trackedHasteAuraEffects = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+        trackedHasteAuraEffects = &EQHasteAuraEffectsByUnitGUID[unit->GetGUID()];
+    }
+
+    // Capture the natural (pre-cap) amounts.  Buff refreshes reset effect amounts to their recalculated natural values before this hook fires, so the current amount is always the natural amount here
+    for (uint8 i = 0; i < MAX_SPELL_EFFECTS; ++i)
+    {
+        AuraEffect* auraEffect = aura->GetEffect(i);
+        if (auraEffect == nullptr)
+            continue;
+        AuraType auraType = auraEffect->GetAuraType();
+        if (auraType != SPELL_AURA_MOD_MELEE_HASTE && auraType != SPELL_AURA_MOD_RANGED_HASTE)
+            continue;
+        if (auraEffect->GetAmount() <= 0)
+            continue;
+
+        bool foundExisting = false;
+        for (EverQuestUnitHasteAuraEffect& trackedHasteAuraEffect : *trackedHasteAuraEffects)
+        {
+            if (trackedHasteAuraEffect.SpellID == spellID && trackedHasteAuraEffect.CasterGUID == aura->GetCasterGUID() && trackedHasteAuraEffect.EffectIndex == i)
+            {
+                trackedHasteAuraEffect.NaturalAmount = auraEffect->GetAmount();
+                foundExisting = true;
+                break;
+            }
+        }
+        if (foundExisting == false)
+        {
+            EverQuestUnitHasteAuraEffect trackedHasteAuraEffect;
+            trackedHasteAuraEffect.SpellID = spellID;
+            trackedHasteAuraEffect.CasterGUID = aura->GetCasterGUID();
+            trackedHasteAuraEffect.EffectIndex = i;
+            trackedHasteAuraEffect.AuraType = (uint32)auraType;
+            trackedHasteAuraEffect.NaturalAmount = auraEffect->GetAmount();
+            trackedHasteAuraEffects->push_back(trackedHasteAuraEffect);
+        }
+    }
+
+    EnforceEQHastePercentCapOnUnit(unit, *trackedHasteAuraEffects);
+}
+
+void EverQuestMod::UntrackEQHasteAurasAndEnforceCapOnAuraRemove(Unit* unit, Aura* aura)
+{
+    if (ConfigSpellHasteCapEnabled == false)
+        return;
+    uint32 spellID = aura->GetId();
+    if (spellID < ConfigSystemSpellDBCIDMin || spellID > ConfigSystemSpellDBCIDMax)
+        return;
+
+    // Only the lookup needs the lock (the vector itself is only touched by the unit's own map thread)
+    vector<EverQuestUnitHasteAuraEffect>* trackedHasteAuraEffects = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+        auto trackedIter = EQHasteAuraEffectsByUnitGUID.find(unit->GetGUID());
+        if (trackedIter == EQHasteAuraEffectsByUnitGUID.end())
+            return;
+        trackedHasteAuraEffects = &trackedIter->second;
+    }
+
+    bool removedAny = false;
+    for (vector<EverQuestUnitHasteAuraEffect>::iterator effectIter = trackedHasteAuraEffects->begin(); effectIter != trackedHasteAuraEffects->end();)
+    {
+        if (effectIter->SpellID == spellID && effectIter->CasterGUID == aura->GetCasterGUID())
+        {
+            effectIter = trackedHasteAuraEffects->erase(effectIter);
+            removedAny = true;
+        }
+        else
+            ++effectIter;
+    }
+    if (removedAny == false)
+        return;
+
+    if (trackedHasteAuraEffects->empty() == true)
+    {
+        std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+        EQHasteAuraEffectsByUnitGUID.erase(unit->GetGUID());
+        return;
+    }
+
+    EnforceEQHastePercentCapOnUnit(unit, *trackedHasteAuraEffects);
+}
+
+void EverQuestMod::EnforceEQHastePercentCapOnUnit(Unit* unit, vector<EverQuestUnitHasteAuraEffect>& trackedHasteAuraEffects)
+{
+    float capPercent = ConfigSpellHasteCapPercent;
+    if (capPercent < 0)
+        capPercent = 0;
+
+    // Melee and ranged haste cap independently, and while WoW stacks haste auras multiplicatively EQ stacks them additively
+    // So walk the effects in apply order and clamp each applied amount such that the combined multiplier equals what the capped additive total would give
+    uint32 auraTypesToProcess[2] = { SPELL_AURA_MOD_MELEE_HASTE, SPELL_AURA_MOD_RANGED_HASTE };
+    for (uint32 auraType : auraTypesToProcess)
+    {
+        float naturalTotalPercent = 0;
+        float previousCappedTotalPercent = 0;
+        for (EverQuestUnitHasteAuraEffect& trackedHasteAuraEffect : trackedHasteAuraEffects)
+        {
+            if (trackedHasteAuraEffect.AuraType != auraType)
+                continue;
+            AuraEffect* auraEffect = unit->GetAuraEffect(trackedHasteAuraEffect.SpellID, trackedHasteAuraEffect.EffectIndex, trackedHasteAuraEffect.CasterGUID);
+            if (auraEffect == nullptr)
+                continue;
+            naturalTotalPercent += (float)trackedHasteAuraEffect.NaturalAmount;
+            float cappedTotalPercent = std::min(naturalTotalPercent, capPercent);
+            int32 newAmount = (int32)std::lround(100.0f * ((100.0f + cappedTotalPercent) / (100.0f + previousCappedTotalPercent)) - 100.0f);
+            previousCappedTotalPercent = cappedTotalPercent;
+            if (auraEffect->GetAmount() != newAmount)
+                auraEffect->ChangeAmount(newAmount);
+        }
+    }
 }
 
 void EverQuestMod::LoadQuestCompletionReputations()

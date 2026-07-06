@@ -35,6 +35,7 @@ using namespace std;
 static uint32 ConfigMaxSkillIDCheck = 1000;         // The highest level of skill ID it will look for when doing copies
 
 class Unit;
+class Aura;
 
 #define EQ_MOD_VERSION                              35
 
@@ -480,6 +481,15 @@ struct EverQuestPlayerEquipedItemData
     uint32 ItemInstanceGUID;
 };
 
+struct EverQuestUnitHasteAuraEffect
+{
+    uint32 SpellID;
+    ObjectGuid CasterGUID;
+    uint8 EffectIndex;
+    uint32 AuraType;
+    int32 NaturalAmount;    // The amount the effect would apply if there were no cap
+};
+
 class EverQuestClassMap
 {
 public:
@@ -529,6 +539,8 @@ public:
     float ConfigAlternateGroupExperienceAddPercentPerAddedMember;
     bool ConfigSpellDisableStackingOfSameDOT;
     bool ConfigSpellBuffLevelRestrictionsEnabled;
+    bool ConfigSpellHasteCapEnabled;
+    float ConfigSpellHasteCapPercent;
     bool ConfigCombatSkillsDisableBashKickStunOnPlayers;
     bool ConfigCombatSkillsRangedAttackEnabled;
     float ConfigCombatSkillsRangedAttackDefaultMinRange;
@@ -577,6 +589,7 @@ public:
     unordered_map<int, unordered_map<uint32, vector<Creature*>>> AllLoadedCreaturesByMapIDThenSpawnPointID;
     unordered_map<int, unordered_map<uint32, vector<Creature*>>> AllLoadedCreaturesByMapIDThenSpawnGroupID;
     unordered_map<ObjectGuid, deque<uint32>> PlayerCasterConcurrentBardSongs;
+    unordered_map<ObjectGuid, vector<EverQuestUnitHasteAuraEffect>> EQHasteAuraEffectsByUnitGUID;
     unordered_map<uint32, vector<EverQuestCreatureLootGroup>> CreatureLootGroupsByCreatureTemplateID;
     unordered_map<ObjectGuid, vector<uint32>> PreloadedLootItemIDsByCreatureGUID;
     unordered_map<ObjectGuid, unordered_map<uint32, uint32>> PreloadedLootCountsByCreatureGUID;
@@ -627,6 +640,9 @@ public:
     void LoadSpellData();
     const EverQuestSpell& GetSpellDataForSpellID(uint32 spellID);
     bool IsSpellBlockedByMinTargetLevel(uint32 spellID, Unit* target, Unit* caster);
+    void TrackEQHasteAurasAndEnforceCapOnAuraApply(Unit* unit, Aura* aura);
+    void UntrackEQHasteAurasAndEnforceCapOnAuraRemove(Unit* unit, Aura* aura);
+    void EnforceEQHastePercentCapOnUnit(Unit* unit, vector<EverQuestUnitHasteAuraEffect>& trackedHasteAuraEffects);
     void LoadQuestCompletionReputations();
     const list<EverQuestQuestCompletionReputation>& GetQuestCompletionReputationsForQuestTemplate(uint32 questTemplateID);
     void LoadQuestReactions();

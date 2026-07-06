@@ -143,6 +143,8 @@ public:
         if (TryHandleBashKickStunChance(unit, aura) == true)
             return;
 
+        EverQuest->TrackEQHasteAurasAndEnforceCapOnAuraApply(unit, aura);
+
         if (!unit->IsPlayer())
             return;
 
@@ -189,6 +191,10 @@ public:
             return;
         if (unit == nullptr)
             return;
+
+        if (aurApp != nullptr && aurApp->GetBase() != nullptr)
+            EverQuest->UntrackEQHasteAurasAndEnforceCapOnAuraRemove(unit, aurApp->GetBase());
+
         if (unit->IsPlayer())
         {
             if (aurApp == nullptr)

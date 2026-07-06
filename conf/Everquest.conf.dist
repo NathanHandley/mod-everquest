@@ -101,6 +101,25 @@ EverQuest.Spells.BuffLevelRestrictionsEnabled = True
 
 ###################################################################################################
 #
+# 	EverQuest.Spells.HasteCapEnabled
+#		If true, the combined attack speed bonus ("haste") a unit has from EverQuest sources
+#		(cast spells, bard songs, worn item effects, potions and other clickies) is capped at
+#		EverQuest.Spells.HasteCapPercent.  EverQuest haste sources also stack additively with
+#		one another (like EQ) instead of multiplicatively (like WoW).  WoW haste sources are
+#		unaffected by this and stack normally on top of the capped EverQuest haste.
+#	Default: True (use EverQuest behavior)
+#
+# 	EverQuest.Spells.HasteCapPercent
+#		The maximum combined attack speed bonus percent from EverQuest sources
+#	Default: 100
+#
+###################################################################################################
+
+EverQuest.Spells.HasteCapEnabled = True
+EverQuest.Spells.HasteCapPercent = 100
+
+###################################################################################################
+#
 # 	EverQuest.CombatSkills.DisableBashKickStunOnPlayers
 #		If true, the stun part of Bash/Kick/Slam combat skills will never land on player targets.
 #	Default: False (players can be stunned by these combat skills)
