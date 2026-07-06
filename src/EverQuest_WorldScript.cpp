@@ -57,6 +57,7 @@ public:
         EverQuest->LoadSpellData();
         EverQuest->LoadQuestCompletionReputations();
         EverQuest->LoadQuestReactions();
+        EverQuest->LoadGossipReactions();
         EverQuest->LoadPetData();
         EverQuest->LoadCreatePlayerData();
         EverQuest->LoadCreatureLootData();

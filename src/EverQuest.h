@@ -37,7 +37,7 @@ static uint32 ConfigMaxSkillIDCheck = 1000;         // The highest level of skil
 class Unit;
 class Aura;
 
-#define EQ_MOD_VERSION                              36
+#define EQ_MOD_VERSION                              37
 
 #define EQ_EQCLASS_NONE                             0
 #define EQ_EQCLASS_WARRIOR                          1
@@ -355,6 +355,33 @@ public:
     uint32 DelayInMS = 0;
 };
 
+class EverQuestGossipReaction
+{
+public:
+    uint32 GossipCreatureTemplateID = 0;
+    uint32 NpcTextID = 0;
+    uint32 OptionID = 0;
+    string OptionText;
+    int ReactionType = 0;
+    string SayText;
+    uint32 TargetCreatureTemplateID = 0;
+    bool UsePlayerX = false;
+    bool UsePlayerY = false;
+    bool UsePlayerZ = false;
+    float AddedPlayerX = 0;
+    float AddedPlayerY = 0;
+    bool UsePlayerOrientation = false;
+    bool UseNpcX = false;
+    bool UseNpcY = false;
+    bool UseNpcZ = false;
+    bool UseNpcOrientation = false;
+    float PositionX = 0;
+    float PositionY = 0;
+    float PositionZ = 0;
+    float Orientation = 0;
+    uint32 DelayInMS = 0;
+};
+
 class EverQuestTriggeredQuestKillSpawn
 {
 public:
@@ -583,6 +610,7 @@ public:
     unordered_map<uint32, EverQuestSpell> SpellDataBySpellID;
     unordered_map<uint32, list<EverQuestQuestCompletionReputation>> QuestCompletionReputationsByQuestTemplateID;
     unordered_map<uint32, list<EverQuestQuestReaction>> QuestReactionListByQuestTemplateID;
+    unordered_map<uint32, vector<EverQuestGossipReaction>> GossipReactionsByGossipCreatureTemplateID;
     unordered_map<uint32, EverQuestPet> PetDataByCreatureTemplateID;
     unordered_map<uint8, unordered_map<uint8, EverQuestPlayerCreateInfo>> PlayerCreateInfoByRaceIDThenClassID;
     unordered_map<uint8, list<uint32>> PlayerAutoLearnSkillsByEQClassID;
@@ -653,6 +681,10 @@ public:
     const list<EverQuestQuestCompletionReputation>& GetQuestCompletionReputationsForQuestTemplate(uint32 questTemplateID);
     void LoadQuestReactions();
     const list<EverQuestQuestReaction>& GetQuestReactions(uint32 questTemplateID);
+    void LoadGossipReactions();
+    bool HandleGossipHello(Player* player, Creature* creature);
+    bool HandleGossipSelect(Player* player, Creature* creature, uint32 sender, uint32 action);
+    string FormatGossipTextForPlayer(Player* player, const string& text);
     void LoadPetData();
     bool HasPetDataForCreatureTemplateID(uint32 creatureTemplateID);
     const EverQuestPet& GetPetDataForCreatureTemplateID(uint32 creatureTemplateID);

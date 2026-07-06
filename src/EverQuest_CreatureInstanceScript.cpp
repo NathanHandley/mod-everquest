@@ -650,6 +650,17 @@ public:
         }
     };
 
+    // A creature-level ScriptName overrides any template-level ScriptName, so waypoint-scripted creatures that also have gossip reactions still need the gossip handling here
+    bool OnGossipHello(Player* player, Creature* creature) override
+    {
+        return EverQuest->HandleGossipHello(player, creature);
+    }
+
+    bool OnGossipSelect(Player* player, Creature* creature, uint32 sender, uint32 action) override
+    {
+        return EverQuest->HandleGossipSelect(player, creature, sender, action);
+    }
+
     CreatureAI* GetAI(Creature* creature) const override
     {
         return new EverQuest_CreatureInstanceScriptAI(creature);

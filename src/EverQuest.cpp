@@ -28,6 +28,8 @@
 #include "Tokenize.h"
 #include "Map.h"
 #include "ObjectAccessor.h"
+#include "GossipDef.h"
+#include "ScriptedGossip.h"
 #include "TemporarySummon.h"
 #include "CellImpl.h"
 #include "GridNotifiers.h"
@@ -1140,6 +1142,191 @@ const list<EverQuestQuestReaction>& EverQuestMod::GetQuestReactions(uint32 quest
         static const list<EverQuestQuestReaction> returnEmpty;
         return returnEmpty;
     }
+}
+
+void EverQuestMod::LoadGossipReactions()
+{
+    GossipReactionsByGossipCreatureTemplateID.clear();
+    QueryResult queryResult = WorldDatabase.Query("SELECT GossipCreatureTemplateID, NpcTextID, OptionID, OptionText, ReactionType, SayText, TargetCreatureTemplateID, UsePlayerX, UsePlayerY, UsePlayerZ, AddedPlayerX, AddedPlayerY, UsePlayerOrientation, UseNpcX, UseNpcY, UseNpcZ, UseNpcOrientation, PositionX, PositionY, PositionZ, Orientation, DelayInMS FROM mod_everquest_gossip_reaction ORDER BY GossipCreatureTemplateID, ID;");
+    if (queryResult)
+    {
+        do
+        {
+            // Pull the data out
+            Field* fields = queryResult->Fetch();
+            EverQuestGossipReaction gossipReaction;
+            gossipReaction.GossipCreatureTemplateID = fields[0].Get<uint32>();
+            gossipReaction.NpcTextID = fields[1].Get<uint32>();
+            gossipReaction.OptionID = fields[2].Get<uint32>();
+            gossipReaction.OptionText = fields[3].Get<std::string>();
+            gossipReaction.ReactionType = fields[4].Get<int32>();
+            gossipReaction.SayText = fields[5].Get<std::string>();
+            gossipReaction.TargetCreatureTemplateID = fields[6].Get<uint32>();
+            gossipReaction.UsePlayerX = fields[7].Get<bool>();
+            gossipReaction.UsePlayerY = fields[8].Get<bool>();
+            gossipReaction.UsePlayerZ = fields[9].Get<bool>();
+            gossipReaction.AddedPlayerX = fields[10].Get<float>();
+            gossipReaction.AddedPlayerY = fields[11].Get<float>();
+            gossipReaction.UsePlayerOrientation = fields[12].Get<bool>();
+            gossipReaction.UseNpcX = fields[13].Get<bool>();
+            gossipReaction.UseNpcY = fields[14].Get<bool>();
+            gossipReaction.UseNpcZ = fields[15].Get<bool>();
+            gossipReaction.UseNpcOrientation = fields[16].Get<bool>();
+            gossipReaction.PositionX = fields[17].Get<float>();
+            gossipReaction.PositionY = fields[18].Get<float>();
+            gossipReaction.PositionZ = fields[19].Get<float>();
+            gossipReaction.Orientation = fields[20].Get<float>();
+            gossipReaction.DelayInMS = fields[21].Get<uint32>();
+            GossipReactionsByGossipCreatureTemplateID[gossipReaction.GossipCreatureTemplateID].push_back(gossipReaction);
+        } while (queryResult->NextRow());
+    }
+}
+
+bool EverQuestMod::HandleGossipHello(Player* player, Creature* creature)
+{
+    if (IsEnabled == false)
+        return false;
+    unordered_map<uint32, vector<EverQuestGossipReaction>>::const_iterator gossipReactionsIterator = GossipReactionsByGossipCreatureTemplateID.find(creature->GetEntry());
+    if (gossipReactionsIterator == GossipReactionsByGossipCreatureTemplateID.end())
+        return false;
+
+    ClearGossipMenuFor(player);
+    if (creature->IsQuestGiver() == true)
+        player->PrepareQuestMenu(creature->GetGUID());
+
+    // Rows are ordered, so each option's text comes from its first reaction row
+    uint32 npcTextID = 0;
+    set<uint32> addedOptionIDs;
+    for (const EverQuestGossipReaction& gossipReaction : gossipReactionsIterator->second)
+    {
+        npcTextID = gossipReaction.NpcTextID;
+        if (addedOptionIDs.find(gossipReaction.OptionID) != addedOptionIDs.end())
+            continue;
+        addedOptionIDs.insert(gossipReaction.OptionID);
+        AddGossipItemFor(player, GOSSIP_ICON_CHAT, gossipReaction.OptionText, GOSSIP_SENDER_MAIN, gossipReaction.OptionID);
+    }
+    SendGossipMenuFor(player, npcTextID, creature->GetGUID());
+    return true;
+}
+
+bool EverQuestMod::HandleGossipSelect(Player* player, Creature* creature, uint32 /*sender*/, uint32 action)
+{
+    if (IsEnabled == false)
+        return false;
+    unordered_map<uint32, vector<EverQuestGossipReaction>>::const_iterator gossipReactionsIterator = GossipReactionsByGossipCreatureTemplateID.find(creature->GetEntry());
+    if (gossipReactionsIterator == GossipReactionsByGossipCreatureTemplateID.end())
+        return false;
+
+    Map* map = creature->GetMap();
+    bool reactionMatched = false;
+    for (const EverQuestGossipReaction& gossipReaction : gossipReactionsIterator->second)
+    {
+        if (gossipReaction.OptionID != action)
+            continue;
+        reactionMatched = true;
+
+        float x = gossipReaction.PositionX;
+        if (gossipReaction.UsePlayerX == true)
+            x = player->GetPositionX() + gossipReaction.AddedPlayerX;
+        else if (gossipReaction.UseNpcX == true)
+            x = creature->GetPositionX();
+        float y = gossipReaction.PositionY;
+        if (gossipReaction.UsePlayerY == true)
+            y = player->GetPositionY() + gossipReaction.AddedPlayerY;
+        else if (gossipReaction.UseNpcY == true)
+            y = creature->GetPositionY();
+        float z = gossipReaction.PositionZ;
+        if (gossipReaction.UsePlayerZ == true)
+            z = player->GetPositionZ();
+        else if (gossipReaction.UseNpcZ == true)
+            z = creature->GetPositionZ();
+        float orientation = gossipReaction.Orientation;
+        if (gossipReaction.UsePlayerOrientation == true)
+            orientation = player->GetOrientation();
+        else if (gossipReaction.UseNpcOrientation == true)
+            orientation = creature->GetOrientation();
+
+        switch (gossipReaction.ReactionType)
+        {
+        case EQ_QUEST_REACTION_SAY:
+        {
+            creature->Say(FormatGossipTextForPlayer(player, gossipReaction.SayText), LANG_UNIVERSAL, player);
+        } break;
+        case EQ_QUEST_REACTION_EMOTE:
+        {
+            creature->TextEmote(FormatGossipTextForPlayer(player, gossipReaction.SayText), player);
+        } break;
+        case EQ_QUEST_REACTION_YELL:
+        {
+            creature->Yell(FormatGossipTextForPlayer(player, gossipReaction.SayText), LANG_UNIVERSAL, player);
+        } break;
+        case EQ_QUEST_REACTION_ATTACKPLAYER:
+        {
+            MakeCreatureAttackPlayer(gossipReaction.TargetCreatureTemplateID, map, player);
+        } break;
+        case EQ_QUEST_REACTION_DESPAWN:
+        {
+            if (gossipReaction.DelayInMS > 0)
+            {
+                EverQuestPendingKillSpawnAction pendingAction;
+                pendingAction.ActionType = EQ_KILLSPAWN_ACTION_DESPAWN;
+                pendingAction.TargetCreatureTemplateID = gossipReaction.TargetCreatureTemplateID;
+                pendingAction.RemainingMS = (int32)gossipReaction.DelayInMS;
+                if (gossipReaction.TargetCreatureTemplateID == creature->GetEntry())
+                {
+                    // Only despawn the copy of the creature that the player is talking to
+                    pendingAction.DespawnNearestToPositionOnly = true;
+                    pendingAction.PositionX = creature->GetPositionX();
+                    pendingAction.PositionY = creature->GetPositionY();
+                    pendingAction.PositionZ = creature->GetPositionZ();
+                }
+                EnqueuePendingKillSpawnAction(map->GetId(), pendingAction);
+            }
+            else if (gossipReaction.TargetCreatureTemplateID == creature->GetEntry())
+                creature->DespawnOrUnsummon(0ms);
+            else
+                DespawnCreature(gossipReaction.TargetCreatureTemplateID, map);
+        } break;
+        case EQ_QUEST_REACTION_SPAWN:
+        case EQ_QUEST_REACTION_SPAWNUNIQUE:
+        {
+            if (gossipReaction.DelayInMS > 0)
+            {
+                EverQuestPendingKillSpawnAction pendingAction;
+                pendingAction.ActionType = EQ_KILLSPAWN_ACTION_SPAWN;
+                pendingAction.TargetCreatureTemplateID = gossipReaction.TargetCreatureTemplateID;
+                if (gossipReaction.ReactionType == EQ_QUEST_REACTION_SPAWNUNIQUE)
+                    pendingAction.OnlyIfNotAliveCreatureTemplateID = gossipReaction.TargetCreatureTemplateID;
+                pendingAction.PositionX = x;
+                pendingAction.PositionY = y;
+                pendingAction.PositionZ = z;
+                pendingAction.Orientation = orientation;
+                pendingAction.RemainingMS = (int32)gossipReaction.DelayInMS;
+                EnqueuePendingKillSpawnAction(map->GetId(), pendingAction);
+            }
+            else
+                SpawnCreature(gossipReaction.TargetCreatureTemplateID, map, x, y, z, orientation, gossipReaction.ReactionType == EQ_QUEST_REACTION_SPAWNUNIQUE);
+        } break;
+        default: break; // Nothing
+        }
+    }
+
+    if (reactionMatched == false)
+        return false;
+    CloseGossipMenuFor(player);
+    return true;
+}
+
+string EverQuestMod::FormatGossipTextForPlayer(Player* player, const string& text)
+{
+    string formattedText = text;
+    size_t tokenPosition = formattedText.find("$N");
+    while (tokenPosition != string::npos)
+    {
+        formattedText.replace(tokenPosition, 2, player->GetName());
+        tokenPosition = formattedText.find("$N", tokenPosition + player->GetName().length());
+    }
+    return formattedText;
 }
 
 void EverQuestMod::LoadPetData()
