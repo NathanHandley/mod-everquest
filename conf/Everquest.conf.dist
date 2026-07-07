@@ -275,6 +275,24 @@ EverQuest.SecondaryExpPool.MaxPooled = 1000000
 
 ###################################################################################################
 #
+# 	EverQuest.Player.LevelCap
+#		If set to a non-zero level, players can never reach that level through normal play.
+#        Experience keeps filling the bar on the level below it, but stops one experience point
+#        short of leveling and freezes there.  Example: if set to 61, players can only reach
+#        level 60, their level 60 experience bar fills to one point short of flipping, and no
+#        amount of experience from any source will make them level 61.  GM commands that grant
+#        levels directly (like .levelup and .character level) are NOT capped and still work.
+#       NOTE: The worldserver.conf MaxPlayerLevel setting must still be at or higher than this
+#        value for this setting to have any effect, since the core stops all experience gain
+#        outright at MaxPlayerLevel and the bar could never fill on the level below this cap.
+#	Default: 0 (disabled, no level cap is enforced by the mod)
+#
+###################################################################################################
+
+EverQuest.Player.LevelCap = 0
+
+###################################################################################################
+#
 # 	EverQuest.CrossClass.IncludeSkillIDs
 #		Comma delimited list of skill IDs that remain when you switch eq classes
 #	Default: list is related to professions, flying, pick lock, ...

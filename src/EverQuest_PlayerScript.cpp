@@ -234,6 +234,30 @@ public:
             EverQuest->SendExpPoolAddonMessageToPlayer(player, added);
     }
 
+    void OnPlayerBeforeGetLevelForXPGain(Player const* player, uint8& level) override
+    {
+        if (EverQuest->IsEnabled == false)
+            return;
+
+        EverQuest->HandleLevelCapOnBeforeExperienceGain(player, level);
+    }
+
+    bool OnPlayerCanGiveLevel(Player* player, uint8 newLevel) override
+    {
+        if (EverQuest->IsEnabled == false)
+            return true;
+
+        return EverQuest->HandleLevelCapOnCanGiveLevel(player, newLevel);
+    }
+
+    void OnPlayerUpdate(Player* player, uint32 /*p_time*/) override
+    {
+        if (EverQuest->IsEnabled == false)
+            return;
+
+        EverQuest->ProcessLevelCapStateForPlayer(player);
+    }
+
     void OnPlayerRewardKillRewarder(Player* player, KillRewarder* rewarder, bool /*isDungeon*/, float& rate) override
     {
         if (EverQuest->IsEnabled == false)
@@ -517,6 +541,10 @@ public:
             std::lock_guard<std::mutex> lock(EverQuest->RuntimeStateMutex);
             EverQuest->PlayerCasterConcurrentBardSongs.erase(player->GetGUID());
         }
+
+        // Apply any pending level cap experience park before the character saves
+        if (EverQuest->ConfigPlayerLevelCap != 0)
+            EverQuest->ProcessLevelCapStateForPlayer(player);
 
         // Class switch
         if (EverQuest->GetCurrentSecondEQClassForPlayer(player) != EverQuest->GetNextSecondEQClassForPlayer(player))

@@ -83,6 +83,7 @@ EverQuestMod::EverQuestMod() :
     ConfigShowClassMessageOnLogin(true),
     ConfigSecondaryExpPoolGainPercent(25.0f),
     ConfigSecondaryExpPoolMaxPooled(1000000),
+    ConfigPlayerLevelCap(0),
     CrossClassExemptSpellIDsBuilt(false)
 {
 }
@@ -238,6 +239,9 @@ void EverQuestMod::LoadConfigurationFile()
     // Secondary Experience Pool
     ConfigSecondaryExpPoolGainPercent = sConfigMgr->GetOption<float>("EverQuest.SecondaryExpPool.GainPercent", 25);
     ConfigSecondaryExpPoolMaxPooled = sConfigMgr->GetOption<uint32>("EverQuest.SecondaryExpPool.MaxPooled", 1000000);
+
+    // Player Level Cap
+    ConfigPlayerLevelCap = sConfigMgr->GetOption<uint32>("EverQuest.Player.LevelCap", 0);
 
     // Cross-Class values
     ConfigCrossClassIncludeSkillIDs = GetSetFromConfigString("EverQuest.CrossClass.IncludeSkillIDs");
@@ -3183,6 +3187,14 @@ uint32 EverQuestMod::SpendSecondaryExpPoolForPlayer(Player* player)
         return 0;
     uint32 needed = nextLevelXP - curXP;
 
+    // At the level cap the experience bar parks one point short of leveling, so never add that last point
+    if (ConfigPlayerLevelCap != 0 && static_cast<uint32>(player->GetLevel()) + 1 >= ConfigPlayerLevelCap)
+    {
+        if (needed <= 1)
+            return 0;
+        needed -= 1;
+    }
+
     uint32 spend = (controllerData.SecondaryExpPool < needed) ? controllerData.SecondaryExpPool : needed;
     if (spend == 0)
         return 0;
@@ -3211,6 +3223,64 @@ void EverQuestMod::SaveSecondaryExpPoolForPlayer(Player* player)
         controllerData.NextSecondClass,
         controllerData.SecondaryExpPool,
         controllerData.SecondaryExpPool);
+}
+
+void EverQuestMod::HandleLevelCapOnBeforeExperienceGain(Player const* player, uint8& levelForExpGain)
+{
+    if (ConfigPlayerLevelCap == 0)
+        return;
+
+    // Track that this player is inside Player::GiveXP, so an experience-driven level up attempt can be told apart from a direct GiveLevel call (GM .levelup / .character level), which must stay uncapped
+    {
+        std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+        PlayersGainingExperience.insert(player->GetGUID());
+    }
+
+    // Once the bar is parked one point short of a capped level up, report max level so GiveXP discards the gain
+    if (static_cast<uint32>(player->GetLevel()) + 1 >= ConfigPlayerLevelCap)
+    {
+        uint32 curExp = player->GetUInt32Value(PLAYER_XP);
+        uint32 nextLevelExp = player->GetUInt32Value(PLAYER_NEXT_LEVEL_XP);
+        if (nextLevelExp > 0 && curExp >= nextLevelExp - 1)
+            levelForExpGain = 255;
+    }
+}
+
+bool EverQuestMod::HandleLevelCapOnCanGiveLevel(Player* player, uint8 newLevel)
+{
+    if (ConfigPlayerLevelCap == 0)
+        return true;
+    if (static_cast<uint32>(newLevel) < ConfigPlayerLevelCap)
+        return true;
+
+    std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+    if (PlayersGainingExperience.find(player->GetGUID()) == PlayersGainingExperience.end())
+        return true;
+
+    PlayersPendingLevelCapExperiencePark.insert(player->GetGUID());
+    return false;
+}
+
+void EverQuestMod::ProcessLevelCapStateForPlayer(Player* player)
+{
+    if (ConfigPlayerLevelCap == 0)
+        return;
+
+    bool parkExperienceBar = false;
+    {
+        std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+        PlayersGainingExperience.erase(player->GetGUID());
+        parkExperienceBar = PlayersPendingLevelCapExperiencePark.erase(player->GetGUID()) > 0;
+    }
+    if (parkExperienceBar == false)
+        return;
+
+    if (static_cast<uint32>(player->GetLevel()) + 1 >= ConfigPlayerLevelCap)
+    {
+        uint32 nextLevelExp = player->GetUInt32Value(PLAYER_NEXT_LEVEL_XP);
+        if (nextLevelExp > 0)
+            player->SetUInt32Value(PLAYER_XP, nextLevelExp - 1);
+    }
 }
 
 map<string, EverQuestPlayerClassInfoItem> EverQuestMod::GetPlayerClassInfoByClassNameForPlayer(Player* player)

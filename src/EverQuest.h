@@ -587,6 +587,7 @@ public:
     bool ConfigShowClassMessageOnLogin;
     float ConfigSecondaryExpPoolGainPercent;
     uint32 ConfigSecondaryExpPoolMaxPooled;
+    uint32 ConfigPlayerLevelCap;
     std::set<uint32> ConfigCrossClassIncludeSkillIDs;
 
     unordered_set<uint32> CrossClassExemptSpellIDs;
@@ -622,6 +623,8 @@ public:
     unordered_map<int, unordered_map<uint32, vector<Creature*>>> AllLoadedCreaturesByMapIDThenSpawnPointID;
     unordered_map<int, unordered_map<uint32, vector<Creature*>>> AllLoadedCreaturesByMapIDThenSpawnGroupID;
     unordered_map<ObjectGuid, deque<uint32>> PlayerCasterConcurrentBardSongs;
+    unordered_set<ObjectGuid> PlayersGainingExperience;
+    unordered_set<ObjectGuid> PlayersPendingLevelCapExperiencePark;
     unordered_map<ObjectGuid, vector<EverQuestUnitHasteAuraEffect>> EQHasteAuraEffectsByUnitGUID;
     unordered_map<uint32, vector<EverQuestCreatureLootGroup>> CreatureLootGroupsByCreatureTemplateID;
     unordered_map<ObjectGuid, vector<uint32>> PreloadedLootItemIDsByCreatureGUID;
@@ -766,6 +769,9 @@ public:
     uint32 AddToSecondaryExpPoolForPlayer(Player* player, uint32 grantedExp);
     uint32 SpendSecondaryExpPoolForPlayer(Player* player);
     void SaveSecondaryExpPoolForPlayer(Player* player);
+    void HandleLevelCapOnBeforeExperienceGain(Player const* player, uint8& levelForExpGain);
+    bool HandleLevelCapOnCanGiveLevel(Player* player, uint8 newLevel);
+    void ProcessLevelCapStateForPlayer(Player* player);
     void SendExpPoolAddonMessageToPlayer(Player* player, uint32 gainedExp);
     void SetInitialEQClassesForPlayer(Player* player);
     void SetInitialCreatePositionForPlayer(Player* player);
