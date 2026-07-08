@@ -3,6 +3,7 @@ CREATE TABLE IF NOT EXISTS `mod_everquest_character_settings` (
 	`currentSecondaryClass` TINYINT(3) UNSIGNED NOT NULL DEFAULT '0',
 	`nextSecondaryClass` TINYINT(3) UNSIGNED NOT NULL DEFAULT '0',
 	`secondaryExpPool` INT(10) UNSIGNED NOT NULL DEFAULT '0',
+	`illusionFaceId` INT NOT NULL DEFAULT '0',
 	`lastgateMapId` SMALLINT(5) UNSIGNED NULL DEFAULT NULL,
 	`lastgateZoneId` SMALLINT(5) UNSIGNED NULL DEFAULT NULL,
 	`lastgatePosX` FLOAT NULL DEFAULT NULL,

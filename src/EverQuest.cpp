@@ -85,7 +85,8 @@ EverQuestMod::EverQuestMod() :
     ConfigSecondaryExpPoolGainPercent(25.0f),
     ConfigSecondaryExpPoolMaxPooled(1000000),
     ConfigPlayerLevelCap(0),
-    CrossClassExemptSpellIDsBuilt(false)
+    CrossClassExemptSpellIDsBuilt(false),
+    IllusionMaxFaceIndex(0)
 {
 }
 
@@ -944,6 +945,49 @@ uint32 EverQuestMod::GetIllusionBodySetForEQArmorMaterial(uint32 eqArmorMaterial
     return 0;
 }
 
+void EverQuestMod::LoadIllusionFaceData()
+{
+    IllusionFaceDisplayIDsByLookupKey.clear();
+    IllusionMaxFaceIndex = 0;
+
+    // Rows only exist for face indexes of 1 and up, as face 0 is the base display itself
+    QueryResult queryResult = WorldDatabase.Query("SELECT BaseDisplayID, FaceIndex, DisplayID FROM mod_everquest_illusion_face;");
+    if (!queryResult)
+    {
+        LOG_INFO("module.EverQuest", "EverQuestMod::LoadIllusionFaceData found no mod_everquest_illusion_face rows, so illusion forms will always use the base (0) face");
+        return;
+    }
+    do
+    {
+        // Pull the data out
+        Field* fields = queryResult->Fetch();
+        uint32 baseDisplayID = fields[0].Get<uint32>();
+        uint32 faceIndex = (uint32)std::max(0, fields[1].Get<int32>());
+        uint32 displayID = fields[2].Get<uint32>();
+        IllusionFaceDisplayIDsByLookupKey[GetIllusionFaceLookupKey(baseDisplayID, faceIndex)] = displayID;
+        if (faceIndex > IllusionMaxFaceIndex)
+            IllusionMaxFaceIndex = faceIndex;
+    } while (queryResult->NextRow());
+}
+
+uint64 EverQuestMod::GetIllusionFaceLookupKey(uint32 baseDisplayID, uint32 faceIndex)
+{
+    // Stored as base display ID (32 bits, from bit 8) | face index (8 bits, from bit 0)
+    return ((uint64)baseDisplayID << 8) | (uint64)(faceIndex & 0xFF);
+}
+
+uint32 EverQuestMod::GetIllusionFaceDisplayIDForPlayer(Player* player, uint32 baseDisplayID)
+{
+    // Face 0 is the base display itself, and any (base display, face) pair without a row falls back to the base display, which also covers players whose selected face is out of range for the current form's race
+    uint32 playerFaceID = GetIllusionFaceIDForPlayer(player);
+    if (playerFaceID == 0)
+        return baseDisplayID;
+    auto faceItr = IllusionFaceDisplayIDsByLookupKey.find(GetIllusionFaceLookupKey(baseDisplayID, playerFaceID));
+    if (faceItr == IllusionFaceDisplayIDsByLookupKey.end())
+        return baseDisplayID;
+    return faceItr->second;
+}
+
 uint32 EverQuestMod::GetIllusionGearDisplayIDForPlayer(Player* player, uint32 formSpellID)
 {
     // Just use the chest to drive the outfit
@@ -991,10 +1035,13 @@ void EverQuestMod::ApplyIllusionGearDisplayIfChanged(Player* player, EverQuestPl
     uint32 gearDisplayID = GetIllusionGearDisplayIDForPlayer(player, illusionState->FormSpellID);
     if (gearDisplayID == 0)
         return;
-    if (gearDisplayID == illusionState->LastGearDisplayID)
+
+    // Swap in the player's selected face version of the display when one exists
+    uint32 faceDisplayID = GetIllusionFaceDisplayIDForPlayer(player, gearDisplayID);
+    if (faceDisplayID == illusionState->LastGearDisplayID)
         return;
-    illusionState->LastGearDisplayID = gearDisplayID;
-    player->SetDisplayId(gearDisplayID);
+    illusionState->LastGearDisplayID = faceDisplayID;
+    player->SetDisplayId(faceDisplayID);
 }
 
 void EverQuestMod::ApplyIllusionGearDisplayOnFormAuraApply(Player* player, uint32 formSpellID)
@@ -3334,13 +3381,14 @@ EverQuestPlayerControllerData EverQuestMod::GetPlayerControllerData(Player* play
 {
     EverQuestPlayerControllerData controllerData;
     controllerData.GUID = player->GetGUID().GetCounter();
-    QueryResult queryResult = CharacterDatabase.Query("SELECT nextSecondaryClass, currentSecondaryClass, secondaryExpPool FROM mod_everquest_character_settings WHERE guid = {}", player->GetGUID().GetCounter());
+    QueryResult queryResult = CharacterDatabase.Query("SELECT nextSecondaryClass, currentSecondaryClass, secondaryExpPool, illusionFaceId FROM mod_everquest_character_settings WHERE guid = {}", player->GetGUID().GetCounter());
     if (!queryResult || queryResult->GetRowCount() == 0)
     {
         const EverQuestClassMap classMap = GetClassMapForWOWClassID(player->getClass());
         controllerData.CurrentSecondClass = classMap.EQClassIDDefaultSecond;
         controllerData.NextSecondClass = classMap.EQClassIDDefaultSecond;
         controllerData.SecondaryExpPool = 0;
+        controllerData.IllusionFaceID = 0;
     }
     else
     {
@@ -3348,6 +3396,7 @@ EverQuestPlayerControllerData EverQuestMod::GetPlayerControllerData(Player* play
         controllerData.NextSecondClass = fields[0].Get<uint8>();
         controllerData.CurrentSecondClass = fields[1].Get<uint8>();
         controllerData.SecondaryExpPool = fields[2].Get<uint32>();
+        controllerData.IllusionFaceID = (uint32)std::max(0, fields[3].Get<int32>());
     }
     return controllerData;
 }
@@ -3439,6 +3488,37 @@ void EverQuestMod::SaveSecondaryExpPoolForPlayer(Player* player)
         controllerData.NextSecondClass,
         controllerData.SecondaryExpPool,
         controllerData.SecondaryExpPool);
+}
+
+uint32 EverQuestMod::GetIllusionFaceIDForPlayer(Player* player)
+{
+    return GetOrLoadActivePlayerClassControllerData(player)->IllusionFaceID;
+}
+
+void EverQuestMod::SetIllusionFaceIDForPlayer(Player* player, uint32 faceID)
+{
+    GetOrLoadActivePlayerClassControllerData(player)->IllusionFaceID = faceID;
+    SaveIllusionFaceIDForPlayer(player);
+}
+
+void EverQuestMod::SaveIllusionFaceIDForPlayer(Player* player)
+{
+    EverQuestPlayerControllerData controllerData;
+    {
+        std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+        auto controllerDataIt = ActivePlayerClassControllerDataByGUID.find(player->GetGUID());
+        if (controllerDataIt == ActivePlayerClassControllerDataByGUID.end())
+            return;
+        controllerData = controllerDataIt->second;
+    }
+
+    CharacterDatabase.Execute("INSERT INTO `mod_everquest_character_settings` (`guid`, `currentSecondaryClass`, `nextSecondaryClass`, `secondaryExpPool`, `illusionFaceId`) VALUES ({}, {}, {}, {}, {}) ON DUPLICATE KEY UPDATE `illusionFaceId` = {}",
+        player->GetGUID().GetCounter(),
+        controllerData.CurrentSecondClass,
+        controllerData.NextSecondClass,
+        controllerData.SecondaryExpPool,
+        controllerData.IllusionFaceID,
+        controllerData.IllusionFaceID);
 }
 
 void EverQuestMod::HandleLevelCapOnBeforeExperienceGain(Player const* player, uint8& levelForExpGain)

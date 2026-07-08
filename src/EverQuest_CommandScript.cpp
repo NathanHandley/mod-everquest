@@ -22,6 +22,7 @@
 #include "CommandScript.h"
 #include "boost/algorithm/string.hpp"
 
+#include <cctype>
 #include <iomanip>
 
 using namespace Acore::ChatCommands;
@@ -77,6 +78,7 @@ public:
         static ChatCommandTable commandTable =
         {
             { "eqgps",  HandleEQGPSCommand,             SEC_PLAYER, Console::No },
+            { "eqface", HandleEQFaceCommand,            SEC_PLAYER, Console::No },
             { "class",  classCommandTable                                       },
         };
 
@@ -116,6 +118,57 @@ public:
         float eqHeadingFloat = ((((object->GetOrientation() - 3.14159265359) * 180.0) / 3.14159265359f) / 360.0) * 512.0;
         string eqText = fmt::format("EverQuest X: {} Y: {} Z: {} H: {}", RoundVal(object->GetPositionY() / worldScale, 6), RoundVal(object->GetPositionX() / worldScale, 6), RoundVal(object->GetPositionZ() / worldScale, 6), RoundVal(eqHeadingFloat, 6));
         handler->PSendSysMessage(eqText);
+        return true;
+    }
+
+    static bool HandleEQFaceCommand(ChatHandler* handler, const char* args)
+    {
+        if (EverQuest->IsEnabled == false)
+            return true;
+
+        Player* player = handler->GetPlayer();
+        uint32 maxFaceIndex = EverQuest->IllusionMaxFaceIndex;
+
+        // Validate the passed value is a number between 0 and the highest known face index
+        bool isValidFaceID = false;
+        uint32 faceID = 0;
+        if (*args)
+        {
+            char* faceToken = strtok((char*)args, " ");
+            std::string faceString = faceToken != nullptr ? faceToken : "";
+            if (faceString.empty() == false && faceString.size() <= 6)
+            {
+                bool isAllDigits = true;
+                for (size_t i = 0; i < faceString.size(); ++i)
+                {
+                    if (isdigit(static_cast<unsigned char>(faceString[i])) == 0)
+                    {
+                        isAllDigits = false;
+                        break;
+                    }
+                }
+                if (isAllDigits == true)
+                {
+                    faceID = static_cast<uint32>(atoi(faceString.c_str()));
+                    if (faceID <= maxFaceIndex)
+                        isValidFaceID = true;
+                }
+            }
+        }
+        if (isValidFaceID == false)
+        {
+            handler->PSendSysMessage(".eqface 'number'");
+            handler->PSendSysMessage("Sets the face shown when you are under an illusion. Example: '.eqface 3' will show you with face ID 3");
+            handler->PSendSysMessage("Valid Face Values: 0 - {} (0 is the default face, and races with fewer faces use the default)", maxFaceIndex);
+            return true;
+        }
+
+        // Store the setting
+        EverQuest->SetIllusionFaceIDForPlayer(player, faceID);
+        handler->PSendSysMessage("Your illusion face is now |cff4CFF00{}|r.", faceID);
+
+        // If an illusion form is active, update the shown model right away
+        EverQuest->RefreshIllusionGearDisplayForPlayer(player);
         return true;
     }
 

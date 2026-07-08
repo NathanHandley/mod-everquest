@@ -37,7 +37,7 @@ static uint32 ConfigMaxSkillIDCheck = 1000;         // The highest level of skil
 class Unit;
 class Aura;
 
-#define EQ_MOD_VERSION                              38
+#define EQ_MOD_VERSION                              39
 
 #define EQ_EQCLASS_NONE                             0
 #define EQ_EQCLASS_WARRIOR                          1
@@ -500,6 +500,7 @@ struct EverQuestPlayerControllerData
     uint8 CurrentSecondClass = 0;
     uint8 NextSecondClass = 0;
     uint32 SecondaryExpPool = 0;
+    uint32 IllusionFaceID = 0;
 };
 
 class EverQuestPlayerClassInfoItem
@@ -622,6 +623,8 @@ public:
     unordered_set<uint32> WornEffectSpellIDs;
     unordered_map<uint32, EverQuestSpell> SpellDataBySpellID;
     unordered_map<uint64, uint32> IllusionDisplayIDsByLookupKey;
+    unordered_map<uint64, uint32> IllusionFaceDisplayIDsByLookupKey;
+    uint32 IllusionMaxFaceIndex;
     unordered_set<uint32> IllusionFormSpellIDs;
     unordered_map<ObjectGuid, EverQuestPlayerIllusionState> PlayerIllusionStatesByPlayerGUID;
     unordered_map<uint32, list<EverQuestQuestCompletionReputation>> QuestCompletionReputationsByQuestTemplateID;
@@ -695,6 +698,9 @@ public:
     bool TryGetIllusionDisplayID(uint32 formSpellID, uint32 bodySet, uint32 tintID, bool helmOn, uint32& displayIDOut);
     uint32 GetIllusionDisplayIDWithFallback(uint32 formSpellID, uint32 bodySet, uint32 tintID, bool helmOn);
     uint32 GetIllusionBodySetForEQArmorMaterial(uint32 eqArmorMaterial);
+    void LoadIllusionFaceData();
+    uint64 GetIllusionFaceLookupKey(uint32 baseDisplayID, uint32 faceIndex);
+    uint32 GetIllusionFaceDisplayIDForPlayer(Player* player, uint32 baseDisplayID);
     uint32 GetIllusionGearDisplayIDForPlayer(Player* player, uint32 formSpellID);
     void ApplyIllusionGearDisplayIfChanged(Player* player, EverQuestPlayerIllusionState* illusionState);
     void ApplyIllusionGearDisplayOnFormAuraApply(Player* player, uint32 formSpellID);
@@ -796,6 +802,9 @@ public:
     uint32 AddToSecondaryExpPoolForPlayer(Player* player, uint32 grantedExp);
     uint32 SpendSecondaryExpPoolForPlayer(Player* player);
     void SaveSecondaryExpPoolForPlayer(Player* player);
+    uint32 GetIllusionFaceIDForPlayer(Player* player);
+    void SetIllusionFaceIDForPlayer(Player* player, uint32 faceID);
+    void SaveIllusionFaceIDForPlayer(Player* player);
     void HandleLevelCapOnBeforeExperienceGain(Player const* player, uint8& levelForExpGain);
     bool HandleLevelCapOnCanGiveLevel(Player* player, uint8 newLevel);
     void ProcessLevelCapStateForPlayer(Player* player);

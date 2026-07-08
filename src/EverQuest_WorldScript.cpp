@@ -56,6 +56,7 @@ public:
         EverQuest->LoadItemTemplateData();
         EverQuest->LoadSpellData();
         EverQuest->LoadIllusionDisplayData();
+        EverQuest->LoadIllusionFaceData();
         EverQuest->LoadQuestCompletionReputations();
         EverQuest->LoadQuestReactions();
         EverQuest->LoadGossipReactions();
