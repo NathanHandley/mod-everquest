@@ -37,7 +37,7 @@ static uint32 ConfigMaxSkillIDCheck = 1000;         // The highest level of skil
 class Unit;
 class Aura;
 
-#define EQ_MOD_VERSION                              37
+#define EQ_MOD_VERSION                              38
 
 #define EQ_EQCLASS_NONE                             0
 #define EQ_EQCLASS_WARRIOR                          1
@@ -299,6 +299,15 @@ public:
     uint32 ItemTemplateEntryIDForNPCEquip = 0;
     uint32 WornEffectSpellID = 0;
     uint32 AllowedEQClassMask = 0;
+    uint32 EQArmorMaterial = 0;
+    uint32 IllusionTintID = 0;
+};
+
+class EverQuestPlayerIllusionState
+{
+public:
+    uint32 FormSpellID = 0;
+    uint32 LastGearDisplayID = 0;
 };
 
 class EverQuestPet
@@ -610,6 +619,9 @@ public:
     unordered_map<uint32, EverQuestItemTemplate> ItemTemplatesByEntryID;
     unordered_set<uint32> WornEffectSpellIDs;
     unordered_map<uint32, EverQuestSpell> SpellDataBySpellID;
+    unordered_map<uint64, uint32> IllusionDisplayIDsByLookupKey;
+    unordered_set<uint32> IllusionFormSpellIDs;
+    unordered_map<ObjectGuid, EverQuestPlayerIllusionState> PlayerIllusionStatesByPlayerGUID;
     unordered_map<uint32, list<EverQuestQuestCompletionReputation>> QuestCompletionReputationsByQuestTemplateID;
     unordered_map<uint32, list<EverQuestQuestReaction>> QuestReactionListByQuestTemplateID;
     unordered_map<uint32, vector<EverQuestGossipReaction>> GossipReactionsByGossipCreatureTemplateID;
@@ -675,6 +687,18 @@ public:
     bool IsWornEffectSpell(uint32 spellID);
     void LoadSpellData();
     const EverQuestSpell& GetSpellDataForSpellID(uint32 spellID);
+    void LoadIllusionDisplayData();
+    bool IsIllusionFormSpell(uint32 spellID);
+    uint64 GetIllusionDisplayLookupKey(uint32 formSpellID, uint32 bodySet, uint32 tintID, bool helmOn);
+    bool TryGetIllusionDisplayID(uint32 formSpellID, uint32 bodySet, uint32 tintID, bool helmOn, uint32& displayIDOut);
+    uint32 GetIllusionDisplayIDWithFallback(uint32 formSpellID, uint32 bodySet, uint32 tintID, bool helmOn);
+    uint32 GetIllusionBodySetForEQArmorMaterial(uint32 eqArmorMaterial);
+    uint32 GetIllusionGearDisplayIDForPlayer(Player* player, uint32 formSpellID);
+    void ApplyIllusionGearDisplayIfChanged(Player* player, EverQuestPlayerIllusionState* illusionState);
+    void ApplyIllusionGearDisplayOnFormAuraApply(Player* player, uint32 formSpellID);
+    void HandleIllusionFormAuraRemove(Player* player, uint32 spellID);
+    void RefreshIllusionGearDisplayForPlayer(Player* player);
+    void ClearIllusionTrackingForPlayer(ObjectGuid playerGUID);
     bool IsSpellBlockedByMinTargetLevel(uint32 spellID, Unit* target, Unit* caster);
     bool IsSpellBlockedByMaxCreatureTargetLevel(uint32 spellID, Unit* target, Unit* caster);
     bool IsCreatureCharmBlockedByCharmLimits(uint32 spellID, Unit* target, Unit* caster);

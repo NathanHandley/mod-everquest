@@ -160,6 +160,10 @@ public:
         Player* player = unit->ToPlayer();
         uint32 spellID = aura->GetId();
 
+        // The core transform has already set the illusion model by now, so swap in the gear-matched version
+        if (EverQuest->IsIllusionFormSpell(spellID) == true)
+            EverQuest->ApplyIllusionGearDisplayOnFormAuraApply(player, spellID);
+
         if (EverQuest->IsSpellBlockedByMinTargetLevel(spellID, unit, aura->GetCaster()) == true)
         {
             Unit* auraCaster = aura->GetCaster();
@@ -210,6 +214,9 @@ public:
                 return;
             if (aurApp->GetBase() == nullptr)
                 return;
+
+            EverQuest->HandleIllusionFormAuraRemove(unit->ToPlayer(), aurApp->GetBase()->GetId());
+
             if (aurApp->GetBase()->GetId() < EverQuest->ConfigSystemSpellDBCIDMin || aurApp->GetBase()->GetId() > EverQuest->ConfigSystemSpellDBCIDMax)
                 return;
             if (aurApp->GetBase()->GetEffect(0) == nullptr)

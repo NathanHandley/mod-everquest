@@ -55,6 +55,7 @@ public:
         EverQuest->LoadCreatureOnkillReputations();
         EverQuest->LoadItemTemplateData();
         EverQuest->LoadSpellData();
+        EverQuest->LoadIllusionDisplayData();
         EverQuest->LoadQuestCompletionReputations();
         EverQuest->LoadQuestReactions();
         EverQuest->LoadGossipReactions();

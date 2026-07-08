@@ -742,7 +742,7 @@ void EverQuestMod::LoadItemTemplateData()
 {
     ItemTemplatesByEntryID.clear();
     WornEffectSpellIDs.clear();
-    QueryResult queryResult = WorldDatabase.Query("SELECT ItemTemplateID, NPCEquipItemTemplateID, WornEffectSpellID, AllowedEQClassMask FROM mod_everquest_item_template ORDER BY ItemTemplateID;");
+    QueryResult queryResult = WorldDatabase.Query("SELECT ItemTemplateID, NPCEquipItemTemplateID, WornEffectSpellID, AllowedEQClassMask, EQArmorMaterial, IllusionTintID FROM mod_everquest_item_template ORDER BY ItemTemplateID;");
     if (queryResult)
     {
         do
@@ -754,6 +754,8 @@ void EverQuestMod::LoadItemTemplateData()
             everQuestItemTemplate.ItemTemplateEntryIDForNPCEquip = fields[1].Get<uint32>();
             everQuestItemTemplate.WornEffectSpellID = fields[2].Get<uint32>();
             everQuestItemTemplate.AllowedEQClassMask = fields[3].Get<uint32>();
+            everQuestItemTemplate.EQArmorMaterial = (uint32)std::max(0, fields[4].Get<int32>());
+            everQuestItemTemplate.IllusionTintID = (uint32)std::max(0, fields[5].Get<int32>());
             ItemTemplatesByEntryID[everQuestItemTemplate.ItemTemplateEntryID] = everQuestItemTemplate;
             if (everQuestItemTemplate.WornEffectSpellID != 0)
                 WornEffectSpellIDs.insert(everQuestItemTemplate.WornEffectSpellID);
@@ -860,6 +862,203 @@ const EverQuestSpell& EverQuestMod::GetSpellDataForSpellID(uint32 spellID)
         static const EverQuestSpell returnEmpty;
         return returnEmpty;
     }
+}
+
+void EverQuestMod::LoadIllusionDisplayData()
+{
+    IllusionDisplayIDsByLookupKey.clear();
+    IllusionFormSpellIDs.clear();
+
+    QueryResult queryResult = WorldDatabase.Query("SELECT FormSpellID, BodySet, TintID, HelmOn, DisplayID FROM mod_everquest_illusion_display;");
+    if (!queryResult)
+    {
+        LOG_INFO("module.EverQuest", "EverQuestMod::LoadIllusionDisplayData found no mod_everquest_illusion_display rows, so illusion forms will not match worn gear");
+        return;
+    }
+    do
+    {
+        // Pull the data out
+        Field* fields = queryResult->Fetch();
+        uint32 formSpellID = fields[0].Get<uint32>();
+        uint32 bodySet = (uint32)std::max(0, fields[1].Get<int32>());
+        uint32 tintID = (uint32)std::max(0, fields[2].Get<int32>());
+        bool helmOn = fields[3].Get<bool>();
+        uint32 displayID = fields[4].Get<uint32>();
+        IllusionDisplayIDsByLookupKey[GetIllusionDisplayLookupKey(formSpellID, bodySet, tintID, helmOn)] = displayID;
+        IllusionFormSpellIDs.insert(formSpellID);
+    } while (queryResult->NextRow());
+}
+
+bool EverQuestMod::IsIllusionFormSpell(uint32 spellID)
+{
+    return IllusionFormSpellIDs.find(spellID) != IllusionFormSpellIDs.end();
+}
+
+uint64 EverQuestMod::GetIllusionDisplayLookupKey(uint32 formSpellID, uint32 bodySet, uint32 tintID, bool helmOn)
+{
+    // Stored as (high 32 bits) | tint (20 bits, from bit 12) | body set (8 bits, from bit 4) | helm (bit 0)
+    return ((uint64)formSpellID << 32) | ((uint64)(tintID & 0xFFFFF) << 12) | ((uint64)(bodySet & 0xFF) << 4) | (uint64)(helmOn ? 1 : 0);
+}
+
+bool EverQuestMod::TryGetIllusionDisplayID(uint32 formSpellID, uint32 bodySet, uint32 tintID, bool helmOn, uint32& displayIDOut)
+{
+    auto displayItr = IllusionDisplayIDsByLookupKey.find(GetIllusionDisplayLookupKey(formSpellID, bodySet, tintID, helmOn));
+    if (displayItr == IllusionDisplayIDsByLookupKey.end())
+        return false;
+    displayIDOut = displayItr->second;
+    return true;
+}
+
+uint32 EverQuestMod::GetIllusionDisplayIDWithFallback(uint32 formSpellID, uint32 bodySet, uint32 tintID, bool helmOn)
+{
+    // If exact, don't use tint
+    uint32 displayID = 0;
+    if (TryGetIllusionDisplayID(formSpellID, bodySet, tintID, helmOn, displayID) == true)
+        return displayID;
+    if (TryGetIllusionDisplayID(formSpellID, bodySet, 0, helmOn, displayID) == true)
+        return displayID;
+
+    // Robe sets fall back to the base cloth set
+    if (bodySet >= 10)
+    {
+        if (TryGetIllusionDisplayID(formSpellID, 0, 0, helmOn, displayID) == true)
+            return displayID;
+    }
+
+    if (TryGetIllusionDisplayID(formSpellID, 0, 0, false, displayID) == true)
+        return displayID;
+    return 0;
+}
+
+uint32 EverQuestMod::GetIllusionBodySetForEQArmorMaterial(uint32 eqArmorMaterial)
+{
+    // 1-3 are leather/chain/plate, 10/16 are robe sets, and all else is cloth
+    if (eqArmorMaterial >= 1 && eqArmorMaterial <= 3)
+        return eqArmorMaterial;
+    if (eqArmorMaterial >= 10 && eqArmorMaterial <= 16)
+        return eqArmorMaterial;
+    return 0;
+}
+
+uint32 EverQuestMod::GetIllusionGearDisplayIDForPlayer(Player* player, uint32 formSpellID)
+{
+    // Just use the chest to drive the outfit
+    uint32 bodySet = 0;
+    uint32 tintID = 0;
+    Item* chestItem = player->GetItemByPos(INVENTORY_SLOT_BAG_0, EQUIPMENT_SLOT_CHEST);
+    if (chestItem != nullptr)
+    {
+        auto itemTemplateItr = ItemTemplatesByEntryID.find(chestItem->GetEntry());
+        if (itemTemplateItr != ItemTemplatesByEntryID.end())
+        {
+            bodySet = GetIllusionBodySetForEQArmorMaterial(itemTemplateItr->second.EQArmorMaterial);
+            tintID = itemTemplateItr->second.IllusionTintID;
+        }
+        else
+        {
+            ItemTemplate const* itemProto = chestItem->GetTemplate();
+            if (itemProto != nullptr && itemProto->Class == ITEM_CLASS_ARMOR)
+            {
+                switch (itemProto->SubClass)
+                {
+                    case ITEM_SUBCLASS_ARMOR_CLOTH: bodySet = 0; break;
+                    case ITEM_SUBCLASS_ARMOR_LEATHER: bodySet = 1; break;
+                    case ITEM_SUBCLASS_ARMOR_MAIL: bodySet = 2; break;
+                    case ITEM_SUBCLASS_ARMOR_PLATE: bodySet = 3; break;
+                    default: break;
+                }
+            }
+        }
+    }
+
+    // The helm shows when an armor head item is worn and the player isn't hiding it via the interface option
+    bool helmOn = false;
+    Item* headItem = player->GetItemByPos(INVENTORY_SLOT_BAG_0, EQUIPMENT_SLOT_HEAD);
+    if (headItem != nullptr && headItem->GetTemplate() != nullptr && headItem->GetTemplate()->Class == ITEM_CLASS_ARMOR &&
+        player->HasPlayerFlag(PLAYER_FLAGS_HIDE_HELM) == false)
+        helmOn = true;
+
+    return GetIllusionDisplayIDWithFallback(formSpellID, bodySet, tintID, helmOn);
+}
+
+void EverQuestMod::ApplyIllusionGearDisplayIfChanged(Player* player, EverQuestPlayerIllusionState* illusionState)
+{
+    // A zero result means no one doesn't exist, so leave the core's transform display alone
+    uint32 gearDisplayID = GetIllusionGearDisplayIDForPlayer(player, illusionState->FormSpellID);
+    if (gearDisplayID == 0)
+        return;
+    if (gearDisplayID == illusionState->LastGearDisplayID)
+        return;
+    illusionState->LastGearDisplayID = gearDisplayID;
+    player->SetDisplayId(gearDisplayID);
+}
+
+void EverQuestMod::ApplyIllusionGearDisplayOnFormAuraApply(Player* player, uint32 formSpellID)
+{
+    // Track the player illusion state
+    EverQuestPlayerIllusionState* illusionState = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+        illusionState = &PlayerIllusionStatesByPlayerGUID[player->GetGUID()];
+    }
+    illusionState->FormSpellID = formSpellID;
+    illusionState->LastGearDisplayID = 0;
+
+    // Override the model with a gear-matched version
+    ApplyIllusionGearDisplayIfChanged(player, illusionState);
+}
+
+void EverQuestMod::HandleIllusionFormAuraRemove(Player* player, uint32 spellID)
+{
+    if (IsIllusionFormSpell(spellID) == false)
+        return;
+
+    // Cleanup tracking
+    {
+        std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+        auto illusionStateItr = PlayerIllusionStatesByPlayerGUID.find(player->GetGUID());
+        if (illusionStateItr == PlayerIllusionStatesByPlayerGUID.end())
+            return;
+        if (illusionStateItr->second.FormSpellID != spellID)
+        {
+            // If a different form fell off, force a refresh next cycle
+            illusionStateItr->second.LastGearDisplayID = 0;
+            return;
+        }
+        PlayerIllusionStatesByPlayerGUID.erase(illusionStateItr);
+    }
+
+    // If there's another form, swap in
+    for (auto const& appliedAuraItr : player->GetAppliedAuras())
+    {
+        AuraApplication const* appliedAurApp = appliedAuraItr.second;
+        if (appliedAurApp == nullptr || appliedAurApp->GetBase() == nullptr)
+            continue;
+        uint32 appliedSpellID = appliedAurApp->GetBase()->GetId();
+        if (IsIllusionFormSpell(appliedSpellID) == false)
+            continue;
+        ApplyIllusionGearDisplayOnFormAuraApply(player, appliedSpellID);
+        return;
+    }
+}
+
+void EverQuestMod::RefreshIllusionGearDisplayForPlayer(Player* player)
+{
+    EverQuestPlayerIllusionState* illusionState = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+        auto illusionStateItr = PlayerIllusionStatesByPlayerGUID.find(player->GetGUID());
+        if (illusionStateItr == PlayerIllusionStatesByPlayerGUID.end())
+            return;
+        illusionState = &illusionStateItr->second;
+    }
+    ApplyIllusionGearDisplayIfChanged(player, illusionState);
+}
+
+void EverQuestMod::ClearIllusionTrackingForPlayer(ObjectGuid playerGUID)
+{
+    std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+    PlayerIllusionStatesByPlayerGUID.erase(playerGUID);
 }
 
 bool EverQuestMod::IsSpellBlockedByMinTargetLevel(uint32 spellID, Unit* target, Unit* caster)

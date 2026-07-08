@@ -250,7 +250,16 @@ public:
         return EverQuest->HandleLevelCapOnCanGiveLevel(player, newLevel);
     }
 
-    void OnPlayerUpdate(Player* player, uint32 /*p_time*/) override
+    void OnPlayerEquip(Player* player, Item* /*it*/, uint8 /*bag*/, uint8 /*slot*/, bool /*update*/) override
+    {
+        if (EverQuest->IsEnabled == false)
+            return;
+
+        // Equipping gear while illusioned can change change gear under some situations
+        EverQuest->RefreshIllusionGearDisplayForPlayer(player);
+    }
+
+    void OnPlayerUpdate(Player* player, uint32 p_time) override
     {
         if (EverQuest->IsEnabled == false)
             return;
@@ -545,6 +554,9 @@ public:
         // Apply any pending level cap experience park before the character saves
         if (EverQuest->ConfigPlayerLevelCap != 0)
             EverQuest->ProcessLevelCapStateForPlayer(player);
+
+        // Stop tracking any illusion gear display state
+        EverQuest->ClearIllusionTrackingForPlayer(player->GetGUID());
 
         // Class switch
         if (EverQuest->GetCurrentSecondEQClassForPlayer(player) != EverQuest->GetNextSecondEQClassForPlayer(player))
