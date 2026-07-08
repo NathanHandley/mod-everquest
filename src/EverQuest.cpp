@@ -2736,24 +2736,20 @@ void EverQuestMod::StorePositionAsLastGate(Player* player)
     if (player->GetMap() == nullptr)
         return;
 
-    // Set up the transaction
-    CharacterDatabaseTransaction transaction = CharacterDatabase.BeginTransaction();
-
-    // Delete the old record, if it exists
-    transaction->Append("DELETE FROM `mod_everquest_character_lastgate` WHERE guid = {}", player->GetGUID().GetCounter());
-
-    // Add the new gate reference
+    // Gather the new gate reference
     float playerX = player->GetPosition().GetPositionX();
     float playerY = player->GetPosition().GetPositionY();
     float playerZ = player->GetPosition().GetPositionZ();
     float playerOrientation = player->GetOrientation();
     int mapID = player->GetMap()->GetId();
     int zoneID = player->GetAreaId();
-    transaction->Append("INSERT INTO `mod_everquest_character_lastgate` (`guid`, `mapId`, `zoneId`, `posX`, `posY`, `posZ`, `orientation`) VALUES ({}, {}, {}, {}, {}, {}, {})",
-        player->GetGUID().GetCounter(), mapID, zoneID, playerX, playerY, playerZ, playerOrientation);
+    uint32 guidCounter = player->GetGUID().GetCounter();
 
-    // Commit the transaction
-    CharacterDatabase.CommitTransaction(transaction);
+    // Upsert only the last-gate columns so the class-controller and home-bind data sharing this row is preserved
+    CharacterDatabase.Execute("INSERT INTO `mod_everquest_character_settings` (`guid`, `lastgateMapId`, `lastgateZoneId`, `lastgatePosX`, `lastgatePosY`, `lastgatePosZ`, `lastgateOrientation`) VALUES ({}, {}, {}, {}, {}, {}, {}) "
+        "ON DUPLICATE KEY UPDATE `lastgateMapId` = {}, `lastgateZoneId` = {}, `lastgatePosX` = {}, `lastgatePosY` = {}, `lastgatePosZ` = {}, `lastgateOrientation` = {}",
+        guidCounter, mapID, zoneID, playerX, playerY, playerZ, playerOrientation,
+        mapID, zoneID, playerX, playerY, playerZ, playerOrientation);
 }
 
 void EverQuestMod::SendPlayerToLastGate(Player* player)
@@ -2765,8 +2761,8 @@ void EverQuestMod::SendPlayerToLastGate(Player* player)
         return;
     }
 
-    // Pull the bind position
-    QueryResult queryResult = CharacterDatabase.Query("SELECT mapId, zoneId, posX, posY, posZ, orientation FROM mod_everquest_character_lastgate WHERE guid = {}", player->GetGUID().GetCounter());
+    // Pull the last gate position
+    QueryResult queryResult = CharacterDatabase.Query("SELECT lastgateMapId, lastgateZoneId, lastgatePosX, lastgatePosY, lastgatePosZ, lastgateOrientation FROM mod_everquest_character_settings WHERE guid = {} AND lastgateMapId IS NOT NULL", player->GetGUID().GetCounter());
     if (!queryResult || queryResult->GetRowCount() == 0)
     {
         ChatHandler(player->GetSession()).PSendSysMessage("No tethered gate could be found. Spell failed.");
@@ -2789,7 +2785,7 @@ void EverQuestMod::SendPlayerToLastGate(Player* player)
 void EverQuestMod::SendPlayerToEQBindHome(Player* player)
 {
     // Pull the bind position
-    QueryResult queryResult = CharacterDatabase.Query("SELECT mapId, zoneId, posX, posY, posZ FROM mod_everquest_character_homebind WHERE guid = {}", player->GetGUID().GetCounter());
+    QueryResult queryResult = CharacterDatabase.Query("SELECT homebindMapId, homebindZoneId, homebindPosX, homebindPosY, homebindPosZ FROM mod_everquest_character_settings WHERE guid = {} AND homebindMapId IS NOT NULL", player->GetGUID().GetCounter());
     if (!queryResult || queryResult->GetRowCount() == 0)
     {
         ChatHandler(player->GetSession()).PSendSysMessage("You have no bind point in Norrath. Spell failed.");
@@ -2826,18 +2822,11 @@ void EverQuestMod::SetNewBindHome(Player* player)
 
 void EverQuestMod::SetNewBindHome(Player* player, uint32 playerGUIDCounter, int mapID, int zoneID, float playerX, float playerY, float playerZ)
 {
-    // Set up the transaction
-    CharacterDatabaseTransaction transaction = CharacterDatabase.BeginTransaction();
-
-    // Delete the old record, if it exists
-    transaction->Append("DELETE FROM `mod_everquest_character_homebind` WHERE guid = {}", playerGUIDCounter);
-
-    // Add the new binding
-    transaction->Append("INSERT INTO `mod_everquest_character_homebind` (`guid`, `mapId`, `zoneId`, `posX`, `posY`, `posZ`) VALUES ({}, {}, {}, {}, {}, {})",
-        playerGUIDCounter, mapID, zoneID, playerX, playerY, playerZ);
-
-    // Commit the transaction
-    CharacterDatabase.CommitTransaction(transaction);
+    // Upsert only the home-bind columns so the class-controller and last-gate data sharing this row is preserved
+    CharacterDatabase.Execute("INSERT INTO `mod_everquest_character_settings` (`guid`, `homebindMapId`, `homebindZoneId`, `homebindPosX`, `homebindPosY`, `homebindPosZ`) VALUES ({}, {}, {}, {}, {}, {}) "
+        "ON DUPLICATE KEY UPDATE `homebindMapId` = {}, `homebindZoneId` = {}, `homebindPosX` = {}, `homebindPosY` = {}, `homebindPosZ` = {}",
+        playerGUIDCounter, mapID, zoneID, playerX, playerY, playerZ,
+        mapID, zoneID, playerX, playerY, playerZ);
 
     // Send a message to the player
     ChatHandler(player->GetSession()).PSendSysMessage("You feel yourself bind to the area.");
@@ -2845,15 +2834,11 @@ void EverQuestMod::SetNewBindHome(Player* player, uint32 playerGUIDCounter, int 
 
 void EverQuestMod::DeletePlayerBindHome(ObjectGuid guid)
 {
-    // Set up the transaction
-    CharacterDatabaseTransaction transaction = CharacterDatabase.BeginTransaction();
-
-    // Delete the old record, if it exists
-    transaction->Append("DELETE FROM `mod_everquest_character_homebind` WHERE guid = {}", guid.GetCounter());
-    transaction->Append("DELETE FROM `mod_everquest_character_lastgate` WHERE guid = {}", guid.GetCounter());
-
-    // Commit the transaction
-    CharacterDatabase.CommitTransaction(transaction);
+    // Clear only the home-bind and last-gate columns; the class-controller data sharing this row is left intact
+    CharacterDatabase.Execute("UPDATE `mod_everquest_character_settings` SET "
+        "`homebindMapId` = NULL, `homebindZoneId` = NULL, `homebindPosX` = NULL, `homebindPosY` = NULL, `homebindPosZ` = NULL, "
+        "`lastgateMapId` = NULL, `lastgateZoneId` = NULL, `lastgatePosX` = NULL, `lastgatePosY` = NULL, `lastgatePosZ` = NULL, `lastgateOrientation` = NULL "
+        "WHERE guid = {}", guid.GetCounter());
 }
 
 void EverQuestMod::AddCreatureAsLoaded(int mapID, Creature* creature)
@@ -3323,9 +3308,13 @@ void EverQuestMod::SetInitialEQClassesForPlayer(Player* player)
         ActivePlayerClassControllerDataByGUID[player->GetGUID()] = controllerData;
     }
 
-    // Persist the controller row immediately
-    CharacterDatabase.Execute("REPLACE INTO `mod_everquest_character_class_controller` (`guid`, `nextClass`, `currentClass`, `secondaryExpPool`) VALUES ({}, {}, {}, {})",
+    // Persist the controller columns immediately, without disturbing any home-bind / last-gate data already in this row
+    CharacterDatabase.Execute("INSERT INTO `mod_everquest_character_settings` (`guid`, `nextSecondaryClass`, `currentSecondaryClass`, `secondaryExpPool`) VALUES ({}, {}, {}, {}) "
+        "ON DUPLICATE KEY UPDATE `nextSecondaryClass` = {}, `currentSecondaryClass` = {}, `secondaryExpPool` = {}",
         controllerData.GUID,
+        controllerData.NextSecondClass,
+        controllerData.CurrentSecondClass,
+        controllerData.SecondaryExpPool,
         controllerData.NextSecondClass,
         controllerData.CurrentSecondClass,
         controllerData.SecondaryExpPool);
@@ -3345,7 +3334,7 @@ EverQuestPlayerControllerData EverQuestMod::GetPlayerControllerData(Player* play
 {
     EverQuestPlayerControllerData controllerData;
     controllerData.GUID = player->GetGUID().GetCounter();
-    QueryResult queryResult = CharacterDatabase.Query("SELECT nextClass, currentClass, secondaryExpPool FROM mod_everquest_character_class_controller WHERE guid = {}", player->GetGUID().GetCounter());
+    QueryResult queryResult = CharacterDatabase.Query("SELECT nextSecondaryClass, currentSecondaryClass, secondaryExpPool FROM mod_everquest_character_settings WHERE guid = {}", player->GetGUID().GetCounter());
     if (!queryResult || queryResult->GetRowCount() == 0)
     {
         const EverQuestClassMap classMap = GetClassMapForWOWClassID(player->getClass());
@@ -3444,7 +3433,7 @@ void EverQuestMod::SaveSecondaryExpPoolForPlayer(Player* player)
         controllerData = controllerDataIt->second;
     }
 
-    CharacterDatabase.Execute("INSERT INTO `mod_everquest_character_class_controller` (`guid`, `currentClass`, `nextClass`, `secondaryExpPool`) VALUES ({}, {}, {}, {}) ON DUPLICATE KEY UPDATE `secondaryExpPool` = {}",
+    CharacterDatabase.Execute("INSERT INTO `mod_everquest_character_settings` (`guid`, `currentSecondaryClass`, `nextSecondaryClass`, `secondaryExpPool`) VALUES ({}, {}, {}, {}) ON DUPLICATE KEY UPDATE `secondaryExpPool` = {}",
         player->GetGUID().GetCounter(),
         controllerData.CurrentSecondClass,
         controllerData.NextSecondClass,
@@ -3928,11 +3917,16 @@ void EverQuestMod::CopyModQuestTablesIntoCharacterQuests(Player* player, uint8 p
 
 void EverQuestMod::UpdatePlayerControllerForClassChange(Player* player, uint8 newEQClassID, CharacterDatabaseTransaction& transaction)
 {
-    transaction->Append("REPLACE INTO `mod_everquest_character_class_controller` (`guid`, `nextClass`, `currentClass`, `secondaryExpPool`) VALUES ({}, {}, {}, {})",
+    uint32 currentExpPool = GetSecondaryExpPoolForPlayer(player);
+    transaction->Append("INSERT INTO `mod_everquest_character_settings` (`guid`, `nextSecondaryClass`, `currentSecondaryClass`, `secondaryExpPool`) VALUES ({}, {}, {}, {}) "
+        "ON DUPLICATE KEY UPDATE `nextSecondaryClass` = {}, `currentSecondaryClass` = {}, `secondaryExpPool` = {}",
         player->GetGUID().GetCounter(),
         newEQClassID,
         newEQClassID, // Overwriting current with next
-        GetSecondaryExpPoolForPlayer(player));
+        currentExpPool,
+        newEQClassID,
+        newEQClassID,
+        currentExpPool);
 }
 
 map<uint8, EverQuestPlayerEquipedItemData> EverQuestMod::GetVisibleItemsBySlotForPlayerClass(Player* player, uint8 eqClassID)
@@ -4095,7 +4089,7 @@ bool EverQuestMod::PerformPlayerDelete(ObjectGuid guid)
     transaction->Append("DELETE FROM mod_everquest_character_class_action WHERE guid = {}", playerGUID);
     transaction->Append("DELETE FROM mod_everquest_character_class_glyphs WHERE guid = {}", playerGUID);
     transaction->Append("DELETE FROM mod_everquest_character_class_inventory WHERE guid = {}", playerGUID);
-    transaction->Append("DELETE FROM mod_everquest_character_class_controller WHERE guid = {}", playerGUID);
+    transaction->Append("DELETE FROM mod_everquest_character_settings WHERE guid = {}", playerGUID);
     transaction->Append("DELETE FROM mod_everquest_character_class_queststatus WHERE guid = {}", playerGUID);
     transaction->Append("DELETE FROM mod_everquest_character_class_queststatus_rewarded WHERE guid = {}", playerGUID);
     transaction->Append("DELETE FROM character_pet WHERE owner = 0 AND eq_owner = {}", playerGUID);
