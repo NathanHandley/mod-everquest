@@ -308,6 +308,7 @@ class EverQuestPlayerIllusionState
 public:
     uint32 FormSpellID = 0;
     uint32 LastGearDisplayID = 0;
+    uint32 RefreshTimerMS = 0;
 };
 
 class EverQuestPet
@@ -593,6 +594,7 @@ public:
     uint32 ConfigEvadeUnstickStepPercent;
     bool ConfigCharmCreatureCharmLimitsEnabled;
     float ConfigCharmUncharmedPlayerCheckRadius;
+    uint32 ConfigIllusionGearRefreshTimeInMS;
     bool ConfigShowClassMessageOnLogin;
     float ConfigSecondaryExpPoolGainPercent;
     uint32 ConfigSecondaryExpPoolMaxPooled;
@@ -698,6 +700,7 @@ public:
     void ApplyIllusionGearDisplayOnFormAuraApply(Player* player, uint32 formSpellID);
     void HandleIllusionFormAuraRemove(Player* player, uint32 spellID);
     void RefreshIllusionGearDisplayForPlayer(Player* player);
+    void UpdatePlayerIllusionGearDisplay(Player* player, uint32 diffInMS);
     void ClearIllusionTrackingForPlayer(ObjectGuid playerGUID);
     bool IsSpellBlockedByMinTargetLevel(uint32 spellID, Unit* target, Unit* caster);
     bool IsSpellBlockedByMaxCreatureTargetLevel(uint32 spellID, Unit* target, Unit* caster);

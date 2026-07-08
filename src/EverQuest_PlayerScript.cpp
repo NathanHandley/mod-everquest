@@ -265,6 +265,7 @@ public:
             return;
 
         EverQuest->ProcessLevelCapStateForPlayer(player);
+        EverQuest->UpdatePlayerIllusionGearDisplay(player, p_time);
     }
 
     void OnPlayerRewardKillRewarder(Player* player, KillRewarder* rewarder, bool /*isDungeon*/, float& rate) override

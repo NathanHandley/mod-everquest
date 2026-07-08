@@ -80,6 +80,7 @@ EverQuestMod::EverQuestMod() :
     ConfigEvadeUnstickStepPercent(25),
     ConfigCharmCreatureCharmLimitsEnabled(true),
     ConfigCharmUncharmedPlayerCheckRadius(100.0f),
+    ConfigIllusionGearRefreshTimeInMS(1000),
     ConfigShowClassMessageOnLogin(true),
     ConfigSecondaryExpPoolGainPercent(25.0f),
     ConfigSecondaryExpPoolMaxPooled(1000000),
@@ -232,6 +233,9 @@ void EverQuestMod::LoadConfigurationFile()
     // Charm
     ConfigCharmCreatureCharmLimitsEnabled = sConfigMgr->GetOption<bool>("EverQuest.Charm.CreatureCharmLimitsEnabled", true);
     ConfigCharmUncharmedPlayerCheckRadius = sConfigMgr->GetOption<float>("EverQuest.Charm.UncharmedPlayerCheckRadius", 100.0f);
+
+    // Illusion
+    ConfigIllusionGearRefreshTimeInMS = sConfigMgr->GetOption<uint32>("EverQuest.Illusion.GearRefreshTimeInMS", 1000);
 
     // Class
     ConfigShowClassMessageOnLogin = sConfigMgr->GetOption<bool>("EverQuest.ShowClassMessageOnLogin", true);
@@ -1003,6 +1007,7 @@ void EverQuestMod::ApplyIllusionGearDisplayOnFormAuraApply(Player* player, uint3
     }
     illusionState->FormSpellID = formSpellID;
     illusionState->LastGearDisplayID = 0;
+    illusionState->RefreshTimerMS = 0;
 
     // Override the model with a gear-matched version
     ApplyIllusionGearDisplayIfChanged(player, illusionState);
@@ -1052,6 +1057,29 @@ void EverQuestMod::RefreshIllusionGearDisplayForPlayer(Player* player)
             return;
         illusionState = &illusionStateItr->second;
     }
+    ApplyIllusionGearDisplayIfChanged(player, illusionState);
+}
+
+void EverQuestMod::UpdatePlayerIllusionGearDisplay(Player* player, uint32 diffInMS)
+{
+    // Zero (or below) disables the periodic check
+    if (ConfigIllusionGearRefreshTimeInMS <= 0)
+        return;
+
+    EverQuestPlayerIllusionState* illusionState = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+        auto illusionStateItr = PlayerIllusionStatesByPlayerGUID.find(player->GetGUID());
+        if (illusionStateItr == PlayerIllusionStatesByPlayerGUID.end())
+            return;
+        illusionState = &illusionStateItr->second;
+    }
+
+    // Light periodic check, since unequips and the show-helm interface toggle have no hooks
+    illusionState->RefreshTimerMS += diffInMS;
+    if (illusionState->RefreshTimerMS < ConfigIllusionGearRefreshTimeInMS)
+        return;
+    illusionState->RefreshTimerMS = 0;
     ApplyIllusionGearDisplayIfChanged(player, illusionState);
 }
 

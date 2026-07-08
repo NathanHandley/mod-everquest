@@ -244,6 +244,19 @@ EverQuest.Charm.UncharmedPlayerCheckRadius = 100
 
 ###################################################################################################
 #
+# 	EverQuest.Illusion.GearRefreshTimeInMS
+#		How often, in milliseconds, an illusioned player's gear-matched display is revalidated. This
+#		catches changes that have no event hooks, like unequipping the chest item or toggling the
+#		"Show Helm" interface option. Zero or below disables the periodic revalidation entirely, so the
+#		display only updates when an illusion spell lands or an item is equipped
+#	Default: 1000 (1 second)
+#
+###################################################################################################
+
+EverQuest.Illusion.GearRefreshTimeInMS = 1000
+
+###################################################################################################
+#
 # 	EverQuest.ShowClassMessageOnLogin
 #		If true, a chat message describing the player's primary (and secondary) EQ class is shown
 #		on login.
