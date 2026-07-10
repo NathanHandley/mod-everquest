@@ -18,6 +18,7 @@
 #define EVERQUEST_H
 
 #include "Common.h"
+#include "DataMap.h"
 #include "GameObject.h"
 #include "ObjectGuid.h"
 #include "CreatureData.h"
@@ -136,8 +137,8 @@ class Aura;
 #define EQ_MOVE_TO_ROAM_POINT                       20001
 #define EQ_MOVE_TO_WAYPOINT_POINT                   20002
 
-#define EQ_MOVE_SMALL_STEP_SIZE_DISTANCE            5.0f    // Minimum distance between nodes when making small steps
-#define EQ_MOVE_SMALL_STEP_SIZE_LAST_DISTANCE       5.0f    // How much minimium distance to allow on the last node
+#define EQ_MOVE_SMALL_STEP_SIZE_DISTANCE            10.0f   // Minimum distance between nodes when making small steps
+#define EQ_MOVE_SMALL_STEP_SIZE_LAST_DISTANCE       5f      // How much minimium distance to allow on the last node
 #define EQ_MOVE_SMALL_STEP_DISTANCE_TO_END          0.25f   // If within this distance, end movement to current node
 #define EQ_MOVE_UNDER_WATER_SURFACE_SKIM_REDICTION  3.0f    // How far to reduce a position if a tested z position hit water
 #define EQ_MOVE_TEST_Z_DOWN_AMOUNT_FOR_WATER_TEST   10.0f   // How far to test down when looking for water in the Z testing
@@ -155,6 +156,10 @@ class Aura;
 #define EQ_FORAGE_TYPE_DRINK                        1
 #define EQ_FORAGE_TYPE_BAIT                         2
 #define EQ_FORAGE_TYPE_OTHER                        3
+
+#define EQ_CREATURE_CUSTOMDATA_RANGEDATTACK         "EQRangedAtk"
+#define EQ_CREATURE_CUSTOMDATA_UNSTICK              "EQUnstick"
+#define EQ_CREATURE_CUSTOMDATA_SOCIALAGGRO          "EQSocialAggro"
 
 class EverQuestCreatureOnkillReputation
 {
@@ -266,7 +271,7 @@ public:
     bool IsDualWielding = false;
 };
 
-class EverQuestCreatureRangedAttackState
+class EverQuestCreatureRangedAttackState : public DataMap::Base
 {
 public:
     float MinRange = 0.0f;
@@ -275,7 +280,7 @@ public:
     uint32 SwingTimerRemainingMS = 0;
 };
 
-class EverQuestCreatureUnstickState
+class EverQuestCreatureUnstickState : public DataMap::Base
 {
 public:
     float AnchorX = 0.0f;
@@ -286,7 +291,7 @@ public:
     uint32 TeleportAttemptsUsed = 0;
 };
 
-class EverQuestCreatureSocialAggroState
+class EverQuestCreatureSocialAggroState : public DataMap::Base
 {
 public:
     uint32 RecallTimerMS = 0;
@@ -647,9 +652,6 @@ public:
     unordered_map<ObjectGuid, vector<uint32>> PreloadedLootItemIDsByCreatureGUID;
     unordered_map<ObjectGuid, unordered_map<uint32, uint32>> PreloadedLootCountsByCreatureGUID;
     unordered_map<ObjectGuid, EverQuestLoadedCreatureEquippedVisualItems> VisualEquippedItemsByCreatureGUID;
-    unordered_map<ObjectGuid, EverQuestCreatureRangedAttackState> RangedAttackStateByCreatureGUID;
-    unordered_map<ObjectGuid, EverQuestCreatureUnstickState> UnstickStateByCreatureGUID;
-    unordered_map<ObjectGuid, EverQuestCreatureSocialAggroState> SocialAggroStateByCreatureGUID;
     unordered_set<ObjectGuid> CreaturesResolvingEQMeleeExtraAttacks;
     unordered_map<uint32, vector<EverQuestTransportShipTrigger>> ShipTriggersByTriggeringGameObjectTemplateEntryID;
     unordered_map<uint32, int> ShipWaitNodesByGameObjectTemplateEntryID;
@@ -748,24 +750,24 @@ public:
     bool IsCreatureDualWielding(ObjectGuid creatureGUID);
     uint32 GetEQNPCMeleeWeaponSkillForLevel(uint32 level);
     void TryDoCreatureEQMeleeExtraAttacks(Unit* attacker, Unit* victim);
-    void StoreCreatureRangedAttackState(ObjectGuid creatureGUID, float minRange, float maxRange, int32 damageModPct);
-    void RemoveCreatureRangedAttackState(ObjectGuid creatureGUID);
+    void StoreCreatureRangedAttackState(Creature* creature, float minRange, float maxRange, int32 damageModPct);
+    void RemoveCreatureRangedAttackState(Creature* creature);
     void UpdateCreatureRangedAttack(Creature* creature, uint32 diff);
-    void RemoveCreatureUnstickState(ObjectGuid creatureGUID);
+    void RemoveCreatureUnstickState(Creature* creature);
     void CalculateUnstickTeleportPosition(Creature* creature, Unit* victim, float& xOut, float& yOut, float& zOut);
     void UpdateCreatureUnstick(Creature* creature, uint32 diff);
     bool TryGetCustomSocialAggroScale(Creature* creature, float& scaleOut);
     void DoScaledSocialAggroSearch(Creature* caller, Unit* victim, float scale);
     void ApplyScaledCreatureSocialAggroOnEngage(Creature* creature, Unit* victim);
     void UpdateCreatureScaledSocialAggro(Creature* creature, uint32 diff);
-    void RemoveCreatureSocialAggroState(ObjectGuid creatureGUID);
+    void RemoveCreatureSocialAggroState(Creature* creature);
     void RemoveVisualEquippedItemForCreatureGUIDIfExists(Map* map, ObjectGuid creatureGUID, uint32 itemTemplateID);
     void LoadShipTriggerData();
     const vector<EverQuestTransportShipTrigger>& GetShipTriggersForShip(int triggeringGameObjectTemplateEntryID);
     void LoadCreatureInstanceData();
     const EverQuestCreatureInstance& GetCreatureInstanceData(uint32 creatureInstanceGUID);
     void LoadCreatureWaypointData();
-    const vector<EverQuestCreatureWaypoint> GetWaypoints(uint32 mapID, uint32 waypointListID);
+    const vector<EverQuestCreatureWaypoint>& GetWaypoints(uint32 mapID, uint32 waypointListID);
     void LoadForageData();
     const vector<EverQuestForageZoneItem>& GetForageZoneItemsInMap(uint32 mapID);
     void LoadZoneSafePointData();

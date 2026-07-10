@@ -60,9 +60,9 @@ public:
         uint32 mapID = creature->GetMap()->GetId();
         if (mapID >= EverQuest->ConfigSystemMapDBCIDMin && mapID <= EverQuest->ConfigSystemMapDBCIDMax)
             EverQuest->RemoveCreatureAsLoaded(mapID, creature);
-        EverQuest->RemoveCreatureRangedAttackState(creature->GetGUID());
-        EverQuest->RemoveCreatureUnstickState(creature->GetGUID());
-        EverQuest->RemoveCreatureSocialAggroState(creature->GetGUID());
+        EverQuest->RemoveCreatureRangedAttackState(creature);
+        EverQuest->RemoveCreatureUnstickState(creature);
+        EverQuest->RemoveCreatureSocialAggroState(creature);
     }
 
     void OnAllCreatureUpdate(Creature* creature, uint32 diff) override
@@ -150,7 +150,7 @@ private:
                 creature->SetSheath(SHEATH_STATE_RANGED);
         }
 
-        EverQuest->StoreCreatureRangedAttackState(creature->GetGUID(), minRange, maxRange, damageModPct);
+        EverQuest->StoreCreatureRangedAttackState(creature, minRange, maxRange, damageModPct);
     }
 
     void ApplyLootWornEffectAuras(Creature* creature)

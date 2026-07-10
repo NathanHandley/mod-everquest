@@ -2075,21 +2075,18 @@ void EverQuestMod::TryDoCreatureEQMeleeExtraAttacks(Unit* attacker, Unit* victim
     }
 }
 
-void EverQuestMod::StoreCreatureRangedAttackState(ObjectGuid creatureGUID, float minRange, float maxRange, int32 damageModPct)
+void EverQuestMod::StoreCreatureRangedAttackState(Creature* creature, float minRange, float maxRange, int32 damageModPct)
 {
-    EverQuestCreatureRangedAttackState state;
-    state.MinRange = minRange;
-    state.MaxRange = maxRange;
-    state.DamageModPct = damageModPct;
-    state.SwingTimerRemainingMS = 0; // Ready to fire as soon as a valid target is in range
-    std::lock_guard<std::mutex> lock(RuntimeStateMutex);
-    RangedAttackStateByCreatureGUID[creatureGUID] = state;
+    EverQuestCreatureRangedAttackState* state = creature->CustomData.GetDefault<EverQuestCreatureRangedAttackState>(EQ_CREATURE_CUSTOMDATA_RANGEDATTACK);
+    state->MinRange = minRange;
+    state->MaxRange = maxRange;
+    state->DamageModPct = damageModPct;
+    state->SwingTimerRemainingMS = 0; // Ready to fire as soon as a valid target is in range
 }
 
-void EverQuestMod::RemoveCreatureRangedAttackState(ObjectGuid creatureGUID)
+void EverQuestMod::RemoveCreatureRangedAttackState(Creature* creature)
 {
-    std::lock_guard<std::mutex> lock(RuntimeStateMutex);
-    RangedAttackStateByCreatureGUID.erase(creatureGUID);
+    creature->CustomData.Erase(EQ_CREATURE_CUSTOMDATA_RANGEDATTACK);
 }
 
 // Logic reference was TAKP's NPC::RangedAttack. Creature will always try to get in melee range, but shoot while going towards them
@@ -2100,14 +2097,9 @@ void EverQuestMod::UpdateCreatureRangedAttack(Creature* creature, uint32 diff)
     if (ConfigCombatSkillsRangedAttackEnabled == false || ConfigSystemRangedAttackSpellID == 0)
         return;
 
-    EverQuestCreatureRangedAttackState* state = nullptr;
-    {
-        std::lock_guard<std::mutex> lock(RuntimeStateMutex);
-        auto stateIt = RangedAttackStateByCreatureGUID.find(creature->GetGUID());
-        if (stateIt == RangedAttackStateByCreatureGUID.end())
-            return;
-        state = &stateIt->second;
-    }
+    EverQuestCreatureRangedAttackState* state = creature->CustomData.Get<EverQuestCreatureRangedAttackState>(EQ_CREATURE_CUSTOMDATA_RANGEDATTACK);
+    if (state == nullptr)
+        return;
 
     // Use creature swing for timing. Probably right.
     if (state->SwingTimerRemainingMS > diff)
@@ -2156,16 +2148,14 @@ void EverQuestMod::UpdateCreatureRangedAttack(Creature* creature, uint32 diff)
     uint32 swingTime = creature->GetAttackTime(BASE_ATTACK);
     if (swingTime < 1000)
         swingTime = 1000;
-    std::lock_guard<std::mutex> lock(RuntimeStateMutex);
-    auto stateAfterCastIt = RangedAttackStateByCreatureGUID.find(creature->GetGUID());
-    if (stateAfterCastIt != RangedAttackStateByCreatureGUID.end())
-        stateAfterCastIt->second.SwingTimerRemainingMS = swingTime;
+    EverQuestCreatureRangedAttackState* stateAfterCast = creature->CustomData.Get<EverQuestCreatureRangedAttackState>(EQ_CREATURE_CUSTOMDATA_RANGEDATTACK);
+    if (stateAfterCast != nullptr)
+        stateAfterCast->SwingTimerRemainingMS = swingTime;
 }
 
-void EverQuestMod::RemoveCreatureUnstickState(ObjectGuid creatureGUID)
+void EverQuestMod::RemoveCreatureUnstickState(Creature* creature)
 {
-    std::lock_guard<std::mutex> lock(RuntimeStateMutex);
-    UnstickStateByCreatureGUID.erase(creatureGUID);
+    creature->CustomData.Erase(EQ_CREATURE_CUSTOMDATA_UNSTICK);
 }
 
 void EverQuestMod::CalculateUnstickTeleportPosition(Creature* creature, Unit* victim, float& xOut, float& yOut, float& zOut)
@@ -2250,26 +2240,18 @@ void EverQuestMod::UpdateCreatureUnstick(Creature* creature, uint32 diff)
 
     if (eligible == false)
     {
-        bool wasSettling = false;
+        EverQuestCreatureUnstickState* existingState = creature->CustomData.Get<EverQuestCreatureUnstickState>(EQ_CREATURE_CUSTOMDATA_UNSTICK);
+        if (existingState != nullptr)
         {
-            std::lock_guard<std::mutex> lock(RuntimeStateMutex);
-            auto existingIt = UnstickStateByCreatureGUID.find(creature->GetGUID());
-            if (existingIt != UnstickStateByCreatureGUID.end())
-            {
-                wasSettling = existingIt->second.SettleRemainingMS > 0;
-                UnstickStateByCreatureGUID.erase(existingIt);
-            }
+            bool wasSettling = existingState->SettleRemainingMS > 0;
+            creature->CustomData.Erase(EQ_CREATURE_CUSTOMDATA_UNSTICK);
+            if (wasSettling == true)
+                creature->ClearUnitState(UNIT_STATE_NO_COMBAT_MOVEMENT);
         }
-        if (wasSettling == true)
-            creature->ClearUnitState(UNIT_STATE_NO_COMBAT_MOVEMENT);
         return;
     }
 
-    EverQuestCreatureUnstickState* state = nullptr;
-    {
-        std::lock_guard<std::mutex> lock(RuntimeStateMutex);
-        state = &UnstickStateByCreatureGUID[creature->GetGUID()];
-    }
+    EverQuestCreatureUnstickState* state = creature->CustomData.GetDefault<EverQuestCreatureUnstickState>(EQ_CREATURE_CUSTOMDATA_UNSTICK);
     // Take over 'cannot reach' to avoid early evades
     if (creature->CanNotReachTarget() == true)
         creature->SetCannotReachTarget();
@@ -2357,7 +2339,7 @@ void EverQuestMod::UpdateCreatureUnstick(Creature* creature, uint32 diff)
     {
         if (creature->AI() != nullptr)
             creature->AI()->EnterEvadeMode(CreatureAI::EVADE_REASON_NO_PATH);
-        RemoveCreatureUnstickState(creature->GetGUID());
+        RemoveCreatureUnstickState(creature);
     }
 }
 
@@ -2410,10 +2392,9 @@ void EverQuestMod::ApplyScaledCreatureSocialAggroOnEngage(Creature* creature, Un
     DoScaledSocialAggroSearch(creature, victim, scale);
 }
 
-void EverQuestMod::RemoveCreatureSocialAggroState(ObjectGuid creatureGUID)
+void EverQuestMod::RemoveCreatureSocialAggroState(Creature* creature)
 {
-    std::lock_guard<std::mutex> lock(RuntimeStateMutex);
-    SocialAggroStateByCreatureGUID.erase(creatureGUID);
+    creature->CustomData.Erase(EQ_CREATURE_CUSTOMDATA_SOCIALAGGRO);
 }
 
 void EverQuestMod::UpdateCreatureScaledSocialAggro(Creature* creature, uint32 diff)
@@ -2431,7 +2412,7 @@ void EverQuestMod::UpdateCreatureScaledSocialAggro(Creature* creature, uint32 di
 
     if (eligible == false)
     {
-        RemoveCreatureSocialAggroState(creature->GetGUID());
+        RemoveCreatureSocialAggroState(creature);
         return;
     }
 
@@ -2442,15 +2423,11 @@ void EverQuestMod::UpdateCreatureScaledSocialAggro(Creature* creature, uint32 di
     uint32 periodMS = sWorld->getIntConfig(CONFIG_CREATURE_FAMILY_ASSISTANCE_PERIOD);
     if (periodMS == 0)
     {
-        RemoveCreatureSocialAggroState(creature->GetGUID());
+        RemoveCreatureSocialAggroState(creature);
         return;
     }
 
-    EverQuestCreatureSocialAggroState* state = nullptr;
-    {
-        std::lock_guard<std::mutex> lock(RuntimeStateMutex);
-        state = &SocialAggroStateByCreatureGUID[creature->GetGUID()];
-    }
+    EverQuestCreatureSocialAggroState* state = creature->CustomData.GetDefault<EverQuestCreatureSocialAggroState>(EQ_CREATURE_CUSTOMDATA_SOCIALAGGRO);
     if (state->RecallTimerMS <= diff)
     {
         DoScaledSocialAggroSearch(creature, victim, scale);
@@ -2635,16 +2612,18 @@ void EverQuestMod::LoadCreatureWaypointData()
     }
 }
 
-const vector<EverQuestCreatureWaypoint> EverQuestMod::GetWaypoints(uint32 mapID, uint32 waypointListID)
+const vector<EverQuestCreatureWaypoint>& EverQuestMod::GetWaypoints(uint32 mapID, uint32 waypointListID)
 {
+    static const vector<EverQuestCreatureWaypoint> returnEmpty;
     auto outerIt = CreatureWaypointsByMapIDAndWaypointID.find(mapID);
     if (outerIt == CreatureWaypointsByMapIDAndWaypointID.end())
-        return {};
+        return returnEmpty;
     const unordered_map<uint32, vector<EverQuestCreatureWaypoint>>& innerMap = outerIt->second;
-    if (innerMap.find(waypointListID) == innerMap.end())
-        return {};
+    auto innerIt = innerMap.find(waypointListID);
+    if (innerIt == innerMap.end())
+        return returnEmpty;
 
-    return innerMap.at(waypointListID);
+    return innerIt->second;
 }
 
 void EverQuestMod::LoadForageData()
