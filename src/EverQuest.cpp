@@ -56,6 +56,7 @@ EverQuestMod::EverQuestMod() :
     ConfigSystemCreatureTemplateIDMin(0),
     ConfigSystemCreatureTemplateIDMax(0),
     ConfigSystemInvisVsUndeadDetectSpellID(0),
+    ConfigSystemLegacyAchievementID(0),
     ConfigDeathKnightsStartLikeOtherClasses(false),
     ConfigMapRestrictPlayersToNorrath(false),    
     ConfigQuestGrantExpOnRepeatCompletion(true),
@@ -137,6 +138,10 @@ bool EverQuestMod::LoadConfigurationSystemDataFromDB()
                 ConfigSystemGameObjectTemplateIDMax = (uint32)atoi(value.c_str());
             else if (key == "InvisVsUndeadDetectSpellID")
                 ConfigSystemInvisVsUndeadDetectSpellID = (uint32)atoi(value.c_str());
+            else if (key == "LegacyAchievementID")
+                ConfigSystemLegacyAchievementID = (uint32)atoi(value.c_str());
+            else if (key == "LegacyAchievementAccountCreatedBefore")
+                ConfigSystemLegacyAchievementAccountCreatedBefore = value;
             else if (key == "MapDBCIDMin")
                 ConfigSystemMapDBCIDMin = (uint32)atoi(value.c_str());
             else if (key == "MapDBCIDMax")
@@ -1846,6 +1851,28 @@ void EverQuestMod::ApplyAutoAddedClassItems(Player* player)
                 player->StoreNewItem(destPosition, itemID, true);
         }
     }
+}
+
+void EverQuestMod::GrantLegacyAchievementIfEligible(Player* player)
+{
+    if (ConfigSystemLegacyAchievementID == 0 || ConfigSystemLegacyAchievementAccountCreatedBefore.empty() == true)
+        return;
+    if (player->HasAchieved(ConfigSystemLegacyAchievementID) == true)
+        return;
+
+    AchievementEntry const* achievementEntry = sAchievementStore.LookupEntry(ConfigSystemLegacyAchievementID);
+    if (achievementEntry == nullptr)
+    {
+        LOG_ERROR("module.EverQuest", "EverQuestMod::GrantLegacyAchievementIfEligible error, no achievement with ID {} exists", ConfigSystemLegacyAchievementID);
+        return;
+    }
+
+    // Only grant to characters on accounts created before the configured date
+    uint32 accountID = player->GetSession()->GetAccountId();
+    QueryResult accountEligibleQueryResult = LoginDatabase.Query("SELECT 1 FROM account WHERE id = {} AND joindate < '{}'", accountID, ConfigSystemLegacyAchievementAccountCreatedBefore);
+    if (!accountEligibleQueryResult)
+        return;
+    player->CompletedAchievement(achievementEntry);
 }
 
 bool EverQuestMod::HasCreatePlayerData(uint8 raceID, uint8 classID)

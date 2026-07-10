@@ -38,7 +38,7 @@ static uint32 ConfigMaxSkillIDCheck = 1000;         // The highest level of skil
 class Unit;
 class Aura;
 
-#define EQ_MOD_VERSION                              39
+#define EQ_MOD_VERSION                              40
 
 #define EQ_EQCLASS_NONE                             0
 #define EQ_EQCLASS_WARRIOR                          1
@@ -571,6 +571,8 @@ public:
     uint32 ConfigSystemShipEntryTemplateIDMax;
     uint32 ConfigSystemInvisVsUndeadDetectSpellID;
     uint32 ConfigSystemRangedAttackSpellID;
+    uint32 ConfigSystemLegacyAchievementID;
+    string ConfigSystemLegacyAchievementAccountCreatedBefore;
 
     // Configs (from server file)
     bool ConfigMapRestrictPlayersToNorrath;
@@ -738,6 +740,7 @@ public:
     void LoadAutoAddItemsData();
     const list<uint32>& GetAutoAddItemsForClass(uint8 classID);
     void ApplyAutoAddedClassItems(Player* player);
+    void GrantLegacyAchievementIfEligible(Player* player);
     void LoadCreatureLootData();
     bool HasCreatureLootDataForCreatureTemplateEntryID(uint32 creatureTemplateEntryID);
     bool HasPreloadedLootItemIDsForCreatureGUID(ObjectGuid creatureGUID);

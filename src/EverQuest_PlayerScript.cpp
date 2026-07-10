@@ -487,6 +487,9 @@ public:
         if (EverQuest->ConfigSystemInvisVsUndeadDetectSpellID != 0 && player->HasAura(EverQuest->ConfigSystemInvisVsUndeadDetectSpellID) == false)
             player->CastSpell(player, EverQuest->ConfigSystemInvisVsUndeadDetectSpellID, true);
 
+        // Grant the legacy account feat of strength if the account is old enough
+        EverQuest->GrantLegacyAchievementIfEligible(player);
+
         // Grab any cast bard songs for the player
         if (EverQuest->ConfigBardMaxConcurrentSongs != 0)
         {
