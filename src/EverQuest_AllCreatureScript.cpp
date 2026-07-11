@@ -45,6 +45,7 @@ public:
                 return;
             }
             EverQuest->AddCreatureAsLoaded(mapID, creature);
+            EverQuest->SetupCreatureEmoteState(creature);
         }
         RestrictCreatureOwnedPetAggroRange(creature);
         SetVisualEquipment(creature);
@@ -63,6 +64,7 @@ public:
         EverQuest->RemoveCreatureRangedAttackState(creature);
         EverQuest->RemoveCreatureUnstickState(creature);
         EverQuest->RemoveCreatureSocialAggroState(creature);
+        EverQuest->RemoveCreatureEmoteState(creature);
     }
 
     void OnAllCreatureUpdate(Creature* creature, uint32 diff) override
@@ -72,6 +74,7 @@ public:
         EverQuest->UpdateCreatureRangedAttack(creature, diff);
         EverQuest->UpdateCreatureUnstick(creature, diff);
         EverQuest->UpdateCreatureScaledSocialAggro(creature, diff);
+        EverQuest->UpdateCreatureEmotes(creature, diff);
     }
 
 private:

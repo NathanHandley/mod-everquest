@@ -38,7 +38,7 @@ static uint32 ConfigMaxSkillIDCheck = 1000;         // The highest level of skil
 class Unit;
 class Aura;
 
-#define EQ_MOD_VERSION                              40
+#define EQ_MOD_VERSION                              41
 
 #define EQ_EQCLASS_NONE                             0
 #define EQ_EQCLASS_WARRIOR                          1
@@ -117,6 +117,27 @@ class Aura;
 #define EQ_KILLSPAWN_ACTION_DESPAWN                 1
 #define EQ_KILLSPAWN_ACTION_RESPAWNSELF             2
 
+#define EQ_CREATURE_EMOTE_EVENT_LEAVECOMBAT         0
+#define EQ_CREATURE_EMOTE_EVENT_ENTERCOMBAT         1
+#define EQ_CREATURE_EMOTE_EVENT_ONDEATH             2
+#define EQ_CREATURE_EMOTE_EVENT_AFTERDEATH          3
+#define EQ_CREATURE_EMOTE_EVENT_HAILED              4
+#define EQ_CREATURE_EMOTE_EVENT_KILLEDPC            5   // Was #9 in TAKP, but made sense here
+#define EQ_CREATURE_EMOTE_EVENT_KILLEDNPC           6
+#define EQ_CREATURE_EMOTE_EVENT_ONSPAWN             7
+#define EQ_CREATURE_EMOTE_EVENT_ONDESPAWN           8
+#define EQ_CREATURE_EMOTE_EVENT_RANDOMTIMER         10  // From EQ quest scripts, Param1/Param2 is min/max interval in MS
+#define EQ_CREATURE_EMOTE_EVENT_PROXIMITY           11  // Param1 = radius in yards, Param2 = cooldown in MS
+
+// Same as TAKP's EQ::constants::EmoteTypes
+#define EQ_CREATURE_EMOTE_TYPE_SAY                  0
+#define EQ_CREATURE_EMOTE_TYPE_EMOTE                1
+#define EQ_CREATURE_EMOTE_TYPE_SHOUT                2
+#define EQ_CREATURE_EMOTE_TYPE_PROXIMITY            3
+
+#define EQ_CREATURE_EMOTE_PROXIMITY_CHECK_MS        1000   // How often a proximity emote creature searches for a nearby player
+#define EQ_CREATURE_EMOTE_PROXIMITY_MIN_COOLDOWN_MS 5000   // Minimum time between next proxy emote (avoids spam)
+
 #define EQ_NONE                                     -1
 #define EQ_GRID_CIRCULAR                            0
 #define EQ_GRID_RANDOM_10                           1
@@ -160,6 +181,7 @@ class Aura;
 #define EQ_CREATURE_CUSTOMDATA_RANGEDATTACK         "EQRangedAtk"
 #define EQ_CREATURE_CUSTOMDATA_UNSTICK              "EQUnstick"
 #define EQ_CREATURE_CUSTOMDATA_SOCIALAGGRO          "EQSocialAggro"
+#define EQ_CREATURE_CUSTOMDATA_EMOTE                "EQEmote"
 
 class EverQuestCreatureOnkillReputation
 {
@@ -295,6 +317,26 @@ class EverQuestCreatureSocialAggroState : public DataMap::Base
 {
 public:
     uint32 RecallTimerMS = 0;
+};
+
+class EverQuestCreatureEmote
+{
+public:
+    uint8 EventType = 0;
+    uint8 EmoteType = 0;
+    float ChancePct = 100;
+    int32 Param1 = 0;
+    int32 Param2 = 0;
+    string EmoteText;
+};
+
+class EverQuestCreatureEmoteState : public DataMap::Base
+{
+public:
+    bool WasAlive = false;
+    uint32 RandomTimerRemainingMS = 0;
+    uint32 ProximityCheckRemainingMS = 0;
+    uint32 ProximityCooldownRemainingMS = 0;
 };
 
 class EverQuestItemTemplate
@@ -602,6 +644,8 @@ public:
     uint32 ConfigEvadeUnstickStepPercent;
     bool ConfigCharmCreatureCharmLimitsEnabled;
     float ConfigCharmUncharmedPlayerCheckRadius;
+    bool ConfigCreatureEmotesEnabled;
+    bool ConfigCreatureEmotesAmbientEnabled;
     uint32 ConfigIllusionGearRefreshTimeInMS;
     bool ConfigShowClassMessageOnLogin;
     float ConfigSecondaryExpPoolGainPercent;
@@ -622,6 +666,7 @@ public:
     unordered_map<uint32, EverQuestCreature> CreaturesByTemplateID;
     unordered_map<uint32, list<EverQuestCreatureOnkillReputation>> CreatureOnkillReputationsByCreatureTemplateID;
     unordered_map<uint32, vector<EverQuestCreatureKillSpawn>> CreatureKillSpawnsByTriggerCreatureTemplateID;
+    unordered_map<uint32, vector<EverQuestCreatureEmote>> CreatureEmotesByCreatureTemplateID;
 
     std::mutex PendingKillSpawnActionsMutex;
     unordered_map<uint32, vector<EverQuestPendingKillSpawnAction>> PendingKillSpawnActionsByMapID;
@@ -680,6 +725,13 @@ public:
     void LoadCreatureSpawnPoints();
     bool ShouldDespawnCreatureDueToSpawnRestrictions(int mapID, Creature* creature);
     void LoadCreatureKillSpawnData();
+    void LoadCreatureEmoteData();
+    bool DoCreatureEmoteEvent(Creature* creature, uint8 emoteEventType, Unit* target);
+    void EmitCreatureEmote(Creature* creature, const EverQuestCreatureEmote& emote, Unit* target);
+    string FormatCreatureEmoteText(Creature* creature, Unit* target, const string& text);
+    void SetupCreatureEmoteState(Creature* creature);
+    void RemoveCreatureEmoteState(Creature* creature);
+    void UpdateCreatureEmotes(Creature* creature, uint32 diff);
     void ProcessKillSpawnsForCreatureDeath(Creature* deadCreature, Unit* killer);
     void ProcessTriggeredQuestKillSpawnsForCreatureDeath(Creature* deadCreature, Unit* killer);
     void TriggerQuestKillSpawn(uint32 mapID, const EverQuestQuestReaction& questReaction);

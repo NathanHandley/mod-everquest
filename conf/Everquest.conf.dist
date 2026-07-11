@@ -243,6 +243,26 @@ EverQuest.Charm.CreatureCharmLimitsEnabled = True
 EverQuest.Charm.UncharmedPlayerCheckRadius = 100
 
 ###################################################################################################
+# Creature Emote Settings (EQ-faithful creature says/emotes/yells)
+#
+# 	EverQuest.CreatureEmotes.Enabled
+#		If true, creatures speak their EQ npc_emotes lines on events: enter combat, leave combat,
+#		death, killing a player, spawn, despawn, and being talked to (In Wow it's a Gossip, in EQ
+#       it's a "hail")
+#	Default: True
+#
+# 	EverQuest.CreatureEmotes.AmbientEnabled
+#		If true, ambient speech extracted from the EQ quest scripts also plays: timed roamer statements
+#		(like Nillipuss in Rivervale) and proximity-triggered speech (like the invisible 'trigger'
+#		creatures in Chardok).  Requires EverQuest.CreatureEmotes.Enabled
+#	Default: True
+#
+###################################################################################################
+
+EverQuest.CreatureEmotes.Enabled = True
+EverQuest.CreatureEmotes.AmbientEnabled = True
+
+###################################################################################################
 #
 # 	EverQuest.Illusion.GearRefreshTimeInMS
 #		How often, in milliseconds, an illusioned player's gear-matched display is revalidated. This

@@ -81,6 +81,8 @@ EverQuestMod::EverQuestMod() :
     ConfigEvadeUnstickStepPercent(25),
     ConfigCharmCreatureCharmLimitsEnabled(true),
     ConfigCharmUncharmedPlayerCheckRadius(100.0f),
+    ConfigCreatureEmotesEnabled(true),
+    ConfigCreatureEmotesAmbientEnabled(true),
     ConfigIllusionGearRefreshTimeInMS(1000),
     ConfigShowClassMessageOnLogin(true),
     ConfigSecondaryExpPoolGainPercent(25.0f),
@@ -239,6 +241,10 @@ void EverQuestMod::LoadConfigurationFile()
     // Charm
     ConfigCharmCreatureCharmLimitsEnabled = sConfigMgr->GetOption<bool>("EverQuest.Charm.CreatureCharmLimitsEnabled", true);
     ConfigCharmUncharmedPlayerCheckRadius = sConfigMgr->GetOption<float>("EverQuest.Charm.UncharmedPlayerCheckRadius", 100.0f);
+
+    // Creature emotes
+    ConfigCreatureEmotesEnabled = sConfigMgr->GetOption<bool>("EverQuest.CreatureEmotes.Enabled", true);
+    ConfigCreatureEmotesAmbientEnabled = sConfigMgr->GetOption<bool>("EverQuest.CreatureEmotes.AmbientEnabled", true);
 
     // Illusion
     ConfigIllusionGearRefreshTimeInMS = sConfigMgr->GetOption<uint32>("EverQuest.Illusion.GearRefreshTimeInMS", 1000);
@@ -423,6 +429,306 @@ void EverQuestMod::LoadCreatureKillSpawnData()
     }
 }
 
+void EverQuestMod::LoadCreatureEmoteData()
+{
+    CreatureEmotesByCreatureTemplateID.clear();
+
+    QueryResult queryResult = WorldDatabase.Query("SELECT CreatureTemplateID, EventType, EmoteType, ChancePct, Param1, Param2, EmoteText FROM mod_everquest_creature_emote ORDER BY CreatureTemplateID, ID;");
+    if (queryResult)
+    {
+        do
+        {
+            Field* fields = queryResult->Fetch();
+            uint32 creatureTemplateID = fields[0].Get<uint32>();
+            EverQuestCreatureEmote emote;
+            emote.EventType = fields[1].Get<uint8>();
+            emote.EmoteType = fields[2].Get<uint8>();
+            emote.ChancePct = fields[3].Get<float>();
+            emote.Param1 = fields[4].Get<int32>();
+            emote.Param2 = fields[5].Get<int32>();
+            emote.EmoteText = fields[6].Get<string>();
+            CreatureEmotesByCreatureTemplateID[creatureTemplateID].push_back(emote);
+        } while (queryResult->NextRow());
+    }
+}
+
+static void ReplaceAllInString(string& subject, const string& token, const string& replacement)
+{
+    size_t tokenPosition = subject.find(token);
+    while (tokenPosition != string::npos)
+    {
+        subject.replace(tokenPosition, token.length(), replacement);
+        tokenPosition = subject.find(token, tokenPosition + replacement.length());
+    }
+}
+
+static string GetRaceNameForPlayerRaceID(uint8 raceID)
+{
+    switch (raceID)
+    {
+        case 1: return "Human";
+        case 2: return "Orc";
+        case 3: return "Dwarf";
+        case 4: return "Night Elf";
+        case 5: return "Undead";
+        case 6: return "Tauren";
+        case 7: return "Gnome";
+        case 8: return "Troll";
+        case 10: return "Blood Elf";
+        case 11: return "Draenei";
+        default: return "race";
+    }
+}
+
+// Substitution tokens and no-target fallbacks do the same as TAKP's NPC::DoNPCEmote.
+// The 'M' tokens describe the speaking creature, the others describe the target (nearly always a player)
+// TODO: Consider preprocessing this to minimumize runtime performance cost
+string EverQuestMod::FormatCreatureEmoteText(Creature* creature, Unit* target, const string& text)
+{
+    string formattedText = text;
+
+    // Note: $MRP must replace before $MR, and $RP before $R, since the short tokens are prefixes of the long ones
+    ReplaceAllInString(formattedText, "$MN", creature->GetName());
+    ReplaceAllInString(formattedText, "$MRP", "creatures");
+    ReplaceAllInString(formattedText, "$MR", "creature");
+    ReplaceAllInString(formattedText, "$MC", "creature");
+    if (target != nullptr && target->IsPlayer() == true)
+    {
+        Player* targetPlayer = target->ToPlayer();
+        ReplaceAllInString(formattedText, "$N", targetPlayer->GetName());
+        ReplaceAllInString(formattedText, "$RP", GetRaceNameForPlayerRaceID(targetPlayer->getRace()) + "s");
+        ReplaceAllInString(formattedText, "$R", GetRaceNameForPlayerRaceID(targetPlayer->getRace()));
+        // Drop the ' (WAR)' style abbreviation suffix from the class name since that looks funny
+        string eqClassName = GetEQClassStringFromID(GetClassMapForWOWClassID(targetPlayer->getClass()).EQClassIDBase);
+        size_t abbreviationPosition = eqClassName.find(" (");
+        if (abbreviationPosition != string::npos)
+            eqClassName = eqClassName.substr(0, abbreviationPosition);
+        if (eqClassName.length() == 0)
+            eqClassName = "class";
+        ReplaceAllInString(formattedText, "$C", eqClassName);
+    }
+    else
+    {
+        ReplaceAllInString(formattedText, "$N", "foe");
+        ReplaceAllInString(formattedText, "$RP", "races");
+        ReplaceAllInString(formattedText, "$R", "race");
+        ReplaceAllInString(formattedText, "$C", "class");
+    }
+    return formattedText;
+}
+
+void EverQuestMod::EmitCreatureEmote(Creature* creature, const EverQuestCreatureEmote& emote, Unit* target)
+{
+    string formattedText = FormatCreatureEmoteText(creature, target, emote.EmoteText);
+
+    // Some emotes need the name added since in WoW they won't automatically append it
+    bool isInvisibleTrigger = (creature->GetCreatureTemplate()->flags_extra & CREATURE_FLAG_EXTRA_TRIGGER) != 0;
+    switch (emote.EmoteType)
+    {
+        case EQ_CREATURE_EMOTE_TYPE_EMOTE:
+        {
+            creature->TextEmote(creature->GetName() + " " + formattedText, target);
+        } break;
+        case EQ_CREATURE_EMOTE_TYPE_SHOUT:
+        {
+            if (isInvisibleTrigger == true)
+                creature->TextEmote(creature->GetName() + " shouts, '" + formattedText + "'", target);
+            else
+                creature->Yell(formattedText, LANG_UNIVERSAL, target);
+        } break;
+        case EQ_CREATURE_EMOTE_TYPE_PROXIMITY:
+        {
+            // In EQ this was raw text (no speaker name) sent only to nearby players, so use a boss emote
+            creature->TextEmote(formattedText, target, true);
+        } break;
+        default:
+        {
+            if (isInvisibleTrigger == true)
+                creature->TextEmote(creature->GetName() + " says, '" + formattedText + "'", target);
+            else
+                creature->Say(formattedText, LANG_UNIVERSAL, target);
+        } break;
+    }
+}
+
+// This is like TAKP's NPC::GetNPCEmote
+bool EverQuestMod::DoCreatureEmoteEvent(Creature* creature, uint8 emoteEventType, Unit* target)
+{
+    if (ConfigCreatureEmotesEnabled == false)
+        return false;
+    if (creature == nullptr)
+        return false;
+    unordered_map<uint32, vector<EverQuestCreatureEmote>>::const_iterator emoteIter = CreatureEmotesByCreatureTemplateID.find(creature->GetEntry());
+    if (emoteIter == CreatureEmotesByCreatureTemplateID.end())
+        return false;
+
+    vector<const EverQuestCreatureEmote*> matchingEmotes;
+    for (const EverQuestCreatureEmote& emote : emoteIter->second)
+        if (emote.EventType == emoteEventType)
+            matchingEmotes.push_back(&emote);
+    if (matchingEmotes.empty() == true)
+        return false;
+
+    const EverQuestCreatureEmote* chosenEmote = matchingEmotes[urand(0, matchingEmotes.size() - 1)];
+    if (chosenEmote->ChancePct < 100 && roll_chance_f(chosenEmote->ChancePct) == false)
+        return false;
+    EmitCreatureEmote(creature, *chosenEmote, target);
+    return true;
+}
+
+// Only creatures with spawn, timer, or proximity emote lines get tick state
+void EverQuestMod::SetupCreatureEmoteState(Creature* creature)
+{
+    if (ConfigCreatureEmotesEnabled == false)
+        return;
+    unordered_map<uint32, vector<EverQuestCreatureEmote>>::const_iterator emoteIter = CreatureEmotesByCreatureTemplateID.find(creature->GetEntry());
+    if (emoteIter == CreatureEmotesByCreatureTemplateID.end())
+        return;
+
+    bool hasOnSpawnEmote = false;
+    bool hasRandomTimerEmote = false;
+    bool hasProximityEmote = false;
+    uint32 randomTimerMinMS = 0;
+    uint32 randomTimerMaxMS = 0;
+    for (const EverQuestCreatureEmote& emote : emoteIter->second)
+    {
+        if (emote.EventType == EQ_CREATURE_EMOTE_EVENT_ONSPAWN)
+            hasOnSpawnEmote = true;
+        else if (emote.EventType == EQ_CREATURE_EMOTE_EVENT_RANDOMTIMER)
+        {
+            hasRandomTimerEmote = true;
+            randomTimerMinMS = (uint32)emote.Param1;
+            randomTimerMaxMS = (uint32)emote.Param2;
+        }
+        else if (emote.EventType == EQ_CREATURE_EMOTE_EVENT_PROXIMITY)
+            hasProximityEmote = true;
+    }
+    if (hasOnSpawnEmote == false && hasRandomTimerEmote == false && hasProximityEmote == false)
+        return;
+
+    EverQuestCreatureEmoteState* state = creature->CustomData.GetDefault<EverQuestCreatureEmoteState>(EQ_CREATURE_CUSTOMDATA_EMOTE);
+    state->WasAlive = creature->IsAlive();
+    state->RandomTimerRemainingMS = 0;
+    state->ProximityCheckRemainingMS = 0;
+    state->ProximityCooldownRemainingMS = 0;
+    if (hasRandomTimerEmote == true)
+    {
+        if (randomTimerMaxMS < randomTimerMinMS)
+            randomTimerMaxMS = randomTimerMinMS;
+        state->RandomTimerRemainingMS = urand(randomTimerMinMS, randomTimerMaxMS);
+    }
+    if (hasProximityEmote == true)
+        state->ProximityCheckRemainingMS = EQ_CREATURE_EMOTE_PROXIMITY_CHECK_MS;
+    if (state->WasAlive == true)
+        DoCreatureEmoteEvent(creature, EQ_CREATURE_EMOTE_EVENT_ONSPAWN, nullptr);
+}
+
+void EverQuestMod::RemoveCreatureEmoteState(Creature* creature)
+{
+    creature->CustomData.Erase(EQ_CREATURE_CUSTOMDATA_EMOTE);
+}
+
+void EverQuestMod::UpdateCreatureEmotes(Creature* creature, uint32 diff)
+{
+    if (creature == nullptr)
+        return;
+    if (ConfigCreatureEmotesEnabled == false)
+        return;
+    EverQuestCreatureEmoteState* state = creature->CustomData.Get<EverQuestCreatureEmoteState>(EQ_CREATURE_CUSTOMDATA_EMOTE);
+    if (state == nullptr)
+        return;
+
+    // Normal respawns and kill-spawn 'respawnself' never pass back through OnCreatureAddWorld, so catch the dead-to-alive transition here for the OnSpawn emote
+    bool isAlive = creature->IsAlive();
+    if (isAlive == true && state->WasAlive == false)
+        DoCreatureEmoteEvent(creature, EQ_CREATURE_EMOTE_EVENT_ONSPAWN, nullptr);
+    state->WasAlive = isAlive;
+    if (isAlive == false)
+        return;
+    if (ConfigCreatureEmotesAmbientEnabled == false)
+        return;
+    if (creature->IsInCombat() == true)
+        return;
+
+    // Timed roamer utterances
+    if (state->RandomTimerRemainingMS > 0)
+    {
+        if (state->RandomTimerRemainingMS > diff)
+            state->RandomTimerRemainingMS -= diff;
+        else
+        {
+            uint32 nextTimerMinMS = 0;
+            uint32 nextTimerMaxMS = 0;
+            unordered_map<uint32, vector<EverQuestCreatureEmote>>::const_iterator emoteIter = CreatureEmotesByCreatureTemplateID.find(creature->GetEntry());
+            if (emoteIter != CreatureEmotesByCreatureTemplateID.end())
+            {
+                vector<const EverQuestCreatureEmote*> timerEmotes;
+                for (const EverQuestCreatureEmote& emote : emoteIter->second)
+                    if (emote.EventType == EQ_CREATURE_EMOTE_EVENT_RANDOMTIMER)
+                        timerEmotes.push_back(&emote);
+                if (timerEmotes.empty() == false)
+                {
+                    const EverQuestCreatureEmote* chosenEmote = timerEmotes[urand(0, timerEmotes.size() - 1)];
+                    if (chosenEmote->ChancePct >= 100 || roll_chance_f(chosenEmote->ChancePct) == true)
+                        EmitCreatureEmote(creature, *chosenEmote, nullptr);
+                    nextTimerMinMS = (uint32)chosenEmote->Param1;
+                    nextTimerMaxMS = (uint32)chosenEmote->Param2;
+                }
+            }
+            if (nextTimerMaxMS < nextTimerMinMS)
+                nextTimerMaxMS = nextTimerMinMS;
+            if (nextTimerMinMS == 0 && nextTimerMaxMS == 0)
+                return;
+            state->RandomTimerRemainingMS = urand(nextTimerMinMS, nextTimerMaxMS);
+        }
+    }
+
+    // Proximity speech (when you walk up to them)
+    if (state->ProximityCheckRemainingMS > 0)
+    {
+        if (state->ProximityCooldownRemainingMS > 0)
+        {
+            if (state->ProximityCooldownRemainingMS > diff)
+                state->ProximityCooldownRemainingMS -= diff;
+            else
+                state->ProximityCooldownRemainingMS = 0;
+        }
+        if (state->ProximityCheckRemainingMS > diff)
+            state->ProximityCheckRemainingMS -= diff;
+        else
+        {
+            state->ProximityCheckRemainingMS = EQ_CREATURE_EMOTE_PROXIMITY_CHECK_MS;
+            if (state->ProximityCooldownRemainingMS == 0)
+            {
+                unordered_map<uint32, vector<EverQuestCreatureEmote>>::const_iterator emoteIter = CreatureEmotesByCreatureTemplateID.find(creature->GetEntry());
+                if (emoteIter != CreatureEmotesByCreatureTemplateID.end())
+                {
+                    vector<const EverQuestCreatureEmote*> proximityEmotes;
+                    for (const EverQuestCreatureEmote& emote : emoteIter->second)
+                        if (emote.EventType == EQ_CREATURE_EMOTE_EVENT_PROXIMITY)
+                            proximityEmotes.push_back(&emote);
+                    if (proximityEmotes.empty() == false)
+                    {
+                        const EverQuestCreatureEmote* chosenEmote = proximityEmotes[urand(0, proximityEmotes.size() - 1)];
+                        Player* nearbyPlayer = creature->SelectNearestPlayer((float)chosenEmote->Param1);
+                        if (nearbyPlayer != nullptr && nearbyPlayer->IsAlive() == true && nearbyPlayer->IsGameMaster() == false)
+                        {
+                            if (chosenEmote->ChancePct >= 100 || roll_chance_f(chosenEmote->ChancePct) == true)
+                                EmitCreatureEmote(creature, *chosenEmote, nearbyPlayer);
+                            uint32 cooldownMS = (uint32)chosenEmote->Param2;
+                            if (cooldownMS < EQ_CREATURE_EMOTE_PROXIMITY_MIN_COOLDOWN_MS)
+                                cooldownMS = EQ_CREATURE_EMOTE_PROXIMITY_MIN_COOLDOWN_MS;
+                            EverQuestCreatureEmoteState* stateAfterEmote = creature->CustomData.Get<EverQuestCreatureEmoteState>(EQ_CREATURE_CUSTOMDATA_EMOTE);
+                            if (stateAfterEmote != nullptr)
+                                stateAfterEmote->ProximityCooldownRemainingMS = cooldownMS;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 bool EverQuestMod::HasAliveCreatureWithEntryInMap(uint32 mapID, uint32 creatureTemplateID, Creature* ignoreCreature)
 {
     std::lock_guard<std::mutex> lock(RuntimeStateMutex);
@@ -604,12 +910,16 @@ void EverQuestMod::ExecuteKillSpawnAction(Map* map, EverQuestPendingKillSpawnAct
                         nearestDistance = curDistance;
                     }
                 }
+                DoCreatureEmoteEvent(nearestCreature, EQ_CREATURE_EMOTE_EVENT_ONDESPAWN, nullptr);
                 nearestCreature->DespawnOrUnsummon();
             }
             else
             {
                 for (Creature* creature : despawnCandidates)
+                {
+                    DoCreatureEmoteEvent(creature, EQ_CREATURE_EMOTE_EVENT_ONDESPAWN, nullptr);
                     creature->DespawnOrUnsummon();
+                }
             }
         } break;
         case EQ_KILLSPAWN_ACTION_RESPAWNSELF:
@@ -1479,9 +1789,22 @@ bool EverQuestMod::HandleGossipHello(Player* player, Creature* creature)
 {
     if (IsEnabled == false)
         return false;
+
+    // Talking to the creature is the closest analog to saying 'Hail' in EQ
+    bool firedHailedEmote = DoCreatureEmoteEvent(creature, EQ_CREATURE_EMOTE_EVENT_HAILED, player);
+
     unordered_map<uint32, vector<EverQuestGossipReaction>>::const_iterator gossipReactionsIterator = GossipReactionsByGossipCreatureTemplateID.find(creature->GetEntry());
     if (gossipReactionsIterator == GossipReactionsByGossipCreatureTemplateID.end())
+    {
+        // Creatures that only exist as gossip targets for a hailed emote shouldn't open an empty gossip window, but any creature with a real role should fall through to its normal handling
+        if (firedHailedEmote == true && creature->IsQuestGiver() == false && creature->IsVendor() == false && creature->IsTrainer() == false
+            && creature->HasNpcFlag(UNIT_NPC_FLAG_BANKER) == false && creature->HasNpcFlag(UNIT_NPC_FLAG_STABLEMASTER) == false && creature->HasNpcFlag(UNIT_NPC_FLAG_INNKEEPER) == false)
+        {
+            CloseGossipMenuFor(player);
+            return true;
+        }
         return false;
+    }
 
     ClearGossipMenuFor(player);
     if (creature->IsQuestGiver() == true)
@@ -1547,7 +1870,8 @@ bool EverQuestMod::HandleGossipSelect(Player* player, Creature* creature, uint32
         } break;
         case EQ_QUEST_REACTION_EMOTE:
         {
-            creature->TextEmote(FormatGossipTextForPlayer(player, gossipReaction.SayText), player);
+            // Monster emote text renders raw on the client (no speaker name), so bake the name in
+            creature->TextEmote(creature->GetName() + " " + FormatGossipTextForPlayer(player, gossipReaction.SayText), player);
         } break;
         case EQ_QUEST_REACTION_YELL:
         {
@@ -1576,7 +1900,10 @@ bool EverQuestMod::HandleGossipSelect(Player* player, Creature* creature, uint32
                 EnqueuePendingKillSpawnAction(map->GetId(), pendingAction);
             }
             else if (gossipReaction.TargetCreatureTemplateID == creature->GetEntry())
+            {
+                DoCreatureEmoteEvent(creature, EQ_CREATURE_EMOTE_EVENT_ONDESPAWN, nullptr);
                 creature->DespawnOrUnsummon(0ms);
+            }
             else
                 DespawnCreature(gossipReaction.TargetCreatureTemplateID, map);
         } break;
@@ -3163,7 +3490,10 @@ void EverQuestMod::DespawnCreature(uint32 entryID, Map* map)
     vector<Creature*> loadedCreatures = GetLoadedCreaturesWithEntryID(map->GetId(), entryID);
     for (Creature* creature : loadedCreatures)
         if (creature != nullptr)
+        {
+            DoCreatureEmoteEvent(creature, EQ_CREATURE_EMOTE_EVENT_ONDESPAWN, nullptr);
             creature->DespawnOrUnsummon(0ms);
+        }
 }
 
 void EverQuestMod::MakeCreatureAttackPlayer(uint32 entryID, Map* map, Player* player)

@@ -60,6 +60,18 @@ public:
         return true;
     }
 
+    void OnPlayerKilledByCreature(Creature* killer, Player* killed) override
+    {
+        if (EverQuest->IsEnabled == false)
+            return;
+        if (killer == nullptr || killed == nullptr)
+            return;
+
+        // TAKP fires both its 'KilledPC' and 'Killed' emote events when an NPC kills a player, and the converter folds those together into KilledPC
+        if (killer->IsPet() == false && killer->IsControlledByPlayer() == false)
+            EverQuest->DoCreatureEmoteEvent(killer, EQ_CREATURE_EMOTE_EVENT_KILLEDPC, killed);
+    }
+
     bool OnPlayerCanEquipItem(Player* player, uint8 /*slot*/, uint16& /*dest*/, Item* pItem, bool /*swap*/, bool not_loading) override
     {
         if (EverQuest->IsEnabled == false)

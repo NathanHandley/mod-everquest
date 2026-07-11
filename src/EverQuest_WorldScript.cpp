@@ -52,6 +52,7 @@ public:
         EverQuest->LoadCreatureData();
         EverQuest->LoadCreatureSpawnPoints();
         EverQuest->LoadCreatureKillSpawnData();
+        EverQuest->LoadCreatureEmoteData();
         EverQuest->LoadCreatureOnkillReputations();
         EverQuest->LoadItemTemplateData();
         EverQuest->LoadSpellData();

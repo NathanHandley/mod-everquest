@@ -85,6 +85,10 @@ public:
         if (creature == nullptr)
             return;
         EverQuest->ApplyScaledCreatureSocialAggroOnEngage(creature, victim);
+
+        // Enter combat emotes skip pets (like TAKP's EnterCombat DoNPCEmote)
+        if (creature->IsPet() == false && creature->IsControlledByPlayer() == false)
+            EverQuest->DoCreatureEmoteEvent(creature, EQ_CREATURE_EMOTE_EVENT_ENTERCOMBAT, victim);
     }
 
     void OnUnitDeath(Unit* unit, Unit* killer) override
@@ -99,6 +103,17 @@ public:
         uint32 mapID = creature->GetMapId();
         if (mapID < EverQuest->ConfigSystemMapDBCIDMin || mapID > EverQuest->ConfigSystemMapDBCIDMax)
             return;
+
+        // TAKP fires 'OnDeath' at death and 'AfterDeath' right after the corpse forms, so both fire here in order
+        EverQuest->DoCreatureEmoteEvent(creature, EQ_CREATURE_EMOTE_EVENT_ONDEATH, killer);
+        EverQuest->DoCreatureEmoteEvent(creature, EQ_CREATURE_EMOTE_EVENT_AFTERDEATH, killer);
+        if (killer != nullptr && killer != unit && killer->IsCreature() == true)
+        {
+            Creature* killerCreature = killer->ToCreature();
+            if (killerCreature->IsPet() == false && killerCreature->IsControlledByPlayer() == false)
+                EverQuest->DoCreatureEmoteEvent(killerCreature, EQ_CREATURE_EMOTE_EVENT_KILLEDNPC, creature);
+        }
+
         EverQuest->ProcessKillSpawnsForCreatureDeath(creature, killer);
         EverQuest->ProcessTriggeredQuestKillSpawnsForCreatureDeath(creature, killer);
     }
@@ -115,6 +130,10 @@ public:
         uint32 mapID = creature->GetMapId();
         if (mapID < EverQuest->ConfigSystemMapDBCIDMin || mapID > EverQuest->ConfigSystemMapDBCIDMax)
             return;
+
+        // Leaving combat (it's killed or evades) is the closest thing to TAKP's "LeaveCombat" emote event
+        if (creature->IsPet() == false && creature->IsControlledByPlayer() == false)
+            EverQuest->DoCreatureEmoteEvent(creature, EQ_CREATURE_EMOTE_EVENT_LEAVECOMBAT, nullptr);
 
         // When a creature evades, let the player break charm so they aren't stuck
         Unit* charmed = creature->GetCharm();
