@@ -46,8 +46,12 @@ public:
             }
             EverQuest->AddCreatureAsLoaded(mapID, creature);
             EverQuest->SetupCreatureEmoteState(creature);
+            RestrictCreatureOwnedPetAggroRange(creature);
         }
-        RestrictCreatureOwnedPetAggroRange(creature);
+
+        uint32 entryID = creature->GetEntry();
+        if (entryID < EverQuest->ConfigSystemCreatureTemplateIDMin || entryID > EverQuest->ConfigSystemCreatureTemplateIDMax)
+            return;
         SetVisualEquipment(creature);
         ApplyLootWornEffectAuras(creature);
         SetupRangedAttack(creature);
@@ -71,6 +75,9 @@ public:
     void OnAllCreatureUpdate(Creature* creature, uint32 diff) override
     {
         if (EverQuest->IsEnabled == false)
+            return;
+        uint32 entryID = creature->GetEntry();
+        if (entryID < EverQuest->ConfigSystemCreatureTemplateIDMin || entryID > EverQuest->ConfigSystemCreatureTemplateIDMax)
             return;
         EverQuest->UpdateCreatureRangedAttack(creature, diff);
         EverQuest->UpdateCreatureUnstick(creature, diff);

@@ -73,9 +73,18 @@ private:
 public:
     EverQuest_TransportScript() : TransportScript("EverQuest_TransportScript") {}
 
+    bool IsEQShipEntry(uint32 gameObjectTemplateEntryID)
+    {
+        if (gameObjectTemplateEntryID < EverQuest->ConfigSystemShipEntryTemplateIDMin || gameObjectTemplateEntryID > EverQuest->ConfigSystemShipEntryTemplateIDMax)
+            return false;
+        return true;
+    }
+
     void OnRelocate(Transport* transport, uint32 waypointId, uint32 /*mapId*/, float /*x*/, float /*y*/, float /*z*/) override
     {
         if (EverQuest->IsEnabled == false)
+            return;
+        if (IsEQShipEntry(transport->GetEntry()) == false)
             return;
 
         // Pause any triggered ships
@@ -112,6 +121,11 @@ public:
 
     void OnUpdate(Transport* transport, uint32 /*diff*/) override
     {
+        if (EverQuest->IsEnabled == false)
+            return;
+        if (IsEQShipEntry(transport->GetEntry()) == false)
+            return;
+
         // Force any needed client states
         {
             std::lock_guard<std::mutex> lock(PendingResyncMutex);

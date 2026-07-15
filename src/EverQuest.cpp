@@ -2516,6 +2516,13 @@ void EverQuestMod::TryDoCreatureEQMeleeExtraAttacks(Unit* attacker, Unit* victim
     if (victim->IsAlive() == false)
         return;
 
+    Creature* creature = attacker->ToCreature();
+
+    // Restrict to EverQuest zones
+    uint32 mapID = creature->GetMap()->GetId();
+    if (mapID < ConfigSystemMapDBCIDMin || mapID > ConfigSystemMapDBCIDMax)
+        return;
+
     // Prevent injected swings from repeating
     ObjectGuid attackerGUID = attacker->GetGUID();
     {
@@ -2523,13 +2530,6 @@ void EverQuestMod::TryDoCreatureEQMeleeExtraAttacks(Unit* attacker, Unit* victim
         if (CreaturesResolvingEQMeleeExtraAttacks.count(attackerGUID) > 0)
             return;
     }
-
-    Creature* creature = attacker->ToCreature();
-
-    // Restrict to EverQuest zones
-    uint32 mapID = creature->GetMap()->GetId();
-    if (mapID < ConfigSystemMapDBCIDMin || mapID > ConfigSystemMapDBCIDMax)
-        return;
 
     uint32 level = creature->GetLevel();
     uint32 weaponSkill = GetEQNPCMeleeWeaponSkillForLevel(level);

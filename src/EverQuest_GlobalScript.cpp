@@ -26,6 +26,16 @@ class EverQuest_GlobalScript: public GlobalScript
 public:
     EverQuest_GlobalScript() : GlobalScript("EverQuest_GlobalScript") {}
 
+    bool CouldLootSourceBePrerolledEQCreature(Loot& loot)
+    {
+        if (loot.sourceWorldObjectGUID.IsCreature() == false)
+            return false;
+        uint32 entryID = loot.sourceWorldObjectGUID.GetEntry();
+        if (entryID < EverQuest->ConfigSystemCreatureTemplateIDMin || entryID > EverQuest->ConfigSystemCreatureTemplateIDMax)
+            return false;
+        return true;
+    }
+
     void OnLoadSpellCustomAttr(SpellInfo* spell) override
     {
         if (EverQuest->IsEnabled == false)
@@ -101,6 +111,8 @@ public:
     {
         if (EverQuest->IsEnabled == false)
             return true;
+        if (CouldLootSourceBePrerolledEQCreature(loot) == false)
+            return true;
 
         // For any items that are on prerolled creatures, restrict drops to align to what was prerolled
         if (EverQuest->HasPreloadedLootItemIDsForCreatureGUID(loot.sourceWorldObjectGUID) == false)
@@ -116,6 +128,8 @@ public:
     void OnBeforeDropAddItem(Player const* /*player*/, Loot& loot, bool /*canRate*/, uint16 /*lootMode*/, LootStoreItem* lootStoreItem, LootStore const& /*store*/) override
     {
         if (EverQuest->IsEnabled == false)
+            return;
+        if (CouldLootSourceBePrerolledEQCreature(loot) == false)
             return;
 
         if (EverQuest->HasPreloadedLootItemIDsForCreatureGUID(loot.sourceWorldObjectGUID) == false)
@@ -138,6 +152,8 @@ public:
     bool OnBeforeLootEqualChanced(Player const* /*player*/, list<LootStoreItem*> /*equalChanced*/, Loot& loot, LootStore const& /*lootStore*/) override
     {
         if (EverQuest->IsEnabled == false)
+            return true;
+        if (CouldLootSourceBePrerolledEQCreature(loot) == false)
             return true;
 
         // Fail it so only prerolled items drop
