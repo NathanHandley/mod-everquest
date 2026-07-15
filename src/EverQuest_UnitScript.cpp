@@ -238,6 +238,25 @@ public:
 
             if (aurApp->GetBase()->GetId() < EverQuest->ConfigSystemSpellDBCIDMin || aurApp->GetBase()->GetId() > EverQuest->ConfigSystemSpellDBCIDMax)
                 return;
+
+            // Handle stone gate recall, which can sit in any effect slot since the spell's teleport effect comes first
+            if (mode == AURA_REMOVE_BY_CANCEL)
+            {
+                for (uint8 effectIndex = EFFECT_0; effectIndex <= EFFECT_2; effectIndex++)
+                {
+                    AuraEffect* auraEffect = aurApp->GetBase()->GetEffect(effectIndex);
+                    if (auraEffect == nullptr)
+                        continue;
+                    if (auraEffect->GetAuraType() != SPELL_AURA_DUMMY && auraEffect->GetAuraType() != SPELL_AURA_PERIODIC_DUMMY)
+                        continue;
+                    if (auraEffect->GetMiscValue() == EQ_SPELLDUMMYTYPE_STONEGATE)
+                    {
+                        EverQuest->SendPlayerToLastStoneGate(unit->ToPlayer());
+                        return;
+                    }
+                }
+            }
+
             if (aurApp->GetBase()->GetEffect(0) == nullptr)
                 return;
             if (aurApp->GetBase()->GetEffect(0)->GetAuraType() != SPELL_AURA_DUMMY && aurApp->GetBase()->GetEffect(0)->GetAuraType() != SPELL_AURA_PERIODIC_DUMMY)

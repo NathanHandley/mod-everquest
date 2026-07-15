@@ -384,6 +384,19 @@ public:
             }
         }
 
+        // Stone gate tether auras can sit in any effect slot, as the spell's own teleport effect comes first
+        for (uint8 effectIndex = EFFECT_0; effectIndex <= EFFECT_2; effectIndex++)
+        {
+            auto const& stoneGateEffect = spell->m_spellInfo->Effects[effectIndex];
+            if ((stoneGateEffect.Effect == SPELL_EFFECT_DUMMY || (stoneGateEffect.Effect == SPELL_EFFECT_APPLY_AURA && stoneGateEffect.ApplyAuraName == SPELL_AURA_DUMMY))
+                && stoneGateEffect.MiscValue == EQ_SPELLDUMMYTYPE_STONEGATE)
+            {
+                // Store where the player cast from, since the spell's teleport effect will move them after this fires
+                EverQuest->StorePositionAsLastStoneGate(player);
+                return;
+            }
+        }
+
         if (spell->m_spellInfo->Effects[EFFECT_0].Effect == SPELL_EFFECT_DUMMY ||
             (spell->m_spellInfo->Effects[EFFECT_0].Effect == SPELL_EFFECT_APPLY_AURA && spell->m_spellInfo->Effects[EFFECT_0].ApplyAuraName == SPELL_AURA_DUMMY))
         {
