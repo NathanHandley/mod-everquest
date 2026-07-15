@@ -574,6 +574,13 @@ public:
     float Orientation = 0;
 };
 
+class EverQuestZone
+{
+public:
+    uint32 MapID = 0;
+    bool AllowBind = true;
+};
+
 struct EverQuestPlayerControllerData
 {
     uint32 GUID = 0;
@@ -743,6 +750,7 @@ public:
     unordered_map<uint32, vector<EverQuestForageZoneItem>> ForageZoneItemsByMapID;
     unordered_map<uint32, uint32> ForageZoneItemTotalChanceByMapID;
     unordered_map<uint32, EverQuestZoneSafePoint> ZoneSafePointByMapID;
+    unordered_map<uint32, EverQuestZone> ZoneByMapID;
     unordered_map<uint8, EverQuestClassMap> ClassMapByWOWClassID;
 
     static EverQuestMod* instance()
@@ -865,6 +873,8 @@ public:
     const vector<EverQuestForageZoneItem>& GetForageZoneItemsInMap(uint32 mapID);
     void LoadZoneSafePointData();
     void SendPlayerToZoneSafePoint(Player* player, bool includeGroup);
+    void LoadZoneData();
+    bool IsBindAllowedForMap(uint32 mapID);
     void LoadClassMapData();
     const EverQuestClassMap& GetClassMapForWOWClassID(uint8 wowClassID);
     bool IsEQClassABaseEQClass(uint8 eqClassID);

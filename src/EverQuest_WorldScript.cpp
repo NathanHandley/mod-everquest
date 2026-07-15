@@ -73,6 +73,7 @@ public:
         EverQuest->LoadAutoAddItemsData();
         EverQuest->LoadForageData();
         EverQuest->LoadZoneSafePointData();
+        EverQuest->LoadZoneData();
     }
 };
 

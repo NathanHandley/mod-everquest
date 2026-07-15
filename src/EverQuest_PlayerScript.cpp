@@ -407,6 +407,11 @@ public:
                     ChatHandler(player->GetSession()).PSendSysMessage("The spell failed, as it only works in Norrath.");
                     return;
                 }
+                if (EverQuest->IsBindAllowedForMap(player->GetMapId()) == false)
+                {
+                    ChatHandler(player->GetSession()).PSendSysMessage("Spell failed, as binding to this area is not allowed.");
+                    return;
+                }
                 EverQuest->SetNewBindHome(player);
             }
             else if (spell->m_spellInfo->Effects[EFFECT_0].MiscValue == EQ_SPELLDUMMYTYPE_BINDANY) // Bind Any
@@ -414,6 +419,11 @@ public:
                 if (player->GetMapId() < EverQuest->ConfigSystemMapDBCIDMin || player->GetMapId() > EverQuest->ConfigSystemMapDBCIDMax)
                 {
                     ChatHandler(player->GetSession()).PSendSysMessage("The spell failed, as it only works in Norrath.");
+                    return;
+                }
+                if (EverQuest->IsBindAllowedForMap(player->GetMapId()) == false)
+                {
+                    ChatHandler(player->GetSession()).PSendSysMessage("Spell failed, as binding to this area is not allowed.");
                     return;
                 }
                 ObjectGuid const target = player->GetTarget();

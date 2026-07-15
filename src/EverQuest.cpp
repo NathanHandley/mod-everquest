@@ -3182,6 +3182,33 @@ void EverQuestMod::LoadZoneSafePointData()
     }
 }
 
+void EverQuestMod::LoadZoneData()
+{
+    ZoneByMapID.clear();
+
+    QueryResult queryResult = WorldDatabase.Query("SELECT MapID, AllowBind FROM mod_everquest_zone;");
+    if (queryResult)
+    {
+        do
+        {
+            Field* fields = queryResult->Fetch();
+            EverQuestZone zone;
+            zone.MapID = fields[0].Get<uint32>();
+            zone.AllowBind = fields[1].Get<uint8>() != 0;
+            ZoneByMapID[zone.MapID] = zone;
+        } while (queryResult->NextRow());
+    }
+}
+
+bool EverQuestMod::IsBindAllowedForMap(uint32 mapID)
+{
+    // Any zone missing from the zone data is considered bind-restricted
+    auto zoneIt = ZoneByMapID.find(mapID);
+    if (zoneIt == ZoneByMapID.end())
+        return false;
+    return zoneIt->second.AllowBind;
+}
+
 void EverQuestMod::SendPlayerToZoneSafePoint(Player* player, bool includeGroup)
 {
     // In-zone succor sends to the safe point of the zone the caster is currently in
