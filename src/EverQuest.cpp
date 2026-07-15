@@ -246,6 +246,9 @@ void EverQuestMod::LoadConfigurationFile()
     ConfigCreatureEmotesEnabled = sConfigMgr->GetOption<bool>("EverQuest.CreatureEmotes.Enabled", true);
     ConfigCreatureEmotesAmbientEnabled = sConfigMgr->GetOption<bool>("EverQuest.CreatureEmotes.AmbientEnabled", true);
 
+    // Creature movement sounds
+    ConfigCreatureMovementSoundsEnabled = sConfigMgr->GetOption<bool>("EverQuest.CreatureMovementSounds.Enabled", true);
+
     // Illusion
     ConfigIllusionGearRefreshTimeInMS = sConfigMgr->GetOption<uint32>("EverQuest.Illusion.GearRefreshTimeInMS", 1000);
 
@@ -448,6 +451,42 @@ void EverQuestMod::LoadCreatureEmoteData()
             emote.Param2 = fields[5].Get<int32>();
             emote.EmoteText = fields[6].Get<string>();
             CreatureEmotesByCreatureTemplateID[creatureTemplateID].push_back(emote);
+        } while (queryResult->NextRow());
+    }
+}
+
+void EverQuestMod::LoadCreatureMovementSoundData()
+{
+    CreatureMovementSoundsByDisplayID.clear();
+
+    QueryResult queryResult = WorldDatabase.Query("SELECT DisplayID, WalkSoundEntryIDs, WalkSoundDurationsMS, RunSoundEntryIDs, RunSoundDurationsMS, MaxHearingDistance FROM mod_everquest_creature_movement_sound;");
+    if (queryResult)
+    {
+        do
+        {
+            Field* fields = queryResult->Fetch();
+            uint32 displayID = fields[0].Get<uint32>();
+            EverQuestCreatureMovementSound movementSound;
+            string walkSoundEntryIDsString = fields[1].Get<string>();
+            for (std::string_view idToken : Acore::Tokenize(walkSoundEntryIDsString, ';', false))
+                movementSound.WalkPieceSoundEntryIDs.push_back(Acore::StringTo<uint32>(idToken).value_or(0));
+            string walkSoundDurationsString = fields[2].Get<string>();
+            for (std::string_view durationToken : Acore::Tokenize(walkSoundDurationsString, ';', false))
+                movementSound.WalkPieceDurationsMS.push_back(Acore::StringTo<uint32>(durationToken).value_or(0));
+            string runSoundEntryIDsString = fields[3].Get<string>();
+            for (std::string_view idToken : Acore::Tokenize(runSoundEntryIDsString, ';', false))
+                movementSound.RunPieceSoundEntryIDs.push_back(Acore::StringTo<uint32>(idToken).value_or(0));
+            string runSoundDurationsString = fields[4].Get<string>();
+            for (std::string_view durationToken : Acore::Tokenize(runSoundDurationsString, ';', false))
+                movementSound.RunPieceDurationsMS.push_back(Acore::StringTo<uint32>(durationToken).value_or(0));
+            movementSound.MaxHearingDistance = fields[5].Get<float>();
+            if (movementSound.WalkPieceSoundEntryIDs.size() != movementSound.WalkPieceDurationsMS.size() ||
+                movementSound.RunPieceSoundEntryIDs.size() != movementSound.RunPieceDurationsMS.size())
+            {
+                LOG_ERROR("module.EverQuest", "EverQuestMod::LoadCreatureMovementSoundData skipped display ID {} as the piece sound and duration list lengths do not match", displayID);
+                continue;
+            }
+            CreatureMovementSoundsByDisplayID[displayID] = movementSound;
         } while (queryResult->NextRow());
     }
 }
@@ -726,6 +765,113 @@ void EverQuestMod::UpdateCreatureEmotes(Creature* creature, uint32 diff)
                 }
             }
         }
+    }
+}
+
+void EverQuestMod::RemoveCreatureMovementSoundState(Creature* creature)
+{
+    creature->CustomData.Erase(EQ_CREATURE_CUSTOMDATA_MOVEMENTSOUND);
+}
+
+void EverQuestMod::UpdateCreatureMovementSound(Creature* creature, uint32 diff)
+{
+    // In EQ, movement sounds are repeating loops which isn't how WoW works.  So this is a 'hack' to make sounds
+    // play in parts emitted from the server instead of relying on EQ creature event attachments
+    if (creature == nullptr)
+        return;
+    if (ConfigCreatureMovementSoundsEnabled == false)
+        return;
+
+    // Walk vs Run sound picking
+    uint8 curGait = EQ_CREATURE_MOVEMENT_GAIT_NONE;
+    if (creature->IsAlive() == true && creature->isMoving() == true && creature->IsUnderWater() == false && creature->IsFlying() == false)
+        curGait = creature->IsWalking() == true ? EQ_CREATURE_MOVEMENT_GAIT_WALK : EQ_CREATURE_MOVEMENT_GAIT_RUN;
+
+    // Drop from idle creatures
+    EverQuestCreatureMovementSoundState* state = creature->CustomData.Get<EverQuestCreatureMovementSoundState>(EQ_CREATURE_CUSTOMDATA_MOVEMENTSOUND);
+    if (curGait == EQ_CREATURE_MOVEMENT_GAIT_NONE || creature->GetMap()->GetPlayers().IsEmpty() == true)
+    {
+        if (state != nullptr)
+        {
+            state->CurGait = EQ_CREATURE_MOVEMENT_GAIT_NONE;
+            state->ListenersByGUID.clear();
+        }
+        return;
+    }
+
+    unordered_map<uint32, EverQuestCreatureMovementSound>::const_iterator soundIter = CreatureMovementSoundsByDisplayID.find(creature->GetDisplayId());
+    if (soundIter == CreatureMovementSoundsByDisplayID.end())
+        return;
+    const vector<uint32>& pieceSoundEntryIDs = curGait == EQ_CREATURE_MOVEMENT_GAIT_WALK ? soundIter->second.WalkPieceSoundEntryIDs : soundIter->second.RunPieceSoundEntryIDs;
+    const vector<uint32>& pieceDurationsMS = curGait == EQ_CREATURE_MOVEMENT_GAIT_WALK ? soundIter->second.WalkPieceDurationsMS : soundIter->second.RunPieceDurationsMS;
+    if (pieceSoundEntryIDs.empty() == true)
+    {
+        if (state != nullptr)
+        {
+            state->CurGait = EQ_CREATURE_MOVEMENT_GAIT_NONE;
+            state->ListenersByGUID.clear();
+        }
+        return;
+    }
+    if (state == nullptr)
+        state = creature->CustomData.GetDefault<EverQuestCreatureMovementSoundState>(EQ_CREATURE_CUSTOMDATA_MOVEMENTSOUND);
+
+    // Changing gait will restart the loop new for everyone
+    bool gaitChanged = (state->CurGait != curGait);
+    state->CurGait = curGait;
+    if (gaitChanged == true)
+        state->ListenerScanRemainingMS = 0;
+
+    // Rescan who can hear this
+    if (state->ListenerScanRemainingMS > diff)
+        state->ListenerScanRemainingMS -= diff;
+    else
+    {
+        state->ListenerScanRemainingMS = EQ_CREATURE_MOVEMENT_SOUND_LISTENER_SCAN_MS;
+        unordered_map<ObjectGuid, EverQuestCreatureMovementSoundListener> refreshedListeners;
+        Map::PlayerList const& mapPlayers = creature->GetMap()->GetPlayers();
+        for (Map::PlayerList::const_iterator playerIter = mapPlayers.begin(); playerIter != mapPlayers.end(); ++playerIter)
+        {
+            Player* mapPlayer = playerIter->GetSource();
+            if (mapPlayer == nullptr || mapPlayer->IsInWorld() == false)
+                continue;
+            if (creature->IsWithinDistInMap(mapPlayer, soundIter->second.MaxHearingDistance) == false)
+                continue;
+            unordered_map<ObjectGuid, EverQuestCreatureMovementSoundListener>::const_iterator listenerIter = state->ListenersByGUID.find(mapPlayer->GetGUID());
+            if (listenerIter == state->ListenersByGUID.end() || gaitChanged == true)
+            {
+                creature->PlayDistanceSound(pieceSoundEntryIDs[0], mapPlayer);
+                EverQuestCreatureMovementSoundListener newListener;
+                newListener.PieceIndex = 0;
+                newListener.ReplayRemainingMS = pieceDurationsMS[0];
+                refreshedListeners[mapPlayer->GetGUID()] = newListener;
+            }
+            else
+                refreshedListeners[mapPlayer->GetGUID()] = listenerIter->second;
+        }
+        state->ListenersByGUID.swap(refreshedListeners);
+    }
+
+    // Chain parts so a finished part moves to the next
+    for (unordered_map<ObjectGuid, EverQuestCreatureMovementSoundListener>::iterator listenerIter = state->ListenersByGUID.begin(); listenerIter != state->ListenersByGUID.end(); ++listenerIter)
+    {
+        EverQuestCreatureMovementSoundListener& listener = listenerIter->second;
+        if (listener.ReplayRemainingMS > diff)
+        {
+            listener.ReplayRemainingMS -= diff;
+            continue;
+        }
+        uint32 overshootMS = diff - listener.ReplayRemainingMS;
+        listener.PieceIndex = (listener.PieceIndex + 1) % pieceSoundEntryIDs.size();
+        uint32 nextPieceDurationMS = pieceDurationsMS[listener.PieceIndex];
+        if (nextPieceDurationMS == 0)
+            nextPieceDurationMS = 1;
+        if (overshootMS >= nextPieceDurationMS)
+            overshootMS = nextPieceDurationMS - 1;
+        listener.ReplayRemainingMS = nextPieceDurationMS - overshootMS;
+        Player* listenerPlayer = ObjectAccessor::GetPlayer(*creature, listenerIter->first);
+        if (listenerPlayer != nullptr)
+            creature->PlayDistanceSound(pieceSoundEntryIDs[listener.PieceIndex], listenerPlayer);
     }
 }
 

@@ -38,7 +38,7 @@ static uint32 ConfigMaxSkillIDCheck = 1000;         // The highest level of skil
 class Unit;
 class Aura;
 
-#define EQ_MOD_VERSION                              41
+#define EQ_MOD_VERSION                              44
 
 #define EQ_EQCLASS_NONE                             0
 #define EQ_EQCLASS_WARRIOR                          1
@@ -182,6 +182,13 @@ class Aura;
 #define EQ_CREATURE_CUSTOMDATA_UNSTICK              "EQUnstick"
 #define EQ_CREATURE_CUSTOMDATA_SOCIALAGGRO          "EQSocialAggro"
 #define EQ_CREATURE_CUSTOMDATA_EMOTE                "EQEmote"
+#define EQ_CREATURE_CUSTOMDATA_MOVEMENTSOUND        "EQMoveSound"
+
+#define EQ_CREATURE_MOVEMENT_GAIT_NONE              0
+#define EQ_CREATURE_MOVEMENT_GAIT_WALK              1
+#define EQ_CREATURE_MOVEMENT_GAIT_RUN               2
+
+#define EQ_CREATURE_MOVEMENT_SOUND_LISTENER_SCAN_MS 250
 
 class EverQuestCreatureOnkillReputation
 {
@@ -337,6 +344,31 @@ public:
     uint32 RandomTimerRemainingMS = 0;
     uint32 ProximityCheckRemainingMS = 0;
     uint32 ProximityCooldownRemainingMS = 0;
+};
+
+class EverQuestCreatureMovementSound
+{
+public:
+    vector<uint32> WalkPieceSoundEntryIDs;
+    vector<uint32> WalkPieceDurationsMS;
+    vector<uint32> RunPieceSoundEntryIDs;
+    vector<uint32> RunPieceDurationsMS;
+    float MaxHearingDistance = 20.0f;
+};
+
+class EverQuestCreatureMovementSoundListener
+{
+public:
+    uint32 PieceIndex = 0;
+    uint32 ReplayRemainingMS = 0;
+};
+
+class EverQuestCreatureMovementSoundState : public DataMap::Base
+{
+public:
+    uint8 CurGait = EQ_CREATURE_MOVEMENT_GAIT_NONE;
+    uint32 ListenerScanRemainingMS = 0;
+    unordered_map<ObjectGuid, EverQuestCreatureMovementSoundListener> ListenersByGUID;
 };
 
 class EverQuestItemTemplate
@@ -646,6 +678,7 @@ public:
     float ConfigCharmUncharmedPlayerCheckRadius;
     bool ConfigCreatureEmotesEnabled;
     bool ConfigCreatureEmotesAmbientEnabled;
+    bool ConfigCreatureMovementSoundsEnabled;
     uint32 ConfigIllusionGearRefreshTimeInMS;
     bool ConfigShowClassMessageOnLogin;
     float ConfigSecondaryExpPoolGainPercent;
@@ -667,6 +700,7 @@ public:
     unordered_map<uint32, list<EverQuestCreatureOnkillReputation>> CreatureOnkillReputationsByCreatureTemplateID;
     unordered_map<uint32, vector<EverQuestCreatureKillSpawn>> CreatureKillSpawnsByTriggerCreatureTemplateID;
     unordered_map<uint32, vector<EverQuestCreatureEmote>> CreatureEmotesByCreatureTemplateID;
+    unordered_map<uint32, EverQuestCreatureMovementSound> CreatureMovementSoundsByDisplayID;
 
     std::mutex PendingKillSpawnActionsMutex;
     unordered_map<uint32, vector<EverQuestPendingKillSpawnAction>> PendingKillSpawnActionsByMapID;
@@ -732,6 +766,9 @@ public:
     void SetupCreatureEmoteState(Creature* creature);
     void RemoveCreatureEmoteState(Creature* creature);
     void UpdateCreatureEmotes(Creature* creature, uint32 diff);
+    void LoadCreatureMovementSoundData();
+    void RemoveCreatureMovementSoundState(Creature* creature);
+    void UpdateCreatureMovementSound(Creature* creature, uint32 diff);
     void ProcessKillSpawnsForCreatureDeath(Creature* deadCreature, Unit* killer);
     void ProcessTriggeredQuestKillSpawnsForCreatureDeath(Creature* deadCreature, Unit* killer);
     void TriggerQuestKillSpawn(uint32 mapID, const EverQuestQuestReaction& questReaction);

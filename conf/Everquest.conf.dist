@@ -263,6 +263,20 @@ EverQuest.CreatureEmotes.Enabled = True
 EverQuest.CreatureEmotes.AmbientEnabled = True
 
 ###################################################################################################
+# Creature Movement Sound Settings (EQ-like walk/run sound loops)
+#
+# 	EverQuest.CreatureMovementSounds.Enabled
+#		If true, creatures play their EQ walk sound as a continuous loop while walking and their
+#		EQ run sound while running, like the EQ client did.  The loop is driven by the server
+#		(replayed back-to-back at the sound file length) because the WoW client cannot loop a
+#		sound linked on unit movement by itself in full loops
+#	Default: True
+#
+###################################################################################################
+
+EverQuest.CreatureMovementSounds.Enabled = True
+
+###################################################################################################
 #
 # 	EverQuest.Illusion.GearRefreshTimeInMS
 #		How often, in milliseconds, an illusioned player's gear-matched display is revalidated. This

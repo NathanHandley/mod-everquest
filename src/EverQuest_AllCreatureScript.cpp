@@ -65,6 +65,7 @@ public:
         EverQuest->RemoveCreatureUnstickState(creature);
         EverQuest->RemoveCreatureSocialAggroState(creature);
         EverQuest->RemoveCreatureEmoteState(creature);
+        EverQuest->RemoveCreatureMovementSoundState(creature);
     }
 
     void OnAllCreatureUpdate(Creature* creature, uint32 diff) override
@@ -75,6 +76,7 @@ public:
         EverQuest->UpdateCreatureUnstick(creature, diff);
         EverQuest->UpdateCreatureScaledSocialAggro(creature, diff);
         EverQuest->UpdateCreatureEmotes(creature, diff);
+        EverQuest->UpdateCreatureMovementSound(creature, diff);
     }
 
 private:
