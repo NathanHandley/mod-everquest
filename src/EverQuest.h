@@ -38,7 +38,7 @@ static uint32 ConfigMaxSkillIDCheck = 1000;         // The highest level of skil
 class Unit;
 class Aura;
 
-#define EQ_MOD_VERSION                              45
+#define EQ_MOD_VERSION                              46
 
 #define EQ_EQCLASS_NONE                             0
 #define EQ_EQCLASS_WARRIOR                          1
@@ -81,7 +81,6 @@ class Aura;
 #define EQ_SPELLDUMMYTYPE_FORAGE                    16
 #define EQ_SPELLDUMMYTYPE_SUMMONACTIVE              17
 #define EQ_SPELLDUMMYTYPE_SUCCOR                    18
-#define EQ_SPELLDUMMYTYPE_STONEGATE                 19
 
 #define EQ_BARDSONGAURATARGET_ENEMYAREA             1
 #define EQ_BARDSONGAURATARGET_FRIENDLYPARTY         2
@@ -880,8 +879,6 @@ public:
 
     void StorePositionAsLastGate(Player* player);
     void SendPlayerToLastGate(Player* player);
-    void StorePositionAsLastStoneGate(Player* player);
-    void SendPlayerToLastStoneGate(Player* player);
     void SendPlayerToEQBindHome(Player* player);
     void SetNewBindHome(Player* player);
     void SetNewBindHome(Player* player, uint32 playerGUIDCounter, int mapID, int zoneID, float playerX, float playerY, float playerZ);

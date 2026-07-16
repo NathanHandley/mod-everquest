@@ -3332,58 +3332,6 @@ void EverQuestMod::SendPlayerToLastGate(Player* player)
     player->TeleportTo({ mapId, {posX, posY, posZ, orientation} });
 }
 
-void EverQuestMod::StorePositionAsLastStoneGate(Player* player)
-{
-    // Fail if there is no map, or if the map is invalid
-    if (player->GetMap() == nullptr)
-        return;
-
-    // Gather the new stone gate reference
-    float playerX = player->GetPosition().GetPositionX();
-    float playerY = player->GetPosition().GetPositionY();
-    float playerZ = player->GetPosition().GetPositionZ();
-    float playerOrientation = player->GetOrientation();
-    int mapID = player->GetMap()->GetId();
-    int zoneID = player->GetAreaId();
-    uint32 guidCounter = player->GetGUID().GetCounter();
-
-    // Upsert only the last-stone-gate columns so the class-controller, last-gate, and home-bind data sharing this row is preserved
-    CharacterDatabase.Execute("INSERT INTO `mod_everquest_character_settings` (`guid`, `laststonegateMapId`, `laststonegateZoneId`, `laststonegatePosX`, `laststonegatePosY`, `laststonegatePosZ`, `laststonegateOrientation`) VALUES ({}, {}, {}, {}, {}, {}, {}) "
-        "ON DUPLICATE KEY UPDATE `laststonegateMapId` = {}, `laststonegateZoneId` = {}, `laststonegatePosX` = {}, `laststonegatePosY` = {}, `laststonegatePosZ` = {}, `laststonegateOrientation` = {}",
-        guidCounter, mapID, zoneID, playerX, playerY, playerZ, playerOrientation,
-        mapID, zoneID, playerX, playerY, playerZ, playerOrientation);
-}
-
-void EverQuestMod::SendPlayerToLastStoneGate(Player* player)
-{
-    // Fail if in combat
-    if (player->IsInCombat() == true)
-    {
-        ChatHandler(player->GetSession()).PSendSysMessage("Your stone tether broke due to being in combat!");
-        return;
-    }
-
-    // Pull the last stone gate position
-    QueryResult queryResult = CharacterDatabase.Query("SELECT laststonegateMapId, laststonegateZoneId, laststonegatePosX, laststonegatePosY, laststonegatePosZ, laststonegateOrientation FROM mod_everquest_character_settings WHERE guid = {} AND laststonegateMapId IS NOT NULL", player->GetGUID().GetCounter());
-    if (!queryResult || queryResult->GetRowCount() == 0)
-    {
-        ChatHandler(player->GetSession()).PSendSysMessage("No tethered stone location could be found. Spell failed.");
-        return;
-    }
-
-    // Pull the fields out
-    Field* fields = queryResult->Fetch();
-    uint32 mapId = fields[0].Get<uint32>();
-    //uint32 zoneId = fields[1].Get<uint32>();
-    float posX = fields[2].Get<float>();
-    float posY = fields[3].Get<float>();
-    float posZ = fields[4].Get<float>();
-    float orientation = fields[5].Get<float>();
-
-    // Teleport the player
-    player->TeleportTo({ mapId, {posX, posY, posZ, orientation} });
-}
-
 void EverQuestMod::SendPlayerToEQBindHome(Player* player)
 {
     // Pull the bind position
@@ -3436,11 +3384,10 @@ void EverQuestMod::SetNewBindHome(Player* player, uint32 playerGUIDCounter, int 
 
 void EverQuestMod::DeletePlayerBindHome(ObjectGuid guid)
 {
-    // Clear only the home-bind, last-gate, and last-stone-gate columns.  The class-controller data sharing this row is left intact
+    // Clear only the home-bind and last-gate columns. The class-controller data sharing this row is left intact
     CharacterDatabase.Execute("UPDATE `mod_everquest_character_settings` SET "
         "`homebindMapId` = NULL, `homebindZoneId` = NULL, `homebindPosX` = NULL, `homebindPosY` = NULL, `homebindPosZ` = NULL, "
-        "`lastgateMapId` = NULL, `lastgateZoneId` = NULL, `lastgatePosX` = NULL, `lastgatePosY` = NULL, `lastgatePosZ` = NULL, `lastgateOrientation` = NULL, "
-        "`laststonegateMapId` = NULL, `laststonegateZoneId` = NULL, `laststonegatePosX` = NULL, `laststonegatePosY` = NULL, `laststonegatePosZ` = NULL, `laststonegateOrientation` = NULL "
+        "`lastgateMapId` = NULL, `lastgateZoneId` = NULL, `lastgatePosX` = NULL, `lastgatePosY` = NULL, `lastgatePosZ` = NULL, `lastgateOrientation` = NULL "
         "WHERE guid = {}", guid.GetCounter());
 }
 

@@ -25,6 +25,7 @@
 #include "ReputationMgr.h"
 #include "ScriptMgr.h"
 #include "Spell.h"
+#include "SpellMgr.h"
 #include "QuestDef.h"
 #include "World.h"
 #include "WorldSession.h"
@@ -391,15 +392,19 @@ public:
             }
         }
 
-        // Stone gate tether auras can sit in any effect slot, as the spell's own teleport effect comes first
-        for (uint8 effectIndex = EFFECT_0; effectIndex <= EFFECT_2; effectIndex++)
+        // Spells with their own teleport effect (like the legacy stone) apply the gate tether by triggering the gate spell from a later effect slot.
+        for (uint8 effectIndex = EFFECT_1; effectIndex <= EFFECT_2; effectIndex++)
         {
-            auto const& stoneGateEffect = spell->m_spellInfo->Effects[effectIndex];
-            if ((stoneGateEffect.Effect == SPELL_EFFECT_DUMMY || (stoneGateEffect.Effect == SPELL_EFFECT_APPLY_AURA && stoneGateEffect.ApplyAuraName == SPELL_AURA_DUMMY))
-                && stoneGateEffect.MiscValue == EQ_SPELLDUMMYTYPE_STONEGATE)
+            auto const& triggerEffect = spell->m_spellInfo->Effects[effectIndex];
+            if (triggerEffect.Effect != SPELL_EFFECT_TRIGGER_SPELL || triggerEffect.TriggerSpell == 0)
+                continue;
+            SpellInfo const* triggeredSpellInfo = sSpellMgr->GetSpellInfo(triggerEffect.TriggerSpell);
+            if (triggeredSpellInfo == nullptr)
+                continue;
+            if (triggeredSpellInfo->Effects[EFFECT_0].Effect == SPELL_EFFECT_APPLY_AURA && triggeredSpellInfo->Effects[EFFECT_0].ApplyAuraName == SPELL_AURA_DUMMY
+                && triggeredSpellInfo->Effects[EFFECT_0].MiscValue == EQ_SPELLDUMMYTYPE_GATE)
             {
-                // Store where the player cast from, since the spell's teleport effect will move them after this fires
-                EverQuest->StorePositionAsLastStoneGate(player);
+                EverQuest->StorePositionAsLastGate(player);
                 return;
             }
         }
@@ -451,8 +456,12 @@ public:
             }
             else if (spell->m_spellInfo->Effects[EFFECT_0].MiscValue == EQ_SPELLDUMMYTYPE_GATE) // Gate
             {
-                EverQuest->StorePositionAsLastGate(player);
-                EverQuest->SendPlayerToEQBindHome(player);
+                // Triggered casts are tether-aura-only applications (like from the legacy stone), so they should not gate the player home
+                if (spell->IsTriggered() == false)
+                {
+                    EverQuest->StorePositionAsLastGate(player);
+                    EverQuest->SendPlayerToEQBindHome(player);
+                }
             }
             else if (spell->m_spellInfo->Effects[EFFECT_0].MiscValue == EQ_SPELLDUMMYTYPE_FORAGE) // Forage
             {
