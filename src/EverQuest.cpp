@@ -1499,9 +1499,8 @@ void EverQuestMod::ApplyIllusionGearDisplayIfChanged(Player* player, EverQuestPl
 
     // Swap in the player's selected face version of the display when one exists
     uint32 faceDisplayID = GetIllusionFaceDisplayIDForPlayer(player, gearDisplayID);
-    if (faceDisplayID == illusionState->LastGearDisplayID)
+    if (faceDisplayID == player->GetDisplayId())
         return;
-    illusionState->LastGearDisplayID = faceDisplayID;
     player->SetDisplayId(faceDisplayID);
 }
 
@@ -1514,7 +1513,6 @@ void EverQuestMod::ApplyIllusionGearDisplayOnFormAuraApply(Player* player, uint3
         illusionState = &PlayerIllusionStatesByPlayerGUID[player->GetGUID()];
     }
     illusionState->FormSpellID = formSpellID;
-    illusionState->LastGearDisplayID = 0;
     illusionState->RefreshTimerMS = 0;
 
     // Override the model with a gear-matched version
@@ -1534,8 +1532,7 @@ void EverQuestMod::HandleIllusionFormAuraRemove(Player* player, uint32 spellID)
             return;
         if (illusionStateItr->second.FormSpellID != spellID)
         {
-            // If a different form fell off, force a refresh next cycle
-            illusionStateItr->second.LastGearDisplayID = 0;
+            // A different form fell off, so the tracked form is still active and the next refresh cycle covers any display change
             return;
         }
         PlayerIllusionStatesByPlayerGUID.erase(illusionStateItr);

@@ -280,6 +280,13 @@ public:
         EverQuest->UpdatePlayerIllusionGearDisplay(player, p_time);
     }
 
+    void OnPlayerUpdateZone(Player* player, uint32 /*newZone*/, uint32 /*newArea*/) override
+    {
+        if (EverQuest->IsEnabled == false)
+            return;
+        EverQuest->RefreshIllusionGearDisplayForPlayer(player);
+    }
+
     void OnPlayerRewardKillRewarder(Player* player, KillRewarder* rewarder, bool /*isDungeon*/, float& rate) override
     {
         if (EverQuest->IsEnabled == false)

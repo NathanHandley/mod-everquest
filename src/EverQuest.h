@@ -387,7 +387,6 @@ class EverQuestPlayerIllusionState
 {
 public:
     uint32 FormSpellID = 0;
-    uint32 LastGearDisplayID = 0;
     uint32 RefreshTimerMS = 0;
 };
 
