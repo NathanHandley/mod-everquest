@@ -89,6 +89,10 @@ public:
         // Enter combat emotes skip pets (like TAKP's EnterCombat DoNPCEmote)
         if (creature->IsPet() == false && creature->IsControlledByPlayer() == false)
             EverQuest->DoCreatureEmoteEvent(creature, EQ_CREATURE_EMOTE_EVENT_ENTERCOMBAT, victim);
+
+        uint32 mapID = creature->GetMapId();
+        if (mapID >= EverQuest->ConfigSystemMapDBCIDMin && mapID <= EverQuest->ConfigSystemMapDBCIDMax)
+            EverQuest->ProcessKillSpawnsForCreatureEvent(creature, victim, EQ_KILLSPAWN_TRIGGER_COMBAT);
     }
 
     void OnUnitDeath(Unit* unit, Unit* killer) override
@@ -114,7 +118,7 @@ public:
                 EverQuest->DoCreatureEmoteEvent(killerCreature, EQ_CREATURE_EMOTE_EVENT_KILLEDNPC, creature);
         }
 
-        EverQuest->ProcessKillSpawnsForCreatureDeath(creature, killer);
+        EverQuest->ProcessKillSpawnsForCreatureEvent(creature, killer, EQ_KILLSPAWN_TRIGGER_DEATH);
         EverQuest->ProcessTriggeredQuestKillSpawnsForCreatureDeath(creature, killer);
     }
 
@@ -131,7 +135,7 @@ public:
         if (mapID < EverQuest->ConfigSystemMapDBCIDMin || mapID > EverQuest->ConfigSystemMapDBCIDMax)
             return;
 
-        // Leaving combat (it's killed or evades) is the closest thing to TAKP's "LeaveCombat" emote event
+        // Note: SmartAI creatures never trigger this hook (SmartAI::EnterEvadeMode skips CreatureAI::EnterEvadeMode), which is why UpdateCreatureKillSpawnCombatWatch has the evade/ooc timer and kill spawn triggers
         if (creature->IsPet() == false && creature->IsControlledByPlayer() == false)
             EverQuest->DoCreatureEmoteEvent(creature, EQ_CREATURE_EMOTE_EVENT_LEAVECOMBAT, nullptr);
 

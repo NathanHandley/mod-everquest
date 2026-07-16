@@ -75,6 +75,15 @@ public:
         EverQuest->LoadZoneSafePointData();
         EverQuest->LoadZoneData();
     }
+
+    void OnStartup() override
+    {
+        if (EverQuest->IsEnabled == false)
+            return;
+
+        // The creature spawn tables aren't loaded yet when the kill spawn data loads with the config so respawn target spawn points resolve here instead
+        EverQuest->ResolveKillSpawnRespawnTargetSpawnPoints();
+    }
 };
 
 void AddEverQuestWorldScripts()

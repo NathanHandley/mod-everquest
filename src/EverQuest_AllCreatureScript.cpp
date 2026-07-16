@@ -70,6 +70,7 @@ public:
         EverQuest->RemoveCreatureSocialAggroState(creature);
         EverQuest->RemoveCreatureEmoteState(creature);
         EverQuest->RemoveCreatureMovementSoundState(creature);
+        EverQuest->RemoveCreatureKillSpawnCombatWatchState(creature);
     }
 
     void OnAllCreatureUpdate(Creature* creature, uint32 diff) override
@@ -84,6 +85,7 @@ public:
         EverQuest->UpdateCreatureScaledSocialAggro(creature, diff);
         EverQuest->UpdateCreatureEmotes(creature, diff);
         EverQuest->UpdateCreatureMovementSound(creature, diff);
+        EverQuest->UpdateCreatureKillSpawnCombatWatch(creature, diff);
     }
 
 private:

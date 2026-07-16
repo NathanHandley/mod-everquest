@@ -38,7 +38,7 @@ static uint32 ConfigMaxSkillIDCheck = 1000;         // The highest level of skil
 class Unit;
 class Aura;
 
-#define EQ_MOD_VERSION                              46
+#define EQ_MOD_VERSION                              47
 
 #define EQ_EQCLASS_NONE                             0
 #define EQ_EQCLASS_WARRIOR                          1
@@ -116,6 +116,12 @@ class Aura;
 #define EQ_KILLSPAWN_ACTION_SPAWN                   0
 #define EQ_KILLSPAWN_ACTION_DESPAWN                 1
 #define EQ_KILLSPAWN_ACTION_RESPAWNSELF             2
+#define EQ_KILLSPAWN_ACTION_RESPAWNTARGET           3
+
+#define EQ_KILLSPAWN_TRIGGER_DEATH                  0
+#define EQ_KILLSPAWN_TRIGGER_COMBAT                 1
+#define EQ_KILLSPAWN_TRIGGER_EVADE                  2
+#define EQ_KILLSPAWN_TRIGGER_OOCTIMER               3   // Fires after DelayMinMS of continuous out-of-combat time
 
 #define EQ_CREATURE_EMOTE_EVENT_LEAVECOMBAT         0
 #define EQ_CREATURE_EMOTE_EVENT_ENTERCOMBAT         1
@@ -183,6 +189,7 @@ class Aura;
 #define EQ_CREATURE_CUSTOMDATA_SOCIALAGGRO          "EQSocialAggro"
 #define EQ_CREATURE_CUSTOMDATA_EMOTE                "EQEmote"
 #define EQ_CREATURE_CUSTOMDATA_MOVEMENTSOUND        "EQMoveSound"
+#define EQ_CREATURE_CUSTOMDATA_KILLSPAWNWATCH       "EQKillSpawnWatch"
 
 #define EQ_CREATURE_MOVEMENT_GAIT_NONE              0
 #define EQ_CREATURE_MOVEMENT_GAIT_WALK              1
@@ -253,6 +260,7 @@ class EverQuestCreatureKillSpawn
 public:
     uint32 ID = 0;
     uint32 TriggerCreatureTemplateID = 0;
+    uint8 TriggerTypeID = EQ_KILLSPAWN_TRIGGER_DEATH;
     uint32 MapID = 0;
     uint8 ActionType = EQ_KILLSPAWN_ACTION_SPAWN;
     uint32 TargetCreatureTemplateID = 0;
@@ -273,6 +281,8 @@ public:
     bool AddToHateList = false;
     uint32 TriggerMinLevel = 0;
     uint32 TriggerMaxLevel = 0;
+    uint32 RespawnTimeSec = 0;
+    vector<ObjectGuid::LowType> TargetSpawnIDs;
 };
 
 class EverQuestPendingKillSpawnAction
@@ -289,6 +299,8 @@ public:
     uint32 OnlyIfNotAliveCreatureTemplateID = 0;
     bool DespawnNearestToPositionOnly = false;
     bool AddToHateList = false;
+    uint32 RespawnTimeSec = 0;
+    vector<ObjectGuid::LowType> RespawnTargetSpawnIDs;
     ObjectGuid KillerGUID;
 };
 
@@ -344,6 +356,13 @@ public:
     uint32 RandomTimerRemainingMS = 0;
     uint32 ProximityCheckRemainingMS = 0;
     uint32 ProximityCooldownRemainingMS = 0;
+};
+
+class EverQuestCreatureKillSpawnWatchState : public DataMap::Base
+{
+public:
+    bool WasInCombat = false;
+    uint32 OocTimerRemainingMS = 0; // 0 = not yet armed
 };
 
 class EverQuestCreatureMovementSound
@@ -705,6 +724,8 @@ public:
     unordered_map<uint32, EverQuestCreature> CreaturesByTemplateID;
     unordered_map<uint32, list<EverQuestCreatureOnkillReputation>> CreatureOnkillReputationsByCreatureTemplateID;
     unordered_map<uint32, vector<EverQuestCreatureKillSpawn>> CreatureKillSpawnsByTriggerCreatureTemplateID;
+    unordered_set<uint32> EvadeKillSpawnTriggerCreatureTemplateIDs;
+    unordered_map<uint32, uint32> OocTimerKillSpawnDurationMSByCreatureTemplateID;
     unordered_map<uint32, vector<EverQuestCreatureEmote>> CreatureEmotesByCreatureTemplateID;
     unordered_map<uint32, EverQuestCreatureMovementSound> CreatureMovementSoundsByDisplayID;
 
@@ -766,6 +787,7 @@ public:
     void LoadCreatureSpawnPoints();
     bool ShouldDespawnCreatureDueToSpawnRestrictions(int mapID, Creature* creature);
     void LoadCreatureKillSpawnData();
+    void ResolveKillSpawnRespawnTargetSpawnPoints();
     void LoadCreatureEmoteData();
     bool DoCreatureEmoteEvent(Creature* creature, uint8 emoteEventType, Unit* target);
     void EmitCreatureEmote(Creature* creature, const EverQuestCreatureEmote& emote, Unit* target);
@@ -776,7 +798,9 @@ public:
     void LoadCreatureMovementSoundData();
     void RemoveCreatureMovementSoundState(Creature* creature);
     void UpdateCreatureMovementSound(Creature* creature, uint32 diff);
-    void ProcessKillSpawnsForCreatureDeath(Creature* deadCreature, Unit* killer);
+    void ProcessKillSpawnsForCreatureEvent(Creature* eventCreature, Unit* otherUnit, uint8 triggerTypeID);
+    void UpdateCreatureKillSpawnCombatWatch(Creature* creature, uint32 diff);
+    void RemoveCreatureKillSpawnCombatWatchState(Creature* creature);
     void ProcessTriggeredQuestKillSpawnsForCreatureDeath(Creature* deadCreature, Unit* killer);
     void TriggerQuestKillSpawn(uint32 mapID, const EverQuestQuestReaction& questReaction);
     void EnqueuePendingKillSpawnAction(uint32 mapID, EverQuestPendingKillSpawnAction& action);
