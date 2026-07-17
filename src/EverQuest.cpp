@@ -718,8 +718,7 @@ void EverQuestMod::EmitCreatureEmote(Creature* creature, const EverQuestCreature
         } break;
         case EQ_CREATURE_EMOTE_TYPE_PROXIMITY:
         {
-            // In EQ this was raw text (no speaker name) sent only to nearby players, so use a boss emote
-            creature->TextEmote(formattedText, target, true);
+            creature->TextEmote(formattedText, target);
         } break;
         default:
         {
