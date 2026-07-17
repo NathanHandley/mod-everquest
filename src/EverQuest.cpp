@@ -3330,6 +3330,9 @@ void EverQuestMod::UpdateCreatureUnstick(Creature* creature, uint32 diff)
         return;
     }
 
+    // This forces creatures to continue chasing if they are doing so legitimately
+    creature->UpdateLeashExtensionTime();
+
     EverQuestCreatureUnstickState* state = creature->CustomData.GetDefault<EverQuestCreatureUnstickState>(EQ_CREATURE_CUSTOMDATA_UNSTICK);
     // Take over 'cannot reach' to avoid early evades
     if (creature->CanNotReachTarget() == true)
