@@ -55,6 +55,7 @@ public:
         SetVisualEquipment(creature);
         ApplyLootWornEffectAuras(creature);
         SetupRangedAttack(creature);
+        EverQuest->SetupCreatureCombatAbilities(creature);
     }
 
     void OnCreatureRemoveWorld(Creature* creature) override
@@ -66,6 +67,7 @@ public:
         if (mapID >= EverQuest->ConfigSystemMapDBCIDMin && mapID <= EverQuest->ConfigSystemMapDBCIDMax)
             EverQuest->RemoveCreatureAsLoaded(mapID, creature);
         EverQuest->RemoveCreatureRangedAttackState(creature);
+        EverQuest->RemoveCreatureCombatAbilityState(creature);
         EverQuest->RemoveCreatureUnstickState(creature);
         EverQuest->RemoveCreatureSocialAggroState(creature);
         EverQuest->RemoveCreatureEmoteState(creature);
@@ -82,6 +84,7 @@ public:
         if (entryID < EverQuest->ConfigSystemCreatureTemplateIDMin || entryID > EverQuest->ConfigSystemCreatureTemplateIDMax)
             return;
         EverQuest->UpdateCreatureRangedAttack(creature, diff);
+        EverQuest->UpdateCreatureCombatAbilities(creature, diff);
         EverQuest->UpdateCreatureUnstick(creature, diff);
         EverQuest->UpdateCreatureScaledSocialAggro(creature, diff);
         EverQuest->UpdateCreatureEmotes(creature, diff);

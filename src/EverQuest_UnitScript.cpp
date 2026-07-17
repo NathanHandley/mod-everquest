@@ -314,6 +314,12 @@ public:
         // Some creatures double/triple attack and off-hand attack
         EverQuest->TryDoCreatureEQMeleeExtraAttacks(attacker, target);
 
+        // An enraged creature ripostes frontal melee
+        EverQuest->TryDoCreatureEnrageRiposteCounter(target, attacker);
+
+        // Rampage and wild rampage swings can carry a damage percent modifier
+        EverQuest->ApplyCreatureCombatAbilityDamageMod(attacker, damage);
+
         if (damage <= 0)
             return;
 
@@ -343,14 +349,28 @@ public:
             attacker->CastSpell(attacker, spellIDToCastOnAttacker);
     }
 
-    void OnBeforeRollMeleeOutcomeAgainst(Unit const* /*attacker*/, Unit const* victim, WeaponAttackType /*attType*/,
+    void OnBeforeRollMeleeOutcomeAgainst(Unit const* attacker, Unit const* victim, WeaponAttackType attType,
         int32& /*attackerMaxSkillValueForLevel*/, int32& /*victimMaxSkillValueForLevel*/, int32& /*attackerWeaponSkill*/,
-        int32& /*victimDefenseSkill*/, int32& /*crit_chance*/, int32& miss_chance, int32& dodge_chance,
-        int32& parry_chance, int32& /*block_chance*/) override
+        int32& /*victimDefenseSkill*/, int32& crit_chance, int32& miss_chance, int32& dodge_chance,
+        int32& parry_chance, int32& block_chance) override
     {
         if (EverQuest->IsEnabled == false)
             return;
-        if (victim == nullptr || victim->IsPlayer() == false)
+        if (victim == nullptr || attacker == nullptr)
+            return;
+
+        // For enrage, parry all frontal melee (to simulate riposte counterattack)
+        if (attType != RANGED_ATTACK && EverQuest->IsCreatureEnragedForRiposte(victim, attacker) == true)
+        {
+            miss_chance = 0;
+            dodge_chance = 0;
+            block_chance = 0;
+            crit_chance = 0;
+            parry_chance = 30000; // This makes parry always win the roll
+            return;
+        }
+
+        if (victim->IsPlayer() == false)
             return;
 
         // This is a bit 'hacky', but this logic will fold dodge and parry into 'miss' during the casting of a bard song to

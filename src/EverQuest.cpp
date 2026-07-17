@@ -226,6 +226,18 @@ void EverQuestMod::LoadConfigurationFile()
     ConfigCombatSkillsRangedAttackDefaultMinRange = sConfigMgr->GetOption<float>("EverQuest.CombatSkills.RangedAttackDefaultMinRange", 25.0f);
     ConfigCombatSkillsRangedAttackDefaultMaxRange = sConfigMgr->GetOption<float>("EverQuest.CombatSkills.RangedAttackDefaultMaxRange", 250.0f);
     ConfigCombatSkillsRangedAttackDamageMultiplier = sConfigMgr->GetOption<float>("EverQuest.CombatSkills.RangedAttackDamageMultiplier", 1.0f);
+    ConfigCombatSkillsEnrageEnabled = sConfigMgr->GetOption<bool>("EverQuest.CombatSkills.EnrageEnabled", true);
+    ConfigCombatSkillsEnrageDefaultHPPct = sConfigMgr->GetOption<uint32>("EverQuest.CombatSkills.EnrageDefaultHPPercent", 10);
+    ConfigCombatSkillsEnrageDefaultDurationInMS = sConfigMgr->GetOption<uint32>("EverQuest.CombatSkills.EnrageDefaultDurationInMS", 10000);
+    ConfigCombatSkillsEnrageDefaultCooldownInMS = sConfigMgr->GetOption<uint32>("EverQuest.CombatSkills.EnrageDefaultCooldownInMS", 360000);
+    ConfigCombatSkillsFlurryEnabled = sConfigMgr->GetOption<bool>("EverQuest.CombatSkills.FlurryEnabled", true);
+    ConfigCombatSkillsFlurryDefaultChancePct = sConfigMgr->GetOption<uint32>("EverQuest.CombatSkills.FlurryDefaultChancePercent", 20);
+    ConfigCombatSkillsRampageEnabled = sConfigMgr->GetOption<bool>("EverQuest.CombatSkills.RampageEnabled", true);
+    ConfigCombatSkillsRampageDefaultChancePct = sConfigMgr->GetOption<uint32>("EverQuest.CombatSkills.RampageDefaultChancePercent", 20);
+    ConfigCombatSkillsRampageDefaultRange = sConfigMgr->GetOption<float>("EverQuest.CombatSkills.RampageDefaultRange", 75.0f);
+    ConfigCombatSkillsAreaRampageEnabled = sConfigMgr->GetOption<bool>("EverQuest.CombatSkills.AreaRampageEnabled", true);
+    ConfigCombatSkillsAreaRampageDefaultChancePct = sConfigMgr->GetOption<uint32>("EverQuest.CombatSkills.AreaRampageDefaultChancePercent", 20);
+    ConfigCombatSkillsAreaRampageDefaultMaxTargets = sConfigMgr->GetOption<uint32>("EverQuest.CombatSkills.AreaRampageDefaultMaxTargets", 999);
 
     // Evade / unstick (EverQuest maps only)
     ConfigEvadeEnabled = sConfigMgr->GetOption<bool>("EverQuest.Evade.Enabled", true);
@@ -275,7 +287,7 @@ void EverQuestMod::LoadConfigurationFile()
 void EverQuestMod::LoadCreatureData()
 {
     CreaturesByTemplateID.clear();
-    QueryResult queryResult = WorldDatabase.Query("SELECT CreatureTemplateID, CanShowHeldLootItems, CanShowHeldLootShields, SpawnLimit, RangedAttackEnabled, RangedAttackMinRange, RangedAttackMaxRange, RangedAttackDamageModPct, AgroSocialDistanceMod FROM mod_everquest_creature ORDER BY CreatureTemplateID;");
+    QueryResult queryResult = WorldDatabase.Query("SELECT CreatureTemplateID, CanShowHeldLootItems, CanShowHeldLootShields, SpawnLimit, RangedAttackEnabled, RangedAttackMinRange, RangedAttackMaxRange, RangedAttackDamageModPct, AgroSocialDistanceMod, EnrageEnabled, EnrageHPPct, EnrageDurationInMS, EnrageCooldownInMS, FlurryEnabled, FlurryChancePct, RampageEnabled, RampageChancePct, RampageRange, RampageDamagePct, AreaRampageEnabled, AreaRampageChancePct, AreaRampageMaxTargets, AreaRampageDamagePct, AttackRoundTimeInMS FROM mod_everquest_creature ORDER BY CreatureTemplateID;");
     if (queryResult)
     {
         do
@@ -292,6 +304,21 @@ void EverQuestMod::LoadCreatureData()
             everQuestCreature.RangedAttackMaxRange = fields[6].Get<uint32>();
             everQuestCreature.RangedAttackDamageModPct = fields[7].Get<int32>();
             everQuestCreature.AgroSocialDistanceMod = fields[8].Get<float>();
+            everQuestCreature.EnrageEnabled = fields[9].Get<bool>();
+            everQuestCreature.EnrageHPPct = fields[10].Get<uint32>();
+            everQuestCreature.EnrageDurationInMS = fields[11].Get<uint32>();
+            everQuestCreature.EnrageCooldownInMS = fields[12].Get<uint32>();
+            everQuestCreature.FlurryEnabled = fields[13].Get<bool>();
+            everQuestCreature.FlurryChancePct = fields[14].Get<uint32>();
+            everQuestCreature.RampageEnabled = fields[15].Get<bool>();
+            everQuestCreature.RampageChancePct = fields[16].Get<uint32>();
+            everQuestCreature.RampageRange = fields[17].Get<uint32>();
+            everQuestCreature.RampageDamagePct = fields[18].Get<uint32>();
+            everQuestCreature.AreaRampageEnabled = fields[19].Get<bool>();
+            everQuestCreature.AreaRampageChancePct = fields[20].Get<uint32>();
+            everQuestCreature.AreaRampageMaxTargets = fields[21].Get<uint32>();
+            everQuestCreature.AreaRampageDamagePct = fields[22].Get<uint32>();
+            everQuestCreature.AttackRoundTimeInMS = fields[23].Get<uint32>();
             CreaturesByTemplateID[everQuestCreature.CreatureTemplateID] = everQuestCreature;
         } while (queryResult->NextRow());
     }
@@ -2890,6 +2917,319 @@ void EverQuestMod::UpdateCreatureRangedAttack(Creature* creature, uint32 diff)
     EverQuestCreatureRangedAttackState* stateAfterCast = creature->CustomData.Get<EverQuestCreatureRangedAttackState>(EQ_CREATURE_CUSTOMDATA_RANGEDATTACK);
     if (stateAfterCast != nullptr)
         stateAfterCast->SwingTimerRemainingMS = swingTime;
+}
+
+void EverQuestMod::SetupCreatureCombatAbilities(Creature* creature)
+{
+    if (HasCreatureDataForCreatureTemplateID(creature->GetEntry()) == false)
+        return;
+    const EverQuestCreature& eqCreature = GetCreatureDataForCreatureTemplateID(creature->GetEntry());
+    bool enrageEnabled = eqCreature.EnrageEnabled == true && ConfigCombatSkillsEnrageEnabled == true;
+    bool flurryEnabled = eqCreature.FlurryEnabled == true && ConfigCombatSkillsFlurryEnabled == true;
+    bool rampageEnabled = eqCreature.RampageEnabled == true && ConfigCombatSkillsRampageEnabled == true;
+    bool areaRampageEnabled = eqCreature.AreaRampageEnabled == true && ConfigCombatSkillsAreaRampageEnabled == true;
+    if (enrageEnabled == false && flurryEnabled == false && rampageEnabled == false && areaRampageEnabled == false)
+        return;
+
+    // Reset runtime fields in case this creature object was recycled
+    EverQuestCreatureCombatAbilityState* state = creature->CustomData.GetDefault<EverQuestCreatureCombatAbilityState>(EQ_CREATURE_CUSTOMDATA_COMBATABILITY);
+    state->EnrageEnabled = enrageEnabled;
+    state->EnrageHPPct = eqCreature.EnrageHPPct;
+    state->EnrageDurationInMS = eqCreature.EnrageDurationInMS;
+    state->EnrageCooldownInMS = eqCreature.EnrageCooldownInMS;
+    state->FlurryEnabled = flurryEnabled;
+    state->FlurryChancePct = eqCreature.FlurryChancePct;
+    state->RampageEnabled = rampageEnabled;
+    state->RampageChancePct = eqCreature.RampageChancePct;
+    state->RampageRange = (float)eqCreature.RampageRange;
+    state->RampageDamagePct = eqCreature.RampageDamagePct;
+    state->AreaRampageEnabled = areaRampageEnabled;
+    state->AreaRampageChancePct = eqCreature.AreaRampageChancePct;
+    state->AreaRampageMaxTargets = eqCreature.AreaRampageMaxTargets;
+    state->AreaRampageDamagePct = eqCreature.AreaRampageDamagePct;
+    state->AttackRoundTimeInMS = eqCreature.AttackRoundTimeInMS;
+    state->IsEnraged = false;
+    state->EnrageDurationRemainingMS = 0;
+    state->EnrageCooldownRemainingMS = 0;
+    state->SpecialAttackTimerRemainingMS = 0;
+    state->ActiveSwingDamageModPct = 100;
+}
+
+void EverQuestMod::RemoveCreatureCombatAbilityState(Creature* creature)
+{
+    creature->CustomData.Erase(EQ_CREATURE_CUSTOMDATA_COMBATABILITY);
+}
+
+void EverQuestMod::UpdateCreatureCombatAbilities(Creature* creature, uint32 diff)
+{
+    if (creature == nullptr)
+        return;
+    EverQuestCreatureCombatAbilityState* state = creature->CustomData.Get<EverQuestCreatureCombatAbilityState>(EQ_CREATURE_CUSTOMDATA_COMBATABILITY);
+    if (state == nullptr)
+        return;
+    UpdateCreatureEnrage(creature, state, diff);
+    UpdateCreatureSpecialAttacks(creature, state, diff);
+}
+
+// This was written referencing TAKP's Mob::CheckEnrage, Mob::StartEnrage, Mob:ProcessEnrage
+void EverQuestMod::UpdateCreatureEnrage(Creature* creature, EverQuestCreatureCombatAbilityState* state, uint32 diff)
+{
+    if (state->EnrageEnabled == false)
+        return;
+
+    // Wind down an active enrage, and start the reuse cooldown when it ends
+    if (state->IsEnraged == true)
+    {
+        if (state->EnrageDurationRemainingMS > diff)
+        {
+            state->EnrageDurationRemainingMS -= diff;
+            return;
+        }
+        state->IsEnraged = false;
+        state->EnrageDurationRemainingMS = 0;
+        state->EnrageCooldownRemainingMS = state->EnrageCooldownInMS > 0 ? state->EnrageCooldownInMS : ConfigCombatSkillsEnrageDefaultCooldownInMS;
+        if (creature->IsAlive() == true)
+            creature->TextEmote(creature->GetName() + " is no longer enraged.", nullptr, true);
+        return;
+    }
+
+    // Tick down the reuse cooldown
+    if (state->EnrageCooldownRemainingMS > 0)
+    {
+        if (state->EnrageCooldownRemainingMS > diff)
+        {
+            state->EnrageCooldownRemainingMS -= diff;
+            return;
+        }
+        state->EnrageCooldownRemainingMS = 0;
+    }
+
+    // Start an enrage when low enough on health.
+    // Note: TAKP also blocks starting one while feared and not rooted
+    if (creature->IsAlive() == false || creature->IsInCombat() == false)
+        return;
+    if (creature->HasUnitState(UNIT_STATE_FLEEING) == true && creature->HasUnitState(UNIT_STATE_ROOT) == false)
+        return;
+    uint32 hpPctTrigger = state->EnrageHPPct > 0 ? state->EnrageHPPct : ConfigCombatSkillsEnrageDefaultHPPct;
+    if (creature->GetHealthPct() > (float)hpPctTrigger)
+        return;
+    state->IsEnraged = true;
+    state->EnrageDurationRemainingMS = state->EnrageDurationInMS > 0 ? state->EnrageDurationInMS : ConfigCombatSkillsEnrageDefaultDurationInMS;
+    creature->TextEmote(creature->GetName() + " has become ENRAGED.", nullptr, true);
+}
+
+// Written by referencing TAKP's Mod:AI_Process for special attacks
+void EverQuestMod::UpdateCreatureSpecialAttacks(Creature* creature, EverQuestCreatureCombatAbilityState* state, uint32 diff)
+{
+    if (state->FlurryEnabled == false && state->RampageEnabled == false && state->AreaRampageEnabled == false)
+        return;
+
+    // Roll at the creature's main-hand swing rate to mirror TAKP checking after each attack round
+    if (state->SpecialAttackTimerRemainingMS > diff)
+    {
+        state->SpecialAttackTimerRemainingMS -= diff;
+        return;
+    }
+    state->SpecialAttackTimerRemainingMS = 0;
+
+    if (creature->IsAlive() == false || creature->IsInCombat() == false)
+        return;
+    if (creature->IsCharmed() == true)
+        return;
+    if (creature->HasUnitState(UNIT_STATE_CASTING) || creature->IsNonMeleeSpellCast(false))
+        return;
+    if (creature->HasUnitState(UNIT_STATE_STUNNED | UNIT_STATE_FLEEING | UNIT_STATE_CONFUSED))
+        return;
+    Unit* victim = creature->GetVictim();
+    if (victim == nullptr || victim->IsAlive() == false)
+        return;
+    if (creature->IsWithinMeleeRange(victim) == false)
+        return;
+
+    // Rebalanced WoW swing time is typically faster than EQ attack delay, so control for that
+    uint32 swingTime = state->AttackRoundTimeInMS > 0 ? state->AttackRoundTimeInMS : creature->GetAttackTime(BASE_ATTACK);
+    if (swingTime < 1000)
+        swingTime = 1000;
+    state->SpecialAttackTimerRemainingMS = swingTime;
+
+    if (state->FlurryEnabled == true)
+    {
+        uint32 chance = state->FlurryChancePct > 0 ? state->FlurryChancePct : ConfigCombatSkillsFlurryDefaultChancePct;
+        if (urand(0, 99) < chance)
+        {
+            DoCreatureFlurry(creature, victim);
+            return;
+        }
+    }
+    if (state->RampageEnabled == true)
+    {
+        uint32 chance = state->RampageChancePct > 0 ? state->RampageChancePct : ConfigCombatSkillsRampageDefaultChancePct;
+        if (urand(0, 99) < chance)
+        {
+            float range = state->RampageRange > 0.0f ? state->RampageRange : ConfigCombatSkillsRampageDefaultRange * ConfigWorldScale;
+            uint32 damagePct = state->RampageDamagePct > 0 ? state->RampageDamagePct : 100;
+            DoCreatureRampage(creature, victim, range, damagePct);
+            return;
+        }
+    }
+    if (state->AreaRampageEnabled == true)
+    {
+        uint32 chance = state->AreaRampageChancePct > 0 ? state->AreaRampageChancePct : ConfigCombatSkillsAreaRampageDefaultChancePct;
+        if (urand(0, 99) < chance)
+        {
+            uint32 maxTargets = state->AreaRampageMaxTargets > 0 ? state->AreaRampageMaxTargets : ConfigCombatSkillsAreaRampageDefaultMaxTargets;
+            uint32 damagePct = state->AreaRampageDamagePct > 0 ? state->AreaRampageDamagePct : 100;
+            DoCreatureAreaRampage(creature, victim, maxTargets, damagePct);
+        }
+    }
+}
+
+// Similar to TAKP's "DoMainHandRound" + "DoOffHandRound". Intentionally not adding an explicit off-hand swing here
+void EverQuestMod::DoCreatureCombatAbilitySwingRound(Creature* creature, Unit* target, uint32 damagePct)
+{
+    if (target == nullptr || target->IsAlive() == false)
+        return;
+
+    EverQuestCreatureCombatAbilityState* state = creature->CustomData.Get<EverQuestCreatureCombatAbilityState>(EQ_CREATURE_CUSTOMDATA_COMBATABILITY);
+    if (state != nullptr)
+        state->ActiveSwingDamageModPct = damagePct;
+
+    creature->AttackerStateUpdate(target, BASE_ATTACK, true);
+
+    // Make sure the custom data was not changed via scripting or whatever
+    state = creature->CustomData.Get<EverQuestCreatureCombatAbilityState>(EQ_CREATURE_CUSTOMDATA_COMBATABILITY);
+    if (state != nullptr)
+        state->ActiveSwingDamageModPct = 100;
+}
+
+// Based on TAKP's Mob::Flurry of having one extra full attack round on the current target
+void EverQuestMod::DoCreatureFlurry(Creature* creature, Unit* victim)
+{
+    creature->TextEmote(creature->GetName() + " executes a FLURRY of attacks on " + victim->GetName() + "!", victim);
+    DoCreatureCombatAbilitySwingRound(creature, victim, 100);
+}
+
+// Based on TAKP's Mob::Rampage, but use the hate list instead of engage list
+void EverQuestMod::DoCreatureRampage(Creature* creature, Unit* victim, float range, uint32 damagePct)
+{
+    // TAKP still emits the message even when nobody else ends up eligible to hit, so let's do that too
+    creature->TextEmote(creature->GetName() + " goes on a RAMPAGE!", nullptr);
+
+    // Take a snapshot of the hate list in case it changes mid execution
+    vector<ObjectGuid> hatedUnitGUIDs;
+    for (ThreatReference const* threatReference : creature->GetThreatMgr().GetSortedThreatList())
+    {
+        if (threatReference == nullptr || threatReference->IsAvailable() == false)
+            continue;
+        Unit* hatedUnit = threatReference->GetVictim();
+        if (hatedUnit == nullptr)
+            continue;
+        hatedUnitGUIDs.push_back(hatedUnit->GetGUID());
+    }
+
+    for (ObjectGuid hatedUnitGUID : hatedUnitGUIDs)
+    {
+        if (victim != nullptr && hatedUnitGUID == victim->GetGUID())
+            continue;
+        Unit* rampageTarget = ObjectAccessor::GetUnit(*creature, hatedUnitGUID);
+        if (rampageTarget == nullptr || rampageTarget->IsAlive() == false)
+            continue;
+        if (creature->GetExactDist(rampageTarget) > range)
+            continue;
+
+        // Regular rampage hits exactly one extra target
+        DoCreatureCombatAbilitySwingRound(creature, rampageTarget, damagePct);
+        return;
+    }
+}
+
+// Based on TAKP's Mob::AreaRampage + HateList::AreaRampage.
+void EverQuestMod::DoCreatureAreaRampage(Creature* creature, Unit* victim, uint32 maxTargets, uint32 damagePct)
+{
+    creature->TextEmote(creature->GetName() + " goes on a WILD RAMPAGE!", nullptr);
+
+    // Take a snapshot of the hate list in case it changes mid execution
+    vector<ObjectGuid> hatedUnitGUIDs;
+    for (ThreatReference const* threatReference : creature->GetThreatMgr().GetSortedThreatList())
+    {
+        if (threatReference == nullptr || threatReference->IsAvailable() == false)
+            continue;
+        Unit* hatedUnit = threatReference->GetVictim();
+        if (hatedUnit == nullptr)
+            continue;
+        hatedUnitGUIDs.push_back(hatedUnit->GetGUID());
+    }
+
+    bool includeCurrentVictim = (hatedUnitGUIDs.size() == 1);
+    uint32 targetsHit = 0;
+    for (ObjectGuid hatedUnitGUID : hatedUnitGUIDs)
+    {
+        if (targetsHit >= maxTargets)
+            break;
+        if (creature->IsAlive() == false)
+            break;
+        if (includeCurrentVictim == false && victim != nullptr && hatedUnitGUID == victim->GetGUID())
+            continue;
+        Unit* rampageTarget = ObjectAccessor::GetUnit(*creature, hatedUnitGUID);
+        if (rampageTarget == nullptr || rampageTarget->IsAlive() == false)
+            continue;
+        if (creature->IsWithinMeleeRange(rampageTarget) == false)
+            continue;
+        DoCreatureCombatAbilitySwingRound(creature, rampageTarget, damagePct);
+        targetsHit++;
+    }
+}
+
+bool EverQuestMod::IsCreatureEnragedForRiposte(Unit const* unit, Unit const* attacker)
+{
+    if (unit == nullptr || attacker == nullptr)
+        return false;
+    if (unit->IsCreature() == false)
+        return false;
+    const EverQuestCreatureCombatAbilityState* state = unit->CustomData.Get<EverQuestCreatureCombatAbilityState>(EQ_CREATURE_CUSTOMDATA_COMBATABILITY);
+    if (state == nullptr || state->IsEnraged == false)
+        return false;
+    if (unit->IsAlive() == false)
+        return false;
+    if (unit->ToCreature()->HasFlagsExtra(CREATURE_FLAG_EXTRA_NO_PARRY))
+        return false;
+    if (unit->HasInArc(M_PI, attacker) == false)
+        return false;
+    if (unit->IsNonMeleeSpellCast(false, false, true) == true || unit->HasUnitState(UNIT_STATE_CONTROLLED))
+        return false;
+    return true;
+}
+
+void EverQuestMod::TryDoCreatureEnrageRiposteCounter(Unit* victim, Unit* attacker)
+{
+    if (IsCreatureEnragedForRiposte(victim, attacker) == false)
+        return;
+
+    Creature* enragedCreature = victim->ToCreature();
+    ObjectGuid enragedCreatureGUID = enragedCreature->GetGUID();
+    {
+        std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+        if (CreaturesResolvingEQMeleeExtraAttacks.count(enragedCreatureGUID) > 0)
+            return;
+        CreaturesResolvingEQMeleeExtraAttacks.insert(enragedCreatureGUID);
+    }
+
+    enragedCreature->AttackerStateUpdate(attacker, BASE_ATTACK, true);
+
+    {
+        std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+        CreaturesResolvingEQMeleeExtraAttacks.erase(enragedCreatureGUID);
+    }
+}
+
+void EverQuestMod::ApplyCreatureCombatAbilityDamageMod(Unit* attacker, uint32& damage)
+{
+    if (attacker == nullptr || attacker->IsCreature() == false || damage == 0)
+        return;
+    EverQuestCreatureCombatAbilityState* state = attacker->CustomData.Get<EverQuestCreatureCombatAbilityState>(EQ_CREATURE_CUSTOMDATA_COMBATABILITY);
+    if (state == nullptr || state->ActiveSwingDamageModPct == 100)
+        return;
+    damage = damage * state->ActiveSwingDamageModPct / 100;
 }
 
 void EverQuestMod::RemoveCreatureUnstickState(Creature* creature)

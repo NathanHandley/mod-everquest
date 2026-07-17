@@ -38,7 +38,7 @@ static uint32 ConfigMaxSkillIDCheck = 1000;         // The highest level of skil
 class Unit;
 class Aura;
 
-#define EQ_MOD_VERSION                              47
+#define EQ_MOD_VERSION                              49
 
 #define EQ_EQCLASS_NONE                             0
 #define EQ_EQCLASS_WARRIOR                          1
@@ -185,6 +185,7 @@ class Aura;
 #define EQ_FORAGE_TYPE_OTHER                        3
 
 #define EQ_CREATURE_CUSTOMDATA_RANGEDATTACK         "EQRangedAtk"
+#define EQ_CREATURE_CUSTOMDATA_COMBATABILITY        "EQCombatAbility"
 #define EQ_CREATURE_CUSTOMDATA_UNSTICK              "EQUnstick"
 #define EQ_CREATURE_CUSTOMDATA_SOCIALAGGRO          "EQSocialAggro"
 #define EQ_CREATURE_CUSTOMDATA_EMOTE                "EQEmote"
@@ -248,6 +249,21 @@ public:
     uint32 RangedAttackMaxRange = 0;
     int32 RangedAttackDamageModPct = 0;
     float AgroSocialDistanceMod = 1.0f;
+    bool EnrageEnabled = false;
+    uint32 EnrageHPPct = 0;
+    uint32 EnrageDurationInMS = 0;
+    uint32 EnrageCooldownInMS = 0;
+    bool FlurryEnabled = false;
+    uint32 FlurryChancePct = 0;
+    bool RampageEnabled = false;
+    uint32 RampageChancePct = 0;
+    uint32 RampageRange = 0;
+    uint32 RampageDamagePct = 0;
+    bool AreaRampageEnabled = false;
+    uint32 AreaRampageChancePct = 0;
+    uint32 AreaRampageMaxTargets = 0;
+    uint32 AreaRampageDamagePct = 0;
+    uint32 AttackRoundTimeInMS = 0;
 };
 
 class EverQuestCreatureSpawnPoint
@@ -324,6 +340,31 @@ public:
     float MaxRange = 0.0f;
     int32 DamageModPct = 0;
     uint32 SwingTimerRemainingMS = 0;
+};
+
+class EverQuestCreatureCombatAbilityState : public DataMap::Base
+{
+public:
+    bool EnrageEnabled = false;
+    uint32 EnrageHPPct = 0;
+    uint32 EnrageDurationInMS = 0;
+    uint32 EnrageCooldownInMS = 0;
+    bool FlurryEnabled = false;
+    uint32 FlurryChancePct = 0;
+    bool RampageEnabled = false;
+    uint32 RampageChancePct = 0;
+    float RampageRange = 0.0f;
+    uint32 RampageDamagePct = 0;
+    bool AreaRampageEnabled = false;
+    uint32 AreaRampageChancePct = 0;
+    uint32 AreaRampageMaxTargets = 0;
+    uint32 AreaRampageDamagePct = 0;
+    uint32 AttackRoundTimeInMS = 0;
+    bool IsEnraged = false;
+    uint32 EnrageDurationRemainingMS = 0;
+    uint32 EnrageCooldownRemainingMS = 0;
+    uint32 SpecialAttackTimerRemainingMS = 0;
+    uint32 ActiveSwingDamageModPct = 100;
 };
 
 class EverQuestCreatureUnstickState : public DataMap::Base
@@ -705,6 +746,18 @@ public:
     float ConfigCombatSkillsRangedAttackDefaultMinRange;
     float ConfigCombatSkillsRangedAttackDefaultMaxRange;
     float ConfigCombatSkillsRangedAttackDamageMultiplier;
+    bool ConfigCombatSkillsEnrageEnabled;
+    uint32 ConfigCombatSkillsEnrageDefaultHPPct;
+    uint32 ConfigCombatSkillsEnrageDefaultDurationInMS;
+    uint32 ConfigCombatSkillsEnrageDefaultCooldownInMS;
+    bool ConfigCombatSkillsFlurryEnabled;
+    uint32 ConfigCombatSkillsFlurryDefaultChancePct;
+    bool ConfigCombatSkillsRampageEnabled;
+    uint32 ConfigCombatSkillsRampageDefaultChancePct;
+    float ConfigCombatSkillsRampageDefaultRange;
+    bool ConfigCombatSkillsAreaRampageEnabled;
+    uint32 ConfigCombatSkillsAreaRampageDefaultChancePct;
+    uint32 ConfigCombatSkillsAreaRampageDefaultMaxTargets;
     bool ConfigEvadeEnabled;
     float ConfigEvadeUnreachableSeconds;
     float ConfigEvadeUnstickStallSeconds;
@@ -895,6 +948,18 @@ public:
     void StoreCreatureRangedAttackState(Creature* creature, float minRange, float maxRange, int32 damageModPct);
     void RemoveCreatureRangedAttackState(Creature* creature);
     void UpdateCreatureRangedAttack(Creature* creature, uint32 diff);
+    void SetupCreatureCombatAbilities(Creature* creature);
+    void RemoveCreatureCombatAbilityState(Creature* creature);
+    void UpdateCreatureCombatAbilities(Creature* creature, uint32 diff);
+    void UpdateCreatureEnrage(Creature* creature, EverQuestCreatureCombatAbilityState* state, uint32 diff);
+    void UpdateCreatureSpecialAttacks(Creature* creature, EverQuestCreatureCombatAbilityState* state, uint32 diff);
+    void DoCreatureCombatAbilitySwingRound(Creature* creature, Unit* target, uint32 damagePct);
+    void DoCreatureFlurry(Creature* creature, Unit* victim);
+    void DoCreatureRampage(Creature* creature, Unit* victim, float range, uint32 damagePct);
+    void DoCreatureAreaRampage(Creature* creature, Unit* victim, uint32 maxTargets, uint32 damagePct);
+    bool IsCreatureEnragedForRiposte(Unit const* unit, Unit const* attacker);
+    void TryDoCreatureEnrageRiposteCounter(Unit* victim, Unit* attacker);
+    void ApplyCreatureCombatAbilityDamageMod(Unit* attacker, uint32& damage);
     void RemoveCreatureUnstickState(Creature* creature);
     void CalculateUnstickTeleportPosition(Creature* creature, Unit* victim, float& xOut, float& yOut, float& zOut);
     void UpdateCreatureUnstick(Creature* creature, uint32 diff);

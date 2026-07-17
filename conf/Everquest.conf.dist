@@ -168,6 +168,74 @@ EverQuest.CombatSkills.RangedAttackDefaultMaxRange = 250
 EverQuest.CombatSkills.RangedAttackDamageMultiplier = 1.0
 
 ###################################################################################################
+#
+# 	EverQuest.CombatSkills.EnrageEnabled
+#		If true, creatures with the EQ "enrage" special ability riposte all frontal melee swings
+#		(parry + counterattack) for a short duration when low on health (mirrors TAKP)
+#	Default: True
+#
+#	EverQuest.CombatSkills.EnrageDefaultHPPercent
+#		Health percent at/below which an enrage starts, when the creature does not specify its own
+#	Default: 10
+#
+#	EverQuest.CombatSkills.EnrageDefaultDurationInMS
+#	EverQuest.CombatSkills.EnrageDefaultCooldownInMS
+#		How long an enrage lasts and how long until it can happen again, when the creature does not
+#		specify its own values
+#	Default: 10000 / 360000
+#
+# 	EverQuest.CombatSkills.FlurryEnabled
+#		If true, creatures with the EQ "flurry" special ability can perform an extra attack round
+#		on their current target
+#	Default: True
+#
+#	EverQuest.CombatSkills.FlurryDefaultChancePercent
+#		Chance per attack round to flurry, when the creature does not specify its own
+#	Default: 20
+#
+# 	EverQuest.CombatSkills.RampageEnabled
+#		If true, creatures with the EQ "rampage" special ability can strike an extra hate list
+#		member that isn't their current target
+#	Default: True
+#
+#	EverQuest.CombatSkills.RampageDefaultChancePercent
+#		Chance per attack round to rampage, when the creature does not specify its own
+#	Default: 20
+#
+#	EverQuest.CombatSkills.RampageDefaultRange
+#		Max distance a rampage target can be, when the creature does not specify its own.
+#       Note: Multiplied by world scale from the converter (typically 0.29)
+#	Default: 75
+#
+# 	EverQuest.CombatSkills.AreaRampageEnabled
+#		If true, creatures with the EQ "area rampage" (wild rampage) special ability can strike
+#		everyone on their hate list in melee range, like a WoW cleave
+#	Default: True
+#
+#	EverQuest.CombatSkills.AreaRampageDefaultChancePercent
+#		Chance per attack round to area rampage, when the creature does not specify its own
+#	Default: 20
+#
+#	EverQuest.CombatSkills.AreaRampageDefaultMaxTargets
+#		Max hate list members struck by one area rampage, when the creature does not specify its own
+#	Default: 999
+#
+###################################################################################################
+
+EverQuest.CombatSkills.EnrageEnabled = True
+EverQuest.CombatSkills.EnrageDefaultHPPercent = 10
+EverQuest.CombatSkills.EnrageDefaultDurationInMS = 10000
+EverQuest.CombatSkills.EnrageDefaultCooldownInMS = 360000
+EverQuest.CombatSkills.FlurryEnabled = True
+EverQuest.CombatSkills.FlurryDefaultChancePercent = 20
+EverQuest.CombatSkills.RampageEnabled = True
+EverQuest.CombatSkills.RampageDefaultChancePercent = 20
+EverQuest.CombatSkills.RampageDefaultRange = 75
+EverQuest.CombatSkills.AreaRampageEnabled = True
+EverQuest.CombatSkills.AreaRampageDefaultChancePercent = 20
+EverQuest.CombatSkills.AreaRampageDefaultMaxTargets = 999
+
+###################################################################################################
 # Evade / Unstick Settings (EverQuest maps only)
 #
 # 	EverQuest.Evade.Enabled
