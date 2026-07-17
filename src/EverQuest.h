@@ -259,10 +259,10 @@ public:
     uint32 RampageChancePct = 0;
     uint32 RampageRange = 0;
     uint32 RampageDamagePct = 0;
-    bool AreaRampageEnabled = false;
-    uint32 AreaRampageChancePct = 0;
-    uint32 AreaRampageMaxTargets = 0;
-    uint32 AreaRampageDamagePct = 0;
+    bool WildRampageEnabled = false;
+    uint32 WildRampageChancePct = 0;
+    uint32 WildRampageMaxTargets = 0;
+    uint32 WildRampageDamagePct = 0;
     uint32 AttackRoundTimeInMS = 0;
 };
 
@@ -355,10 +355,10 @@ public:
     uint32 RampageChancePct = 0;
     float RampageRange = 0.0f;
     uint32 RampageDamagePct = 0;
-    bool AreaRampageEnabled = false;
-    uint32 AreaRampageChancePct = 0;
-    uint32 AreaRampageMaxTargets = 0;
-    uint32 AreaRampageDamagePct = 0;
+    bool WildRampageEnabled = false;
+    uint32 WildRampageChancePct = 0;
+    uint32 WildRampageMaxTargets = 0;
+    uint32 WildRampageDamagePct = 0;
     uint32 AttackRoundTimeInMS = 0;
     bool IsEnraged = false;
     uint32 EnrageDurationRemainingMS = 0;
@@ -755,9 +755,9 @@ public:
     bool ConfigCombatSkillsRampageEnabled;
     uint32 ConfigCombatSkillsRampageDefaultChancePct;
     float ConfigCombatSkillsRampageDefaultRange;
-    bool ConfigCombatSkillsAreaRampageEnabled;
-    uint32 ConfigCombatSkillsAreaRampageDefaultChancePct;
-    uint32 ConfigCombatSkillsAreaRampageDefaultMaxTargets;
+    bool ConfigCombatSkillsWildRampageEnabled;
+    uint32 ConfigCombatSkillsWildRampageDefaultChancePct;
+    uint32 ConfigCombatSkillsWildRampageDefaultMaxTargets;
     bool ConfigEvadeEnabled;
     float ConfigEvadeUnreachableSeconds;
     float ConfigEvadeUnstickStallSeconds;
@@ -956,7 +956,7 @@ public:
     void DoCreatureCombatAbilitySwingRound(Creature* creature, Unit* target, uint32 damagePct);
     void DoCreatureFlurry(Creature* creature, Unit* victim);
     void DoCreatureRampage(Creature* creature, Unit* victim, float range, uint32 damagePct);
-    void DoCreatureAreaRampage(Creature* creature, Unit* victim, uint32 maxTargets, uint32 damagePct);
+    void DoCreatureWildRampage(Creature* creature, Unit* victim, uint32 maxTargets, uint32 damagePct);
     bool IsCreatureEnragedForRiposte(Unit const* unit, Unit const* attacker);
     void TryDoCreatureEnrageRiposteCounter(Unit* victim, Unit* attacker);
     void ApplyCreatureCombatAbilityDamageMod(Unit* attacker, uint32& damage);

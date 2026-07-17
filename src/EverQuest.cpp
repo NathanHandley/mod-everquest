@@ -235,9 +235,9 @@ void EverQuestMod::LoadConfigurationFile()
     ConfigCombatSkillsRampageEnabled = sConfigMgr->GetOption<bool>("EverQuest.CombatSkills.RampageEnabled", true);
     ConfigCombatSkillsRampageDefaultChancePct = sConfigMgr->GetOption<uint32>("EverQuest.CombatSkills.RampageDefaultChancePercent", 20);
     ConfigCombatSkillsRampageDefaultRange = sConfigMgr->GetOption<float>("EverQuest.CombatSkills.RampageDefaultRange", 75.0f);
-    ConfigCombatSkillsAreaRampageEnabled = sConfigMgr->GetOption<bool>("EverQuest.CombatSkills.AreaRampageEnabled", true);
-    ConfigCombatSkillsAreaRampageDefaultChancePct = sConfigMgr->GetOption<uint32>("EverQuest.CombatSkills.AreaRampageDefaultChancePercent", 20);
-    ConfigCombatSkillsAreaRampageDefaultMaxTargets = sConfigMgr->GetOption<uint32>("EverQuest.CombatSkills.AreaRampageDefaultMaxTargets", 999);
+    ConfigCombatSkillsWildRampageEnabled = sConfigMgr->GetOption<bool>("EverQuest.CombatSkills.WildRampageEnabled", true);
+    ConfigCombatSkillsWildRampageDefaultChancePct = sConfigMgr->GetOption<uint32>("EverQuest.CombatSkills.WildRampageDefaultChancePercent", 20);
+    ConfigCombatSkillsWildRampageDefaultMaxTargets = sConfigMgr->GetOption<uint32>("EverQuest.CombatSkills.WildRampageDefaultMaxTargets", 999);
 
     // Evade / unstick (EverQuest maps only)
     ConfigEvadeEnabled = sConfigMgr->GetOption<bool>("EverQuest.Evade.Enabled", true);
@@ -287,7 +287,7 @@ void EverQuestMod::LoadConfigurationFile()
 void EverQuestMod::LoadCreatureData()
 {
     CreaturesByTemplateID.clear();
-    QueryResult queryResult = WorldDatabase.Query("SELECT CreatureTemplateID, CanShowHeldLootItems, CanShowHeldLootShields, SpawnLimit, RangedAttackEnabled, RangedAttackMinRange, RangedAttackMaxRange, RangedAttackDamageModPct, AgroSocialDistanceMod, EnrageEnabled, EnrageHPPct, EnrageDurationInMS, EnrageCooldownInMS, FlurryEnabled, FlurryChancePct, RampageEnabled, RampageChancePct, RampageRange, RampageDamagePct, AreaRampageEnabled, AreaRampageChancePct, AreaRampageMaxTargets, AreaRampageDamagePct, AttackRoundTimeInMS FROM mod_everquest_creature ORDER BY CreatureTemplateID;");
+    QueryResult queryResult = WorldDatabase.Query("SELECT CreatureTemplateID, CanShowHeldLootItems, CanShowHeldLootShields, SpawnLimit, RangedAttackEnabled, RangedAttackMinRange, RangedAttackMaxRange, RangedAttackDamageModPct, AgroSocialDistanceMod, EnrageEnabled, EnrageHPPct, EnrageDurationInMS, EnrageCooldownInMS, FlurryEnabled, FlurryChancePct, RampageEnabled, RampageChancePct, RampageRange, RampageDamagePct, WildRampageEnabled, WildRampageChancePct, WildRampageMaxTargets, WildRampageDamagePct, AttackRoundTimeInMS FROM mod_everquest_creature ORDER BY CreatureTemplateID;");
     if (queryResult)
     {
         do
@@ -314,10 +314,10 @@ void EverQuestMod::LoadCreatureData()
             everQuestCreature.RampageChancePct = fields[16].Get<uint32>();
             everQuestCreature.RampageRange = fields[17].Get<uint32>();
             everQuestCreature.RampageDamagePct = fields[18].Get<uint32>();
-            everQuestCreature.AreaRampageEnabled = fields[19].Get<bool>();
-            everQuestCreature.AreaRampageChancePct = fields[20].Get<uint32>();
-            everQuestCreature.AreaRampageMaxTargets = fields[21].Get<uint32>();
-            everQuestCreature.AreaRampageDamagePct = fields[22].Get<uint32>();
+            everQuestCreature.WildRampageEnabled = fields[19].Get<bool>();
+            everQuestCreature.WildRampageChancePct = fields[20].Get<uint32>();
+            everQuestCreature.WildRampageMaxTargets = fields[21].Get<uint32>();
+            everQuestCreature.WildRampageDamagePct = fields[22].Get<uint32>();
             everQuestCreature.AttackRoundTimeInMS = fields[23].Get<uint32>();
             CreaturesByTemplateID[everQuestCreature.CreatureTemplateID] = everQuestCreature;
         } while (queryResult->NextRow());
@@ -2927,8 +2927,8 @@ void EverQuestMod::SetupCreatureCombatAbilities(Creature* creature)
     bool enrageEnabled = eqCreature.EnrageEnabled == true && ConfigCombatSkillsEnrageEnabled == true;
     bool flurryEnabled = eqCreature.FlurryEnabled == true && ConfigCombatSkillsFlurryEnabled == true;
     bool rampageEnabled = eqCreature.RampageEnabled == true && ConfigCombatSkillsRampageEnabled == true;
-    bool areaRampageEnabled = eqCreature.AreaRampageEnabled == true && ConfigCombatSkillsAreaRampageEnabled == true;
-    if (enrageEnabled == false && flurryEnabled == false && rampageEnabled == false && areaRampageEnabled == false)
+    bool wildRampageEnabled = eqCreature.WildRampageEnabled == true && ConfigCombatSkillsWildRampageEnabled == true;
+    if (enrageEnabled == false && flurryEnabled == false && rampageEnabled == false && wildRampageEnabled == false)
         return;
 
     // Reset runtime fields in case this creature object was recycled
@@ -2943,10 +2943,10 @@ void EverQuestMod::SetupCreatureCombatAbilities(Creature* creature)
     state->RampageChancePct = eqCreature.RampageChancePct;
     state->RampageRange = (float)eqCreature.RampageRange;
     state->RampageDamagePct = eqCreature.RampageDamagePct;
-    state->AreaRampageEnabled = areaRampageEnabled;
-    state->AreaRampageChancePct = eqCreature.AreaRampageChancePct;
-    state->AreaRampageMaxTargets = eqCreature.AreaRampageMaxTargets;
-    state->AreaRampageDamagePct = eqCreature.AreaRampageDamagePct;
+    state->WildRampageEnabled = wildRampageEnabled;
+    state->WildRampageChancePct = eqCreature.WildRampageChancePct;
+    state->WildRampageMaxTargets = eqCreature.WildRampageMaxTargets;
+    state->WildRampageDamagePct = eqCreature.WildRampageDamagePct;
     state->AttackRoundTimeInMS = eqCreature.AttackRoundTimeInMS;
     state->IsEnraged = false;
     state->EnrageDurationRemainingMS = 0;
@@ -3021,7 +3021,7 @@ void EverQuestMod::UpdateCreatureEnrage(Creature* creature, EverQuestCreatureCom
 // Written by referencing TAKP's Mod:AI_Process for special attacks
 void EverQuestMod::UpdateCreatureSpecialAttacks(Creature* creature, EverQuestCreatureCombatAbilityState* state, uint32 diff)
 {
-    if (state->FlurryEnabled == false && state->RampageEnabled == false && state->AreaRampageEnabled == false)
+    if (state->FlurryEnabled == false && state->RampageEnabled == false && state->WildRampageEnabled == false)
         return;
 
     // Roll at the creature's main-hand swing rate to mirror TAKP checking after each attack round
@@ -3072,14 +3072,14 @@ void EverQuestMod::UpdateCreatureSpecialAttacks(Creature* creature, EverQuestCre
             return;
         }
     }
-    if (state->AreaRampageEnabled == true)
+    if (state->WildRampageEnabled == true)
     {
-        uint32 chance = state->AreaRampageChancePct > 0 ? state->AreaRampageChancePct : ConfigCombatSkillsAreaRampageDefaultChancePct;
+        uint32 chance = state->WildRampageChancePct > 0 ? state->WildRampageChancePct : ConfigCombatSkillsWildRampageDefaultChancePct;
         if (urand(0, 99) < chance)
         {
-            uint32 maxTargets = state->AreaRampageMaxTargets > 0 ? state->AreaRampageMaxTargets : ConfigCombatSkillsAreaRampageDefaultMaxTargets;
-            uint32 damagePct = state->AreaRampageDamagePct > 0 ? state->AreaRampageDamagePct : 100;
-            DoCreatureAreaRampage(creature, victim, maxTargets, damagePct);
+            uint32 maxTargets = state->WildRampageMaxTargets > 0 ? state->WildRampageMaxTargets : ConfigCombatSkillsWildRampageDefaultMaxTargets;
+            uint32 damagePct = state->WildRampageDamagePct > 0 ? state->WildRampageDamagePct : 100;
+            DoCreatureWildRampage(creature, victim, maxTargets, damagePct);
         }
     }
 }
@@ -3143,8 +3143,8 @@ void EverQuestMod::DoCreatureRampage(Creature* creature, Unit* victim, float ran
     }
 }
 
-// Based on TAKP's Mob::AreaRampage + HateList::AreaRampage.
-void EverQuestMod::DoCreatureAreaRampage(Creature* creature, Unit* victim, uint32 maxTargets, uint32 damagePct)
+// Based on TAKP's Mob::WildRampage + HateList::WildRampage.
+void EverQuestMod::DoCreatureWildRampage(Creature* creature, Unit* victim, uint32 maxTargets, uint32 damagePct)
 {
     creature->TextEmote(creature->GetName() + " goes on a WILD RAMPAGE!", nullptr);
 
