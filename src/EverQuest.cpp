@@ -472,6 +472,107 @@ void EverQuestMod::ResolveKillSpawnRespawnTargetSpawnPoints()
     }
 }
 
+static const uint32 VulakRequiredDragonCreatureTemplateIDs[] =
+{
+    // Lord Koi'Doken is intentionally skipped
+    54930,  // Aaryonar
+    54923,  // Vyemm
+    54928,  // Feshlak
+    54993,  // Kreizenn
+    54995,  // Nevederia
+    54996,  // Mirenilla
+};
+
+// Note: Runs at world startup (OnStartup) since the creature spawn tables aren't loaded before that
+void EverQuestMod::ResolveVulakRequiredDragonSpawnPoints()
+{
+    for (uint32 requiredDragonCreatureTemplateID : VulakRequiredDragonCreatureTemplateIDs)
+    {
+        bool foundSpawnPoint = false;
+        for (auto const& creatureDataPair : sObjectMgr->GetAllCreatureData())
+        {
+            CreatureData const& creatureData = creatureDataPair.second;
+            if (creatureData.id1 != requiredDragonCreatureTemplateID && creatureData.id2 != requiredDragonCreatureTemplateID && creatureData.id3 != requiredDragonCreatureTemplateID)
+                continue;
+            VulakRequiredDragonSpawnIDs.push_back(creatureDataPair.first);
+            foundSpawnPoint = true;
+        }
+        if (foundSpawnPoint == false)
+            LOG_ERROR("module.EverQuest", "EverQuestMod::ResolveVulakRequiredDragonSpawnPoints found no spawn points for required dragon creature template {}, so it will not prevent the Vulak`Aerr unlock", requiredDragonCreatureTemplateID);
+    }
+}
+
+void EverQuestMod::SetVulakLocked(Creature* creature, bool locked)
+{
+    creature->SetImmuneToPC(locked);
+    creature->SetImmuneToNPC(locked);
+    creature->SetReactState(locked == true ? REACT_PASSIVE : REACT_AGGRESSIVE);
+}
+
+bool EverQuestMod::AreAllVulakRequiredDragonsDead(Map* map)
+{
+    if (VulakRequiredDragonSpawnIDs.empty() == true)
+        return false;
+
+    // Spawn points only carry a pending respawn time while the creature is dead
+    for (ObjectGuid::LowType dragonSpawnID : VulakRequiredDragonSpawnIDs)
+        if (map->GetCreatureRespawnTime(dragonSpawnID) == 0)
+            return false;
+    return true;
+}
+
+void EverQuestMod::UpdateVulakLock(Creature* creature, uint32 diff)
+{
+    if (creature->GetEntry() != EQ_VULAK_CREATURE_TEMPLATE_ID)
+        return;
+    EverQuestVulakLockState* state = creature->CustomData.GetDefault<EverQuestVulakLockState>(EQ_CREATURE_CUSTOMDATA_VULAKLOCK);
+    if (creature->IsAlive() == false)
+    {
+        state->WasAlive = false;
+        return;
+    }
+
+    // Lock on fresh spawns (includes respawn and server boots)
+    if (state->WasAlive == false)
+    {
+        state->WasAlive = true;
+        state->Unlocked = false;
+        state->RecheckRemainingMS = 0;
+        creature->SetControlled(true, UNIT_STATE_ROOT);
+        SetVulakLocked(creature, true);
+    }
+
+    if (state->RecheckRemainingMS > diff)
+    {
+        state->RecheckRemainingMS -= diff;
+        return;
+    }
+    state->RecheckRemainingMS = EQ_VULAK_LOCK_RECHECK_MS;
+
+    // Permarooted even while unlocked
+    if (creature->HasUnitState(UNIT_STATE_ROOT) == false)
+        creature->SetControlled(true, UNIT_STATE_ROOT);
+
+    if (state->Unlocked == false)
+    {
+        if (AreAllVulakRequiredDragonsDead(creature->GetMap()) == true)
+        {
+            state->Unlocked = true;
+            SetVulakLocked(creature, false);
+        }
+    }
+    else if (creature->IsInCombat() == false && AreAllVulakRequiredDragonsDead(creature->GetMap()) == false)
+    {
+        state->Unlocked = false;
+        SetVulakLocked(creature, true);
+    }
+}
+
+void EverQuestMod::RemoveVulakLockState(Creature* creature)
+{
+    creature->CustomData.Erase(EQ_CREATURE_CUSTOMDATA_VULAKLOCK);
+}
+
 void EverQuestMod::LoadCreatureEmoteData()
 {
     CreatureEmotesByCreatureTemplateID.clear();

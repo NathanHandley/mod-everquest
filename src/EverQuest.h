@@ -190,6 +190,11 @@ class Aura;
 #define EQ_CREATURE_CUSTOMDATA_EMOTE                "EQEmote"
 #define EQ_CREATURE_CUSTOMDATA_MOVEMENTSOUND        "EQMoveSound"
 #define EQ_CREATURE_CUSTOMDATA_KILLSPAWNWATCH       "EQKillSpawnWatch"
+#define EQ_CREATURE_CUSTOMDATA_VULAKLOCK            "EQVulakLock"
+
+// Vulak`Aerr (Temple of Veeshan) spawns perma-rooted and "locked" (unattackable, non-aggro) until every required dragon is dead, matching Velious-era EQ
+#define EQ_VULAK_CREATURE_TEMPLATE_ID               55045
+#define EQ_VULAK_LOCK_RECHECK_MS                    3000
 
 #define EQ_CREATURE_MOVEMENT_GAIT_NONE              0
 #define EQ_CREATURE_MOVEMENT_GAIT_WALK              1
@@ -363,6 +368,14 @@ class EverQuestCreatureKillSpawnWatchState : public DataMap::Base
 public:
     bool WasInCombat = false;
     uint32 OocTimerRemainingMS = 0; // 0 = not yet armed
+};
+
+class EverQuestVulakLockState : public DataMap::Base
+{
+public:
+    bool WasAlive = false;
+    bool Unlocked = false;
+    uint32 RecheckRemainingMS = 0;
 };
 
 class EverQuestCreatureMovementSound
@@ -726,6 +739,7 @@ public:
     unordered_map<uint32, vector<EverQuestCreatureKillSpawn>> CreatureKillSpawnsByTriggerCreatureTemplateID;
     unordered_set<uint32> EvadeKillSpawnTriggerCreatureTemplateIDs;
     unordered_map<uint32, uint32> OocTimerKillSpawnDurationMSByCreatureTemplateID;
+    vector<ObjectGuid::LowType> VulakRequiredDragonSpawnIDs;
     unordered_map<uint32, vector<EverQuestCreatureEmote>> CreatureEmotesByCreatureTemplateID;
     unordered_map<uint32, EverQuestCreatureMovementSound> CreatureMovementSoundsByDisplayID;
 
@@ -801,6 +815,11 @@ public:
     void ProcessKillSpawnsForCreatureEvent(Creature* eventCreature, Unit* otherUnit, uint8 triggerTypeID);
     void UpdateCreatureKillSpawnCombatWatch(Creature* creature, uint32 diff);
     void RemoveCreatureKillSpawnCombatWatchState(Creature* creature);
+    void ResolveVulakRequiredDragonSpawnPoints();
+    void SetVulakLocked(Creature* creature, bool locked);
+    bool AreAllVulakRequiredDragonsDead(Map* map);
+    void UpdateVulakLock(Creature* creature, uint32 diff);
+    void RemoveVulakLockState(Creature* creature);
     void ProcessTriggeredQuestKillSpawnsForCreatureDeath(Creature* deadCreature, Unit* killer);
     void TriggerQuestKillSpawn(uint32 mapID, const EverQuestQuestReaction& questReaction);
     void EnqueuePendingKillSpawnAction(uint32 mapID, EverQuestPendingKillSpawnAction& action);
