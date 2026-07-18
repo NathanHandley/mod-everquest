@@ -184,6 +184,11 @@ class EverQuest_BardSongAuraScript: public AuraScript
         Unit* caster = GetCaster();
         if (caster == nullptr)
             return;
+
+        // Don't allow pulsing bard songs during feign death
+        if (caster->HasAuraType(SPELL_AURA_FEIGN_DEATH))
+            return;
+
         CastTriggerSpellOnTargets(caster, aurEff);
     }
 
