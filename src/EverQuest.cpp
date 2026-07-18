@@ -23,6 +23,7 @@
 #include "DBCStores.h"
 #include "GameTime.h"
 #include "ObjectMgr.h"
+#include "ReputationMgr.h"
 #include "SpellAuraDefines.h"
 #include "SpellAuraEffects.h"
 #include "SpellAuras.h"
@@ -4014,8 +4015,9 @@ bool EverQuestMod::IsBindAllowedForMap(uint32 mapID)
 void EverQuestMod::LoadFactionData()
 {
     FactionsByFactionTemplateID.clear();
+    DefendCombatFactionTemplateIDs.clear();
 
-    QueryResult queryResult = WorldDatabase.Query("SELECT FactionTemplateID, WillDefendFriendlyPlayers, DefendersWillAttackToDefendPlayer FROM mod_everquest_faction;");
+    QueryResult queryResult = WorldDatabase.Query("SELECT FactionTemplateID, WillDefendFriendlyPlayers, DefendersWillAttackToDefendPlayer, DefendCombatFactionTemplateID FROM mod_everquest_faction;");
     if (queryResult)
     {
         do
@@ -4025,9 +4027,50 @@ void EverQuestMod::LoadFactionData()
             faction.FactionTemplateID = fields[0].Get<uint32>();
             faction.WillDefendFriendlyPlayers = fields[1].Get<uint8>() != 0;
             faction.DefendersWillAttackToDefendPlayer = fields[2].Get<uint8>() != 0;
+            faction.DefendCombatFactionTemplateID = fields[3].Get<uint32>();
             FactionsByFactionTemplateID[faction.FactionTemplateID] = faction;
         } while (queryResult->NextRow());
     }
+}
+
+// Note: Runs at world startup (OnStartup) since the DBC stores aren't loaded when LoadFactionData loads with the config
+void EverQuestMod::ResolveDefendCombatFactionTemplates()
+{
+    // Defend combat templates only work if the deployed FactionTemplate.dbc contains them
+    for (auto& factionPair : FactionsByFactionTemplateID)
+    {
+        EverQuestFaction& faction = factionPair.second;
+        if (faction.DefendCombatFactionTemplateID != 0 && sFactionTemplateStore.LookupEntry(faction.DefendCombatFactionTemplateID) == nullptr)
+        {
+            LOG_ERROR("module.EverQuest", "EverQuestMod::ResolveDefendCombatFactionTemplates faction template {} has defend combat faction template {} which does not exist in FactionTemplate.dbc, disabling the defend combat swap for it", faction.FactionTemplateID, faction.DefendCombatFactionTemplateID);
+            faction.DefendCombatFactionTemplateID = 0;
+        }
+    }
+
+    // Register the combat versions under their own IDs too
+    vector<EverQuestFaction> combatVariantFactions;
+    for (auto& factionPair : FactionsByFactionTemplateID)
+    {
+        if (factionPair.second.DefendCombatFactionTemplateID == 0)
+            continue;
+        DefendCombatFactionTemplateIDs.insert(factionPair.second.DefendCombatFactionTemplateID);
+        EverQuestFaction combatVariantFaction = factionPair.second;
+        combatVariantFaction.FactionTemplateID = factionPair.second.DefendCombatFactionTemplateID;
+        combatVariantFactions.push_back(combatVariantFaction);
+    }
+    for (EverQuestFaction& combatVariantFaction : combatVariantFactions)
+        FactionsByFactionTemplateID[combatVariantFaction.FactionTemplateID] = combatVariantFaction;
+}
+
+bool EverQuestMod::IsPlayerFriendlyWithCreatureByReputation(Creature* creature, Player* player)
+{
+    FactionTemplateEntry const* factionTemplateEntry = creature->GetFactionTemplateEntry();
+    if (factionTemplateEntry == nullptr)
+        return false;
+    FactionEntry const* factionEntry = sFactionStore.LookupEntry(factionTemplateEntry->faction);
+    if (factionEntry == nullptr || factionEntry->CanHaveReputation() == false)
+        return false;
+    return player->GetReputationMgr().GetRank(factionEntry) >= REP_FRIENDLY;
 }
 
 void EverQuestMod::DoDefendFriendlyPlayersSearch(Creature* attacker, Player* attackedPlayer)
@@ -4049,14 +4092,37 @@ void EverQuestMod::DoDefendFriendlyPlayersSearch(Creature* attacker, Player* att
             continue;
         if (defender->IsPet() == true || defender->IsControlledByPlayer() == true)
             continue;
-        if (defender->GetReactionTo(attackedPlayer) < REP_FRIENDLY)
+        if (defender->GetReactionTo(attackedPlayer) < REP_FRIENDLY && IsPlayerFriendlyWithCreatureByReputation(defender, attackedPlayer) == false)
             continue;
         if (defender->IsInCombatWith(attacker) == true)
             continue;
         if (defender->IsValidAttackTarget(attacker) == false)
-            continue;
+        {
+            // Creature-vs-creature combat is only valid when the factions are hostile
+            uint32 defendCombatFactionTemplateID = factionIter->second.DefendCombatFactionTemplateID;
+            uint32 originalFactionTemplateID = defender->GetFaction();
+            if (defendCombatFactionTemplateID == 0 || originalFactionTemplateID == defendCombatFactionTemplateID)
+                continue;
+            defender->SetFaction(defendCombatFactionTemplateID);
+            if (defender->IsValidAttackTarget(attacker) == false)
+            {
+                defender->SetFaction(originalFactionTemplateID);
+                continue;
+            }
+        }
         defender->EngageWithTarget(attacker);
     }
+}
+
+void EverQuestMod::UpdateCreatureDefendFactionRestore(Creature* creature)
+{
+    if (DefendCombatFactionTemplateIDs.empty() == true)
+        return;
+    if (creature->IsInCombat() == true)
+        return;
+    if (DefendCombatFactionTemplateIDs.find(creature->GetFaction()) == DefendCombatFactionTemplateIDs.end())
+        return;
+    creature->SetFaction(creature->GetCreatureTemplate()->faction);
 }
 
 void EverQuestMod::UpdateCreatureDefendFriendlyPlayers(Creature* creature, uint32 diff)

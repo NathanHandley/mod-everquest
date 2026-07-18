@@ -88,6 +88,9 @@ public:
 
         // Saved pet display IDs can become wrong when converted content updates invalide previous display IDs, which crashes the core on pet summon
         EverQuest->FixInvalidCharacterPetModelIDs();
+
+        // Defend combat faction templates validate against FactionTemplate.dbc, which isn't loaded when the faction data loads with the config
+        EverQuest->ResolveDefendCombatFactionTemplates();
     }
 };
 

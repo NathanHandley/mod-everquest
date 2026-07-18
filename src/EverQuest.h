@@ -38,7 +38,7 @@ static uint32 ConfigMaxSkillIDCheck = 1000;         // The highest level of skil
 class Unit;
 class Aura;
 
-#define EQ_MOD_VERSION                              51
+#define EQ_MOD_VERSION                              52
 
 #define EQ_EQCLASS_NONE                             0
 #define EQ_EQCLASS_WARRIOR                          1
@@ -198,7 +198,7 @@ class Aura;
 #define EQ_CREATURE_CUSTOMDATA_DEFENDPLAYERWATCH    "EQDefendPlayerWatch"
 
 #define EQ_DEFEND_PLAYERS_CHECK_MS                  2000
-#define EQ_DEFEND_PLAYERS_SEARCH_RADIUS             30.0f
+#define EQ_DEFEND_PLAYERS_SEARCH_RADIUS             15.0f
 
 // Vulak`Aerr (Temple of Veeshan) spawns perma-rooted and "locked" (unattackable, non-aggro) until every required dragon is dead, matching Velious-era EQ
 #define EQ_VULAK_CREATURE_TEMPLATE_ID               55045
@@ -684,6 +684,7 @@ public:
     uint32 FactionTemplateID = 0;
     bool WillDefendFriendlyPlayers = false;
     bool DefendersWillAttackToDefendPlayer = false;
+    uint32 DefendCombatFactionTemplateID = 0;
 };
 
 class EverQuestCreatureDefendPlayerWatchState : public DataMap::Base
@@ -882,6 +883,7 @@ public:
     unordered_map<uint32, EverQuestZoneSafePoint> ZoneSafePointByMapID;
     unordered_map<uint32, EverQuestZone> ZoneByMapID;
     unordered_map<uint32, EverQuestFaction> FactionsByFactionTemplateID;
+    unordered_set<uint32> DefendCombatFactionTemplateIDs;
     unordered_map<uint8, EverQuestClassMap> ClassMapByWOWClassID;
 
     static EverQuestMod* instance()
@@ -1031,9 +1033,12 @@ public:
     void LoadZoneData();
     bool IsBindAllowedForMap(uint32 mapID);
     void LoadFactionData();
+    void ResolveDefendCombatFactionTemplates();
     void UpdateCreatureDefendFriendlyPlayers(Creature* creature, uint32 diff);
+    bool IsPlayerFriendlyWithCreatureByReputation(Creature* creature, Player* player);
     void DoDefendFriendlyPlayersSearch(Creature* attacker, Player* attackedPlayer);
     void RemoveCreatureDefendPlayerWatchState(Creature* creature);
+    void UpdateCreatureDefendFactionRestore(Creature* creature);
     void LoadClassMapData();
     const EverQuestClassMap& GetClassMapForWOWClassID(uint8 wowClassID);
     bool IsEQClassABaseEQClass(uint8 eqClassID);

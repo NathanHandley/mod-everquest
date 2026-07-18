@@ -95,6 +95,7 @@ public:
         EverQuest->UpdateCreatureKillSpawnCombatWatch(creature, diff);
         EverQuest->UpdateVulakLock(creature, diff);
         EverQuest->UpdateCreatureDefendFriendlyPlayers(creature, diff);
+        EverQuest->UpdateCreatureDefendFactionRestore(creature);
     }
 
 private:
