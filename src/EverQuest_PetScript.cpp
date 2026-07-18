@@ -39,8 +39,12 @@ public:
 
         // Random pet names
         EverQuestPet petData = EverQuest->GetPetDataForCreatureTemplateID(pet->GetCreatureTemplate()->Entry);
-        if (petData.NamingType == EQ_PET_NAMING_TYPE_RANDOM)
+
+        // Make sure the real name shows, and generate when the pet still carries the random placeholder
+        if (petData.NamingType == EQ_PET_NAMING_TYPE_RANDOM && pet->GetName() == pet->GetCreatureTemplate()->Name)
             pet->SetName(sObjectMgr->GeneratePetName(pet->GetCreatureTemplate()->Entry));
+        if (pet->GetCharmInfo() != nullptr && pet->GetCharmInfo()->GetPetNumber() != 0)
+            pet->SetUInt32Value(UNIT_FIELD_PETNUMBER, pet->GetCharmInfo()->GetPetNumber());
 
         // Pet equipment
         if (petData.MainhandItemTemplateID != 0)

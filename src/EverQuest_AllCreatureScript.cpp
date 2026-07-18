@@ -15,6 +15,7 @@
 //  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #include "Configuration/Config.h"
+#include "GameTime.h"
 #include "ObjectMgr.h"
 #include "ScriptMgr.h"
 #include "LootMgr.h"
@@ -55,6 +56,7 @@ public:
         SetVisualEquipment(creature);
         ApplyLootWornEffectAuras(creature);
         SetupRangedAttack(creature);
+        SetupSummonedPet(creature);
         EverQuest->SetupCreatureCombatAbilities(creature);
     }
 
@@ -94,6 +96,27 @@ public:
     }
 
 private:
+    void SetupSummonedPet(Creature* creature)
+    {
+        if (creature->IsSummon() == false || creature->IsPet() == true)
+            return;
+        if (EverQuest->HasPetDataForCreatureTemplateID(creature->GetEntry()) == false)
+            return;
+        EverQuestPet petData = EverQuest->GetPetDataForCreatureTemplateID(creature->GetEntry());
+        if (petData.NamingType == EQ_PET_NAMING_TYPE_RANDOM)
+        {
+            creature->SetName(sObjectMgr->GeneratePetName(creature->GetEntry()));
+            creature->SetUInt32Value(UNIT_FIELD_PETNUMBER, sObjectMgr->GeneratePetNumber());
+            creature->SetUInt32Value(UNIT_FIELD_PET_NAME_TIMESTAMP, uint32(GameTime::GetGameTime().count()));
+        }
+
+        // Pet equipment
+        if (petData.MainhandItemTemplateID != 0)
+            creature->SetUInt32Value(UNIT_VIRTUAL_ITEM_SLOT_ID + 0, petData.MainhandItemTemplateID);
+        if (petData.OffhandItemTemplateID != 0)
+            creature->SetUInt32Value(UNIT_VIRTUAL_ITEM_SLOT_ID + 1, petData.OffhandItemTemplateID);
+    }
+
     void RestrictCreatureOwnedPetAggroRange(Creature* creature)
     {
         if (creature->IsPet() == false && creature->IsSummon() == false)
