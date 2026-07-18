@@ -38,7 +38,7 @@ static uint32 ConfigMaxSkillIDCheck = 1000;         // The highest level of skil
 class Unit;
 class Aura;
 
-#define EQ_MOD_VERSION                              50
+#define EQ_MOD_VERSION                              51
 
 #define EQ_EQCLASS_NONE                             0
 #define EQ_EQCLASS_WARRIOR                          1
@@ -195,6 +195,10 @@ class Aura;
 #define EQ_CREATURE_CUSTOMDATA_MOVEMENTSOUND        "EQMoveSound"
 #define EQ_CREATURE_CUSTOMDATA_KILLSPAWNWATCH       "EQKillSpawnWatch"
 #define EQ_CREATURE_CUSTOMDATA_VULAKLOCK            "EQVulakLock"
+#define EQ_CREATURE_CUSTOMDATA_DEFENDPLAYERWATCH    "EQDefendPlayerWatch"
+
+#define EQ_DEFEND_PLAYERS_CHECK_MS                  2000
+#define EQ_DEFEND_PLAYERS_SEARCH_RADIUS             30.0f
 
 // Vulak`Aerr (Temple of Veeshan) spawns perma-rooted and "locked" (unattackable, non-aggro) until every required dragon is dead, matching Velious-era EQ
 #define EQ_VULAK_CREATURE_TEMPLATE_ID               55045
@@ -674,6 +678,20 @@ public:
     bool AllowBind = true;
 };
 
+class EverQuestFaction
+{
+public:
+    uint32 FactionTemplateID = 0;
+    bool WillDefendFriendlyPlayers = false;
+    bool DefendersWillAttackToDefendPlayer = false;
+};
+
+class EverQuestCreatureDefendPlayerWatchState : public DataMap::Base
+{
+public:
+    uint32 RecheckTimerMS = 0;
+};
+
 struct EverQuestPlayerControllerData
 {
     uint32 GUID = 0;
@@ -1009,6 +1027,10 @@ public:
     void SendPlayerToZoneSafePoint(Player* player, bool includeGroup);
     void LoadZoneData();
     bool IsBindAllowedForMap(uint32 mapID);
+    void LoadFactionData();
+    void UpdateCreatureDefendFriendlyPlayers(Creature* creature, uint32 diff);
+    void DoDefendFriendlyPlayersSearch(Creature* attacker, Player* attackedPlayer);
+    void RemoveCreatureDefendPlayerWatchState(Creature* creature);
     void LoadClassMapData();
     const EverQuestClassMap& GetClassMapForWOWClassID(uint8 wowClassID);
     bool IsEQClassABaseEQClass(uint8 eqClassID);

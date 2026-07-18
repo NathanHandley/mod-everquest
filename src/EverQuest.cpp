@@ -4008,6 +4008,91 @@ bool EverQuestMod::IsBindAllowedForMap(uint32 mapID)
     return zoneIt->second.AllowBind;
 }
 
+void EverQuestMod::LoadFactionData()
+{
+    FactionsByFactionTemplateID.clear();
+
+    QueryResult queryResult = WorldDatabase.Query("SELECT FactionTemplateID, WillDefendFriendlyPlayers, DefendersWillAttackToDefendPlayer FROM mod_everquest_faction;");
+    if (queryResult)
+    {
+        do
+        {
+            Field* fields = queryResult->Fetch();
+            EverQuestFaction faction;
+            faction.FactionTemplateID = fields[0].Get<uint32>();
+            faction.WillDefendFriendlyPlayers = fields[1].Get<uint8>() != 0;
+            faction.DefendersWillAttackToDefendPlayer = fields[2].Get<uint8>() != 0;
+            FactionsByFactionTemplateID[faction.FactionTemplateID] = faction;
+        } while (queryResult->NextRow());
+    }
+}
+
+void EverQuestMod::DoDefendFriendlyPlayersSearch(Creature* attacker, Player* attackedPlayer)
+{
+    if (attacker == nullptr || attackedPlayer == nullptr)
+        return;
+
+    std::list<Creature*> nearbyCreatures;
+    Acore::AnyUnitInObjectRangeCheck check(attackedPlayer, EQ_DEFEND_PLAYERS_SEARCH_RADIUS);
+    Acore::CreatureListSearcher<Acore::AnyUnitInObjectRangeCheck> searcher(attackedPlayer, nearbyCreatures, check);
+    Cell::VisitObjects(attackedPlayer, searcher, EQ_DEFEND_PLAYERS_SEARCH_RADIUS);
+
+    for (Creature* defender : nearbyCreatures)
+    {
+        if (defender == attacker)
+            continue;
+        auto factionIter = FactionsByFactionTemplateID.find(defender->GetFaction());
+        if (factionIter == FactionsByFactionTemplateID.end() || factionIter->second.WillDefendFriendlyPlayers == false)
+            continue;
+        if (defender->IsPet() == true || defender->IsControlledByPlayer() == true)
+            continue;
+        if (defender->GetReactionTo(attackedPlayer) < REP_FRIENDLY)
+            continue;
+        if (defender->IsInCombatWith(attacker) == true)
+            continue;
+        if (defender->IsValidAttackTarget(attacker) == false)
+            continue;
+        defender->EngageWithTarget(attacker);
+    }
+}
+
+void EverQuestMod::UpdateCreatureDefendFriendlyPlayers(Creature* creature, uint32 diff)
+{
+    if (creature == nullptr || FactionsByFactionTemplateID.empty() == true)
+        return;
+
+    auto factionIter = FactionsByFactionTemplateID.find(creature->GetFaction());
+    bool eligible = factionIter != FactionsByFactionTemplateID.end() && factionIter->second.DefendersWillAttackToDefendPlayer == true &&
+        creature->IsAlive() == true && creature->IsInCombat() == true &&
+        creature->IsPet() == false && creature->IsControlledByPlayer() == false;
+    Player* attackedPlayer = nullptr;
+    if (eligible == true)
+    {
+        Unit* victim = creature->GetVictim();
+        if (victim != nullptr && victim->IsAlive() == true)
+            attackedPlayer = victim->ToPlayer();
+    }
+    if (attackedPlayer == nullptr)
+    {
+        RemoveCreatureDefendPlayerWatchState(creature);
+        return;
+    }
+
+    EverQuestCreatureDefendPlayerWatchState* state = creature->CustomData.GetDefault<EverQuestCreatureDefendPlayerWatchState>(EQ_CREATURE_CUSTOMDATA_DEFENDPLAYERWATCH);
+    if (state->RecheckTimerMS <= diff)
+    {
+        DoDefendFriendlyPlayersSearch(creature, attackedPlayer);
+        state->RecheckTimerMS = EQ_DEFEND_PLAYERS_CHECK_MS;
+    }
+    else
+        state->RecheckTimerMS -= diff;
+}
+
+void EverQuestMod::RemoveCreatureDefendPlayerWatchState(Creature* creature)
+{
+    creature->CustomData.Erase(EQ_CREATURE_CUSTOMDATA_DEFENDPLAYERWATCH);
+}
+
 void EverQuestMod::SendPlayerToZoneSafePoint(Player* player, bool includeGroup)
 {
     // In-zone succor sends to the safe point of the zone the caster is currently in

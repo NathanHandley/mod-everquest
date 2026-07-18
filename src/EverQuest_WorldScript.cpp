@@ -74,6 +74,7 @@ public:
         EverQuest->LoadForageData();
         EverQuest->LoadZoneSafePointData();
         EverQuest->LoadZoneData();
+        EverQuest->LoadFactionData();
     }
 
     void OnStartup() override

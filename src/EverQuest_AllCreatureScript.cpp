@@ -76,6 +76,7 @@ public:
         EverQuest->RemoveCreatureMovementSoundState(creature);
         EverQuest->RemoveCreatureKillSpawnCombatWatchState(creature);
         EverQuest->RemoveVulakLockState(creature);
+        EverQuest->RemoveCreatureDefendPlayerWatchState(creature);
     }
 
     void OnAllCreatureUpdate(Creature* creature, uint32 diff) override
@@ -93,6 +94,7 @@ public:
         EverQuest->UpdateCreatureMovementSound(creature, diff);
         EverQuest->UpdateCreatureKillSpawnCombatWatch(creature, diff);
         EverQuest->UpdateVulakLock(creature, diff);
+        EverQuest->UpdateCreatureDefendFriendlyPlayers(creature, diff);
     }
 
 private:
