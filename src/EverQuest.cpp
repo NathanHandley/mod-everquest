@@ -1732,6 +1732,7 @@ bool EverQuestMod::IsItemEQClassAllowedForPlayer(Player* player, uint32 itemTemp
 void EverQuestMod::LoadSpellData()
 {
     SpellDataBySpellID.clear();
+    BardSongTickSpellIDs.clear();
     QueryResult queryResult = WorldDatabase.Query("SELECT SpellID, AuraDurationBaseInMS, AuraDurationAddPerLevelInMS, AuraDurationMaxInMS, AuraDurationCalcMinLevel, AuraDurationCalcMaxLevel, RecourseSpellID, SpellIDCastOnMeleeAttacker, FocusBoostType, PeriodicAuraSpellID, PeriodicAuraSpellRadius, MaleFormSpellID, FemaleFormSpellID, EffectFailChancePercent, EffectFailableType, StunUsesBashKickChance, SpellIDCastOnTargetWhenStunLands, AuraStaysOnSecondaryClassSwitch, MinTargetLevel, MaxCreatureTargetLevel FROM mod_everquest_spell ORDER BY SpellID;");
     if (queryResult)
     {
@@ -1761,6 +1762,8 @@ void EverQuestMod::LoadSpellData()
             everQuestSpell.MinTargetLevel = fields[18].Get<uint32>();
             everQuestSpell.MaxCreatureTargetLevel = fields[19].Get<uint32>();
             SpellDataBySpellID[everQuestSpell.SpellID] = everQuestSpell;
+            if (everQuestSpell.PeriodicAuraSpellID != 0)
+                BardSongTickSpellIDs.insert(everQuestSpell.PeriodicAuraSpellID);
         } while (queryResult->NextRow());
     }
 }
@@ -4774,7 +4777,7 @@ EverQuestPlayerControllerData EverQuestMod::GetPlayerControllerData(Player* play
 {
     EverQuestPlayerControllerData controllerData;
     controllerData.GUID = player->GetGUID().GetCounter();
-    QueryResult queryResult = CharacterDatabase.Query("SELECT nextSecondaryClass, currentSecondaryClass, secondaryExpPool, illusionFaceId FROM mod_everquest_character_settings WHERE guid = {}", player->GetGUID().GetCounter());
+    QueryResult queryResult = CharacterDatabase.Query("SELECT nextSecondaryClass, currentSecondaryClass, secondaryExpPool, illusionFaceId, showBardPulse FROM mod_everquest_character_settings WHERE guid = {}", player->GetGUID().GetCounter());
     if (!queryResult || queryResult->GetRowCount() == 0)
     {
         const EverQuestClassMap classMap = GetClassMapForWOWClassID(player->getClass());
@@ -4782,6 +4785,7 @@ EverQuestPlayerControllerData EverQuestMod::GetPlayerControllerData(Player* play
         controllerData.NextSecondClass = classMap.EQClassIDDefaultSecond;
         controllerData.SecondaryExpPool = 0;
         controllerData.IllusionFaceID = 0;
+        controllerData.ShowBardPulse = true;
     }
     else
     {
@@ -4790,6 +4794,7 @@ EverQuestPlayerControllerData EverQuestMod::GetPlayerControllerData(Player* play
         controllerData.CurrentSecondClass = fields[1].Get<uint8>();
         controllerData.SecondaryExpPool = fields[2].Get<uint32>();
         controllerData.IllusionFaceID = (uint32)std::max(0, fields[3].Get<int32>());
+        controllerData.ShowBardPulse = fields[4].Get<bool>();
     }
     return controllerData;
 }
@@ -4912,6 +4917,37 @@ void EverQuestMod::SaveIllusionFaceIDForPlayer(Player* player)
         controllerData.SecondaryExpPool,
         controllerData.IllusionFaceID,
         controllerData.IllusionFaceID);
+}
+
+bool EverQuestMod::GetShowBardPulseForPlayer(Player* player)
+{
+    return GetOrLoadActivePlayerClassControllerData(player)->ShowBardPulse;
+}
+
+void EverQuestMod::SetShowBardPulseForPlayer(Player* player, bool showBardPulse)
+{
+    GetOrLoadActivePlayerClassControllerData(player)->ShowBardPulse = showBardPulse;
+    SaveShowBardPulseForPlayer(player);
+}
+
+void EverQuestMod::SaveShowBardPulseForPlayer(Player* player)
+{
+    EverQuestPlayerControllerData controllerData;
+    {
+        std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+        auto controllerDataIt = ActivePlayerClassControllerDataByGUID.find(player->GetGUID());
+        if (controllerDataIt == ActivePlayerClassControllerDataByGUID.end())
+            return;
+        controllerData = controllerDataIt->second;
+    }
+
+    CharacterDatabase.Execute("INSERT INTO `mod_everquest_character_settings` (`guid`, `currentSecondaryClass`, `nextSecondaryClass`, `secondaryExpPool`, `showBardPulse`) VALUES ({}, {}, {}, {}, {}) ON DUPLICATE KEY UPDATE `showBardPulse` = {}",
+        player->GetGUID().GetCounter(),
+        controllerData.CurrentSecondClass,
+        controllerData.NextSecondClass,
+        controllerData.SecondaryExpPool,
+        controllerData.ShowBardPulse == true ? 1 : 0,
+        controllerData.ShowBardPulse == true ? 1 : 0);
 }
 
 void EverQuestMod::HandleLevelCapOnBeforeExperienceGain(Player const* player, uint8& levelForExpGain)

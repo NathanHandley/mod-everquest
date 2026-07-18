@@ -699,6 +699,7 @@ struct EverQuestPlayerControllerData
     uint8 NextSecondClass = 0;
     uint32 SecondaryExpPool = 0;
     uint32 IllusionFaceID = 0;
+    bool ShowBardPulse = true;
 };
 
 class EverQuestPlayerClassInfoItem
@@ -842,6 +843,7 @@ public:
     unordered_map<uint32, EverQuestItemTemplate> ItemTemplatesByEntryID;
     unordered_set<uint32> WornEffectSpellIDs;
     unordered_map<uint32, EverQuestSpell> SpellDataBySpellID;
+    unordered_set<uint32> BardSongTickSpellIDs;
     unordered_map<uint64, uint32> IllusionDisplayIDsByLookupKey;
     unordered_map<uint64, uint32> IllusionFaceDisplayIDsByLookupKey;
     uint32 IllusionMaxFaceIndex;
@@ -879,6 +881,7 @@ public:
     unordered_map<uint32, uint32> ForageZoneItemTotalChanceByMapID;
     unordered_map<uint32, EverQuestZoneSafePoint> ZoneSafePointByMapID;
     unordered_map<uint32, EverQuestZone> ZoneByMapID;
+    unordered_map<uint32, EverQuestFaction> FactionsByFactionTemplateID;
     unordered_map<uint8, EverQuestClassMap> ClassMapByWOWClassID;
 
     static EverQuestMod* instance()
@@ -1066,6 +1069,9 @@ public:
     uint32 GetIllusionFaceIDForPlayer(Player* player);
     void SetIllusionFaceIDForPlayer(Player* player, uint32 faceID);
     void SaveIllusionFaceIDForPlayer(Player* player);
+    bool GetShowBardPulseForPlayer(Player* player);
+    void SetShowBardPulseForPlayer(Player* player, bool showBardPulse);
+    void SaveShowBardPulseForPlayer(Player* player);
     void HandleLevelCapOnBeforeExperienceGain(Player const* player, uint8& levelForExpGain);
     bool HandleLevelCapOnCanGiveLevel(Player* player, uint8 newLevel);
     void ProcessLevelCapStateForPlayer(Player* player);

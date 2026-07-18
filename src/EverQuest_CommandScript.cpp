@@ -69,17 +69,18 @@ public:
     {
         static ChatCommandTable classCommandTable =
         {
-            { "change",    HandleMultiClassChangeClass,     SEC_PLAYER, Console::No },
-            { "info",      HandleMultiClassInfo,            SEC_PLAYER, Console::No },
-            { "uiinfo",    HandleMultiClassUIInfo,          SEC_PLAYER, Console::No },
-            { "poolspend", HandleSecondaryExpPoolSpend,     SEC_PLAYER, Console::No },
+            { "change",    HandleMultiClassChangeClass,         SEC_PLAYER, Console::No },
+            { "info",      HandleMultiClassInfo,                SEC_PLAYER, Console::No },
+            { "uiinfo",    HandleMultiClassUIInfo,              SEC_PLAYER, Console::No },
+            { "poolspend", HandleSecondaryExpPoolSpend,         SEC_PLAYER, Console::No },
         };
 
         static ChatCommandTable commandTable =
         {
-            { "eqgps",  HandleEQGPSCommand,             SEC_PLAYER, Console::No },
-            { "eqface", HandleEQFaceCommand,            SEC_PLAYER, Console::No },
-            { "class",  classCommandTable                                       },
+            { "eqgps",  HandleEQGPSCommand,                     SEC_PLAYER, Console::No },
+            { "eqface", HandleEQFaceCommand,                    SEC_PLAYER, Console::No },
+            { "eqshowbardpulse", HandleEQShowBardPulseCommand,  SEC_PLAYER, Console::No },
+            { "class",  classCommandTable                                               },
         };
 
         return commandTable;
@@ -169,6 +170,50 @@ public:
 
         // If an illusion form is active, update the shown model right away
         EverQuest->RefreshIllusionGearDisplayForPlayer(player);
+        return true;
+    }
+
+    static bool HandleEQShowBardPulseCommand(ChatHandler* handler, const char* args)
+    {
+        if (EverQuest->IsEnabled == false)
+            return true;
+
+        Player* player = handler->GetPlayer();
+
+        // Validate the passed value is either "on" or "off"
+        bool isValidValue = false;
+        bool showBardPulse = true;
+        if (*args)
+        {
+            char* valueToken = strtok((char*)args, " ");
+            std::string valueString = valueToken != nullptr ? valueToken : "";
+            boost::algorithm::to_lower(valueString);
+            if (valueString == "on")
+            {
+                showBardPulse = true;
+                isValidValue = true;
+            }
+            else if (valueString == "off")
+            {
+                showBardPulse = false;
+                isValidValue = true;
+            }
+        }
+        if (isValidValue == false)
+        {
+            string currentStateString = EverQuest->GetShowBardPulseForPlayer(player) == true ? "shown" : "hidden";
+            handler->PSendSysMessage(".eqshowbardpulse 'on' or 'off'");
+            handler->PSendSysMessage("Shows or hides the recurring bard song pulse graphic for you. Example: '.eqshowbardpulse off' will hide the pulse graphics");
+            handler->PSendSysMessage("Only the recurring pulses are affected (the graphic when a song starts always shows), and bard song pulses are currently |cff4CFF00{}|r for you.", currentStateString);
+            return true;
+        }
+
+        // Store the setting, which the packet filter picks up on the next pulse
+        EverQuest->SetShowBardPulseForPlayer(player, showBardPulse);
+        if (showBardPulse == true)
+            handler->PSendSysMessage("Bard song pulse graphics are now |cff4CFF00shown|r for you.");
+        else
+            handler->PSendSysMessage("Bard song pulse graphics are now |cff4CFF00hidden|r for you.");
         return true;
     }
 

@@ -30,6 +30,7 @@ void AddEverQuestIllusionSpellScripts();
 void AddEverQuestItemScripts();
 void AddEverQuestPetScripts();
 void AddEverQuestCommandScripts();
+void AddEverQuestServerScripts();
 void AddEverQuestGlobalScripts();
 void AddEverQuestTransportScripts();
 void AddEverQuestCreatureInstanceScripts();
@@ -53,6 +54,7 @@ void Addmod_everquestScripts()
     AddEverQuestItemScripts();
     AddEverQuestPetScripts();
     AddEverQuestCommandScripts();
+    AddEverQuestServerScripts();
     AddEverQuestGlobalScripts();
     AddEverQuestTransportScripts();
     AddEverQuestCreatureInstanceScripts();
