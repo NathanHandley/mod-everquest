@@ -38,7 +38,7 @@ static uint32 ConfigMaxSkillIDCheck = 1000;         // The highest level of skil
 class Unit;
 class Aura;
 
-#define EQ_MOD_VERSION                              49
+#define EQ_MOD_VERSION                              50
 
 #define EQ_EQCLASS_NONE                             0
 #define EQ_EQCLASS_WARRIOR                          1
@@ -122,6 +122,9 @@ class Aura;
 #define EQ_KILLSPAWN_TRIGGER_COMBAT                 1
 #define EQ_KILLSPAWN_TRIGGER_EVADE                  2
 #define EQ_KILLSPAWN_TRIGGER_OOCTIMER               3   // Fires after DelayMinMS of continuous out-of-combat time
+
+#define EQ_CYCLE_SPAWN_CHECK_INTERVAL_IN_MS         30000   // How often each map checks that its spawn cycles are still moving
+#define EQ_CYCLE_SPAWN_PENDING_WINDOW_IN_SEC        300     // Respawn times within this window of a cycle respawn count as the cycle already moving
 
 #define EQ_CREATURE_EMOTE_EVENT_LEAVECOMBAT         0
 #define EQ_CREATURE_EMOTE_EVENT_ENTERCOMBAT         1
@@ -274,6 +277,25 @@ public:
     uint32 SpawnPointID = 0;
     uint32 SpawnGroupID = 0;
     uint32 SpawnGroupLimit = 0;
+    uint32 CycleRespawnTimeSec = 0;
+    uint32 CycleChance = 0;
+};
+
+class EverQuestCycleSpawnCandidate
+{
+public:
+    ObjectGuid::LowType CreatureGUID = 0;
+    uint32 Chance = 0;
+};
+
+class EverQuestCycleSpawnGroup
+{
+public:
+    uint32 MapID = 0;
+    uint32 SpawnGroupID = 0;
+    uint32 SpawnGroupLimit = 1;
+    uint32 CycleRespawnTimeSec = 1;
+    map<uint32, vector<EverQuestCycleSpawnCandidate>> CandidatesBySpawnPointID;
 };
 
 class EverQuestCreatureKillSpawn
@@ -819,6 +841,8 @@ public:
     unordered_map<uint32, EverQuestCreatureSpawnPoint> CreatureSpawnPointsByCreatureGUID;
     unordered_map<int, unordered_map<uint32, vector<Creature*>>> AllLoadedCreaturesByMapIDThenSpawnPointID;
     unordered_map<int, unordered_map<uint32, vector<Creature*>>> AllLoadedCreaturesByMapIDThenSpawnGroupID;
+    unordered_map<uint32, unordered_map<uint32, EverQuestCycleSpawnGroup>> CycleSpawnGroupsByMapIDThenSpawnGroupID;
+    unordered_map<uint32, int32> CycleSpawnCheckTimerInMSByMapID;
     unordered_map<ObjectGuid, deque<uint32>> PlayerCasterConcurrentBardSongs;
     unordered_set<ObjectGuid> PlayersGainingExperience;
     unordered_set<ObjectGuid> PlayersPendingLevelCapExperiencePark;
@@ -853,6 +877,9 @@ public:
     const EverQuestCreature& GetCreatureDataForCreatureTemplateID(uint32 creatureTemplateID);
     void LoadCreatureSpawnPoints();
     bool ShouldDespawnCreatureDueToSpawnRestrictions(int mapID, Creature* creature);
+    ObjectGuid::LowType RollCycleSpawnCreatureGUID(const EverQuestCycleSpawnGroup& cycleSpawnGroup, uint32 excludedSpawnPointID, uint32 mapID);
+    void ProcessCycleSpawnForCreatureDeath(Creature* deadCreature);
+    void UpdateCycleSpawns(Map* map, uint32 diff);
     void LoadCreatureKillSpawnData();
     void ResolveKillSpawnRespawnTargetSpawnPoints();
     void LoadCreatureEmoteData();

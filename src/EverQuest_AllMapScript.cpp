@@ -32,6 +32,7 @@ public:
         if (mapID < EverQuest->ConfigSystemMapDBCIDMin || mapID > EverQuest->ConfigSystemMapDBCIDMax)
             return;
         EverQuest->UpdatePendingKillSpawnActions(map, diff);
+        EverQuest->UpdateCycleSpawns(map, diff);
     }
 };
 

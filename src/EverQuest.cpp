@@ -327,7 +327,7 @@ void EverQuestMod::LoadCreatureData()
 void EverQuestMod::LoadCreatureSpawnPoints()
 {
     CreatureSpawnPointsByCreatureGUID.clear();
-    QueryResult queryResult = WorldDatabase.Query("SELECT CreatureGUID, MapID, SpawnPointID, SpawnGroupID, SpawnGroupLimit FROM mod_everquest_creature_spawn_point;");
+    QueryResult queryResult = WorldDatabase.Query("SELECT CreatureGUID, MapID, SpawnPointID, SpawnGroupID, SpawnGroupLimit, CycleRespawnTimeSec, CycleChance FROM mod_everquest_creature_spawn_point;");
     if (queryResult)
     {
         do
@@ -340,8 +340,187 @@ void EverQuestMod::LoadCreatureSpawnPoints()
             creatureSpawnPoint.SpawnPointID = fields[2].Get<uint32>();
             creatureSpawnPoint.SpawnGroupID = fields[3].Get<uint32>();
             creatureSpawnPoint.SpawnGroupLimit = fields[4].Get<uint32>();
+            creatureSpawnPoint.CycleRespawnTimeSec = fields[5].Get<uint32>();
+            creatureSpawnPoint.CycleChance = fields[6].Get<uint32>();
             CreatureSpawnPointsByCreatureGUID[creatureSpawnPoint.CreatureGUID] = creatureSpawnPoint;
         } while (queryResult->NextRow());
+    }
+
+    // Cycle group spawn metadata
+    CycleSpawnGroupsByMapIDThenSpawnGroupID.clear();
+    CycleSpawnCheckTimerInMSByMapID.clear();
+    for (auto& spawnPointPair : CreatureSpawnPointsByCreatureGUID)
+    {
+        const EverQuestCreatureSpawnPoint& spawnPoint = spawnPointPair.second;
+        if (spawnPoint.CycleRespawnTimeSec == 0)
+            continue;
+        EverQuestCycleSpawnGroup& cycleSpawnGroup = CycleSpawnGroupsByMapIDThenSpawnGroupID[spawnPoint.MapID][spawnPoint.SpawnGroupID];
+        cycleSpawnGroup.MapID = spawnPoint.MapID;
+        cycleSpawnGroup.SpawnGroupID = spawnPoint.SpawnGroupID;
+        if (spawnPoint.SpawnGroupLimit > 0)
+            cycleSpawnGroup.SpawnGroupLimit = spawnPoint.SpawnGroupLimit;
+        cycleSpawnGroup.CycleRespawnTimeSec = spawnPoint.CycleRespawnTimeSec;
+        EverQuestCycleSpawnCandidate cycleSpawnCandidate;
+        cycleSpawnCandidate.CreatureGUID = spawnPoint.CreatureGUID;
+        cycleSpawnCandidate.Chance = spawnPoint.CycleChance;
+        cycleSpawnGroup.CandidatesBySpawnPointID[spawnPoint.SpawnPointID].push_back(cycleSpawnCandidate);
+
+        // Pre-create the per-map check timer so map update threads never change the container's shape
+        CycleSpawnCheckTimerInMSByMapID[spawnPoint.MapID] = 0;
+    }
+}
+
+ObjectGuid::LowType EverQuestMod::RollCycleSpawnCreatureGUID(const EverQuestCycleSpawnGroup& cycleSpawnGroup, uint32 excludedSpawnPointID, uint32 mapID)
+{
+    vector<uint32> eligibleSpawnPointIDs;
+    unordered_set<ObjectGuid::LowType> corpseSpawnIDs;
+    {
+        std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+        auto loadedMapIter = AllLoadedCreaturesByMapIDThenSpawnPointID.find((int)mapID);
+        for (auto& candidatesPair : cycleSpawnGroup.CandidatesBySpawnPointID)
+        {
+            uint32 spawnPointID = candidatesPair.first;
+            if (spawnPointID == excludedSpawnPointID)
+                continue;
+            bool hasAliveCreature = false;
+            if (loadedMapIter != AllLoadedCreaturesByMapIDThenSpawnPointID.end())
+            {
+                auto spawnPointIter = loadedMapIter->second.find(spawnPointID);
+                if (spawnPointIter != loadedMapIter->second.end())
+                {
+                    for (Creature* loadedCreature : spawnPointIter->second)
+                    {
+                        if (loadedCreature->IsAlive() == true)
+                            hasAliveCreature = true;
+                        else if (loadedCreature->GetSpawnId() != 0)
+                            corpseSpawnIDs.insert(loadedCreature->GetSpawnId());
+                    }
+                }
+            }
+            if (hasAliveCreature == false)
+                eligibleSpawnPointIDs.push_back(spawnPointID);
+        }
+    }
+
+    // If skipping the excluded point left nothing (a single point group), allow every point instead
+    if (eligibleSpawnPointIDs.empty() == true && excludedSpawnPointID != 0)
+        return RollCycleSpawnCreatureGUID(cycleSpawnGroup, 0, mapID);
+    if (eligibleSpawnPointIDs.empty() == true)
+        return 0;
+
+    uint32 chosenSpawnPointID = eligibleSpawnPointIDs[urand(0, eligibleSpawnPointIDs.size() - 1)];
+    const vector<EverQuestCycleSpawnCandidate>& candidates = cycleSpawnGroup.CandidatesBySpawnPointID.at(chosenSpawnPointID);
+    vector<const EverQuestCycleSpawnCandidate*> rollableCandidates;
+    uint32 totalChance = 0;
+    for (const EverQuestCycleSpawnCandidate& candidate : candidates)
+    {
+        if (corpseSpawnIDs.find(candidate.CreatureGUID) != corpseSpawnIDs.end())
+            continue;
+        rollableCandidates.push_back(&candidate);
+        totalChance += candidate.Chance;
+    }
+    if (rollableCandidates.empty() == true)
+        return 0;
+    if (totalChance == 0)
+        return rollableCandidates[urand(0, rollableCandidates.size() - 1)]->CreatureGUID;
+    uint32 chanceRoll = urand(1, totalChance);
+    for (const EverQuestCycleSpawnCandidate* candidate : rollableCandidates)
+    {
+        if (chanceRoll <= candidate->Chance)
+            return candidate->CreatureGUID;
+        chanceRoll -= candidate->Chance;
+    }
+    return rollableCandidates[rollableCandidates.size() - 1]->CreatureGUID;
+}
+
+void EverQuestMod::ProcessCycleSpawnForCreatureDeath(Creature* deadCreature)
+{
+    if (deadCreature->GetSpawnId() == 0)
+        return;
+    auto spawnPointIter = CreatureSpawnPointsByCreatureGUID.find(deadCreature->GetSpawnId());
+    if (spawnPointIter == CreatureSpawnPointsByCreatureGUID.end())
+        return;
+    const EverQuestCreatureSpawnPoint& spawnPoint = spawnPointIter->second;
+    if (spawnPoint.CycleRespawnTimeSec == 0)
+        return;
+    uint32 mapID = deadCreature->GetMapId();
+    auto cycleMapIter = CycleSpawnGroupsByMapIDThenSpawnGroupID.find(mapID);
+    if (cycleMapIter == CycleSpawnGroupsByMapIDThenSpawnGroupID.end())
+        return;
+    auto cycleGroupIter = cycleMapIter->second.find(spawnPoint.SpawnGroupID);
+    if (cycleGroupIter == cycleMapIter->second.end())
+        return;
+    const EverQuestCycleSpawnGroup& cycleSpawnGroup = cycleGroupIter->second;
+    ObjectGuid::LowType nextCreatureGUID = RollCycleSpawnCreatureGUID(cycleSpawnGroup, spawnPoint.SpawnPointID, mapID);
+    if (nextCreatureGUID == 0)
+        return;
+
+    // Always defer through the pending queue so the respawn is prepped
+    EverQuestPendingKillSpawnAction action;
+    action.ActionType = EQ_KILLSPAWN_ACTION_RESPAWNTARGET;
+    action.RespawnTimeSec = cycleSpawnGroup.CycleRespawnTimeSec;
+    action.RespawnTargetSpawnIDs.push_back(nextCreatureGUID);
+    action.RemainingMS = 1;
+    EnqueuePendingKillSpawnAction(mapID, action);
+}
+
+void EverQuestMod::UpdateCycleSpawns(Map* map, uint32 diff)
+{
+    uint32 mapID = map->GetId();
+    auto cycleMapIter = CycleSpawnGroupsByMapIDThenSpawnGroupID.find(mapID);
+    if (cycleMapIter == CycleSpawnGroupsByMapIDThenSpawnGroupID.end())
+        return;
+    CycleSpawnCheckTimerInMSByMapID[mapID] -= (int32)diff;
+    if (CycleSpawnCheckTimerInMSByMapID[mapID] > 0)
+        return;
+    CycleSpawnCheckTimerInMSByMapID[mapID] = EQ_CYCLE_SPAWN_CHECK_INTERVAL_IN_MS;
+
+    time_t nowTime = GameTime::GetGameTime().count();
+    for (auto& cycleSpawnGroupPair : cycleMapIter->second)
+    {
+        const EverQuestCycleSpawnGroup& cycleSpawnGroup = cycleSpawnGroupPair.second;
+
+        // Nothing to do while the group is at its limit
+        uint32 aliveCount = 0;
+        {
+            std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+            auto loadedMapIter = AllLoadedCreaturesByMapIDThenSpawnGroupID.find((int)mapID);
+            if (loadedMapIter != AllLoadedCreaturesByMapIDThenSpawnGroupID.end())
+            {
+                auto loadedGroupIter = loadedMapIter->second.find(cycleSpawnGroup.SpawnGroupID);
+                if (loadedGroupIter != loadedMapIter->second.end())
+                    for (Creature* loadedCreature : loadedGroupIter->second)
+                        if (loadedCreature->IsAlive() == true)
+                            aliveCount++;
+            }
+        }
+        if (aliveCount >= cycleSpawnGroup.SpawnGroupLimit)
+            continue;
+
+        // A member with a near respawn time means the cycle is already moving
+        bool hasPendingRespawn = false;
+        for (auto& candidatesPair : cycleSpawnGroup.CandidatesBySpawnPointID)
+        {
+            for (const EverQuestCycleSpawnCandidate& candidate : candidatesPair.second)
+            {
+                time_t respawnTime = map->GetCreatureRespawnTime(candidate.CreatureGUID);
+                if (respawnTime != 0 && respawnTime <= nowTime + (time_t)cycleSpawnGroup.CycleRespawnTimeSec + EQ_CYCLE_SPAWN_PENDING_WINDOW_IN_SEC)
+                {
+                    hasPendingRespawn = true;
+                    break;
+                }
+            }
+            if (hasPendingRespawn == true)
+                break;
+        }
+        if (hasPendingRespawn == true)
+            continue;
+
+        ObjectGuid::LowType nextCreatureGUID = RollCycleSpawnCreatureGUID(cycleSpawnGroup, 0, mapID);
+        if (nextCreatureGUID == 0)
+            continue;
+        time_t respawnTime = nowTime + (time_t)cycleSpawnGroup.CycleRespawnTimeSec;
+        map->SaveCreatureRespawnTime(nextCreatureGUID, respawnTime);
     }
 }
 

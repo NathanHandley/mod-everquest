@@ -120,6 +120,7 @@ public:
 
         EverQuest->ProcessKillSpawnsForCreatureEvent(creature, killer, EQ_KILLSPAWN_TRIGGER_DEATH);
         EverQuest->ProcessTriggeredQuestKillSpawnsForCreatureDeath(creature, killer);
+        EverQuest->ProcessCycleSpawnForCreatureDeath(creature);
     }
 
     void OnUnitEnterEvadeMode(Unit* unit, uint8 /*evadeReason*/) override
