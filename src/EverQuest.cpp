@@ -2383,6 +2383,44 @@ void EverQuestMod::LoadPetData()
     }
 }
 
+void EverQuestMod::FixInvalidCharacterPetModelIDs()
+{
+    // character_pet model IDs can become 'bad' if the server doesn't recast the same model ID. Shouldn't happen anymore, but many saved now can be broken and crash the server
+    QueryResult queryResult = CharacterDatabase.Query("SELECT DISTINCT entry, modelid FROM character_pet");
+    if (!queryResult)
+        return;
+    do
+    {
+        Field* fields = queryResult->Fetch();
+        uint32 creatureTemplateID = fields[0].Get<uint32>();
+        uint32 modelID = fields[1].Get<uint32>();
+        if (modelID != 0 && sCreatureDisplayInfoStore.LookupEntry(modelID) != nullptr)
+            continue;
+        CreatureTemplate const* creatureTemplate = sObjectMgr->GetCreatureTemplate(creatureTemplateID);
+        if (creatureTemplate == nullptr)
+        {
+            LOG_ERROR("module.EverQuest", "EverQuestMod::FixInvalidCharacterPetModelIDs found saved pet(s) with invalid modelid {} but no creature template {} to repair from, skipping (these pets will fail to summon)", modelID, creatureTemplateID);
+            continue;
+        }
+        uint32 replacementModelID = 0;
+        for (CreatureModel const& creatureModel : creatureTemplate->Models)
+        {
+            if (sCreatureDisplayInfoStore.LookupEntry(creatureModel.CreatureDisplayID) != nullptr)
+            {
+                replacementModelID = creatureModel.CreatureDisplayID;
+                break;
+            }
+        }
+        if (replacementModelID == 0)
+        {
+            LOG_ERROR("module.EverQuest", "EverQuestMod::FixInvalidCharacterPetModelIDs found saved pet(s) with invalid modelid {} but creature template {} has no model with a valid display ID either, skipping", modelID, creatureTemplateID);
+            continue;
+        }
+        CharacterDatabase.DirectExecute("UPDATE character_pet SET modelid = {} WHERE entry = {} AND modelid = {}", replacementModelID, creatureTemplateID, modelID);
+        LOG_INFO("module.EverQuest", "EverQuestMod::FixInvalidCharacterPetModelIDs replaced stale saved pet modelid {} with {} for pet creature template {}", modelID, replacementModelID, creatureTemplateID);
+    } while (queryResult->NextRow());
+}
+
 bool EverQuestMod::HasPetDataForCreatureTemplateID(uint32 creatureTemplateID)
 {
     if (PetDataByCreatureTemplateID.find(creatureTemplateID) != PetDataByCreatureTemplateID.end())

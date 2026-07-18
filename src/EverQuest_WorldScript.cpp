@@ -84,6 +84,9 @@ public:
         // The creature spawn tables aren't loaded yet when the kill spawn data loads with the config so respawn target spawn points resolve here instead
         EverQuest->ResolveKillSpawnRespawnTargetSpawnPoints();
         EverQuest->ResolveVulakRequiredDragonSpawnPoints();
+
+        // Saved pet display IDs can become wrong when converted content updates invalide previous display IDs, which crashes the core on pet summon
+        EverQuest->FixInvalidCharacterPetModelIDs();
     }
 };
 
