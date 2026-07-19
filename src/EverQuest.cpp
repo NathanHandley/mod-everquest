@@ -4632,14 +4632,14 @@ void EverQuestMod::SpawnCreature(uint32 entryID, Map* map, float x, float y, flo
     }
 
     Creature* creature = new Creature();
-    if (!creature->Create(map->GenerateLowGuid<HighGuid::Unit>(), map, 6, entryID, 0, x, y, z, orientation)) // PhaseMask of 6 is both day and night
+    if (!creature->Create(map->GenerateLowGuid<HighGuid::Unit>(), map, PHASEMASK_NORMAL, entryID, 0, x, y, z, orientation)) // Players are always in phase 1
     {
         LOG_ERROR("module.EverQuest", "EverQuestMod::SpawnCreature failure, error calling creature->Create with entryID of {}", entryID);
         delete creature;
         return;
     }
 
-    creature->SaveToDB(map->GetId(), (1 << map->GetSpawnMode()), 6);
+    creature->SaveToDB(map->GetId(), (1 << map->GetSpawnMode()), PHASEMASK_NORMAL);
     ObjectGuid::LowType spawnId = creature->GetSpawnId();
 
     // Taken from .npc add in AzerothCore core: "To call _LoadGoods(); _LoadQuests(); CreateTrainerSpells(), current "creature" variable is deleted
