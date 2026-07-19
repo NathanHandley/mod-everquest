@@ -30,6 +30,8 @@
 #include "SpellMgr.h"
 #include "Tokenize.h"
 #include "Map.h"
+#include "MotionMaster.h"
+#include "MovementGenerator.h"
 #include "ObjectAccessor.h"
 #include "GossipDef.h"
 #include "ScriptedGossip.h"
@@ -82,6 +84,7 @@ EverQuestMod::EverQuestMod() :
     ConfigEvadeUnstickMoveThreshold(3.0f),
     ConfigEvadeUnstickMaxAttempts(3),
     ConfigEvadeUnstickStepPercent(25),
+    ConfigEvadeNonEQMapLeashRadius(30.0f),
     ConfigCharmCreatureCharmLimitsEnabled(true),
     ConfigCharmUncharmedPlayerCheckRadius(100.0f),
     ConfigCreatureEmotesEnabled(true),
@@ -252,6 +255,7 @@ void EverQuestMod::LoadConfigurationFile()
         ConfigEvadeUnstickStepPercent = 1;
     if (ConfigEvadeUnstickStepPercent > 100)
         ConfigEvadeUnstickStepPercent = 100;
+    ConfigEvadeNonEQMapLeashRadius = sConfigMgr->GetOption<float>("EverQuest.Evade.NonEQMapLeashRadius", 30.0f);
 
     // Charm
     ConfigCharmCreatureCharmLimitsEnabled = sConfigMgr->GetOption<bool>("EverQuest.Charm.CreatureCharmLimitsEnabled", true);
@@ -3644,6 +3648,52 @@ void EverQuestMod::UpdateCreatureUnstick(Creature* creature, uint32 diff)
             creature->AI()->EnterEvadeMode(CreatureAI::EVADE_REASON_NO_PATH);
         RemoveCreatureUnstickState(creature);
     }
+}
+
+// This is a re-implementation of AzerothCore's CreatureLeashRadius since worldselver has to have "CreatureLeashRadius = 0" in order for bosses not to tether back too quickly in EQ zones
+void EverQuestMod::UpdateNonEQCreatureLeash(Creature* creature)
+{
+    if (creature == nullptr)
+        return;
+    if (ConfigEvadeNonEQMapLeashRadius <= 0.0f)
+        return;
+
+    uint32 mapID = creature->GetMap()->GetId();
+    if (mapID >= ConfigSystemMapDBCIDMin && mapID <= ConfigSystemMapDBCIDMax)
+        return;
+
+    // Core skips all leash logic on instanced maps
+    if (creature->GetMap()->IsDungeon() == true)
+        return;
+
+    if (creature->IsAlive() == false || creature->IsInCombat() == false || creature->IsInEvadeMode() == true)
+        return;
+    if (creature->AI() == nullptr || creature->GetVictim() == nullptr)
+        return;
+
+    // Owned/charmed units take the owner-distance branch in the core
+    if (creature->GetCharmerOrOwnerGUID().IsEmpty() == false)
+        return;
+
+    if (creature->isWorldBoss() == false)
+    {
+        if (creature->GetLastLeashExtensionTime() + creature->GetLeashTimer() > GameTime::GetGameTime().count())
+            return;
+        if (creature->HasTauntAura() == true)
+            return;
+    }
+
+    float x, y, z;
+    x = y = z = 0.0f;
+    bool insideLeashRadius = false;
+    MovementGenerator* idleSlot = creature->GetMotionMaster()->GetMotionSlot(MOTION_SLOT_IDLE);
+    if (idleSlot != nullptr && idleSlot->GetResetPosition(x, y, z))
+        insideLeashRadius = creature->IsInDist2d(x, y, ConfigEvadeNonEQMapLeashRadius);
+    else
+        insideLeashRadius = creature->IsInDist2d(&creature->GetHomePosition(), ConfigEvadeNonEQMapLeashRadius);
+
+    if (insideLeashRadius == false)
+        creature->AI()->EnterEvadeMode(CreatureAI::EVADE_REASON_BOUNDARY);
 }
 
 bool EverQuestMod::TryGetCustomSocialAggroScale(Creature* creature, float& scaleOut)

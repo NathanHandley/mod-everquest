@@ -83,6 +83,8 @@ public:
     {
         if (EverQuest->IsEnabled == false)
             return;
+        // Intentionally before creature ID check, since this only acts on non-EQ creatures
+        EverQuest->UpdateNonEQCreatureLeash(creature);
         uint32 entryID = creature->GetEntry();
         if (entryID < EverQuest->ConfigSystemCreatureTemplateIDMin || entryID > EverQuest->ConfigSystemCreatureTemplateIDMax)
             return;

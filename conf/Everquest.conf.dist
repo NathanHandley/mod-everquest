@@ -236,7 +236,7 @@ EverQuest.CombatSkills.AreaRampageDefaultChancePercent = 20
 EverQuest.CombatSkills.AreaRampageDefaultMaxTargets = 999
 
 ###################################################################################################
-# Evade / Unstick Settings (EverQuest maps only)
+# Evade / Unstick Settings (EverQuest maps only, except NonEQMapLeashRadius)
 #
 # 	EverQuest.Evade.Enabled
 #		If true, EverQuest maps use the EQ-style unreachable handling below instead of the core's
@@ -280,6 +280,15 @@ EverQuest.CombatSkills.AreaRampageDefaultMaxTargets = 999
 #		fallback. 100 always teleports directly onto the target player.
 #	Default: 25
 #
+# 	EverQuest.Evade.NonEQMapLeashRadius
+#		Distance, in yards, a creature on a NON-EverQuest map may pursue beyond its home/waypoint
+#		position before it evades, reimplementing the core CreatureLeashRadius check (worldserver's
+#		CreatureLeashRadius must be set to 0 so creatures on EverQuest maps, particularly bosses,
+#		never distance-leash). As in core, a non-boss only evades this way once its leash timer has
+#		lapsed (no recent direct damage, melee contact, or crowd control) and it has no taunt aura,
+#		while world bosses ignore the timer and taunts. Set to 0 to disable the non-EQ leash as well
+#	Default: 30
+#
 ###################################################################################################
 
 EverQuest.Evade.Enabled = True
@@ -289,6 +298,7 @@ EverQuest.Evade.UnstickSettleSeconds = 1
 EverQuest.Evade.UnstickMoveThreshold = 3
 EverQuest.Evade.UnstickMaxAttempts = 3
 EverQuest.Evade.UnstickStepPercent = 25
+EverQuest.Evade.NonEQMapLeashRadius = 30
 
 ###################################################################################################
 # Charm Settings (creature-cast charms only, player charms are unaffected)

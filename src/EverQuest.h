@@ -807,6 +807,7 @@ public:
     float ConfigEvadeUnstickMoveThreshold;
     uint32 ConfigEvadeUnstickMaxAttempts;
     uint32 ConfigEvadeUnstickStepPercent;
+    float ConfigEvadeNonEQMapLeashRadius;
     bool ConfigCharmCreatureCharmLimitsEnabled;
     float ConfigCharmUncharmedPlayerCheckRadius;
     bool ConfigCreatureEmotesEnabled;
@@ -1014,6 +1015,7 @@ public:
     void RemoveCreatureUnstickState(Creature* creature);
     void CalculateUnstickTeleportPosition(Creature* creature, Unit* victim, float& xOut, float& yOut, float& zOut);
     void UpdateCreatureUnstick(Creature* creature, uint32 diff);
+    void UpdateNonEQCreatureLeash(Creature* creature);
     bool TryGetCustomSocialAggroScale(Creature* creature, float& scaleOut);
     void DoScaledSocialAggroSearch(Creature* caller, Unit* victim, float scale);
     void ApplyScaledCreatureSocialAggroOnEngage(Creature* creature, Unit* victim);
