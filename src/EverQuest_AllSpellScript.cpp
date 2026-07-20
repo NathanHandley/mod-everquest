@@ -230,6 +230,14 @@ public:
             return;
         EverQuestSpell curSpell = EverQuest->GetSpellDataForSpellID(spellInfo->Id);
 
+        // Creatures casting gate return to where they last gained aggro
+        if (caster->IsCreature() == true && spell->IsTriggered() == false
+            && (spellInfo->Effects[EFFECT_0].Effect == SPELL_EFFECT_DUMMY || (spellInfo->Effects[EFFECT_0].Effect == SPELL_EFFECT_APPLY_AURA && spellInfo->Effects[EFFECT_0].ApplyAuraName == SPELL_AURA_DUMMY))
+            && spellInfo->Effects[EFFECT_0].MiscValue == EQ_SPELLDUMMYTYPE_GATE)
+        {
+            EverQuest->TeleportCreatureToLastAggroPosition(caster->ToCreature(), spellInfo->Id);
+        }
+
         // Handle a rolled effect failure (decided at cast start in OnSpellPrepare). Pull the entry out under the
         // lock, then apply it after release since applying casts/engages targets
         if (caster->IsPlayer())

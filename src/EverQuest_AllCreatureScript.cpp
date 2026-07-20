@@ -77,6 +77,7 @@ public:
         EverQuest->RemoveCreatureKillSpawnCombatWatchState(creature);
         EverQuest->RemoveVulakLockState(creature);
         EverQuest->RemoveCreatureDefendPlayerWatchState(creature);
+        EverQuest->RemoveCreatureAggroPositionState(creature);
     }
 
     void OnAllCreatureUpdate(Creature* creature, uint32 diff) override

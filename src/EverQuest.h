@@ -196,6 +196,7 @@ class Aura;
 #define EQ_CREATURE_CUSTOMDATA_KILLSPAWNWATCH       "EQKillSpawnWatch"
 #define EQ_CREATURE_CUSTOMDATA_VULAKLOCK            "EQVulakLock"
 #define EQ_CREATURE_CUSTOMDATA_DEFENDPLAYERWATCH    "EQDefendPlayerWatch"
+#define EQ_CREATURE_CUSTOMDATA_AGGROPOSITION        "EQAggroPos"
 
 #define EQ_DEFEND_PLAYERS_CHECK_MS                  2000
 #define EQ_DEFEND_PLAYERS_SEARCH_RADIUS             15.0f
@@ -408,6 +409,16 @@ class EverQuestCreatureSocialAggroState : public DataMap::Base
 {
 public:
     uint32 RecallTimerMS = 0;
+};
+
+class EverQuestCreatureAggroPositionState : public DataMap::Base
+{
+public:
+    float X = 0.0f;
+    float Y = 0.0f;
+    float Z = 0.0f;
+    float Orientation = 0.0f;
+    bool HasPosition = false;
 };
 
 class EverQuestCreatureEmote
@@ -1021,6 +1032,9 @@ public:
     void ApplyScaledCreatureSocialAggroOnEngage(Creature* creature, Unit* victim);
     void UpdateCreatureScaledSocialAggro(Creature* creature, uint32 diff);
     void RemoveCreatureSocialAggroState(Creature* creature);
+    void StoreCreatureAggroPosition(Creature* creature);
+    void RemoveCreatureAggroPositionState(Creature* creature);
+    void TeleportCreatureToLastAggroPosition(Creature* creature, uint32 gateSpellID);
     void RemoveVisualEquippedItemForCreatureGUIDIfExists(Map* map, ObjectGuid creatureGUID, uint32 itemTemplateID);
     void LoadShipTriggerData();
     const vector<EverQuestTransportShipTrigger>& GetShipTriggersForShip(int triggeringGameObjectTemplateEntryID);

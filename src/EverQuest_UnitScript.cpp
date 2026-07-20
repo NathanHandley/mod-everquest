@@ -92,7 +92,10 @@ public:
 
         uint32 mapID = creature->GetMapId();
         if (mapID >= EverQuest->ConfigSystemMapDBCIDMin && mapID <= EverQuest->ConfigSystemMapDBCIDMax)
+        {
+            EverQuest->StoreCreatureAggroPosition(creature);
             EverQuest->ProcessKillSpawnsForCreatureEvent(creature, victim, EQ_KILLSPAWN_TRIGGER_COMBAT);
+        }
     }
 
     void OnUnitDeath(Unit* unit, Unit* killer) override

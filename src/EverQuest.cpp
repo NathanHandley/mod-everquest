@@ -3790,6 +3790,39 @@ void EverQuestMod::UpdateCreatureScaledSocialAggro(Creature* creature, uint32 di
         state->RecallTimerMS -= diff;
 }
 
+void EverQuestMod::StoreCreatureAggroPosition(Creature* creature)
+{
+    EverQuestCreatureAggroPositionState* state = creature->CustomData.GetDefault<EverQuestCreatureAggroPositionState>(EQ_CREATURE_CUSTOMDATA_AGGROPOSITION);
+    state->X = creature->GetPositionX();
+    state->Y = creature->GetPositionY();
+    state->Z = creature->GetPositionZ();
+    state->Orientation = creature->GetOrientation();
+    state->HasPosition = true;
+}
+
+void EverQuestMod::RemoveCreatureAggroPositionState(Creature* creature)
+{
+    creature->CustomData.Erase(EQ_CREATURE_CUSTOMDATA_AGGROPOSITION);
+}
+
+void EverQuestMod::TeleportCreatureToLastAggroPosition(Creature* creature, uint32 gateSpellID)
+{
+    if (creature == nullptr)
+        return;
+    if (creature->IsAlive() == false)
+        return;
+    if (creature->IsPet() == true || creature->IsControlledByPlayer() == true)
+        return;
+
+    EverQuestCreatureAggroPositionState* state = creature->CustomData.Get<EverQuestCreatureAggroPositionState>(EQ_CREATURE_CUSTOMDATA_AGGROPOSITION);
+    if (state == nullptr || state->HasPosition == false)
+        return;
+
+    // The gate tether aura only has meaning for players
+    creature->RemoveAurasDueToSpell(gateSpellID);
+    creature->NearTeleportTo(state->X, state->Y, state->Z, state->Orientation);
+}
+
 // Reference is EQMacEmu/TAKP Mob::TryBashKickStun
 bool EverQuestMod::RollBashKickStunLands(Unit* attacker, Unit* defender)
 {
