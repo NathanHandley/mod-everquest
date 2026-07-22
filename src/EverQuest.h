@@ -1030,6 +1030,7 @@ public:
     bool TryGetCustomSocialAggroScale(Creature* creature, float& scaleOut);
     void DoScaledSocialAggroSearch(Creature* caller, Unit* victim, float scale);
     void ApplyScaledCreatureSocialAggroOnEngage(Creature* creature, Unit* victim);
+    void ProcessCreatureRetaliationOnDamage(Unit* attacker, Unit* victim);
     void UpdateCreatureScaledSocialAggro(Creature* creature, uint32 diff);
     void RemoveCreatureSocialAggroState(Creature* creature);
     void StoreCreatureAggroPosition(Creature* creature);

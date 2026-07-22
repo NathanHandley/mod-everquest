@@ -75,6 +75,13 @@ public:
         return true;
     }
 
+    void OnDamage(Unit* attacker, Unit* victim, uint32& /*damage*/) override
+    {
+        if (EverQuest->IsEnabled == false)
+            return;
+        EverQuest->ProcessCreatureRetaliationOnDamage(attacker, victim);
+    }
+
     void OnUnitEnterCombat(Unit* unit, Unit* victim) override
     {
         if (EverQuest->IsEnabled == false)

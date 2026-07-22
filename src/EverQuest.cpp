@@ -3750,6 +3750,32 @@ void EverQuestMod::RemoveCreatureSocialAggroState(Creature* creature)
     creature->CustomData.Erase(EQ_CREATURE_CUSTOMDATA_SOCIALAGGRO);
 }
 
+// WoW doesn't have neutral creatures hit by AoE fight back, but EQ should
+void EverQuestMod::ProcessCreatureRetaliationOnDamage(Unit* attacker, Unit* victim)
+{
+    if (attacker == nullptr || victim == nullptr || attacker == victim)
+        return;
+    Creature* creature = victim->ToCreature();
+    if (creature == nullptr)
+        return;
+    uint32 mapID = creature->GetMapId();
+    if (mapID < ConfigSystemMapDBCIDMin || mapID > ConfigSystemMapDBCIDMax)
+        return;
+    if (creature->HasUnitFlag(UNIT_FLAG_PLAYER_CONTROLLED) == true)
+        return;
+    if (attacker->HasUnitFlag(UNIT_FLAG_PLAYER_CONTROLLED) == false)
+        return;
+    if (creature->IsAlive() == false || creature->IsAIEnabled == false || creature->GetVictim() != nullptr)
+        return;
+    if (creature->IsCharmed() == true || creature->IsInEvadeMode() == true)
+        return;
+    if (creature->HasReactState(REACT_PASSIVE) == true)
+        return;
+    if (creature->CanCreatureAttack(attacker) == false)
+        return;
+    creature->AI()->AttackStart(attacker);
+}
+
 void EverQuestMod::UpdateCreatureScaledSocialAggro(Creature* creature, uint32 diff)
 {
     if (creature == nullptr)
