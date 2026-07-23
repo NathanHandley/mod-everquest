@@ -63,6 +63,7 @@ EverQuestMod::EverQuestMod() :
     ConfigSystemCreatureTemplateIDMin(0),
     ConfigSystemCreatureTemplateIDMax(0),
     ConfigSystemInvisVsUndeadDetectSpellID(0),
+    ConfigSystemResistAdjustmentSpellID(0),
     ConfigSystemLegacyAchievementID(0),
     ConfigDeathKnightsStartLikeOtherClasses(false),
     ConfigMapRestrictPlayersToNorrath(false),    
@@ -166,6 +167,8 @@ bool EverQuestMod::LoadConfigurationSystemDataFromDB()
                 ConfigSystemSpellDBCIDMax = (uint32)atoi(value.c_str());
             else if (key == "RangedAttackSpellID")
                 ConfigSystemRangedAttackSpellID = (uint32)atoi(value.c_str());
+            else if (key == "ResistAdjustmentSpellID")
+                ConfigSystemResistAdjustmentSpellID = (uint32)atoi(value.c_str());
             else if (key == "QuestSQLIDMin")
                 ConfigSystemQuestSQLIDMin = (uint32)atoi(value.c_str());
             else if (key == "QuestSQLIDMax")
@@ -1811,7 +1814,7 @@ void EverQuestMod::LoadSpellData()
 {
     SpellDataBySpellID.clear();
     BardSongTickSpellIDs.clear();
-    QueryResult queryResult = WorldDatabase.Query("SELECT SpellID, AuraDurationBaseInMS, AuraDurationAddPerLevelInMS, AuraDurationMaxInMS, AuraDurationCalcMinLevel, AuraDurationCalcMaxLevel, RecourseSpellID, SpellIDCastOnMeleeAttacker, FocusBoostType, PeriodicAuraSpellID, PeriodicAuraSpellRadius, MaleFormSpellID, FemaleFormSpellID, EffectFailChancePercent, EffectFailableType, StunUsesBashKickChance, SpellIDCastOnTargetWhenStunLands, AuraStaysOnSecondaryClassSwitch, MinTargetLevel, MaxCreatureTargetLevel FROM mod_everquest_spell ORDER BY SpellID;");
+    QueryResult queryResult = WorldDatabase.Query("SELECT SpellID, AuraDurationBaseInMS, AuraDurationAddPerLevelInMS, AuraDurationMaxInMS, AuraDurationCalcMinLevel, AuraDurationCalcMaxLevel, RecourseSpellID, SpellIDCastOnMeleeAttacker, FocusBoostType, PeriodicAuraSpellID, PeriodicAuraSpellRadius, MaleFormSpellID, FemaleFormSpellID, EffectFailChancePercent, EffectFailableType, StunUsesBashKickChance, SpellIDCastOnTargetWhenStunLands, AuraStaysOnSecondaryClassSwitch, MinTargetLevel, MaxCreatureTargetLevel, ResistDiff FROM mod_everquest_spell ORDER BY SpellID;");
     if (queryResult)
     {
         do
@@ -1839,6 +1842,7 @@ void EverQuestMod::LoadSpellData()
             everQuestSpell.AuraStaysOnSecondaryClassSwitch = fields[17].Get<bool>();
             everQuestSpell.MinTargetLevel = fields[18].Get<uint32>();
             everQuestSpell.MaxCreatureTargetLevel = fields[19].Get<uint32>();
+            everQuestSpell.ResistDiff = fields[20].Get<int32>();
             SpellDataBySpellID[everQuestSpell.SpellID] = everQuestSpell;
             if (everQuestSpell.PeriodicAuraSpellID != 0)
                 BardSongTickSpellIDs.insert(everQuestSpell.PeriodicAuraSpellID);

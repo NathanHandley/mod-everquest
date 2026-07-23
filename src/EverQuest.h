@@ -39,7 +39,7 @@ class Unit;
 class Aura;
 class WorldPacket;
 
-#define EQ_MOD_VERSION                              52
+#define EQ_MOD_VERSION                              53
 
 #define EQ_EQCLASS_NONE                             0
 #define EQ_EQCLASS_WARRIOR                          1
@@ -244,6 +244,7 @@ public:
     bool AuraStaysOnSecondaryClassSwitch = false;
     uint32 MinTargetLevel = 0;
     uint32 MaxCreatureTargetLevel = 0;
+    int32 ResistDiff = 0;
 };
 
 class EverQuestCreature
@@ -778,6 +779,7 @@ public:
     uint32 ConfigSystemShipEntryTemplateIDMax;
     uint32 ConfigSystemInvisVsUndeadDetectSpellID;
     uint32 ConfigSystemRangedAttackSpellID;
+    uint32 ConfigSystemResistAdjustmentSpellID;
     uint32 ConfigSystemLegacyAchievementID;
     string ConfigSystemLegacyAchievementAccountCreatedBefore;
 
