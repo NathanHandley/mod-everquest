@@ -57,6 +57,7 @@ public:
             return;
 
         bool hasHarmfulPeriodic = false;
+        bool hasAuraEffect = false;
         bool allSelfTargeted = true;
         bool hasPositiveEffect = false;
         bool hasNegativeEffect = false;
@@ -64,6 +65,9 @@ public:
         {
             if (spell->Effects[i].IsEffect() == false)
                 continue;
+
+            if (spell->Effects[i].ApplyAuraName != 0)
+                hasAuraEffect = true;
 
             switch (spell->Effects[i].ApplyAuraName)
             {
@@ -93,6 +97,10 @@ public:
             if (hasHarmfulPeriodic)
                 spell->AttributesCu |= SPELL_ATTR0_CU_SINGLE_AURA_STACK;
         }
+
+        // In EQ, a recast of the same spell should refresh it
+        if (hasAuraEffect == true && EverQuest->IsWornEffectSpell(spell->Id) == false)
+            spell->AttributesCu |= SPELL_ATTR0_CU_SINGLE_AURA_STACK;
 
         // By default in WoW, buffs that have a cost are treated as a debuff (can't be removed).  That's not EQ behavior.
         if (allSelfTargeted && hasPositiveEffect && hasNegativeEffect)
