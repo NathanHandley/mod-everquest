@@ -115,15 +115,20 @@ EverQuest.Spells.CrowdControlLevelRestrictionsEnabled = True
 ###################################################################################################
 #
 # 	EverQuest.Spells.HasteCapEnabled
-#		If true, the combined attack speed bonus ("haste") a unit has from EverQuest sources
-#		(cast spells, bard songs, worn item effects, potions and other clickies) is capped at
-#		EverQuest.Spells.HasteCapPercent.  EverQuest haste sources also stack additively with
-#		one another (like EQ) instead of multiplicatively (like WoW).  WoW haste sources are
-#		unaffected by this and stack normally on top of the capped EverQuest haste.
+#		If true, attack speed bonuses ("haste") from EverQuest sources follow EverQuest stacking
+#		rules.  Haste falls into three categories that never stack within themselves - worn item
+#		effects, spell/song/clicky haste (v1), and v2 haste (some bard songs) - so only the
+#		strongest buff of each category applies (weaker ones stay visible but contribute nothing).
+#		The categories then add together additively (not multiplicatively like WoW) and the total
+#		is capped: players cap at level+25 through level 50, 85 for 51-59, and
+#		EverQuest.Spells.HasteCapPercent at 60+.  Worn haste is capped at 10 until level 26, and
+#		v2 haste only works at level 50+ and adds at most 10.  Pets and other creatures use the
+#		TAKP creature caps.  WoW haste sources are unaffected and stack normally on top.
 #	Default: True (use EverQuest behavior)
 #
 # 	EverQuest.Spells.HasteCapPercent
-#		The maximum combined attack speed bonus percent from EverQuest sources
+#		The maximum combined attack speed bonus percent from EverQuest sources for players
+#		at level 60 and above (matches the TAKP Character.HasteCap rule)
 #	Default: 100
 #
 ###################################################################################################

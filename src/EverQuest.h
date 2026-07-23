@@ -39,7 +39,7 @@ class Unit;
 class Aura;
 class WorldPacket;
 
-#define EQ_MOD_VERSION                              54
+#define EQ_MOD_VERSION                              55
 
 #define EQ_EQCLASS_NONE                             0
 #define EQ_EQCLASS_WARRIOR                          1
@@ -98,6 +98,11 @@ class WorldPacket;
 #define EQ_SPELLFOCUSBOOSTTYPE_BARDSINGING          3
 #define EQ_SPELLFOCUSBOOSTTYPE_BARDSTRINGED         4
 #define EQ_SPELLFOCUSBOOSTTYPE_BARDWIND             5
+
+#define EQ_HASTE_TYPE_NONE                          0
+#define EQ_HASTE_TYPE_WORNITEM                      1
+#define EQ_HASTE_TYPE_SPELL_V1                      2
+#define EQ_HASTE_TYPE_SPELL_V2                      3
 
 #define EQ_PET_NAMING_TYPE_PET                      0
 #define EQ_PET_NAMING_TYPE_FAMILIAR                 1
@@ -245,6 +250,7 @@ public:
     uint32 MinTargetLevel = 0;
     uint32 MaxCreatureTargetLevel = 0;
     int32 ResistDiff = 0;
+    uint32 HasteType = EQ_HASTE_TYPE_NONE;
 };
 
 class EverQuestCreature
@@ -740,6 +746,7 @@ struct EverQuestUnitHasteAuraEffect
     uint8 EffectIndex;
     uint32 AuraType;
     int32 NaturalAmount;    // The amount the effect would apply if there were no cap
+    uint32 HasteType;
 };
 
 class EverQuestClassMap
@@ -984,6 +991,7 @@ public:
     void TrackEQHasteAurasAndEnforceCapOnAuraApply(Unit* unit, Aura* aura);
     void UntrackEQHasteAurasAndEnforceCapOnAuraRemove(Unit* unit, Aura* aura);
     void EnforceEQHastePercentCapOnUnit(Unit* unit, vector<EverQuestUnitHasteAuraEffect>& trackedHasteAuraEffects);
+    float GetEQHasteCapPercentForUnit(Unit* unit);
     void LoadQuestCompletionReputations();
     const list<EverQuestQuestCompletionReputation>& GetQuestCompletionReputationsForQuestTemplate(uint32 questTemplateID);
     void LoadQuestReactions();
