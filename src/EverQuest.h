@@ -936,6 +936,7 @@ public:
     void LoadCreatureEmoteData();
     bool DoCreatureEmoteEvent(Creature* creature, uint8 emoteEventType, Unit* target);
     void EmitCreatureEmote(Creature* creature, const EverQuestCreatureEmote& emote, Unit* target);
+    void SendCreatureChatToAllPlayersOnMap(Creature* creature, ChatMsg chatMsg, const string& text);
     string FormatCreatureEmoteText(Creature* creature, Unit* target, const string& text);
     void SetupCreatureEmoteState(Creature* creature);
     void RemoveCreatureEmoteState(Creature* creature);

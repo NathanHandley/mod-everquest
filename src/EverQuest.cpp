@@ -928,6 +928,21 @@ string EverQuestMod::FormatCreatureEmoteText(Creature* creature, Unit* target, c
     return formattedText;
 }
 
+// EQ shouts reach the entire zone, so deliver them to every player on the map instead of using range-limited chat
+void EverQuestMod::SendCreatureChatToAllPlayersOnMap(Creature* creature, ChatMsg chatMsg, const string& text)
+{
+    Map::PlayerList const& mapPlayers = creature->GetMap()->GetPlayers();
+    for (Map::PlayerList::const_iterator playerIter = mapPlayers.begin(); playerIter != mapPlayers.end(); ++playerIter)
+    {
+        Player* mapPlayer = playerIter->GetSource();
+        if (mapPlayer == nullptr || mapPlayer->IsInWorld() == false)
+            continue;
+        WorldPacket data;
+        ChatHandler::BuildChatPacket(data, chatMsg, LANG_UNIVERSAL, creature, mapPlayer, text);
+        mapPlayer->SendDirectMessage(&data);
+    }
+}
+
 void EverQuestMod::EmitCreatureEmote(Creature* creature, const EverQuestCreatureEmote& emote, Unit* target)
 {
     string formattedText = FormatCreatureEmoteText(creature, target, emote.EmoteText);
@@ -943,9 +958,9 @@ void EverQuestMod::EmitCreatureEmote(Creature* creature, const EverQuestCreature
         case EQ_CREATURE_EMOTE_TYPE_SHOUT:
         {
             if (isInvisibleTrigger == true)
-                creature->TextEmote(creature->GetName() + " shouts, '" + formattedText + "'", target);
+                SendCreatureChatToAllPlayersOnMap(creature, CHAT_MSG_MONSTER_EMOTE, creature->GetName() + " shouts, '" + formattedText + "'");
             else
-                creature->Yell(formattedText, LANG_UNIVERSAL, target);
+                SendCreatureChatToAllPlayersOnMap(creature, CHAT_MSG_MONSTER_YELL, formattedText);
         } break;
         case EQ_CREATURE_EMOTE_TYPE_PROXIMITY:
         {
