@@ -37,6 +37,7 @@ static uint32 ConfigMaxSkillIDCheck = 1000;         // The highest level of skil
 
 class Unit;
 class Aura;
+class WorldPacket;
 
 #define EQ_MOD_VERSION                              52
 
@@ -877,6 +878,7 @@ public:
     unordered_map<uint32, unordered_map<uint32, EverQuestCycleSpawnGroup>> CycleSpawnGroupsByMapIDThenSpawnGroupID;
     unordered_map<uint32, int32> CycleSpawnCheckTimerInMSByMapID;
     unordered_map<ObjectGuid, deque<uint32>> PlayerCasterConcurrentBardSongs;
+    unordered_set<ObjectGuid> PlayersWithAuctionUsableFilterActive;
     unordered_set<ObjectGuid> PlayersGainingExperience;
     unordered_set<ObjectGuid> PlayersPendingLevelCapExperiencePark;
     unordered_map<ObjectGuid, vector<EverQuestUnitHasteAuraEffect>> EQHasteAuraEffectsByUnitGUID;
@@ -947,6 +949,9 @@ public:
     uint32 GetNPCEquipItemTemplateIDForItemTemplate(uint32 itemTemplateID);
     uint32 GetWornEffectSpellIDForItemTemplate(uint32 itemTemplateID);
     bool IsItemEQClassAllowedForPlayer(Player* player, uint32 itemTemplateID);
+    void SetAuctionUsableFilterActiveForPlayer(ObjectGuid playerGUID, bool active);
+    bool IsAuctionUsableFilterActiveForPlayer(ObjectGuid playerGUID);
+    bool BuildEQClassFilteredAuctionListPacket(Player* player, WorldPacket const& packet, WorldPacket& filteredPacket);
     bool IsWornEffectSpell(uint32 spellID);
     void LoadSpellData();
     const EverQuestSpell& GetSpellDataForSpellID(uint32 spellID);

@@ -613,6 +613,9 @@ public:
         // Stop tracking any illusion gear display state
         EverQuest->ClearIllusionTrackingForPlayer(player->GetGUID());
 
+        // Stop tracking the auction "Usable Items" filter state
+        EverQuest->SetAuctionUsableFilterActiveForPlayer(player->GetGUID(), false);
+
         // Class switch
         if (EverQuest->GetCurrentSecondEQClassForPlayer(player) != EverQuest->GetNextSecondEQClassForPlayer(player))
         {

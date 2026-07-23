@@ -33,6 +33,8 @@
 #include "MotionMaster.h"
 #include "MovementGenerator.h"
 #include "ObjectAccessor.h"
+#include "Opcodes.h"
+#include "WorldPacket.h"
 #include "GossipDef.h"
 #include "ScriptedGossip.h"
 #include "TemporarySummon.h"
@@ -1732,6 +1734,77 @@ bool EverQuestMod::IsItemEQClassAllowedForPlayer(Player* player, uint32 itemTemp
         return true;
 
     return false;
+}
+
+void EverQuestMod::SetAuctionUsableFilterActiveForPlayer(ObjectGuid playerGUID, bool active)
+{
+    std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+    if (active == true)
+        PlayersWithAuctionUsableFilterActive.insert(playerGUID);
+    else
+        PlayersWithAuctionUsableFilterActive.erase(playerGUID);
+}
+
+bool EverQuestMod::IsAuctionUsableFilterActiveForPlayer(ObjectGuid playerGUID)
+{
+    std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+    return PlayersWithAuctionUsableFilterActive.find(playerGUID) != PlayersWithAuctionUsableFilterActive.end();
+}
+
+// This is such an obscene hack...
+bool EverQuestMod::BuildEQClassFilteredAuctionListPacket(Player* player, WorldPacket const& packet, WorldPacket& filteredPacket)
+{
+    // Fixed byte size of one auction entry as written by SearchableAuctionEntry::BuildAuctionInfo (auction ID, item, entry ID, inspected enchants, random property, suffix factor, stack count, spell charges, flags, owner guid,
+    // start bid, min outbid, buyout, time left, bidder guid, current bid)
+    static const size_t auctionEntrySizeInBytes = 4 + 4 + (MAX_INSPECTED_ENCHANTMENT_SLOT * 12) + 4 + 4 + 4 + 4 + 4 + 8 + 4 + 4 + 4 + 4 + 8 + 4;
+
+    WorldPacket packetCopy(packet);
+    packetCopy.rpos(0);
+    try
+    {
+        uint32 entryCount;
+        packetCopy >> entryCount;
+
+        // Skip anything not "shaped" like the searcher's output (entry count + entries + total count + search delay)
+        if (packetCopy.size() != 4 + (entryCount * auctionEntrySizeInBytes) + 4 + 4)
+            return false;
+
+        uint32 keptEntryCount = 0;
+        ByteBuffer keptEntryData;
+        for (uint32 i = 0; i < entryCount; ++i)
+        {
+            size_t entryStartPos = packetCopy.rpos();
+            uint32 auctionID;
+            uint32 itemTemplateID;
+            packetCopy >> auctionID;
+            packetCopy >> itemTemplateID;
+            packetCopy.rpos(entryStartPos + auctionEntrySizeInBytes);
+            if (IsItemEQClassAllowedForPlayer(player, itemTemplateID) == true)
+            {
+                keptEntryData.append(packetCopy.contents() + entryStartPos, auctionEntrySizeInBytes);
+                keptEntryCount++;
+            }
+        }
+        if (keptEntryCount == entryCount)
+            return false;
+
+        uint32 totalCount;
+        uint32 searchDelay;
+        packetCopy >> totalCount;
+        packetCopy >> searchDelay;
+
+        filteredPacket.Initialize(SMSG_AUCTION_LIST_RESULT, 4 + (keptEntryCount * auctionEntrySizeInBytes) + 4 + 4);
+        filteredPacket << uint32(keptEntryCount);
+        if (keptEntryCount > 0)
+            filteredPacket.append(keptEntryData);
+        filteredPacket << uint32(totalCount);
+        filteredPacket << uint32(searchDelay);
+        return true;
+    }
+    catch (ByteBufferException const&)
+    {
+        return false;
+    }
 }
 
 void EverQuestMod::LoadSpellData()

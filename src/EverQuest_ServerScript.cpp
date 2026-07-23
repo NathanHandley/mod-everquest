@@ -49,16 +49,71 @@ static uint32 ExtractSpellIDFromSpellStartOrGoPacket(WorldPacket const& packet)
     }
 }
 
+// Returns false when a replacement packet with EQ-class-unusable auctions removed was sent in place of the original
+static bool HandleAuctionListResultPacketSend(WorldSession* session, WorldPacket const& packet)
+{
+    if (EverQuest->IsEnabled == false)
+        return true;
+    Player* player = session->GetPlayer();
+    if (player == nullptr)
+        return true;
+    if (EverQuest->IsAuctionUsableFilterActiveForPlayer(player->GetGUID()) == false)
+        return true;
+
+    WorldPacket filteredPacket;
+    if (EverQuest->BuildEQClassFilteredAuctionListPacket(player, packet, filteredPacket) == false)
+        return true;
+    session->SendPacket(&filteredPacket);
+    return false;
+}
+
 class EverQuest_ServerScript : public ServerScript
 {
 public:
-    EverQuest_ServerScript() : ServerScript("EverQuest_ServerScript", { SERVERHOOK_CAN_PACKET_SEND }) { }
+    EverQuest_ServerScript() : ServerScript("EverQuest_ServerScript", { SERVERHOOK_CAN_PACKET_SEND, SERVERHOOK_CAN_PACKET_RECEIVE }) { }
+
+    // Watches auction search results to learn whether a player's "Usable Items" checkbox is set
+    bool CanPacketReceive(WorldSession* session, WorldPacket const& packet) override
+    {
+        if (packet.GetOpcode() != CMSG_AUCTION_LIST_ITEMS)
+            return true;
+        if (EverQuest->IsEnabled == false)
+            return true;
+        Player* player = session->GetPlayer();
+        if (player == nullptr)
+            return true;
+
+        // Field layout must match WorldSession::HandleAuctionListItems
+        WorldPacket packetCopy(packet);
+        packetCopy.rpos(0);
+        try
+        {
+            ObjectGuid auctioneerGUID;
+            uint32 listFrom;
+            std::string searchedName;
+            uint8 levelMin, levelMax, usable;
+            uint32 auctionSlotID, auctionMainCategory, auctionSubCategory, quality;
+            packetCopy >> auctioneerGUID;
+            packetCopy >> listFrom;
+            packetCopy >> searchedName;
+            packetCopy >> levelMin >> levelMax;
+            packetCopy >> auctionSlotID >> auctionMainCategory >> auctionSubCategory;
+            packetCopy >> quality >> usable;
+            EverQuest->SetAuctionUsableFilterActiveForPlayer(player->GetGUID(), usable != 0);
+        }
+        catch (ByteBufferException const&)
+        {
+        }
+        return true;
+    }
 
     // Hides the recurring bard song pulse graphic from players who turned it off (.eqshowbardpulse). The pulse is the SMSG_SPELL_START / SMSG_SPELL_GO pair of the generated bard tick spell
     // and the buff itself travels in separate aura packets so dropping these only removes the graphic for the receiving player
     bool CanPacketSend(WorldSession* session, WorldPacket const& packet) override
     {
         uint16 opcode = packet.GetOpcode();
+        if (opcode == SMSG_AUCTION_LIST_RESULT)
+            return HandleAuctionListResultPacketSend(session, packet);
         if (opcode != SMSG_SPELL_GO && opcode != SMSG_SPELL_START)
             return true;
         if (EverQuest->IsEnabled == false || EverQuest->BardSongTickSpellIDs.empty() == true)
