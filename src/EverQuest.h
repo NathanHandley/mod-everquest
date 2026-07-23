@@ -39,7 +39,7 @@ class Unit;
 class Aura;
 class WorldPacket;
 
-#define EQ_MOD_VERSION                              53
+#define EQ_MOD_VERSION                              54
 
 #define EQ_EQCLASS_NONE                             0
 #define EQ_EQCLASS_WARRIOR                          1
@@ -782,6 +782,11 @@ public:
     uint32 ConfigSystemResistAdjustmentSpellID;
     uint32 ConfigSystemLegacyAchievementID;
     string ConfigSystemLegacyAchievementAccountCreatedBefore;
+    uint32 ConfigSystemItemTemplateIDMin;
+    uint32 ConfigSystemItemTemplateIDMax;
+    uint32 ConfigSystemAdventurerAchievementID;
+    uint32 ConfigSystemAdventurerAuraSpellID;
+    uint32 ConfigSystemAdventurerAchievementLevel;
 
     // Configs (from server file)
     bool ConfigMapRestrictPlayersToNorrath;
@@ -1003,6 +1008,10 @@ public:
     const list<uint32>& GetAutoAddItemsForClass(uint8 classID);
     void ApplyAutoAddedClassItems(Player* player);
     void GrantLegacyAchievementIfEligible(Player* player);
+    void AddAdventurerAuraForNewCharacter(Player* player);
+    bool RevokeAdventurerAuraIfPresent(Player* player);
+    void GrantAdventurerAchievementIfAccountEarned(Player* player);
+    void ProcessAdventurerStateOnLevelChange(Player* player);
     void LoadCreatureLootData();
     bool HasCreatureLootDataForCreatureTemplateEntryID(uint32 creatureTemplateEntryID);
     bool HasPreloadedLootItemIDsForCreatureGUID(ObjectGuid creatureGUID);

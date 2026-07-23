@@ -65,6 +65,11 @@ EverQuestMod::EverQuestMod() :
     ConfigSystemInvisVsUndeadDetectSpellID(0),
     ConfigSystemResistAdjustmentSpellID(0),
     ConfigSystemLegacyAchievementID(0),
+    ConfigSystemItemTemplateIDMin(0),
+    ConfigSystemItemTemplateIDMax(0),
+    ConfigSystemAdventurerAchievementID(0),
+    ConfigSystemAdventurerAuraSpellID(0),
+    ConfigSystemAdventurerAchievementLevel(0),
     ConfigDeathKnightsStartLikeOtherClasses(false),
     ConfigMapRestrictPlayersToNorrath(false),    
     ConfigQuestGrantExpOnRepeatCompletion(true),
@@ -149,10 +154,20 @@ bool EverQuestMod::LoadConfigurationSystemDataFromDB()
                 ConfigSystemGameObjectTemplateIDMax = (uint32)atoi(value.c_str());
             else if (key == "InvisVsUndeadDetectSpellID")
                 ConfigSystemInvisVsUndeadDetectSpellID = (uint32)atoi(value.c_str());
+            else if (key == "ItemTemplateIDMin")
+                ConfigSystemItemTemplateIDMin = (uint32)atoi(value.c_str());
+            else if (key == "ItemTemplateIDMax")
+                ConfigSystemItemTemplateIDMax = (uint32)atoi(value.c_str());
             else if (key == "LegacyAchievementID")
                 ConfigSystemLegacyAchievementID = (uint32)atoi(value.c_str());
             else if (key == "LegacyAchievementAccountCreatedBefore")
                 ConfigSystemLegacyAchievementAccountCreatedBefore = value;
+            else if (key == "AdventurerAchievementID")
+                ConfigSystemAdventurerAchievementID = (uint32)atoi(value.c_str());
+            else if (key == "AdventurerAuraSpellID")
+                ConfigSystemAdventurerAuraSpellID = (uint32)atoi(value.c_str());
+            else if (key == "AdventurerAchievementLevel")
+                ConfigSystemAdventurerAchievementLevel = (uint32)atoi(value.c_str());
             else if (key == "MapDBCIDMin")
                 ConfigSystemMapDBCIDMin = (uint32)atoi(value.c_str());
             else if (key == "MapDBCIDMax")
@@ -2914,6 +2929,73 @@ void EverQuestMod::GrantLegacyAchievementIfEligible(Player* player)
     if (!accountEligibleQueryResult)
         return;
     player->CompletedAchievement(achievementEntry);
+}
+
+void EverQuestMod::AddAdventurerAuraForNewCharacter(Player* player)
+{
+    if (ConfigSystemAdventurerAuraSpellID == 0)
+        return;
+
+    // Character creation commits to the database before this fires and the player object is discarded after, so writing the aura row directly and it will load with the character on first login
+    CharacterDatabase.Execute("INSERT INTO character_aura (guid, casterGuid, itemGuid, spell, effectMask, recalculateMask, stackcount, amount0, amount1, amount2, base_amount0, base_amount1, base_amount2, maxDuration, remainTime, remainCharges) "
+        "VALUES ({}, {}, 0, {}, 1, 0, 1, 0, 0, 0, 0, 0, 0, -1, -1, 0)",
+        player->GetGUID().GetCounter(), player->GetGUID().GetRawValue(), ConfigSystemAdventurerAuraSpellID);
+}
+
+bool EverQuestMod::RevokeAdventurerAuraIfPresent(Player* player)
+{
+    if (ConfigSystemAdventurerAuraSpellID == 0)
+        return false;
+    if (player->HasAura(ConfigSystemAdventurerAuraSpellID) == false)
+        return false;
+    player->RemoveAura(ConfigSystemAdventurerAuraSpellID);
+    return true;
+}
+
+void EverQuestMod::GrantAdventurerAchievementIfAccountEarned(Player* player)
+{
+    if (ConfigSystemAdventurerAchievementID == 0)
+        return;
+    if (player->HasAchieved(ConfigSystemAdventurerAchievementID) == true)
+        return;
+
+    AchievementEntry const* achievementEntry = sAchievementStore.LookupEntry(ConfigSystemAdventurerAchievementID);
+    if (achievementEntry == nullptr)
+    {
+        LOG_ERROR("module.EverQuest", "EverQuestMod::GrantAdventurerAchievementIfAccountEarned error, no achievement with ID {} exists", ConfigSystemAdventurerAchievementID);
+        return;
+    }
+
+    // Only grant if a character on this account already earned it
+    uint32 accountID = player->GetSession()->GetAccountId();
+    QueryResult accountEarnedQueryResult = CharacterDatabase.Query("SELECT 1 FROM mod_everquest_account_settings WHERE accountid = {} AND earnedAdventurerAchievement = 1", accountID);
+    if (!accountEarnedQueryResult)
+        return;
+    player->CompletedAchievement(achievementEntry);
+}
+
+void EverQuestMod::ProcessAdventurerStateOnLevelChange(Player* player)
+{
+    if (ConfigSystemAdventurerAchievementID == 0 || ConfigSystemAdventurerAuraSpellID == 0 || ConfigSystemAdventurerAchievementLevel == 0)
+        return;
+    if (player->GetLevel() < ConfigSystemAdventurerAchievementLevel)
+        return;
+    if (player->HasAura(ConfigSystemAdventurerAuraSpellID) == false)
+        return;
+
+    if (player->HasAchieved(ConfigSystemAdventurerAchievementID) == false)
+    {
+        AchievementEntry const* achievementEntry = sAchievementStore.LookupEntry(ConfigSystemAdventurerAchievementID);
+        if (achievementEntry == nullptr)
+        {
+            LOG_ERROR("module.EverQuest", "EverQuestMod::ProcessAdventurerStateOnLevelChange error, no achievement with ID {} exists", ConfigSystemAdventurerAchievementID);
+            return;
+        }
+        player->CompletedAchievement(achievementEntry);
+    }
+
+    // Record it account-wide so characters made later on this account also get the achievement
+    CharacterDatabase.Execute("INSERT INTO mod_everquest_account_settings (accountid, earnedAdventurerAchievement) VALUES ({}, 1) ON DUPLICATE KEY UPDATE earnedAdventurerAchievement = 1", player->GetSession()->GetAccountId());
 }
 
 bool EverQuestMod::HasCreatePlayerData(uint8 raceID, uint8 classID)

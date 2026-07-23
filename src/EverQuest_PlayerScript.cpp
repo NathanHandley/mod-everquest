@@ -147,6 +147,13 @@ public:
         if (EverQuest->IsEnabled == false)
             return;
 
+        // Completing a non-EQ quest costs the player the adventurer aura
+        if (quest->GetQuestId() < EverQuest->ConfigSystemQuestSQLIDMin || quest->GetQuestId() > EverQuest->ConfigSystemQuestSQLIDMax)
+        {
+            if (EverQuest->RevokeAdventurerAuraIfPresent(player) == true && player->GetSession() != nullptr)
+                ChatHandler(player->GetSession()).SendSysMessage("|cffFF0000You are no longer an Everquest Adventurer, as you completed a quest that is not from Everquest.|r");
+        }
+
         // Grab the quest rewards, and apply any in the list
         const list<EverQuestQuestCompletionReputation>& questCompletionReputations = EverQuest->GetQuestCompletionReputationsForQuestTemplate(quest->GetQuestId());
         for (auto& completionReputation : questCompletionReputations)
@@ -263,10 +270,22 @@ public:
         return EverQuest->HandleLevelCapOnCanGiveLevel(player, newLevel);
     }
 
-    void OnPlayerEquip(Player* player, Item* /*it*/, uint8 /*bag*/, uint8 /*slot*/, bool /*update*/) override
+    void OnPlayerEquip(Player* player, Item* it, uint8 /*bag*/, uint8 /*slot*/, bool /*update*/) override
     {
         if (EverQuest->IsEnabled == false)
             return;
+
+        // Wearing non-conjured non-EQ equipment costs the player the adventurer aura
+        if (player->GetSession() == nullptr || player->GetSession()->PlayerLoading() == false)
+        {
+            ItemTemplate const* itemTemplate = it->GetTemplate();
+            if (itemTemplate != nullptr && itemTemplate->HasFlag(ITEM_FLAG_CONJURED) == false &&
+                (itemTemplate->ItemId < EverQuest->ConfigSystemItemTemplateIDMin || itemTemplate->ItemId > EverQuest->ConfigSystemItemTemplateIDMax))
+            {
+                if (EverQuest->RevokeAdventurerAuraIfPresent(player) == true && player->GetSession() != nullptr)
+                    ChatHandler(player->GetSession()).SendSysMessage("|cffFF0000You are no longer an Everquest Adventurer, as you equipped an item that is not from Everquest.|r");
+            }
+        }
 
         // Equipping gear while illusioned can change change gear under some situations
         EverQuest->RefreshIllusionGearDisplayForPlayer(player);
@@ -319,6 +338,18 @@ public:
                     float splitBaseRate = 1.0f / static_cast<float>(eligibleMemberCount);
                     rate = splitBaseRate * (1.0f + bonusTotalRatePercent);
                 }
+            }
+        }
+
+        // Kill credit for a non-EQ creature costs the player the adventurer aura
+        Unit* adventurerKillVictim = rewarder->GetVictim();
+        if (adventurerKillVictim != nullptr && adventurerKillVictim->IsCreature() == true)
+        {
+            uint32 victimEntry = adventurerKillVictim->GetEntry();
+            if (victimEntry < EverQuest->ConfigSystemCreatureTemplateIDMin || victimEntry > EverQuest->ConfigSystemCreatureTemplateIDMax)
+            {
+                if (EverQuest->RevokeAdventurerAuraIfPresent(player) == true && player->GetSession() != nullptr)
+                    ChatHandler(player->GetSession()).SendSysMessage("|cffFF0000You are no longer an Everquest Adventurer, as you gained kill credit for a creature that is not from Everquest.|r");
             }
         }
 
@@ -485,6 +516,7 @@ public:
             return;
 
         EverQuest->SetInitialCreatePositionForPlayer(player);
+        EverQuest->AddAdventurerAuraForNewCharacter(player);
     }
 
     bool OnPlayerCheckItemInSlotAtLoadInventory(Player* player, Item* /*item*/, uint8 /*slot*/, uint8& /*err*/, uint16& /*dest*/) override
@@ -541,6 +573,9 @@ public:
         // Grant the legacy account feat of strength if the account is old enough
         EverQuest->GrantLegacyAchievementIfEligible(player);
 
+        // Grant the adventurer feat of strength if another character on this account earned it
+        EverQuest->GrantAdventurerAchievementIfAccountEarned(player);
+
         // Grab any cast bard songs for the player
         if (EverQuest->ConfigBardMaxConcurrentSongs != 0)
         {
@@ -593,6 +628,9 @@ public:
 
         // Grant any auto-learned class spells/skills that unlock at the player's new level
         EverQuest->ApplyAutoLearnedClassSkillsAndSpells(player);
+
+        // Award the adventurer feat of strength if the required level is hit while the aura is still held
+        EverQuest->ProcessAdventurerStateOnLevelChange(player);
     }
 
     void OnPlayerLogout(Player* player) override
