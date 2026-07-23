@@ -678,7 +678,7 @@ void EverQuestMod::ResolveKillSpawnRespawnTargetSpawnPoints()
                 CreatureData const& creatureData = creatureDataPair.second;
                 if (creatureData.mapid != killSpawn.MapID)
                     continue;
-                if (creatureData.id1 != killSpawn.TargetCreatureTemplateID && creatureData.id2 != killSpawn.TargetCreatureTemplateID && creatureData.id3 != killSpawn.TargetCreatureTemplateID)
+                if (creatureData.id != killSpawn.TargetCreatureTemplateID && creatureData.id2 != killSpawn.TargetCreatureTemplateID && creatureData.id3 != killSpawn.TargetCreatureTemplateID)
                     continue;
                 killSpawn.TargetSpawnIDs.push_back(creatureDataPair.first);
             }
@@ -708,7 +708,7 @@ void EverQuestMod::ResolveVulakRequiredDragonSpawnPoints()
         for (auto const& creatureDataPair : sObjectMgr->GetAllCreatureData())
         {
             CreatureData const& creatureData = creatureDataPair.second;
-            if (creatureData.id1 != requiredDragonCreatureTemplateID && creatureData.id2 != requiredDragonCreatureTemplateID && creatureData.id3 != requiredDragonCreatureTemplateID)
+            if (creatureData.id != requiredDragonCreatureTemplateID && creatureData.id2 != requiredDragonCreatureTemplateID && creatureData.id3 != requiredDragonCreatureTemplateID)
                 continue;
             VulakRequiredDragonSpawnIDs.push_back(creatureDataPair.first);
             foundSpawnPoint = true;
