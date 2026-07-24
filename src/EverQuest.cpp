@@ -70,6 +70,10 @@ EverQuestMod::EverQuestMod() :
     ConfigSystemAdventurerAchievementID(0),
     ConfigSystemAdventurerAuraSpellID(0),
     ConfigSystemAdventurerAchievementLevel(0),
+    ConfigSystemFactionGoodClassMask(0),
+    ConfigSystemFactionEvilClassMask(0),
+    ConfigSystemFactionGoodRaceMask(0),
+    ConfigSystemFactionEvilRaceMask(0),
     ConfigDeathKnightsStartLikeOtherClasses(false),
     ConfigMapRestrictPlayersToNorrath(false),    
     ConfigQuestGrantExpOnRepeatCompletion(true),
@@ -152,6 +156,14 @@ bool EverQuestMod::LoadConfigurationSystemDataFromDB()
                 ConfigSystemGameObjectTemplateIDMin = (uint32)atoi(value.c_str());
             else if (key == "GameObjectTemplateIDMax")
                 ConfigSystemGameObjectTemplateIDMax = (uint32)atoi(value.c_str());
+            else if (key == "FactionGoodClassMask")
+                ConfigSystemFactionGoodClassMask = (uint32)atoi(value.c_str());
+            else if (key == "FactionEvilClassMask")
+                ConfigSystemFactionEvilClassMask = (uint32)atoi(value.c_str());
+            else if (key == "FactionGoodRaceMask")
+                ConfigSystemFactionGoodRaceMask = (uint32)atoi(value.c_str());
+            else if (key == "FactionEvilRaceMask")
+                ConfigSystemFactionEvilRaceMask = (uint32)atoi(value.c_str());
             else if (key == "InvisVsUndeadDetectSpellID")
                 ConfigSystemInvisVsUndeadDetectSpellID = (uint32)atoi(value.c_str());
             else if (key == "ItemTemplateIDMin")
@@ -1844,7 +1856,7 @@ void EverQuestMod::LoadSpellData()
 {
     SpellDataBySpellID.clear();
     BardSongTickSpellIDs.clear();
-    QueryResult queryResult = WorldDatabase.Query("SELECT SpellID, AuraDurationBaseInMS, AuraDurationAddPerLevelInMS, AuraDurationMaxInMS, AuraDurationCalcMinLevel, AuraDurationCalcMaxLevel, RecourseSpellID, SpellIDCastOnMeleeAttacker, FocusBoostType, PeriodicAuraSpellID, PeriodicAuraSpellRadius, MaleFormSpellID, FemaleFormSpellID, EffectFailChancePercent, EffectFailableType, StunUsesBashKickChance, SpellIDCastOnTargetWhenStunLands, AuraStaysOnSecondaryClassSwitch, MinTargetLevel, MaxCreatureTargetLevel, ResistDiff, HasteType FROM mod_everquest_spell ORDER BY SpellID;");
+    QueryResult queryResult = WorldDatabase.Query("SELECT SpellID, AuraDurationBaseInMS, AuraDurationAddPerLevelInMS, AuraDurationMaxInMS, AuraDurationCalcMinLevel, AuraDurationCalcMaxLevel, RecourseSpellID, SpellIDCastOnMeleeAttacker, FocusBoostType, PeriodicAuraSpellID, PeriodicAuraSpellRadius, MaleFormSpellID, FemaleFormSpellID, EffectFailChancePercent, EffectFailableType, StunUsesBashKickChance, SpellIDCastOnTargetWhenStunLands, AuraStaysOnSecondaryClassSwitch, MinTargetLevel, MaxCreatureTargetLevel, ResistDiff, HasteType, ModFactionRepValue, IllusionFormAlignment, IllusionFormEQRaceID FROM mod_everquest_spell ORDER BY SpellID;");
     if (queryResult)
     {
         do
@@ -1874,6 +1886,9 @@ void EverQuestMod::LoadSpellData()
             everQuestSpell.MaxCreatureTargetLevel = fields[19].Get<uint32>();
             everQuestSpell.ResistDiff = fields[20].Get<int32>();
             everQuestSpell.HasteType = fields[21].Get<uint8>();
+            everQuestSpell.ModFactionRepValue = fields[22].Get<int32>();
+            everQuestSpell.IllusionFormAlignment = fields[23].Get<uint8>();
+            everQuestSpell.IllusionFormEQRaceID = fields[24].Get<uint32>();
             SpellDataBySpellID[everQuestSpell.SpellID] = everQuestSpell;
             if (everQuestSpell.PeriodicAuraSpellID != 0)
                 BardSongTickSpellIDs.insert(everQuestSpell.PeriodicAuraSpellID);
@@ -4369,7 +4384,7 @@ void EverQuestMod::LoadFactionData()
     FactionsByFactionTemplateID.clear();
     DefendCombatFactionTemplateIDs.clear();
 
-    QueryResult queryResult = WorldDatabase.Query("SELECT FactionTemplateID, WillDefendFriendlyPlayers, DefendersWillAttackToDefendPlayer, DefendCombatFactionTemplateID FROM mod_everquest_faction;");
+    QueryResult queryResult = WorldDatabase.Query("SELECT FactionTemplateID, FactionID, BaseAlignment, PredominantEQRaceID, WillDefendFriendlyPlayers, DefendersWillAttackToDefendPlayer, DefendCombatFactionTemplateID FROM mod_everquest_faction;");
     if (queryResult)
     {
         do
@@ -4377,9 +4392,12 @@ void EverQuestMod::LoadFactionData()
             Field* fields = queryResult->Fetch();
             EverQuestFaction faction;
             faction.FactionTemplateID = fields[0].Get<uint32>();
-            faction.WillDefendFriendlyPlayers = fields[1].Get<uint8>() != 0;
-            faction.DefendersWillAttackToDefendPlayer = fields[2].Get<uint8>() != 0;
-            faction.DefendCombatFactionTemplateID = fields[3].Get<uint32>();
+            faction.FactionID = fields[1].Get<uint32>();
+            faction.BaseAlignment = fields[2].Get<uint8>();
+            faction.PredominantEQRaceID = fields[3].Get<uint32>();
+            faction.WillDefendFriendlyPlayers = fields[4].Get<uint8>() != 0;
+            faction.DefendersWillAttackToDefendPlayer = fields[5].Get<uint8>() != 0;
+            faction.DefendCombatFactionTemplateID = fields[6].Get<uint32>();
             FactionsByFactionTemplateID[faction.FactionTemplateID] = faction;
         } while (queryResult->NextRow());
     }
@@ -4412,6 +4430,233 @@ void EverQuestMod::ResolveDefendCombatFactionTemplates()
     }
     for (EverQuestFaction& combatVariantFaction : combatVariantFactions)
         FactionsByFactionTemplateID[combatVariantFaction.FactionTemplateID] = combatVariantFaction;
+}
+
+// Note: Runs at world startup (OnStartup) since the DBC stores aren't loaded when LoadFactionData loads with the config
+void EverQuestMod::ResolveEQReputationFactions()
+{
+    EQReputationFactionInfoByFactionID.clear();
+    for (auto& factionPair : FactionsByFactionTemplateID)
+    {
+        uint32 factionID = factionPair.second.FactionID;
+        if (factionID == 0)
+            continue;
+        FactionEntry const* factionEntry = sFactionStore.LookupEntry(factionID);
+        if (factionEntry == nullptr || factionEntry->CanHaveReputation() == false)
+            continue;
+        EverQuestReputationFactionInfo factionInfo;
+        factionInfo.BaseAlignment = factionPair.second.BaseAlignment;
+        factionInfo.PredominantEQRaceID = factionPair.second.PredominantEQRaceID;
+        EQReputationFactionInfoByFactionID[factionID] = factionInfo;
+    }
+}
+
+void EverQuestMod::RecalculateTemporaryFactionReactionsForPlayer(Player* player)
+{
+    if (player == nullptr || player->GetSession() == nullptr)
+        return;
+
+    // An active illusion form makes factions react to the player by the form's alignment and race instead of their own
+    uint8 illusionAlignment = EQ_FACTION_ALIGNMENT_NONE;
+    uint32 illusionEQRaceID = 0;
+    for (auto const& appliedAuraItr : player->GetAppliedAuras())
+    {
+        AuraApplication const* appliedAurApp = appliedAuraItr.second;
+        if (appliedAurApp == nullptr || appliedAurApp->GetBase() == nullptr)
+            continue;
+        const EverQuestSpell& appliedSpell = GetSpellDataForSpellID(appliedAurApp->GetBase()->GetId());
+        if (appliedSpell.IllusionFormEQRaceID != 0)
+        {
+            illusionAlignment = appliedSpell.IllusionFormAlignment;
+            illusionEQRaceID = appliedSpell.IllusionFormEQRaceID;
+            break;
+        }
+    }
+
+    // Grab any held spell faction bonus
+    uint32 bonusFactionID = 0;
+    int32 bonusAmount = 0;
+    {
+        std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+        auto bonusIter = TempFactionBonusByPlayerGUID.find(player->GetGUID());
+        if (bonusIter != TempFactionBonusByPlayerGUID.end())
+        {
+            bonusFactionID = bonusIter->second.FactionID;
+            bonusAmount = bonusIter->second.Amount;
+        }
+    }
+
+    // The form's alignment vs the player's baseline alignment determines how many faction bands to step
+    int32 stepsTowardGoodFactions = 0;
+    int32 stepsTowardEvilFactions = 0;
+    if (illusionAlignment != EQ_FACTION_ALIGNMENT_NONE)
+        GetIllusionFactionBandSteps(GetPlayerBaselineFactionAlignment(player), illusionAlignment, stepsTowardGoodFactions, stepsTowardEvilFactions);
+
+    // Force a reaction on every faction where the adjustments land in a different band than the real standing
+    ReputationMgr& reputationMgr = player->GetReputationMgr();
+    vector<uint32> newForcedFactionIDs;
+    for (auto& factionInfoPair : EQReputationFactionInfoByFactionID)
+    {
+        uint32 factionID = factionInfoPair.first;
+        const EverQuestReputationFactionInfo& factionInfo = factionInfoPair.second;
+        FactionEntry const* factionEntry = sFactionStore.LookupEntry(factionID);
+        if (factionEntry == nullptr)
+            continue;
+
+        // A ModFaction bonus adjusts the standing value before it becomes a band
+        int32 naturalStanding = reputationMgr.GetReputation(factionEntry);
+        int32 adjustedStanding = naturalStanding;
+        if (bonusFactionID == factionID)
+            adjustedStanding += bonusAmount;
+        if (adjustedStanding > ReputationMgr::Reputation_Cap)
+            adjustedStanding = ReputationMgr::Reputation_Cap;
+        else if (adjustedStanding < ReputationMgr::Reputation_Bottom)
+            adjustedStanding = ReputationMgr::Reputation_Bottom;
+        ReputationRank naturalRank = ReputationMgr::ReputationToRank(naturalStanding);
+        int32 adjustedRankValue = (int32)ReputationMgr::ReputationToRank(adjustedStanding);
+
+        // Illusion band steps only move factions with a good or evil baseline; None and Neutral factions never move
+        if (factionInfo.BaseAlignment == EQ_FACTION_ALIGNMENT_GOOD)
+            adjustedRankValue += stepsTowardGoodFactions;
+        else if (factionInfo.BaseAlignment == EQ_FACTION_ALIGNMENT_EVIL)
+            adjustedRankValue += stepsTowardEvilFactions;
+
+        // Bonus band step when the form's race matches the faction's predominant member race (like Illusion: Human to EQ humans)
+        if ((factionInfo.BaseAlignment == EQ_FACTION_ALIGNMENT_GOOD || factionInfo.BaseAlignment == EQ_FACTION_ALIGNMENT_EVIL) &&
+            illusionEQRaceID != 0 && factionInfo.PredominantEQRaceID == illusionEQRaceID)
+            adjustedRankValue += 1;
+
+        if (adjustedRankValue > (int32)REP_EXALTED)
+            adjustedRankValue = (int32)REP_EXALTED;
+        else if (adjustedRankValue < (int32)REP_HATED)
+            adjustedRankValue = (int32)REP_HATED;
+        if ((ReputationRank)adjustedRankValue == naturalRank)
+            continue;
+        reputationMgr.ApplyForceReaction(factionID, (ReputationRank)adjustedRankValue, true);
+        newForcedFactionIDs.push_back(factionID);
+    }
+
+    // Clear any previously forced reactions that no longer apply
+    {
+        std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+        auto priorIter = ForcedFactionReactionIDsByPlayerGUID.find(player->GetGUID());
+        if (priorIter != ForcedFactionReactionIDsByPlayerGUID.end())
+        {
+            for (uint32 priorFactionID : priorIter->second)
+            {
+                bool stillForced = false;
+                for (uint32 newFactionID : newForcedFactionIDs)
+                {
+                    if (newFactionID == priorFactionID)
+                    {
+                        stillForced = true;
+                        break;
+                    }
+                }
+                if (stillForced == false)
+                    reputationMgr.ApplyForceReaction(priorFactionID, REP_NEUTRAL, false);
+            }
+        }
+        if (newForcedFactionIDs.empty() == true)
+        {
+            if (priorIter != ForcedFactionReactionIDsByPlayerGUID.end())
+                ForcedFactionReactionIDsByPlayerGUID.erase(priorIter);
+        }
+        else
+            ForcedFactionReactionIDsByPlayerGUID[player->GetGUID()] = newForcedFactionIDs;
+    }
+
+    // Push the current forced reaction set to the client so con colors and interactions update immediately
+    reputationMgr.SendForceReactions();
+}
+
+void EverQuestMod::QueueTemporaryFactionRecalculationForPlayer(ObjectGuid playerGUID)
+{
+    std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+    PlayersPendingTempFactionRecalculation.insert(playerGUID);
+}
+
+void EverQuestMod::ConsumePendingTemporaryFactionRecalculation(Player* player)
+{
+    if (player == nullptr)
+        return;
+    {
+        std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+        if (PlayersPendingTempFactionRecalculation.empty() == true)
+            return;
+        auto pendingIter = PlayersPendingTempFactionRecalculation.find(player->GetGUID());
+        if (pendingIter == PlayersPendingTempFactionRecalculation.end())
+            return;
+        PlayersPendingTempFactionRecalculation.erase(pendingIter);
+    }
+    RecalculateTemporaryFactionReactionsForPlayer(player);
+}
+
+uint8 EverQuestMod::GetPlayerBaselineFactionAlignment(Player* player)
+{
+    // A player's baseline alignment starts with their class and, only if the class is neutral, falls back to their race
+    // Example: a warrior is evil if undead, neutral if gnome, good if dwarf - but a paladin is always good regardless of race
+    uint32 classMask = player->getClassMask();
+    if ((classMask & ConfigSystemFactionGoodClassMask) != 0)
+        return EQ_FACTION_ALIGNMENT_GOOD;
+    if ((classMask & ConfigSystemFactionEvilClassMask) != 0)
+        return EQ_FACTION_ALIGNMENT_EVIL;
+    uint32 raceMask = player->getRaceMask();
+    if ((raceMask & ConfigSystemFactionGoodRaceMask) != 0)
+        return EQ_FACTION_ALIGNMENT_GOOD;
+    if ((raceMask & ConfigSystemFactionEvilRaceMask) != 0)
+        return EQ_FACTION_ALIGNMENT_EVIL;
+    return EQ_FACTION_ALIGNMENT_NEUTRAL;
+}
+
+void EverQuestMod::GetIllusionFactionBandSteps(uint8 playerAlignment, uint8 illusionAlignment, int32& stepsTowardGoodOut, int32& stepsTowardEvilOut)
+{
+    // How many faction bands an illusion form steps the player toward good-baseline and evil-baseline factions, based on the gap between the player's baseline alignment and the form's alignment
+    stepsTowardGoodOut = 0;
+    stepsTowardEvilOut = 0;
+    if (illusionAlignment == playerAlignment)
+        return;
+    if (playerAlignment == EQ_FACTION_ALIGNMENT_GOOD)
+    {
+        if (illusionAlignment == EQ_FACTION_ALIGNMENT_NEUTRAL)
+            stepsTowardEvilOut = 2;
+        else if (illusionAlignment == EQ_FACTION_ALIGNMENT_EVIL)
+        {
+            stepsTowardGoodOut = -2;
+            stepsTowardEvilOut = 3;
+        }
+    }
+    else if (playerAlignment == EQ_FACTION_ALIGNMENT_EVIL)
+    {
+        if (illusionAlignment == EQ_FACTION_ALIGNMENT_NEUTRAL)
+            stepsTowardGoodOut = 2;
+        else if (illusionAlignment == EQ_FACTION_ALIGNMENT_GOOD)
+        {
+            stepsTowardGoodOut = 3;
+            stepsTowardEvilOut = -2;
+        }
+    }
+    else // Neutral player
+    {
+        if (illusionAlignment == EQ_FACTION_ALIGNMENT_GOOD)
+        {
+            stepsTowardGoodOut = 2;
+            stepsTowardEvilOut = -2;
+        }
+        else if (illusionAlignment == EQ_FACTION_ALIGNMENT_EVIL)
+        {
+            stepsTowardGoodOut = -2;
+            stepsTowardEvilOut = 2;
+        }
+    }
+}
+
+void EverQuestMod::ClearTemporaryFactionStateForPlayer(ObjectGuid playerGUID)
+{
+    std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+    TempFactionBonusByPlayerGUID.erase(playerGUID);
+    ForcedFactionReactionIDsByPlayerGUID.erase(playerGUID);
+    PlayersPendingTempFactionRecalculation.erase(playerGUID);
 }
 
 bool EverQuestMod::IsPlayerFriendlyWithCreatureByReputation(Creature* creature, Player* player)

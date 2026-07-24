@@ -91,6 +91,9 @@ public:
 
         // Defend combat faction templates validate against FactionTemplate.dbc, which isn't loaded when the faction data loads with the config
         EverQuest->ResolveDefendCombatFactionTemplates();
+
+        // The set of reputation-capable EQ factions validates against Faction.dbc, which also isn't loaded when the faction data loads with the config
+        EverQuest->ResolveEQReputationFactions();
     }
 };
 

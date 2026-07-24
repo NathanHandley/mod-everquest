@@ -37,9 +37,10 @@ static uint32 ConfigMaxSkillIDCheck = 1000;         // The highest level of skil
 
 class Unit;
 class Aura;
+class AuraApplication;
 class WorldPacket;
 
-#define EQ_MOD_VERSION                              55
+#define EQ_MOD_VERSION                              56
 
 #define EQ_EQCLASS_NONE                             0
 #define EQ_EQCLASS_WARRIOR                          1
@@ -82,6 +83,11 @@ class WorldPacket;
 #define EQ_SPELLDUMMYTYPE_FORAGE                    16
 #define EQ_SPELLDUMMYTYPE_SUMMONACTIVE              17
 #define EQ_SPELLDUMMYTYPE_SUCCOR                    18
+
+#define EQ_FACTION_ALIGNMENT_NONE                   0
+#define EQ_FACTION_ALIGNMENT_NEUTRAL                1
+#define EQ_FACTION_ALIGNMENT_GOOD                   2
+#define EQ_FACTION_ALIGNMENT_EVIL                   3
 
 #define EQ_BARDSONGAURATARGET_ENEMYAREA             1
 #define EQ_BARDSONGAURATARGET_FRIENDLYPARTY         2
@@ -251,6 +257,9 @@ public:
     uint32 MaxCreatureTargetLevel = 0;
     int32 ResistDiff = 0;
     uint32 HasteType = EQ_HASTE_TYPE_NONE;
+    int32 ModFactionRepValue = 0;
+    uint8 IllusionFormAlignment = EQ_FACTION_ALIGNMENT_NONE;
+    uint32 IllusionFormEQRaceID = 0;
 };
 
 class EverQuestCreature
@@ -701,6 +710,9 @@ class EverQuestFaction
 {
 public:
     uint32 FactionTemplateID = 0;
+    uint32 FactionID = 0;
+    uint8 BaseAlignment = EQ_FACTION_ALIGNMENT_NONE;
+    uint32 PredominantEQRaceID = 0;
     bool WillDefendFriendlyPlayers = false;
     bool DefendersWillAttackToDefendPlayer = false;
     uint32 DefendCombatFactionTemplateID = 0;
@@ -794,6 +806,10 @@ public:
     uint32 ConfigSystemAdventurerAchievementID;
     uint32 ConfigSystemAdventurerAuraSpellID;
     uint32 ConfigSystemAdventurerAchievementLevel;
+    uint32 ConfigSystemFactionGoodClassMask;
+    uint32 ConfigSystemFactionEvilClassMask;
+    uint32 ConfigSystemFactionGoodRaceMask;
+    uint32 ConfigSystemFactionEvilRaceMask;
 
     // Configs (from server file)
     bool ConfigMapRestrictPlayersToNorrath;
@@ -912,6 +928,10 @@ public:
     unordered_map<uint32, EverQuestZone> ZoneByMapID;
     unordered_map<uint32, EverQuestFaction> FactionsByFactionTemplateID;
     unordered_set<uint32> DefendCombatFactionTemplateIDs;
+    unordered_map<uint32, EverQuestReputationFactionInfo> EQReputationFactionInfoByFactionID;
+    unordered_map<ObjectGuid, EverQuestPlayerTempFactionBonus> TempFactionBonusByPlayerGUID;
+    unordered_map<ObjectGuid, vector<uint32>> ForcedFactionReactionIDsByPlayerGUID;
+    unordered_set<ObjectGuid> PlayersPendingTempFactionRecalculation;
     unordered_map<uint8, EverQuestClassMap> ClassMapByWOWClassID;
 
     static EverQuestMod* instance()
@@ -1076,6 +1096,13 @@ public:
     bool IsBindAllowedForMap(uint32 mapID);
     void LoadFactionData();
     void ResolveDefendCombatFactionTemplates();
+    void ResolveEQReputationFactions();
+    void RecalculateTemporaryFactionReactionsForPlayer(Player* player);
+    void QueueTemporaryFactionRecalculationForPlayer(ObjectGuid playerGUID);
+    void ConsumePendingTemporaryFactionRecalculation(Player* player);
+    uint8 GetPlayerBaselineFactionAlignment(Player* player);
+    void GetIllusionFactionBandSteps(uint8 playerAlignment, uint8 illusionAlignment, int32& stepsTowardGoodOut, int32& stepsTowardEvilOut);
+    void ClearTemporaryFactionStateForPlayer(ObjectGuid playerGUID);
     void UpdateCreatureDefendFriendlyPlayers(Creature* creature, uint32 diff);
     bool IsPlayerFriendlyWithCreatureByReputation(Creature* creature, Player* player);
     void DoDefendFriendlyPlayersSearch(Creature* attacker, Player* attackedPlayer);

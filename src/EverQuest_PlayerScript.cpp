@@ -298,6 +298,17 @@ public:
 
         EverQuest->ProcessLevelCapStateForPlayer(player);
         EverQuest->UpdatePlayerIllusionGearDisplay(player, p_time);
+        EverQuest->ConsumePendingTemporaryFactionRecalculation(player);
+    }
+
+    void OnPlayerReputationRankChange(Player* player, uint32 factionID, ReputationRank /*newRank*/, ReputationRank /*oldRank*/, bool /*increased*/) override
+    {
+        if (EverQuest->IsEnabled == false)
+            return;
+
+        // Earned reputation crossing a rank boundary can change temporary faction adjustments
+        if (EverQuest->EQReputationFactionInfoByFactionID.find(factionID) != EverQuest->EQReputationFactionInfoByFactionID.end())
+            EverQuest->QueueTemporaryFactionRecalculationForPlayer(player->GetGUID());
     }
 
     void OnPlayerUpdateZone(Player* player, uint32 /*newZone*/, uint32 /*newArea*/) override
@@ -619,6 +630,9 @@ public:
 
         // Seed the EQ Class character-pane tab with the player's class state
         EverQuest->SendClassInfoAddonMessageToPlayer(player);
+
+        // Forced reactions don't survive logout
+        EverQuest->RecalculateTemporaryFactionReactionsForPlayer(player);
     }
 
     void OnPlayerLevelChanged(Player* player, uint8 /*oldlevel*/) override
@@ -650,6 +664,9 @@ public:
 
         // Stop tracking any illusion gear display state
         EverQuest->ClearIllusionTrackingForPlayer(player->GetGUID());
+
+        // Stop tracking any temporary faction adjustment state
+        EverQuest->ClearTemporaryFactionStateForPlayer(player->GetGUID());
 
         // Stop tracking the auction "Usable Items" filter state
         EverQuest->SetAuctionUsableFilterActiveForPlayer(player->GetGUID(), false);

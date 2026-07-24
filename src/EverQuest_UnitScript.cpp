@@ -198,6 +198,10 @@ public:
         if (EverQuest->IsIllusionFormSpell(spellID) == true)
             EverQuest->ApplyIllusionGearDisplayOnFormAuraApply(player, spellID);
 
+        // Illusion forms change how factions perceive the player
+        if (EverQuest->GetSpellDataForSpellID(spellID).IllusionFormEQRaceID != 0)
+            EverQuest->RecalculateTemporaryFactionReactionsForPlayer(player);
+
         if (EverQuest->IsSpellBlockedByMinTargetLevel(spellID, unit, aura->GetCaster()) == true)
         {
             Unit* auraCaster = aura->GetCaster();
@@ -250,6 +254,10 @@ public:
                 return;
 
             EverQuest->HandleIllusionFormAuraRemove(unit->ToPlayer(), aurApp->GetBase()->GetId());
+
+            // Dropping an illusion form restores how factions naturally perceive the player
+            if (EverQuest->GetSpellDataForSpellID(aurApp->GetBase()->GetId()).IllusionFormEQRaceID != 0)
+                EverQuest->RecalculateTemporaryFactionReactionsForPlayer(unit->ToPlayer());
 
             if (aurApp->GetBase()->GetId() < EverQuest->ConfigSystemSpellDBCIDMin || aurApp->GetBase()->GetId() > EverQuest->ConfigSystemSpellDBCIDMax)
                 return;
