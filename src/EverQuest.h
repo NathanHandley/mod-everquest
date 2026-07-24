@@ -63,7 +63,11 @@ class WorldPacket;
 #define EQ_BASHKICKSTUN_MIN_CHANCE                  2
 #define EQ_BASHKICKSTUN_NPC_IMMUNE_ABOVE_LEVEL      55
 
-#define EQ_DAZE_SPELL_ID                            1604   // Pre-defined by the WoW core
+// Pre-defined by the WoW core
+#define EQ_DAZE_SPELL_ID                            1604
+#define EQ_DEATHKNIGHT_DEATHGATE_SPELL_ID           50977
+#define EQ_DEATHKNIGHT_RUNEFORGING_SPELL_ID         53428
+#define EQ_DEATHKNIGHT_RUNEFORGING_SKILL_ID         776
 
 #define EQ_SPELLDUMMYTYPE_BINDSELF                  1
 #define EQ_SPELLDUMMYTYPE_BINDANY                   2
@@ -1181,6 +1185,7 @@ public:
     void MoveClassSpellsToModSpellsTable(Player* player, CharacterDatabaseTransaction& transaction);
     void EnsureCrossClassExemptSpellIDsBuilt();
     bool IsSpellExemptFromClassMove(uint32 spellID);
+    bool IsSkillExemptFromClassMove(uint32 skillID);
     void MoveClassSkillsToModSkillsTable(Player* player, CharacterDatabaseTransaction& transaction);
     void ReplaceModClassActionCopy(Player* player, CharacterDatabaseTransaction& transaction);
     void MoveGlyphsToModGlyhpsTable(Player* player, CharacterDatabaseTransaction& transaction);

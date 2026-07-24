@@ -5892,6 +5892,10 @@ void EverQuestMod::EnsureCrossClassExemptSpellIDsBuilt()
 
 bool EverQuestMod::IsSpellExemptFromClassMove(uint32 spellID)
 {
+    // Death Knight abilities belong to the fixed WoW class rather than the active EQ secondary class, so persist across switches
+    if (spellID == EQ_DEATHKNIGHT_DEATHGATE_SPELL_ID || spellID == EQ_DEATHKNIGHT_RUNEFORGING_SPELL_ID)
+        return true;
+
     // Recipes / abilities mapped to a cross-class skill line via SkillLineAbility
     if (CrossClassExemptSpellIDs.find(spellID) != CrossClassExemptSpellIDs.end())
         return true;
@@ -5960,6 +5964,19 @@ void EverQuestMod::MoveClassSpellsToModSpellsTable(Player* player, CharacterData
     }
 }
 
+bool EverQuestMod::IsSkillExemptFromClassMove(uint32 skillID)
+{
+    // The Runeforging skill line belongs to the fixed WoW Death Knight class, so it persists across secondary switches
+    if (skillID == EQ_DEATHKNIGHT_RUNEFORGING_SKILL_ID)
+        return true;
+
+    // Shared skills (mounts/riding, tradeskills, etc.) configured to persist across secondary classes
+    if (ConfigCrossClassIncludeSkillIDs.find(skillID) != ConfigCrossClassIncludeSkillIDs.end())
+        return true;
+
+    return false;
+}
+
 void EverQuestMod::MoveClassSkillsToModSkillsTable(Player* player, CharacterDatabaseTransaction& transaction)
 {
     uint8 curEQClass = GetCurrentSecondEQClassForPlayer(player);
@@ -5979,8 +5996,8 @@ void EverQuestMod::MoveClassSkillsToModSkillsTable(Player* player, CharacterData
     // Go through all known skills on this player to move them
     for (uint32 curSkillID : playerKnownSkills)
     {
-        // Ignore shared skills
-        if (ConfigCrossClassIncludeSkillIDs.find(curSkillID) != ConfigCrossClassIncludeSkillIDs.end())
+        // Ignore shared skills (and class-fixed skills like Death Knight runeforging) that persist across secondary classes
+        if (IsSkillExemptFromClassMove(curSkillID) == true)
         {
             continue;
         }
