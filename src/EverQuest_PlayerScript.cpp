@@ -665,6 +665,9 @@ public:
         // Stop tracking any illusion gear display state
         EverQuest->ClearIllusionTrackingForPlayer(player->GetGUID());
 
+        // Take any Alliance-line faction bonus aura off its creature while the player is still on the map
+        EverQuest->ClearTempFactionBonusForPlayer(player);
+
         // Stop tracking any temporary faction adjustment state
         EverQuest->ClearTemporaryFactionStateForPlayer(player->GetGUID());
 
@@ -681,11 +684,26 @@ public:
         }
     }
 
+    bool OnPlayerBeforeTeleport(Player* player, uint32 mapid, float /*x*/, float /*y*/, float /*z*/, float /*orientation*/, uint32 /*options*/, Unit* /*target*/) override
+    {
+        if (EverQuest->IsEnabled == false)
+            return true;
+
+        // Alliance-line faction bonuses do not survive leaving the zone, and the creature's aura is only reachable before the map switch
+        if (player != nullptr && mapid != player->GetMapId())
+            EverQuest->ClearTempFactionBonusForPlayer(player);
+
+        return true;
+    }
+
     // Note: this is AFTER the player changes maps
     void OnPlayerMapChanged(Player* player) override
     {
         if (EverQuest->IsEnabled == false)
             return;
+
+        // Catch map switches that bypass TeleportTo
+        EverQuest->ClearTempFactionBonusForPlayer(player);
 
         // Restrict non-GMs to norrath if set
         if (EverQuest->ConfigMapRestrictPlayersToNorrath == true && player->IsGameMaster() == false)
@@ -696,6 +714,15 @@ public:
                 ChatHandler(player->GetSession()).PSendSysMessage("You are not permitted to step into Azeroth.");
             }
         }
+    }
+
+    void OnPlayerJustDied(Player* player) override
+    {
+        if (EverQuest->IsEnabled == false)
+            return;
+
+        // Alliance-line faction bonuses do not survive the caster's death, mirroring EQ death
+        EverQuest->ClearTempFactionBonusForPlayer(player);
     }
 
     void OnPlayerReleasedGhost(Player* player) override

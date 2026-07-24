@@ -4451,6 +4451,82 @@ void EverQuestMod::ResolveEQReputationFactions()
     }
 }
 
+void EverQuestMod::HandleModFactionAuraApplyOnCreature(Creature* creature, Aura* aura)
+{
+    if (creature == nullptr || aura == nullptr)
+        return;
+    int32 modFactionRepValue = GetSpellDataForSpellID(aura->GetId()).ModFactionRepValue;
+    if (modFactionRepValue == 0)
+        return;
+    Unit* casterUnit = aura->GetCaster();
+    if (casterUnit == nullptr || casterUnit->IsPlayer() == false)
+        return;
+    Player* casterPlayer = casterUnit->ToPlayer();
+
+    // The creature's faction has to be a reputation faction, which mirrors EQ requiring the target to have a primary faction
+    auto factionIter = FactionsByFactionTemplateID.find(creature->GetFaction());
+    if (factionIter == FactionsByFactionTemplateID.end() || EQReputationFactionInfoByFactionID.find(factionIter->second.FactionID) == EQReputationFactionInfoByFactionID.end())
+    {
+        creature->RemoveAura(aura);
+        ChatHandler(casterPlayer->GetSession()).PSendSysMessage("Your spell would have no effect on that target.");
+        return;
+    }
+
+    // EQ clears prior spell faction bonuses when a new one lands, so only the latest bonus holds
+    EverQuestPlayerTempFactionBonus bonus;
+    bonus.FactionID = factionIter->second.FactionID;
+    bonus.Amount = modFactionRepValue;
+    bonus.SpellID = aura->GetId();
+    bonus.TargetCreatureGUID = creature->GetGUID();
+    uint32 priorSpellID = 0;
+    ObjectGuid priorTargetCreatureGUID;
+    {
+        std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+        auto priorBonusIter = TempFactionBonusByPlayerGUID.find(casterPlayer->GetGUID());
+        if (priorBonusIter != TempFactionBonusByPlayerGUID.end())
+        {
+            priorSpellID = priorBonusIter->second.SpellID;
+            priorTargetCreatureGUID = priorBonusIter->second.TargetCreatureGUID;
+        }
+        TempFactionBonusByPlayerGUID[casterPlayer->GetGUID()] = bonus;
+    }
+
+    // The displaced bonus leaves its aura behind, so take that aura off unless this apply is a refresh of it
+    if (priorSpellID != 0 && (priorTargetCreatureGUID != creature->GetGUID() || priorSpellID != aura->GetId()))
+    {
+        Creature* priorCreature = ObjectAccessor::GetCreature(*casterPlayer, priorTargetCreatureGUID);
+        if (priorCreature != nullptr)
+            priorCreature->RemoveAurasDueToSpell(priorSpellID, casterPlayer->GetGUID());
+    }
+
+    // The caster shares the creature's map, so it's safe to recalculate directly
+    RecalculateTemporaryFactionReactionsForPlayer(casterPlayer);
+}
+
+void EverQuestMod::HandleModFactionAuraRemoveFromCreature(Creature* creature, AuraApplication* aurApp)
+{
+    if (creature == nullptr || aurApp == nullptr || aurApp->GetBase() == nullptr)
+        return;
+    uint32 spellID = aurApp->GetBase()->GetId();
+    if (GetSpellDataForSpellID(spellID).ModFactionRepValue == 0)
+        return;
+
+    // Only clear the bonus if this exact aura granted the one currently held
+    ObjectGuid casterGUID = aurApp->GetBase()->GetCasterGUID();
+    {
+        std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+        auto bonusIter = TempFactionBonusByPlayerGUID.find(casterGUID);
+        if (bonusIter == TempFactionBonusByPlayerGUID.end())
+            return;
+        if (bonusIter->second.SpellID != spellID || bonusIter->second.TargetCreatureGUID != creature->GetGUID())
+            return;
+        TempFactionBonusByPlayerGUID.erase(bonusIter);
+    }
+
+    // The caster may be on another map by now, so recalculate on the caster's own update instead of directly
+    QueueTemporaryFactionRecalculationForPlayer(casterGUID);
+}
+
 void EverQuestMod::RecalculateTemporaryFactionReactionsForPlayer(Player* player)
 {
     if (player == nullptr || player->GetSession() == nullptr)
@@ -4657,6 +4733,34 @@ void EverQuestMod::ClearTemporaryFactionStateForPlayer(ObjectGuid playerGUID)
     TempFactionBonusByPlayerGUID.erase(playerGUID);
     ForcedFactionReactionIDsByPlayerGUID.erase(playerGUID);
     PlayersPendingTempFactionRecalculation.erase(playerGUID);
+}
+
+void EverQuestMod::ClearTempFactionBonusForPlayer(Player* player)
+{
+    if (player == nullptr)
+        return;
+    uint32 bonusSpellID = 0;
+    ObjectGuid bonusTargetCreatureGUID;
+    {
+        std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+        auto bonusIter = TempFactionBonusByPlayerGUID.find(player->GetGUID());
+        if (bonusIter == TempFactionBonusByPlayerGUID.end())
+            return;
+        bonusSpellID = bonusIter->second.SpellID;
+        bonusTargetCreatureGUID = bonusIter->second.TargetCreatureGUID;
+        TempFactionBonusByPlayerGUID.erase(bonusIter);
+    }
+
+    // Take the orphaned aura off before the map change (when it won't be possible)
+    if (player->IsInWorld() == true)
+    {
+        Creature* bonusTargetCreature = ObjectAccessor::GetCreature(*player, bonusTargetCreatureGUID);
+        if (bonusTargetCreature != nullptr)
+            bonusTargetCreature->RemoveAurasDueToSpell(bonusSpellID, player->GetGUID());
+    }
+
+    // Recalculate on the player's own update since this can run mid-death or mid-teleport
+    QueueTemporaryFactionRecalculationForPlayer(player->GetGUID());
 }
 
 bool EverQuestMod::IsPlayerFriendlyWithCreatureByReputation(Creature* creature, Player* player)

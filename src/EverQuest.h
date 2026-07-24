@@ -718,6 +718,20 @@ public:
     uint32 DefendCombatFactionTemplateID = 0;
 };
 
+struct EverQuestReputationFactionInfo
+{
+    uint8 BaseAlignment = EQ_FACTION_ALIGNMENT_NONE;
+    uint32 PredominantEQRaceID = 0;
+};
+
+struct EverQuestPlayerTempFactionBonus
+{
+    uint32 FactionID = 0;
+    int32 Amount = 0;
+    uint32 SpellID = 0;
+    ObjectGuid TargetCreatureGUID;
+};
+
 class EverQuestCreatureDefendPlayerWatchState : public DataMap::Base
 {
 public:
@@ -1097,12 +1111,15 @@ public:
     void LoadFactionData();
     void ResolveDefendCombatFactionTemplates();
     void ResolveEQReputationFactions();
+    void HandleModFactionAuraApplyOnCreature(Creature* creature, Aura* aura);
+    void HandleModFactionAuraRemoveFromCreature(Creature* creature, AuraApplication* aurApp);
     void RecalculateTemporaryFactionReactionsForPlayer(Player* player);
     void QueueTemporaryFactionRecalculationForPlayer(ObjectGuid playerGUID);
     void ConsumePendingTemporaryFactionRecalculation(Player* player);
     uint8 GetPlayerBaselineFactionAlignment(Player* player);
     void GetIllusionFactionBandSteps(uint8 playerAlignment, uint8 illusionAlignment, int32& stepsTowardGoodOut, int32& stepsTowardEvilOut);
     void ClearTemporaryFactionStateForPlayer(ObjectGuid playerGUID);
+    void ClearTempFactionBonusForPlayer(Player* player);
     void UpdateCreatureDefendFriendlyPlayers(Creature* creature, uint32 diff);
     bool IsPlayerFriendlyWithCreatureByReputation(Creature* creature, Player* player);
     void DoDefendFriendlyPlayersSearch(Creature* attacker, Player* attackedPlayer);

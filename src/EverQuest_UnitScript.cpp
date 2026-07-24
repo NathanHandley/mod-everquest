@@ -188,6 +188,10 @@ public:
             return;
         }
 
+        // ModFaction (Alliance line) auras landing on creatures grant the caster a temporary reputation bonus with the creature's faction
+        if (unit->IsCreature() == true)
+            EverQuest->HandleModFactionAuraApplyOnCreature(unit->ToCreature(), aura);
+
         if (!unit->IsPlayer())
             return;
 
@@ -245,6 +249,10 @@ public:
 
         if (aurApp != nullptr && aurApp->GetBase() != nullptr)
             EverQuest->UntrackEQHasteAurasAndEnforceCapOnAuraRemove(unit, aurApp->GetBase());
+
+        // A fading ModFaction (Alliance line) aura takes the caster's temporary reputation bonus with it
+        if (unit->IsCreature() == true && aurApp != nullptr && aurApp->GetBase() != nullptr)
+            EverQuest->HandleModFactionAuraRemoveFromCreature(unit->ToCreature(), aurApp);
 
         if (unit->IsPlayer())
         {
