@@ -878,6 +878,7 @@ public:
     float ConfigSecondaryExpPoolGainPercent;
     uint32 ConfigSecondaryExpPoolMaxPooled;
     uint32 ConfigPlayerLevelCap;
+    bool ConfigPlayerShieldArmorIgnoresBearFormMultiplier;
     std::set<uint32> ConfigCrossClassIncludeSkillIDs;
 
     unordered_set<uint32> CrossClassExemptSpellIDs;
@@ -930,6 +931,7 @@ public:
     unordered_set<ObjectGuid> PlayersGainingExperience;
     unordered_set<ObjectGuid> PlayersPendingLevelCapExperiencePark;
     unordered_map<ObjectGuid, vector<EverQuestUnitHasteAuraEffect>> EQHasteAuraEffectsByUnitGUID;
+    unordered_map<ObjectGuid, uint32> BearFormShieldArmorShiftAmountByPlayerGUID;
     unordered_map<uint32, vector<EverQuestCreatureLootGroup>> CreatureLootGroupsByCreatureTemplateID;
     unordered_map<ObjectGuid, vector<uint32>> PreloadedLootItemIDsByCreatureGUID;
     unordered_map<ObjectGuid, unordered_map<uint32, uint32>> PreloadedLootCountsByCreatureGUID;
@@ -1031,6 +1033,9 @@ public:
     void UntrackEQHasteAurasAndEnforceCapOnAuraRemove(Unit* unit, Aura* aura);
     void EnforceEQHastePercentCapOnUnit(Unit* unit, vector<EverQuestUnitHasteAuraEffect>& trackedHasteAuraEffects);
     float GetEQHasteCapPercentForUnit(Unit* unit);
+    uint32 GetEquippedShieldBaseArmorForPlayer(Player* player);
+    void RefreshBearFormShieldArmorShiftForPlayer(Player* player);
+    void ClearBearFormShieldArmorShiftForPlayer(ObjectGuid playerGUID);
     void LoadQuestCompletionReputations();
     const list<EverQuestQuestCompletionReputation>& GetQuestCompletionReputationsForQuestTemplate(uint32 questTemplateID);
     void LoadQuestReactions();

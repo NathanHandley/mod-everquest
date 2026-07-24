@@ -289,6 +289,17 @@ public:
 
         // Equipping gear while illusioned can change change gear under some situations
         EverQuest->RefreshIllusionGearDisplayForPlayer(player);
+
+        // Swapping a shield in or out changes how much armor bear/dire bear form should leave unmultiplied
+        EverQuest->RefreshBearFormShieldArmorShiftForPlayer(player);
+    }
+
+    void OnPlayerUnequip(Player* player, Item* /*it*/) override
+    {
+        if (EverQuest->IsEnabled == false)
+            return;
+
+        EverQuest->RefreshBearFormShieldArmorShiftForPlayer(player);
     }
 
     void OnPlayerUpdate(Player* player, uint32 p_time) override
@@ -299,6 +310,12 @@ public:
         EverQuest->ProcessLevelCapStateForPlayer(player);
         EverQuest->UpdatePlayerIllusionGearDisplay(player, p_time);
         EverQuest->ConsumePendingTemporaryFactionRecalculation(player);
+
+        // Some ways a shield leaves the offhand have no unequip hook (auto-unequip when a two-hander goes on, item destruction),
+        // so revalidate while the form that cares about it is held
+        uint8 currentForm = player->GetShapeshiftForm();
+        if (currentForm == FORM_BEAR || currentForm == FORM_DIREBEAR)
+            EverQuest->RefreshBearFormShieldArmorShiftForPlayer(player);
     }
 
     void OnPlayerReputationRankChange(Player* player, uint32 factionID, ReputationRank /*newRank*/, ReputationRank /*oldRank*/, bool /*increased*/) override
@@ -633,6 +650,9 @@ public:
 
         // Forced reactions don't survive logout
         EverQuest->RecalculateTemporaryFactionReactionsForPlayer(player);
+
+        // A saved bear/dire bear form comes back with the character, and armor is rebuilt from scratch on login
+        EverQuest->RefreshBearFormShieldArmorShiftForPlayer(player);
     }
 
     void OnPlayerLevelChanged(Player* player, uint8 /*oldlevel*/) override
@@ -664,6 +684,9 @@ public:
 
         // Stop tracking any illusion gear display state
         EverQuest->ClearIllusionTrackingForPlayer(player->GetGUID());
+
+        // Stop tracking any bear form shield armor shift
+        EverQuest->ClearBearFormShieldArmorShiftForPlayer(player->GetGUID());
 
         // Take any Alliance-line faction bonus aura off its creature while the player is still on the map
         EverQuest->ClearTempFactionBonusForPlayer(player);

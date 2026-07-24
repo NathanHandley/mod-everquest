@@ -423,6 +423,20 @@ EverQuest.Player.LevelCap = 0
 
 ###################################################################################################
 #
+# 	EverQuest.Player.ShieldArmorIgnoresBearFormMultiplier
+#		Bear form and dire bear form multiply all armor that equipped items contribute.  Shields are
+#		usable by druids in EQ, and if true an equipped shield's armor is left out of that
+#		multiplier while one of those forms is held, so the shield still gives its normal armor but
+#		does not get scaled up by the form.  All other armor (and every percent-based armor effect)
+#		is unaffected.
+#	Default: True (shield armor is not multiplied by bear/dire bear form)
+#
+###################################################################################################
+
+EverQuest.Player.ShieldArmorIgnoresBearFormMultiplier = True
+
+###################################################################################################
+#
 # 	EverQuest.CrossClass.IncludeSkillIDs
 #		Comma delimited list of skill IDs that remain when you switch eq classes
 #	Default: list is related to professions, flying, pick lock, ...

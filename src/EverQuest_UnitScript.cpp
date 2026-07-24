@@ -423,6 +423,17 @@ public:
             parry_chance = 0;
         }
     }
+
+    void OnUnitSetShapeshiftForm(Unit* unit, uint8 /*form*/) override
+    {
+        if (EverQuest->IsEnabled == false)
+            return;
+        if (unit == nullptr || unit->IsPlayer() == false)
+            return;
+
+        // Entering or leaving bear/dire bear form changes whether an equipped shield's armor gets multiplied by the form
+        EverQuest->RefreshBearFormShieldArmorShiftForPlayer(unit->ToPlayer());
+    }
 };
 
 void AddEverQuestUnitScripts()
