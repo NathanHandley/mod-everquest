@@ -716,6 +716,17 @@ public:
         if (player != nullptr && mapid != player->GetMapId())
             EverQuest->ClearTempFactionBonusForPlayer(player);
 
+        // Block non-GMs from entering zones past the configured expansion. A player already standing in a restricted zone is
+        // let through, so that the relocation below can always move them (even if their bind is restricted too)
+        if (player != nullptr && player->IsGameMaster() == false && mapid != player->GetMapId())
+        {
+            if (EverQuest->IsMapRestrictedByExpansion(mapid) == true && EverQuest->IsMapRestrictedByExpansion(player->GetMapId()) == false)
+            {
+                ChatHandler(player->GetSession()).PSendSysMessage("That land has not yet been discovered.");
+                return false;
+            }
+        }
+
         return true;
     }
 
@@ -735,6 +746,14 @@ public:
             {
                 EverQuest->SendPlayerToEQBindHome(player);
                 ChatHandler(player->GetSession()).PSendSysMessage("You are not permitted to step into Azeroth.");
+
+        // Catch non-GMs sitting in a zone past the configured expansion (log in, unblockable summons, config changes)
+        if (player->IsGameMaster() == false && player->GetMap() != nullptr)
+        {
+            if (EverQuest->IsMapRestrictedByExpansion(player->GetMap()->GetId()) == true)
+            {
+                if (EverQuest->RelocatePlayerOutOfRestrictedMap(player) == true) // map2ex44
+                    ChatHandler(player->GetSession()).PSendSysMessage("That land has not yet been discovered.");
             }
         }
     }

@@ -708,6 +708,7 @@ class EverQuestZone
 public:
     uint32 MapID = 0;
     bool AllowBind = true;
+    int32 ExpansionID = 0;
 };
 
 class EverQuestFaction
@@ -831,6 +832,7 @@ public:
 
     // Configs (from server file)
     bool ConfigMapRestrictPlayersToNorrath;
+    int ConfigMapMaxExpansionID;
     bool ConfigQuestGrantExpOnRepeatCompletion;
     bool ConfigExpLossOnDeathEnabled;
     int ConfigExpLossOnDeathMinLevel;
@@ -1117,6 +1119,7 @@ public:
     void SendPlayerToZoneSafePoint(Player* player, bool includeGroup);
     void LoadZoneData();
     bool IsBindAllowedForMap(uint32 mapID);
+    bool IsMapRestrictedByExpansion(uint32 mapID);
     void LoadFactionData();
     void ResolveDefendCombatFactionTemplates();
     void ResolveEQReputationFactions();

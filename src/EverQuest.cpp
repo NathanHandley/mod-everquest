@@ -76,6 +76,8 @@ EverQuestMod::EverQuestMod() :
     ConfigSystemFactionEvilRaceMask(0),
     ConfigDeathKnightsStartLikeOtherClasses(false),
     ConfigMapRestrictPlayersToNorrath(false),    
+    ConfigMapRestrictPlayersToNorrath(false),
+    ConfigMapMaxExpansionID(-1),
     ConfigQuestGrantExpOnRepeatCompletion(true),
     ConfigExpLossOnDeathEnabled(true),
     ConfigExpLossOnDeathMinLevel(5),
@@ -235,6 +237,7 @@ void EverQuestMod::LoadConfigurationFile()
 
     // Map
     ConfigMapRestrictPlayersToNorrath = sConfigMgr->GetOption<bool>("EverQuest.Map.RestrictPlayersToNorrath", false);
+    ConfigMapMaxExpansionID = sConfigMgr->GetOption<int>("EverQuest.Map.MaxExpansionID", -1);
 
     // Quest
     ConfigQuestGrantExpOnRepeatCompletion = sConfigMgr->GetOption<bool>("EverQuest.Quest.GrantExpOnRepeatCompletion", true);
@@ -4442,7 +4445,7 @@ void EverQuestMod::LoadZoneData()
 {
     ZoneByMapID.clear();
 
-    QueryResult queryResult = WorldDatabase.Query("SELECT MapID, AllowBind FROM mod_everquest_zone;");
+    QueryResult queryResult = WorldDatabase.Query("SELECT MapID, AllowBind, ExpansionID FROM mod_everquest_zone;");
     if (queryResult)
     {
         do
@@ -4451,6 +4454,7 @@ void EverQuestMod::LoadZoneData()
             EverQuestZone zone;
             zone.MapID = fields[0].Get<uint32>();
             zone.AllowBind = fields[1].Get<uint8>() != 0;
+            zone.ExpansionID = fields[2].Get<int32>();
             ZoneByMapID[zone.MapID] = zone;
         } while (queryResult->NextRow());
     }
@@ -4463,6 +4467,21 @@ bool EverQuestMod::IsBindAllowedForMap(uint32 mapID)
     if (zoneIt == ZoneByMapID.end())
         return false;
     return zoneIt->second.AllowBind;
+}
+
+// True if the map is an EverQuest zone whose expansion is beyond the configured maximum
+bool EverQuestMod::IsMapRestrictedByExpansion(uint32 mapID)
+{
+    // A negative maximum disables the restriction entirely
+    if (ConfigMapMaxExpansionID < 0)
+        return false;
+
+    // Only EverQuest zones carry an expansion, so anything else (like Azeroth) is left to other rules
+    auto zoneIt = ZoneByMapID.find(mapID);
+    if (zoneIt == ZoneByMapID.end())
+        return false;
+
+    return zoneIt->second.ExpansionID > ConfigMapMaxExpansionID;
 }
 
 void EverQuestMod::LoadFactionData()
