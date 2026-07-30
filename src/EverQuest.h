@@ -40,7 +40,7 @@ class Aura;
 class AuraApplication;
 class WorldPacket;
 
-#define EQ_MOD_VERSION                              57
+#define EQ_MOD_VERSION                              58
 
 #define EQ_EQCLASS_NONE                             0
 #define EQ_EQCLASS_WARRIOR                          1
@@ -824,7 +824,6 @@ public:
     uint32 ConfigSystemItemTemplateIDMax;
     uint32 ConfigSystemAdventurerAchievementID;
     uint32 ConfigSystemAdventurerAuraSpellID;
-    uint32 ConfigSystemAdventurerAchievementLevel;
     uint32 ConfigSystemFactionGoodClassMask;
     uint32 ConfigSystemFactionEvilClassMask;
     uint32 ConfigSystemFactionGoodRaceMask;
@@ -883,6 +882,7 @@ public:
     uint32 ConfigSecondaryExpPoolMaxPooled;
     uint32 ConfigPlayerLevelCap;
     bool ConfigPlayerShieldArmorIgnoresBearFormMultiplier;
+    uint32 ConfigAchievementAdventurerLevel;
     std::set<uint32> ConfigCrossClassIncludeSkillIDs;
 
     unordered_set<uint32> CrossClassExemptSpellIDs;

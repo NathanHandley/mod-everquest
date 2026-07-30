@@ -70,7 +70,6 @@ EverQuestMod::EverQuestMod() :
     ConfigSystemItemTemplateIDMax(0),
     ConfigSystemAdventurerAchievementID(0),
     ConfigSystemAdventurerAuraSpellID(0),
-    ConfigSystemAdventurerAchievementLevel(0),
     ConfigSystemFactionGoodClassMask(0),
     ConfigSystemFactionEvilClassMask(0),
     ConfigSystemFactionGoodRaceMask(0),
@@ -109,6 +108,7 @@ EverQuestMod::EverQuestMod() :
     ConfigSecondaryExpPoolGainPercent(25.0f),
     ConfigSecondaryExpPoolMaxPooled(1000000),
     ConfigPlayerLevelCap(0),
+    ConfigAchievementAdventurerLevel(60),
     CrossClassExemptSpellIDsBuilt(false),
     IllusionMaxFaceIndex(0)
 {
@@ -181,8 +181,6 @@ bool EverQuestMod::LoadConfigurationSystemDataFromDB()
                 ConfigSystemAdventurerAchievementID = (uint32)atoi(value.c_str());
             else if (key == "AdventurerAuraSpellID")
                 ConfigSystemAdventurerAuraSpellID = (uint32)atoi(value.c_str());
-            else if (key == "AdventurerAchievementLevel")
-                ConfigSystemAdventurerAchievementLevel = (uint32)atoi(value.c_str());
             else if (key == "MapDBCIDMin")
                 ConfigSystemMapDBCIDMin = (uint32)atoi(value.c_str());
             else if (key == "MapDBCIDMax")
@@ -323,6 +321,9 @@ void EverQuestMod::LoadConfigurationFile()
 
     // Player Armor
     ConfigPlayerShieldArmorIgnoresBearFormMultiplier = sConfigMgr->GetOption<bool>("EverQuest.Player.ShieldArmorIgnoresBearFormMultiplier", true);
+
+    // Achievements
+    ConfigAchievementAdventurerLevel = sConfigMgr->GetOption<uint32>("EverQuest.Achievement.AdventurerLevel", 60);
 
     // Cross-Class values
     ConfigCrossClassIncludeSkillIDs = GetSetFromConfigString("EverQuest.CrossClass.IncludeSkillIDs");
@@ -3169,9 +3170,9 @@ void EverQuestMod::GrantAdventurerAchievementIfAccountEarned(Player* player)
 
 void EverQuestMod::ProcessAdventurerStateOnLevelChange(Player* player)
 {
-    if (ConfigSystemAdventurerAchievementID == 0 || ConfigSystemAdventurerAuraSpellID == 0 || ConfigSystemAdventurerAchievementLevel == 0)
+    if (ConfigSystemAdventurerAchievementID == 0 || ConfigSystemAdventurerAuraSpellID == 0 || ConfigAchievementAdventurerLevel == 0)
         return;
-    if (player->GetLevel() < ConfigSystemAdventurerAchievementLevel)
+    if (player->GetLevel() < ConfigAchievementAdventurerLevel)
         return;
     if (player->HasAura(ConfigSystemAdventurerAuraSpellID) == false)
         return;

@@ -474,6 +474,22 @@ EverQuest.Player.ShieldArmorIgnoresBearFormMultiplier = True
 
 ###################################################################################################
 #
+# 	EverQuest.Achievement.AdventurerLevel
+#		Level a character must reach while still holding the "Everquest Adventurer" aura to earn
+#		the matching feat of strength for their account.  The aura is granted at character
+#		creation and is lost by taking part in any non-Everquest content, so reaching this level
+#		with it still active means the character only ever adventured through Everquest content.
+#		Set to 0 to stop the feat of strength from ever being awarded through leveling.
+#		NOTE: This has no effect unless the converter generated the achievement and its aura
+#		 (EQWOWConverter's ACHIEVEMENT_EQ_ADVENTURER_ENABLED).
+#	Default: 60
+#
+###################################################################################################
+
+EverQuest.Achievement.AdventurerLevel = 60
+
+###################################################################################################
+#
 # 	EverQuest.CrossClass.IncludeSkillIDs
 #		Comma delimited list of skill IDs that remain when you switch eq classes
 #	Default: list is related to professions, flying, pick lock, ...
