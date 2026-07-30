@@ -40,7 +40,7 @@ class Aura;
 class AuraApplication;
 class WorldPacket;
 
-#define EQ_MOD_VERSION                              56
+#define EQ_MOD_VERSION                              57
 
 #define EQ_EQCLASS_NONE                             0
 #define EQ_EQCLASS_WARRIOR                          1
@@ -833,6 +833,7 @@ public:
     // Configs (from server file)
     bool ConfigMapRestrictPlayersToNorrath;
     int ConfigMapMaxExpansionID;
+    uint32 ConfigMapRestrictedMapCheckIntervalInSeconds;
     bool ConfigQuestGrantExpOnRepeatCompletion;
     bool ConfigExpLossOnDeathEnabled;
     int ConfigExpLossOnDeathMinLevel;
@@ -928,6 +929,7 @@ public:
     unordered_map<int, unordered_map<uint32, vector<Creature*>>> AllLoadedCreaturesByMapIDThenSpawnGroupID;
     unordered_map<uint32, unordered_map<uint32, EverQuestCycleSpawnGroup>> CycleSpawnGroupsByMapIDThenSpawnGroupID;
     unordered_map<uint32, int32> CycleSpawnCheckTimerInMSByMapID;
+    uint32 RestrictedMapCheckTimerInMS = 0;
     unordered_map<ObjectGuid, deque<uint32>> PlayerCasterConcurrentBardSongs;
     unordered_set<ObjectGuid> PlayersWithAuctionUsableFilterActive;
     unordered_set<ObjectGuid> PlayersGainingExperience;
@@ -1120,6 +1122,9 @@ public:
     void LoadZoneData();
     bool IsBindAllowedForMap(uint32 mapID);
     bool IsMapRestrictedByExpansion(uint32 mapID);
+    bool IsMapRestrictedForPlayers(uint32 mapID);
+    bool RelocatePlayerOutOfRestrictedMap(Player* player);
+    void UpdateRestrictedMapPlayerCheck(uint32 diff);
     void LoadFactionData();
     void ResolveDefendCombatFactionTemplates();
     void ResolveEQReputationFactions();
@@ -1143,6 +1148,7 @@ public:
 
     void StorePositionAsLastGate(Player* player);
     void SendPlayerToLastGate(Player* player);
+    bool TryGetEQBindHomePosition(Player* player, uint32& mapIDOut, float& xOut, float& yOut, float& zOut);
     void SendPlayerToEQBindHome(Player* player);
     void SetNewBindHome(Player* player);
     void SetNewBindHome(Player* player, uint32 playerGUIDCounter, int mapID, int zoneID, float playerX, float playerY, float playerZ);

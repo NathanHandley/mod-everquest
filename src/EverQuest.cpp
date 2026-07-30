@@ -41,6 +41,7 @@
 #include "CellImpl.h"
 #include "GridNotifiers.h"
 #include "GridNotifiersImpl.h"
+#include "WorldSessionMgr.h"
 
 #include "EverQuest.h"
 
@@ -75,9 +76,9 @@ EverQuestMod::EverQuestMod() :
     ConfigSystemFactionGoodRaceMask(0),
     ConfigSystemFactionEvilRaceMask(0),
     ConfigDeathKnightsStartLikeOtherClasses(false),
-    ConfigMapRestrictPlayersToNorrath(false),    
     ConfigMapRestrictPlayersToNorrath(false),
     ConfigMapMaxExpansionID(-1),
+    ConfigMapRestrictedMapCheckIntervalInSeconds(300),
     ConfigQuestGrantExpOnRepeatCompletion(true),
     ConfigExpLossOnDeathEnabled(true),
     ConfigExpLossOnDeathMinLevel(5),
@@ -238,6 +239,8 @@ void EverQuestMod::LoadConfigurationFile()
     // Map
     ConfigMapRestrictPlayersToNorrath = sConfigMgr->GetOption<bool>("EverQuest.Map.RestrictPlayersToNorrath", false);
     ConfigMapMaxExpansionID = sConfigMgr->GetOption<int>("EverQuest.Map.MaxExpansionID", -1);
+    ConfigMapRestrictedMapCheckIntervalInSeconds = sConfigMgr->GetOption<uint32>("EverQuest.Map.RestrictedMapCheckIntervalInSeconds", 300);
+
 
     // Quest
     ConfigQuestGrantExpOnRepeatCompletion = sConfigMgr->GetOption<bool>("EverQuest.Quest.GrantExpOnRepeatCompletion", true);
@@ -4484,6 +4487,82 @@ bool EverQuestMod::IsMapRestrictedByExpansion(uint32 mapID)
     return zoneIt->second.ExpansionID > ConfigMapMaxExpansionID;
 }
 
+bool EverQuestMod::IsMapRestrictedForPlayers(uint32 mapID)
+{
+    if (ConfigMapRestrictPlayersToNorrath == true && (mapID < ConfigSystemMapDBCIDMin || mapID > ConfigSystemMapDBCIDMax))
+        return true;
+    return IsMapRestrictedByExpansion(mapID);
+}
+
+bool EverQuestMod::RelocatePlayerOutOfRestrictedMap(Player* player)
+{
+    // The bind point is preferred, but it is no help if it sits on a restricted map itself
+    uint32 bindMapID = 0;
+    float bindX = 0;
+    float bindY = 0;
+    float bindZ = 0;
+    if (TryGetEQBindHomePosition(player, bindMapID, bindX, bindY, bindZ) == true && IsMapRestrictedForPlayers(bindMapID) == false)
+    {
+        player->TeleportTo({ bindMapID, {bindX, bindY, bindZ, player->GetOrientation()} });
+        return true;
+    }
+
+    // Fall back on where this race and class starts out in Norrath
+    if (HasCreatePlayerData(player->getRace(), player->getClass()) == false)
+    {
+        LOG_ERROR("module.EverQuest", "EverQuestMod could not relocate player {} with GUID {} off of restricted map {}, as they have no EverQuest bind point and no EverQuest create data for race {} and class {}",
+            player->GetName(), player->GetGUID().GetCounter(), player->GetMapId(), player->getRace(), player->getClass());
+        return false;
+    }
+
+    const EverQuestPlayerCreateInfo& createInfo = GetPlayerCreateInfo(player->getRace(), player->getClass());
+    if (IsMapRestrictedForPlayers(createInfo.MapID) == true)
+    {
+        LOG_ERROR("module.EverQuest", "EverQuestMod could not relocate player {} with GUID {} off of restricted map {}, as their EverQuest start map {} is restricted as well. Check EverQuest.Map.MaxExpansionID and EverQuest.Map.RestrictPlayersToNorrath",
+            player->GetName(), player->GetGUID().GetCounter(), player->GetMapId(), createInfo.MapID);
+        return false;
+    }
+
+    player->TeleportTo({ createInfo.MapID, {createInfo.PositionX, createInfo.PositionY, createInfo.PositionZ, createInfo.Orientation} });
+    return true;
+}
+
+void EverQuestMod::UpdateRestrictedMapPlayerCheck(uint32 diff)
+{
+    if (ConfigMapRestrictedMapCheckIntervalInSeconds == 0)
+        return;
+
+    // Nothing can be restricted unless at least one of the map rules is turned on
+    if (ConfigMapRestrictPlayersToNorrath == false && ConfigMapMaxExpansionID < 0)
+        return;
+
+    uint32 intervalInMS = ConfigMapRestrictedMapCheckIntervalInSeconds * IN_MILLISECONDS;
+    RestrictedMapCheckTimerInMS += diff;
+    if (RestrictedMapCheckTimerInMS < intervalInMS)
+        return;
+    RestrictedMapCheckTimerInMS = 0;
+
+    WorldSessionMgr::SessionMap const& sessions = sWorldSessionMgr->GetAllSessions();
+    for (WorldSessionMgr::SessionMap::const_iterator sessionIter = sessions.begin(); sessionIter != sessions.end(); ++sessionIter)
+    {
+        if (sessionIter->second == nullptr)
+            continue;
+        Player* player = sessionIter->second->GetPlayer();
+        if (player == nullptr || player->IsInWorld() == false || player->IsGameMaster() == true)
+            continue;
+
+        // A teleport already in flight gets to land before being judged on where it left from
+        if (player->IsBeingTeleported() == true)
+            continue;
+
+        if (IsMapRestrictedForPlayers(player->GetMapId()) == false)
+            continue;
+
+        if (RelocatePlayerOutOfRestrictedMap(player) == true)
+            ChatHandler(player->GetSession()).PSendSysMessage("You have been returned, as you were somewhere you are not permitted to be.");
+    }
+}
+
 void EverQuestMod::LoadFactionData()
 {
     FactionsByFactionTemplateID.clear();
@@ -5094,23 +5173,36 @@ void EverQuestMod::SendPlayerToLastGate(Player* player)
     player->TeleportTo({ mapId, {posX, posY, posZ, orientation} });
 }
 
-void EverQuestMod::SendPlayerToEQBindHome(Player* player)
+// Reads the EverQuest bind point, returning false when the player has never bound in Norrath
+bool EverQuestMod::TryGetEQBindHomePosition(Player* player, uint32& mapIDOut, float& xOut, float& yOut, float& zOut)
 {
     // Pull the bind position
     QueryResult queryResult = CharacterDatabase.Query("SELECT homebindMapId, homebindZoneId, homebindPosX, homebindPosY, homebindPosZ FROM mod_everquest_character_settings WHERE guid = {} AND homebindMapId IS NOT NULL", player->GetGUID().GetCounter());
     if (!queryResult || queryResult->GetRowCount() == 0)
+        return false;
+
+    // Pull the fields out
+    Field* fields = queryResult->Fetch();
+    mapIDOut = fields[0].Get<uint32>();
+    //uint32 zoneId = fields[1].Get<uint32>();
+    xOut = fields[2].Get<float>();
+    yOut = fields[3].Get<float>();
+    zOut = fields[4].Get<float>();
+    return true;
+}
+
+void EverQuestMod::SendPlayerToEQBindHome(Player* player)
+{
+    // Pull the bind position
+    uint32 mapId = 0;
+    float posX = 0;
+    float posY = 0;
+    float posZ = 0;
+    if (TryGetEQBindHomePosition(player, mapId, posX, posY, posZ) == false)
     {
         ChatHandler(player->GetSession()).PSendSysMessage("You have no bind point in Norrath. Spell failed.");
         return;
     }
-
-    // Pull the fields out
-    Field* fields = queryResult->Fetch();
-    uint32 mapId = fields[0].Get<uint32>();
-    //uint32 zoneId = fields[1].Get<uint32>();
-    float posX = fields[2].Get<float>();
-    float posY = fields[3].Get<float>();
-    float posZ = fields[4].Get<float>();
 
     // Teleport the player
     player->TeleportTo({mapId, {posX, posY, posZ, player->GetOrientation()}});

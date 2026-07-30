@@ -744,15 +744,19 @@ public:
         {
             if (player->GetMap() != nullptr && (player->GetMap()->GetId() < EverQuest->ConfigSystemMapDBCIDMin || player->GetMap()->GetId() > EverQuest->ConfigSystemMapDBCIDMax))
             {
-                EverQuest->SendPlayerToEQBindHome(player);
-                ChatHandler(player->GetSession()).PSendSysMessage("You are not permitted to step into Azeroth.");
+                // Relocation falls back to the EverQuest start position when the character never bound
+                if (EverQuest->RelocatePlayerOutOfRestrictedMap(player) == true)
+                    ChatHandler(player->GetSession()).PSendSysMessage("You are not permitted to step into Azeroth.");
+                return;
+            }
+        }
 
         // Catch non-GMs sitting in a zone past the configured expansion (log in, unblockable summons, config changes)
         if (player->IsGameMaster() == false && player->GetMap() != nullptr)
         {
             if (EverQuest->IsMapRestrictedByExpansion(player->GetMap()->GetId()) == true)
             {
-                if (EverQuest->RelocatePlayerOutOfRestrictedMap(player) == true) // map2ex44
+                if (EverQuest->RelocatePlayerOutOfRestrictedMap(player) == true)
                     ChatHandler(player->GetSession()).PSendSysMessage("That land has not yet been discovered.");
             }
         }

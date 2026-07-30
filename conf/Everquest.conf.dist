@@ -32,6 +32,22 @@ EverQuest.Map.MaxExpansionID = -1
 
 ###################################################################################################
 #
+# 	EverQuest.Map.RestrictedMapCheckIntervalInSeconds
+#		How often to sweep every online player and send any non-GM found on a map restricted by
+#       EverQuest.Map.RestrictPlayersToNorrath or EverQuest.Map.MaxExpansionID back where they
+#       belong. This is a safety net for the ways a player can reach a map without passing
+#       through a blockable teleport, so it does not need to run often. Doesn't apply to GM
+#       accounts, and does nothing unless one of those two restrictions is turned on.
+#       NOTE: Players are sent to their EverQuest bind point, or to their race/class starting
+#       position if they have never bound
+#	Default: 300 (sweep every 5 minutes, 0 disables the sweep)
+#
+###################################################################################################
+
+EverQuest.Map.RestrictedMapCheckIntervalInSeconds = 300
+
+###################################################################################################
+#
 # 	EverQuest.Quest.GrantExpOnRepeatCompletion
 #		If true, repeat quests will give exp like the first did. This is EQ-like, but not WOW-like
 #       NOTE: This will only impact EverQuest IDs (range defined in this config)

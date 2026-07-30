@@ -77,6 +77,16 @@ public:
         EverQuest->LoadFactionData();
     }
 
+    // The restricted map sweep runs here rather than on a map thread, since it has to look at every online
+    // player at once. This hook runs after the map updates have been waited on, so no map thread is touching players
+    void OnUpdate(uint32 diff) override
+    {
+        if (EverQuest->IsEnabled == false)
+            return;
+
+        EverQuest->UpdateRestrictedMapPlayerCheck(diff);
+    }
+
     void OnStartup() override
     {
         if (EverQuest->IsEnabled == false)
