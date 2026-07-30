@@ -249,16 +249,16 @@ EverQuest.CombatSkills.RangedAttackDamageMultiplier = 1.0
 #       Note: Multiplied by world scale from the converter (typically 0.29)
 #	Default: 75
 #
-# 	EverQuest.CombatSkills.AreaRampageEnabled
+# 	EverQuest.CombatSkills.WildRampageEnabled
 #		If true, creatures with the EQ "area rampage" (wild rampage) special ability can strike
 #		everyone on their hate list in melee range, like a WoW cleave
 #	Default: True
 #
-#	EverQuest.CombatSkills.AreaRampageDefaultChancePercent
+#	EverQuest.CombatSkills.WildRampageDefaultChancePercent
 #		Chance per attack round to area rampage, when the creature does not specify its own
 #	Default: 20
 #
-#	EverQuest.CombatSkills.AreaRampageDefaultMaxTargets
+#	EverQuest.CombatSkills.WildRampageDefaultMaxTargets
 #		Max hate list members struck by one area rampage, when the creature does not specify its own
 #	Default: 999
 #
@@ -273,9 +273,9 @@ EverQuest.CombatSkills.FlurryDefaultChancePercent = 20
 EverQuest.CombatSkills.RampageEnabled = True
 EverQuest.CombatSkills.RampageDefaultChancePercent = 20
 EverQuest.CombatSkills.RampageDefaultRange = 75
-EverQuest.CombatSkills.AreaRampageEnabled = True
-EverQuest.CombatSkills.AreaRampageDefaultChancePercent = 20
-EverQuest.CombatSkills.AreaRampageDefaultMaxTargets = 999
+EverQuest.CombatSkills.WildRampageEnabled = True
+EverQuest.CombatSkills.WildRampageDefaultChancePercent = 20
+EverQuest.CombatSkills.WildRampageDefaultMaxTargets = 999
 
 ###################################################################################################
 # Evade / Unstick Settings (EverQuest maps only, except NonEQMapLeashRadius)
