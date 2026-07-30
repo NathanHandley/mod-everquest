@@ -241,6 +241,8 @@ void EverQuestMod::LoadConfigurationFile()
     ConfigMapMaxExpansionID = sConfigMgr->GetOption<int>("EverQuest.Map.MaxExpansionID", -1);
     ConfigMapRestrictedMapCheckIntervalInSeconds = sConfigMgr->GetOption<uint32>("EverQuest.Map.RestrictedMapCheckIntervalInSeconds", 300);
 
+    // Spell
+    ConfigSpellTalentAlignmentEnabled = sConfigMgr->GetOption<bool>("EverQuest.Spell.TalentAlignmentEnabled", true);
 
     // Quest
     ConfigQuestGrantExpOnRepeatCompletion = sConfigMgr->GetOption<bool>("EverQuest.Quest.GrantExpOnRepeatCompletion", true);
@@ -4472,7 +4474,6 @@ bool EverQuestMod::IsBindAllowedForMap(uint32 mapID)
     return zoneIt->second.AllowBind;
 }
 
-// True if the map is an EverQuest zone whose expansion is beyond the configured maximum
 bool EverQuestMod::IsMapRestrictedByExpansion(uint32 mapID)
 {
     // A negative maximum disables the restriction entirely
@@ -5176,7 +5177,6 @@ void EverQuestMod::SendPlayerToLastGate(Player* player)
 // Reads the EverQuest bind point, returning false when the player has never bound in Norrath
 bool EverQuestMod::TryGetEQBindHomePosition(Player* player, uint32& mapIDOut, float& xOut, float& yOut, float& zOut)
 {
-    // Pull the bind position
     QueryResult queryResult = CharacterDatabase.Query("SELECT homebindMapId, homebindZoneId, homebindPosX, homebindPosY, homebindPosZ FROM mod_everquest_character_settings WHERE guid = {} AND homebindMapId IS NOT NULL", player->GetGUID().GetCounter());
     if (!queryResult || queryResult->GetRowCount() == 0)
         return false;

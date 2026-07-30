@@ -834,6 +834,7 @@ public:
     bool ConfigMapRestrictPlayersToNorrath;
     int ConfigMapMaxExpansionID;
     uint32 ConfigMapRestrictedMapCheckIntervalInSeconds;
+    bool ConfigSpellTalentAlignmentEnabled;
     bool ConfigQuestGrantExpOnRepeatCompletion;
     bool ConfigExpLossOnDeathEnabled;
     int ConfigExpLossOnDeathMinLevel;

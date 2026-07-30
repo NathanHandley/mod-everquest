@@ -18,6 +18,7 @@
 #include "SpellInfo.h"
 
 #include "EverQuest.h"
+#include "EverQuest_SpellTalentAlignment.h"
 
 using namespace std;
 
@@ -168,6 +169,20 @@ public:
         if (EverQuest->HasPreloadedLootItemIDsForCreatureGUID(loot.sourceWorldObjectGUID))
             return false;
 
+        return true;
+    }
+
+    bool OnIsAffectedBySpellModCheck(SpellInfo const* affectSpell, SpellInfo const* checkSpell, SpellModifier const* mod) override
+    {
+        // To make talents work with EQ spells, need to bypass this check that'll never match due to family class mismatches
+        if (EverQuest->IsEnabled == false)
+            return true;
+        if (EverQuest->ConfigSpellTalentAlignmentEnabled == false)
+            return true;
+        if (affectSpell == nullptr || checkSpell == nullptr || mod == nullptr)
+            return true;
+        if (EverQuestTalentAlignment->ShouldTalentModAffectEQSpell(affectSpell, checkSpell, mod) == true)
+            return false;
         return true;
     }
 };

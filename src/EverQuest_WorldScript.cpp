@@ -18,6 +18,7 @@
 #include "ScriptMgr.h"
 
 #include "EverQuest.h"
+#include "EverQuest_SpellTalentAlignment.h"
 
 using namespace std;
 
@@ -91,6 +92,10 @@ public:
     {
         if (EverQuest->IsEnabled == false)
             return;
+
+        // Talent alignment reads Talent.dbc, SkillLineAbility.dbc and the spell store, none of which are ready when the config loads, so it builds here instead
+        if (EverQuest->ConfigSpellTalentAlignmentEnabled == true)
+            EverQuestTalentAlignment->Load();
 
         // The creature spawn tables aren't loaded yet when the kill spawn data loads with the config so respawn target spawn points resolve here instead
         EverQuest->ResolveKillSpawnRespawnTargetSpawnPoints();

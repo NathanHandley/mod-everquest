@@ -29,6 +29,17 @@ EverQuest.Enabled = True
 EverQuest.Map.RestrictPlayersToNorrath = False
 EverQuest.Map.MaxExpansionID = -1
 
+###################################################################################################
+#
+# 	EverQuest.Spell.TalentAlignmentEnabled
+#		Lets a learned WoW talent influence a converted EverQuest spell whenever the two are
+#       logically aligned.  This covers the spell modifier talents only. The talents that proc off
+#       "any spell of my class" are aligned by the converter through the spell_proc table instead.
+#	Default: True
+#
+###################################################################################################
+
+EverQuest.Spell.TalentAlignmentEnabled = True
 
 ###################################################################################################
 #
