@@ -486,6 +486,20 @@ EverQuest.Player.AddHearthstoneToNewCharacters = True
 
 ###################################################################################################
 #
+# 	EverQuest.Player.AddMasterTotemToShamans
+#		If true, shaman characters are given a Totem of the Elements (item 46978) on every login
+#		unless they are already carrying a master totem.  A master totem is any single item that
+#		satisfies the air, earth, fire and water totem requirements at the same time, so a shaman
+#		holding one can cast every totem spell without carrying the four individual totems.  The
+#		bank is not searched, only equipped items, the backpack and any equipped bags.
+#	Default: True (shamans are kept supplied with a master totem)
+#
+###################################################################################################
+
+EverQuest.Player.AddMasterTotemToShamans = True
+
+###################################################################################################
+#
 # 	EverQuest.Achievement.AdventurerLevel
 #		Level a character must reach while still holding the "Everquest Adventurer" aura to earn
 #		the matching feat of strength for their account.  The aura is granted at character

@@ -70,6 +70,7 @@ class WorldPacket;
 #define EQ_DEATHKNIGHT_RUNEFORGING_SPELL_ID         53428
 #define EQ_DEATHKNIGHT_RUNEFORGING_SKILL_ID         776
 #define EQ_HEARTHSTONE_ITEM_ID                      6948
+#define EQ_MASTER_TOTEM_ITEM_ID                     46978
 
 #define EQ_SPELLDUMMYTYPE_BINDSELF                  1
 #define EQ_SPELLDUMMYTYPE_BINDANY                   2
@@ -888,6 +889,7 @@ public:
     uint32 ConfigPlayerLevelCap;
     bool ConfigPlayerShieldArmorIgnoresBearFormMultiplier;
     bool ConfigPlayerAddHearthstoneToNewCharacters;
+    bool ConfigPlayerAddMasterTotemToShamans;
     uint32 ConfigAchievementAdventurerLevel;
     std::set<uint32> ConfigCrossClassIncludeSkillIDs;
 
@@ -929,7 +931,6 @@ public:
     unordered_map<uint8, unordered_map<uint8, EverQuestPlayerCreateInfo>> PlayerCreateInfoByRaceIDThenClassID;
     unordered_map<uint8, list<uint32>> PlayerAutoLearnSkillsByEQClassID;
     unordered_map<uint8, list<EverQuestAutoLearnSpell>> PlayerAutoLearnSpellsByClassID;
-    unordered_map<uint8, list<uint32>> PlayerAutoAddItemsByEQClassID;
     unordered_map<int, unordered_map<int, vector<Creature*>>> AllLoadedCreaturesByMapIDThenCreatureEntryID;
     unordered_map<uint32, EverQuestCreatureSpawnPoint> CreatureSpawnPointsByCreatureGUID;
     unordered_map<int, unordered_map<uint32, vector<Creature*>>> AllLoadedCreaturesByMapIDThenSpawnPointID;
@@ -1067,10 +1068,10 @@ public:
     void LoadAutoLearnSpellsData();
     const list<EverQuestAutoLearnSpell>& GetAutoLearnSpellsForClass(uint8 classID);
     void ApplyAutoLearnedClassSkillsAndSpells(Player* player);
-    void LoadAutoAddItemsData();
-    const list<uint32>& GetAutoAddItemsForClass(uint8 classID);
-    void ApplyAutoAddedClassItems(Player* player);
     void AddHearthstoneForNewCharacter(Player* player);
+    bool IsItemTemplateAMasterTotem(Player* player, ItemTemplate const* itemTemplate);
+    bool IsPlayerCarryingMasterTotem(Player* player);
+    void AddMasterTotemForShaman(Player* player);
     void GrantLegacyAchievementIfEligible(Player* player);
     void AddAdventurerAuraForNewCharacter(Player* player);
     bool RevokeAdventurerAuraIfPresent(Player* player);

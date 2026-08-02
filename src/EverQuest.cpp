@@ -113,6 +113,7 @@ EverQuestMod::EverQuestMod() :
     ConfigSecondaryExpPoolMaxPooled(1000000),
     ConfigPlayerLevelCap(0),
     ConfigPlayerAddHearthstoneToNewCharacters(true),
+    ConfigPlayerAddMasterTotemToShamans(true),
     ConfigAchievementAdventurerLevel(60),
     CrossClassExemptSpellIDsBuilt(false),
     IllusionMaxFaceIndex(0)
@@ -329,6 +330,9 @@ void EverQuestMod::LoadConfigurationFile()
 
     // Player Hearthstone
     ConfigPlayerAddHearthstoneToNewCharacters = sConfigMgr->GetOption<bool>("EverQuest.Player.AddHearthstoneToNewCharacters", true);
+
+    // Player Master Totem
+    ConfigPlayerAddMasterTotemToShamans = sConfigMgr->GetOption<bool>("EverQuest.Player.AddMasterTotemToShamans", true);
 
     // Achievements
     ConfigAchievementAdventurerLevel = sConfigMgr->GetOption<uint32>("EverQuest.Achievement.AdventurerLevel", 60);
@@ -3056,61 +3060,6 @@ void EverQuestMod::ApplyAutoLearnedClassSkillsAndSpells(Player* player)
         player->UpdateSkillsForLevel();
 }
 
-void EverQuestMod::LoadAutoAddItemsData()
-{
-    PlayerAutoAddItemsByEQClassID.clear();
-    QueryResult queryResult = WorldDatabase.Query("SELECT eqclass, item FROM mod_everquest_playerautoadditems;");
-    if (queryResult)
-    {
-        do
-        {
-            // Pull the data out
-            Field* fields = queryResult->Fetch();
-            uint8 classID = fields[0].Get<uint8>();
-            uint32 itemID = fields[1].Get<uint32>();
-            PlayerAutoAddItemsByEQClassID[classID].push_back(itemID);
-        } while (queryResult->NextRow());
-    }
-}
-
-const list<uint32>& EverQuestMod::GetAutoAddItemsForClass(uint8 classID)
-{
-    if (PlayerAutoAddItemsByEQClassID.find(classID) != PlayerAutoAddItemsByEQClassID.end())
-    {
-        return PlayerAutoAddItemsByEQClassID[classID];
-    }
-    else
-    {
-        static const list<uint32> returnEmpty;
-        return returnEmpty;
-    }
-}
-
-void EverQuestMod::ApplyAutoAddedClassItems(Player* player)
-{
-    const EverQuestClassMap classMap = GetClassMapForWOWClassID(player->getClass());
-    uint8 secondClassID = GetCurrentSecondEQClassForPlayer(player);
-    vector<uint8> autoAddEQClassIDs;
-    autoAddEQClassIDs.push_back(classMap.EQClassIDBase);
-    if (secondClassID != EQ_EQCLASS_NONE && secondClassID != classMap.EQClassIDBase)
-        autoAddEQClassIDs.push_back(secondClassID);
-
-    // Grant any items the player does not already have carried (equipped or inventory, ignoring the bank)
-    for (uint8 autoAddEQClassID : autoAddEQClassIDs)
-    {
-        for (auto itemID : GetAutoAddItemsForClass(autoAddEQClassID))
-        {
-            if (player->HasItemCount(itemID, 1, false) == true)
-                continue;
-
-            ItemPosCountVec destPosition;
-            InventoryResult invResult = player->CanStoreNewItem(NULL_BAG, NULL_SLOT, destPosition, itemID, 1);
-            if (invResult == EQUIP_ERR_OK)
-                player->StoreNewItem(destPosition, itemID, true);
-        }
-    }
-}
-
 void EverQuestMod::AddHearthstoneForNewCharacter(Player* player)
 {
     if (ConfigPlayerAddHearthstoneToNewCharacters == false)
@@ -3122,6 +3071,64 @@ void EverQuestMod::AddHearthstoneForNewCharacter(Player* player)
     InventoryResult invResult = player->CanStoreNewItem(NULL_BAG, NULL_SLOT, destPosition, EQ_HEARTHSTONE_ITEM_ID, 1);
     if (invResult == EQUIP_ERR_OK)
         player->StoreNewItem(destPosition, EQ_HEARTHSTONE_ITEM_ID, true);
+}
+
+bool EverQuestMod::IsItemTemplateAMasterTotem(Player* player, ItemTemplate const* itemTemplate)
+{
+    // A master totem is a single item that satisfies the air, earth, fire and water totem requirements all by itself
+    if (itemTemplate == nullptr || itemTemplate->TotemCategory == 0)
+        return false;
+    if (player->IsTotemCategoryCompatiableWith(itemTemplate, TC_EARTH_TOTEM) == false)
+        return false;
+    if (player->IsTotemCategoryCompatiableWith(itemTemplate, TC_AIR_TOTEM) == false)
+        return false;
+    if (player->IsTotemCategoryCompatiableWith(itemTemplate, TC_FIRE_TOTEM) == false)
+        return false;
+    if (player->IsTotemCategoryCompatiableWith(itemTemplate, TC_WATER_TOTEM) == false)
+        return false;
+    return true;
+}
+
+bool EverQuestMod::IsPlayerCarryingMasterTotem(Player* player)
+{
+    // Equipped items, equipped bag slots and the backpack (the bank is intentionally not searched)
+    for (uint8 slotIndex = EQUIPMENT_SLOT_START; slotIndex < INVENTORY_SLOT_ITEM_END; ++slotIndex)
+    {
+        Item* curItem = player->GetItemByPos(INVENTORY_SLOT_BAG_0, slotIndex);
+        if (curItem != nullptr && IsItemTemplateAMasterTotem(player, curItem->GetTemplate()) == true)
+            return true;
+    }
+
+    // Contents of any equipped bags
+    for (uint8 bagSlotIndex = INVENTORY_SLOT_BAG_START; bagSlotIndex < INVENTORY_SLOT_BAG_END; ++bagSlotIndex)
+    {
+        Bag* curBag = player->GetBagByPos(bagSlotIndex);
+        if (curBag == nullptr)
+            continue;
+        for (uint8 itemSlotIndex = 0; itemSlotIndex < curBag->GetBagSize(); ++itemSlotIndex)
+        {
+            Item* curItem = player->GetItemByPos(bagSlotIndex, itemSlotIndex);
+            if (curItem != nullptr && IsItemTemplateAMasterTotem(player, curItem->GetTemplate()) == true)
+                return true;
+        }
+    }
+
+    return false;
+}
+
+void EverQuestMod::AddMasterTotemForShaman(Player* player)
+{
+    if (ConfigPlayerAddMasterTotemToShamans == false)
+        return;
+    if (player->getClass() != CLASS_SHAMAN)
+        return;
+    if (IsPlayerCarryingMasterTotem(player) == true)
+        return;
+
+    ItemPosCountVec destPosition;
+    InventoryResult invResult = player->CanStoreNewItem(NULL_BAG, NULL_SLOT, destPosition, EQ_MASTER_TOTEM_ITEM_ID, 1);
+    if (invResult == EQUIP_ERR_OK)
+        player->StoreNewItem(destPosition, EQ_MASTER_TOTEM_ITEM_ID, true);
 }
 
 void EverQuestMod::GrantLegacyAchievementIfEligible(Player* player)

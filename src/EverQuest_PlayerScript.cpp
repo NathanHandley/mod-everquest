@@ -616,8 +616,8 @@ public:
         // Autolearning is based on EQ classes (primary and secondary)
         EverQuest->ApplyAutoLearnedClassSkillsAndSpells(player);
 
-        // Auto-add class items based on EQ classes (primary and secondary)
-        EverQuest->ApplyAutoAddedClassItems(player);
+        // Shamans need a master totem in order to cast their totem spells, so hand one out if they aren't carrying one
+        EverQuest->AddMasterTotemForShaman(player);
 
         // Grab EQ class info for the login summary message
         EverQuestClassMap classMap = EverQuest->GetClassMapForWOWClassID(player->getClass());
