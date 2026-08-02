@@ -270,22 +270,10 @@ public:
         return EverQuest->HandleLevelCapOnCanGiveLevel(player, newLevel);
     }
 
-    void OnPlayerEquip(Player* player, Item* it, uint8 /*bag*/, uint8 /*slot*/, bool /*update*/) override
+    void OnPlayerEquip(Player* player, Item* /*it*/, uint8 /*bag*/, uint8 /*slot*/, bool /*update*/) override
     {
         if (EverQuest->IsEnabled == false)
             return;
-
-        // Wearing non-conjured non-EQ equipment costs the player the adventurer aura
-        if (player->GetSession() == nullptr || player->GetSession()->PlayerLoading() == false)
-        {
-            ItemTemplate const* itemTemplate = it->GetTemplate();
-            if (itemTemplate != nullptr && itemTemplate->HasFlag(ITEM_FLAG_CONJURED) == false &&
-                (itemTemplate->ItemId < EverQuest->ConfigSystemItemTemplateIDMin || itemTemplate->ItemId > EverQuest->ConfigSystemItemTemplateIDMax))
-            {
-                if (EverQuest->RevokeAdventurerAuraIfPresent(player) == true && player->GetSession() != nullptr)
-                    ChatHandler(player->GetSession()).SendSysMessage("|cffFF0000You are no longer an Everquest Adventurer, as you equipped an item that is not from Everquest.|r");
-            }
-        }
 
         // Equipping gear while illusioned can change change gear under some situations
         EverQuest->RefreshIllusionGearDisplayForPlayer(player);
