@@ -108,6 +108,7 @@ EverQuestMod::EverQuestMod() :
     ConfigSecondaryExpPoolGainPercent(25.0f),
     ConfigSecondaryExpPoolMaxPooled(1000000),
     ConfigPlayerLevelCap(0),
+    ConfigPlayerAddHearthstoneToNewCharacters(true),
     ConfigAchievementAdventurerLevel(60),
     CrossClassExemptSpellIDsBuilt(false),
     IllusionMaxFaceIndex(0)
@@ -321,6 +322,9 @@ void EverQuestMod::LoadConfigurationFile()
 
     // Player Armor
     ConfigPlayerShieldArmorIgnoresBearFormMultiplier = sConfigMgr->GetOption<bool>("EverQuest.Player.ShieldArmorIgnoresBearFormMultiplier", true);
+
+    // Player Hearthstone
+    ConfigPlayerAddHearthstoneToNewCharacters = sConfigMgr->GetOption<bool>("EverQuest.Player.AddHearthstoneToNewCharacters", true);
 
     // Achievements
     ConfigAchievementAdventurerLevel = sConfigMgr->GetOption<uint32>("EverQuest.Achievement.AdventurerLevel", 60);
@@ -3101,6 +3105,19 @@ void EverQuestMod::ApplyAutoAddedClassItems(Player* player)
                 player->StoreNewItem(destPosition, itemID, true);
         }
     }
+}
+
+void EverQuestMod::AddHearthstoneForNewCharacter(Player* player)
+{
+    if (ConfigPlayerAddHearthstoneToNewCharacters == false)
+        return;
+    if (player->HasItemCount(EQ_HEARTHSTONE_ITEM_ID, 1, true) == true)
+        return;
+
+    ItemPosCountVec destPosition;
+    InventoryResult invResult = player->CanStoreNewItem(NULL_BAG, NULL_SLOT, destPosition, EQ_HEARTHSTONE_ITEM_ID, 1);
+    if (invResult == EQUIP_ERR_OK)
+        player->StoreNewItem(destPosition, EQ_HEARTHSTONE_ITEM_ID, true);
 }
 
 void EverQuestMod::GrantLegacyAchievementIfEligible(Player* player)

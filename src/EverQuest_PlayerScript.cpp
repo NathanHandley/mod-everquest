@@ -592,6 +592,9 @@ public:
 
             // Set EQ class
             EverQuest->SetInitialEQClassesForPlayer(player);
+
+            // Give a hearthstone if configured to do so, since the EQ start items don't include one
+            EverQuest->AddHearthstoneForNewCharacter(player);
         }
 
         // Give players the ability to see invis vs undead

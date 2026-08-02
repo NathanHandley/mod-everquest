@@ -68,6 +68,7 @@ class WorldPacket;
 #define EQ_DEATHKNIGHT_DEATHGATE_SPELL_ID           50977
 #define EQ_DEATHKNIGHT_RUNEFORGING_SPELL_ID         53428
 #define EQ_DEATHKNIGHT_RUNEFORGING_SKILL_ID         776
+#define EQ_HEARTHSTONE_ITEM_ID                      6948
 
 #define EQ_SPELLDUMMYTYPE_BINDSELF                  1
 #define EQ_SPELLDUMMYTYPE_BINDANY                   2
@@ -882,6 +883,7 @@ public:
     uint32 ConfigSecondaryExpPoolMaxPooled;
     uint32 ConfigPlayerLevelCap;
     bool ConfigPlayerShieldArmorIgnoresBearFormMultiplier;
+    bool ConfigPlayerAddHearthstoneToNewCharacters;
     uint32 ConfigAchievementAdventurerLevel;
     std::set<uint32> ConfigCrossClassIncludeSkillIDs;
 
@@ -1064,6 +1066,7 @@ public:
     void LoadAutoAddItemsData();
     const list<uint32>& GetAutoAddItemsForClass(uint8 classID);
     void ApplyAutoAddedClassItems(Player* player);
+    void AddHearthstoneForNewCharacter(Player* player);
     void GrantLegacyAchievementIfEligible(Player* player);
     void AddAdventurerAuraForNewCharacter(Player* player);
     bool RevokeAdventurerAuraIfPresent(Player* player);
