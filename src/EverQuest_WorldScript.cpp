@@ -86,6 +86,7 @@ public:
             return;
 
         EverQuest->UpdateRestrictedMapPlayerCheck(diff);
+        EverQuest->ProcessPendingEquipmentStorageTransactions();
     }
 
     void OnStartup() override

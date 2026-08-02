@@ -19,6 +19,7 @@
 
 #include "Common.h"
 #include "DataMap.h"
+#include "DatabaseEnv.h"
 #include "GameObject.h"
 #include "ObjectGuid.h"
 #include "CreatureData.h"
@@ -795,6 +796,9 @@ class EverQuestMod
 private:
     EverQuestMod();
     unordered_map<ObjectGuid, EverQuestPlayerControllerData> ActivePlayerClassControllerDataByGUID;
+    unordered_map<ObjectGuid, uint64> PendingEquipmentStorageCommitMSByGUID;
+    std::mutex PendingStorageTransactionMutex;
+    unordered_map<ObjectGuid, TransactionCallback> PendingStorageTransactionCallbacksByGUID;
 
 public:
     bool IsEnabled;
@@ -1219,6 +1223,19 @@ public:
     void UpdatePlayerControllerForClassChange(Player* player, uint8 newEQClassID, CharacterDatabaseTransaction& transaction);
 
     std::map<uint8, EverQuestPlayerEquipedItemData> GetVisibleItemsBySlotForPlayerClass(Player* player, uint8 classID);
+    bool IsEQClassValidEquipmentStorageTargetForPlayer(Player* player, uint8 eqClassID);
+    bool IsEquipmentStorageCommitPendingForPlayer(Player* player);
+    void SetEquipmentStorageCommitPendingForPlayerGUID(ObjectGuid playerGUID, bool pending);
+    void QueuePendingEquipmentStorageTransaction(Player* player, uint8 eqClassID, CharacterDatabaseTransaction& transaction);
+    void ProcessPendingEquipmentStorageTransactions();
+    void WaitForPendingEquipmentStorageCommitForPlayer(ObjectGuid playerGUID);
+    bool IsItemEQClassAllowedForPlayerSecondaryClass(Player* player, uint8 eqClassID, uint32 itemTemplateID);
+    Item* LoadDetachedItemForPlayer(uint32 itemGUIDCounter, Player* player);
+    bool EquipItemIntoSecondaryClassStorage(Player* player, uint8 eqClassID, uint8 clientBagID, uint8 clientSlotID, uint8 equipSlot, uint32 expectedItemTemplateID, std::string& errorTextOut);
+    bool RemoveItemFromSecondaryClassStorage(Player* player, uint8 eqClassID, uint8 equipSlot, uint8 clientBagID, uint8 clientSlotID, bool useSpecificBagPosition, std::string& errorTextOut);
+    bool MoveItemWithinSecondaryClassStorage(Player* player, uint8 eqClassID, uint8 fromEquipSlot, uint8 toEquipSlot, std::string& errorTextOut);
+    bool SwapSecondaryClassStorageItemWithLiveEquipment(Player* player, uint8 eqClassID, uint8 storageEquipSlot, uint8 liveEquipSlot, std::string& errorTextOut);
+    void SendClassEquipmentAddonMessageToPlayer(Player* player, uint8 eqClassID);
     bool PerformClassSwitch(Player* player);
     bool PerformPlayerDelete(ObjectGuid guid);
 };

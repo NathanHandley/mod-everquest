@@ -14,6 +14,7 @@
 //  You should have received a copy of the GNU General Public License
 //  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+#include "Bag.h"
 #include "Chat.h"
 #include "GameEventMgr.h"
 #include "Group.h"
@@ -46,8 +47,11 @@
 #include "EverQuest.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
+#include <functional>
 #include <random>
+#include <thread>
 
 using namespace std;
 
@@ -6556,6 +6560,9 @@ bool EverQuestMod::PerformClassSwitch(Player* player)
 
         // Give blank action mappings
         transaction->Append("DELETE FROM `character_action` WHERE guid = {}", player->GetGUID().GetCounter());
+
+        // Pull in any equipment staged for this class through the Secondary Class Equipment window (a class with no saved character data can still have stored equipment rows)
+        transaction->Append("INSERT IGNORE INTO `character_inventory` (`guid`, `bag`, `slot`, `item`) SELECT `guid`, `bag`, `slot`, `item` FROM mod_everquest_character_class_inventory WHERE guid = {} AND eqclass = {}", player->GetGUID().GetCounter(), nextSecondaryEQClass);
     }
     // Existing
     else
@@ -6605,6 +6612,11 @@ bool EverQuestMod::PerformPlayerDelete(ObjectGuid guid)
     {
         std::lock_guard<std::mutex> lock(RuntimeStateMutex);
         ActivePlayerClassControllerDataByGUID.erase(guid);
+        PendingEquipmentStorageCommitMSByGUID.erase(guid);
+    }
+    {
+        std::lock_guard<std::mutex> lock(PendingStorageTransactionMutex);
+        PendingStorageTransactionCallbacksByGUID.erase(guid);
     }
     return true;
 }
@@ -6714,6 +6726,690 @@ void EverQuestMod::SendExpPoolAddonMessageToPlayer(Player* player, uint32 gained
     std::string addonMessage = "EQEXPPOOL\t" + std::to_string(gainedExp) + "|"
         + std::to_string(GetSecondaryExpPoolForPlayer(player)) + "|"
         + std::to_string(ConfigSecondaryExpPoolMaxPooled);
+    WorldPacket data;
+    ChatHandler::BuildChatPacket(data, CHAT_MSG_SYSTEM, LANG_ADDON, nullptr, nullptr, addonMessage);
+    player->SendDirectMessage(&data);
+}
+
+static bool CanInventoryTypeGoIntoEquipSlot(uint32 inventoryType, uint8 equipSlot)
+{
+    switch (inventoryType)
+    {
+    case INVTYPE_HEAD:              return equipSlot == EQUIPMENT_SLOT_HEAD;
+    case INVTYPE_NECK:              return equipSlot == EQUIPMENT_SLOT_NECK;
+    case INVTYPE_SHOULDERS:         return equipSlot == EQUIPMENT_SLOT_SHOULDERS;
+    case INVTYPE_BODY:              return equipSlot == EQUIPMENT_SLOT_BODY;
+    case INVTYPE_CHEST:             return equipSlot == EQUIPMENT_SLOT_CHEST;
+    case INVTYPE_ROBE:              return equipSlot == EQUIPMENT_SLOT_CHEST;
+    case INVTYPE_WAIST:             return equipSlot == EQUIPMENT_SLOT_WAIST;
+    case INVTYPE_LEGS:              return equipSlot == EQUIPMENT_SLOT_LEGS;
+    case INVTYPE_FEET:              return equipSlot == EQUIPMENT_SLOT_FEET;
+    case INVTYPE_WRISTS:            return equipSlot == EQUIPMENT_SLOT_WRISTS;
+    case INVTYPE_HANDS:             return equipSlot == EQUIPMENT_SLOT_HANDS;
+    case INVTYPE_FINGER:            return equipSlot == EQUIPMENT_SLOT_FINGER1 || equipSlot == EQUIPMENT_SLOT_FINGER2;
+    case INVTYPE_TRINKET:           return equipSlot == EQUIPMENT_SLOT_TRINKET1 || equipSlot == EQUIPMENT_SLOT_TRINKET2;
+    case INVTYPE_CLOAK:             return equipSlot == EQUIPMENT_SLOT_BACK;
+    case INVTYPE_WEAPON:            return equipSlot == EQUIPMENT_SLOT_MAINHAND || equipSlot == EQUIPMENT_SLOT_OFFHAND;
+    case INVTYPE_2HWEAPON:          return equipSlot == EQUIPMENT_SLOT_MAINHAND;
+    case INVTYPE_WEAPONMAINHAND:    return equipSlot == EQUIPMENT_SLOT_MAINHAND;
+    case INVTYPE_WEAPONOFFHAND:     return equipSlot == EQUIPMENT_SLOT_OFFHAND;
+    case INVTYPE_SHIELD:            return equipSlot == EQUIPMENT_SLOT_OFFHAND;
+    case INVTYPE_HOLDABLE:          return equipSlot == EQUIPMENT_SLOT_OFFHAND;
+    case INVTYPE_RANGED:            return equipSlot == EQUIPMENT_SLOT_RANGED;
+    case INVTYPE_RANGEDRIGHT:       return equipSlot == EQUIPMENT_SLOT_RANGED;
+    case INVTYPE_THROWN:            return equipSlot == EQUIPMENT_SLOT_RANGED;
+    case INVTYPE_RELIC:             return equipSlot == EQUIPMENT_SLOT_RANGED;
+    case INVTYPE_TABARD:            return equipSlot == EQUIPMENT_SLOT_TABARD;
+    default:                        return false;
+    }
+}
+
+static bool ConvertClientBagPositionToServer(uint8 clientBagID, uint8 clientSlotID, uint8& serverBagOut, uint8& serverSlotOut)
+{
+    // Backpack with 1-based slots
+    if (clientBagID == 0)
+    {
+        if (clientSlotID < 1 || clientSlotID > (INVENTORY_SLOT_ITEM_END - INVENTORY_SLOT_ITEM_START))
+            return false;
+        serverBagOut = INVENTORY_SLOT_BAG_0;
+        serverSlotOut = INVENTORY_SLOT_ITEM_START + (clientSlotID - 1);
+        return true;
+    }
+    // Bags 1-4 with 1 based slots
+    else if (clientBagID <= 4)
+    {
+        if (clientSlotID < 1 || clientSlotID > MAX_BAG_SIZE)
+            return false;
+        serverBagOut = INVENTORY_SLOT_BAG_START + (clientBagID - 1);
+        serverSlotOut = clientSlotID - 1;
+        return true;
+    }
+    return false;
+}
+
+bool EverQuestMod::IsEQClassValidEquipmentStorageTargetForPlayer(Player* player, uint8 eqClassID)
+{
+    if (eqClassID > EQ_EQCLASS_ENCHANTER)
+        return false;
+    if (eqClassID == GetCurrentSecondEQClassForPlayer(player))
+        return false;
+    if (eqClassID == EQ_EQCLASS_NONE)
+        return true;
+    const EverQuestClassMap classMap = GetClassMapForWOWClassID(player->getClass());
+    uint32 classBit = 1u << (eqClassID - 1);
+    return (classMap.EQClassIDEligibleSecondMask & classBit) != 0;
+}
+
+static const uint64 EQ_EQUIPSTORAGE_PENDING_EXPIRY_MS = 10000;
+
+bool EverQuestMod::IsEquipmentStorageCommitPendingForPlayer(Player* player)
+{
+    std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+    auto pendingItr = PendingEquipmentStorageCommitMSByGUID.find(player->GetGUID());
+    if (pendingItr == PendingEquipmentStorageCommitMSByGUID.end())
+        return false;
+    uint64 nowMS = uint64(GameTime::GetGameTimeMS().count());
+    if (nowMS - pendingItr->second > EQ_EQUIPSTORAGE_PENDING_EXPIRY_MS)
+    {
+        PendingEquipmentStorageCommitMSByGUID.erase(pendingItr);
+        return false;
+    }
+    return true;
+}
+
+void EverQuestMod::SetEquipmentStorageCommitPendingForPlayerGUID(ObjectGuid playerGUID, bool pending)
+{
+    std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+    if (pending == true)
+        PendingEquipmentStorageCommitMSByGUID[playerGUID] = uint64(GameTime::GetGameTimeMS().count());
+    else
+        PendingEquipmentStorageCommitMSByGUID.erase(playerGUID);
+}
+
+bool EverQuestMod::IsItemEQClassAllowedForPlayerSecondaryClass(Player* player, uint8 eqClassID, uint32 itemTemplateID)
+{
+    // No EQ template data = allowed
+    auto itemTemplateItr = ItemTemplatesByEntryID.find(itemTemplateID);
+    if (itemTemplateItr == ItemTemplatesByEntryID.end())
+        return true;
+
+    // Zero mask = all
+    uint32 allowedEQClassMask = itemTemplateItr->second.AllowedEQClassMask;
+    if (allowedEQClassMask == 0)
+        return true;
+
+    // Compare base class (no class map row means the shift below would be undefined, so allow the item)
+    const EverQuestClassMap classMap = GetClassMapForWOWClassID(player->getClass());
+    if (classMap.EQClassIDBase == 0)
+        return true;
+    uint32 baseEQClassBit = 1u << (classMap.EQClassIDBase - 1);
+    if ((allowedEQClassMask & baseEQClassBit) != 0)
+        return true;
+
+    // Passed secondary class
+    if (eqClassID == EQ_EQCLASS_NONE)
+        return false;
+    uint32 secondEQClassBit = 1u << (eqClassID - 1);
+    return (allowedEQClassMask & secondEQClassBit) != 0;
+}
+
+Item* EverQuestMod::LoadDetachedItemForPlayer(uint32 itemGUIDCounter, Player* player)
+{
+    // Never create a second live object for an item the player already holds
+    if (player->GetItemByGuid(ObjectGuid::Create<HighGuid::Item>(itemGUIDCounter)) != nullptr)
+    {
+        LOG_ERROR("module.EverQuest", "EverQuestMod LoadDetachedItemForPlayer refused item guid {} for player guid {} because that item is already live on the player", itemGUIDCounter, player->GetGUID().GetCounter());
+        return nullptr;
+    }
+
+    QueryResult queryResult = CharacterDatabase.Query("SELECT creatorGuid, giftCreatorGuid, count, duration, charges, flags, enchantments, randomPropertyId, durability, playedTime, text, itemEntry FROM item_instance WHERE guid = {}", itemGUIDCounter);
+    if (!queryResult)
+        return nullptr;
+    Field* fields = queryResult->Fetch();
+    uint32 itemEntry = fields[11].Get<uint32>();
+    ItemTemplate const* itemTemplate = sObjectMgr->GetItemTemplate(itemEntry);
+    if (itemTemplate == nullptr)
+        return nullptr;
+    Item* item = NewItemOrBag(itemTemplate);
+    if (item->LoadFromDB(itemGUIDCounter, player->GetGUID(), fields, itemEntry) == false)
+    {
+        delete item;
+        return nullptr;
+    }
+    return item;
+}
+
+static void SendClassEquipmentAddonMessageAfterCommit(ObjectGuid playerGUID, uint8 eqClassID, bool /*commitSucceeded*/)
+{
+    // The commit landed (or definitively failed), so the next storage mutation may proceed
+    EverQuest->SetEquipmentStorageCommitPendingForPlayerGUID(playerGUID, false);
+
+    Player* player = ObjectAccessor::FindConnectedPlayer(playerGUID);
+    if (player != nullptr)
+        EverQuest->SendClassEquipmentAddonMessageToPlayer(player, eqClassID);
+}
+
+void EverQuestMod::QueuePendingEquipmentStorageTransaction(Player* player, uint8 eqClassID, CharacterDatabaseTransaction& transaction)
+{
+    SetEquipmentStorageCommitPendingForPlayerGUID(player->GetGUID(), true);
+    TransactionCallback callback = CharacterDatabase.AsyncCommitTransaction(transaction);
+    callback.AfterComplete(std::bind(&SendClassEquipmentAddonMessageAfterCommit, player->GetGUID(), eqClassID, std::placeholders::_1));
+
+    std::lock_guard<std::mutex> lock(PendingStorageTransactionMutex);
+    PendingStorageTransactionCallbacksByGUID.erase(player->GetGUID());
+    PendingStorageTransactionCallbacksByGUID.emplace(player->GetGUID(), std::move(callback));
+}
+
+void EverQuestMod::ProcessPendingEquipmentStorageTransactions()
+{
+    std::lock_guard<std::mutex> lock(PendingStorageTransactionMutex);
+    for (auto callbackItr = PendingStorageTransactionCallbacksByGUID.begin(); callbackItr != PendingStorageTransactionCallbacksByGUID.end();)
+    {
+        if (callbackItr->second.InvokeIfReady() == true)
+            callbackItr = PendingStorageTransactionCallbacksByGUID.erase(callbackItr);
+        else
+            ++callbackItr;
+    }
+}
+
+void EverQuestMod::WaitForPendingEquipmentStorageCommitForPlayer(ObjectGuid playerGUID)
+{
+    for (uint32 waitedMS = 0; waitedMS < 5000; ++waitedMS)
+    {
+        {
+            std::lock_guard<std::mutex> lock(PendingStorageTransactionMutex);
+            auto callbackItr = PendingStorageTransactionCallbacksByGUID.find(playerGUID);
+            if (callbackItr == PendingStorageTransactionCallbacksByGUID.end())
+                return;
+            if (callbackItr->second.InvokeIfReady() == true)
+            {
+                PendingStorageTransactionCallbacksByGUID.erase(callbackItr);
+                return;
+            }
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    LOG_ERROR("module.EverQuest", "EverQuestMod Timed out waiting on a pending equipment storage commit for player guid {}", playerGUID.GetCounter());
+}
+
+bool EverQuestMod::EquipItemIntoSecondaryClassStorage(Player* player, uint8 eqClassID, uint8 clientBagID, uint8 clientSlotID, uint8 equipSlot, uint32 expectedItemTemplateID, std::string& errorTextOut)
+{
+    if (IsEQClassValidEquipmentStorageTargetForPlayer(player, eqClassID) == false)
+    {
+        errorTextOut = "That is not one of your inactive secondary EQ classes.";
+        return false;
+    }
+    if (IsEquipmentStorageCommitPendingForPlayer(player) == true)
+    {
+        errorTextOut = "Your previous equipment change is still processing, try again in a moment.";
+        return false;
+    }
+    if (equipSlot > EQUIPMENT_SLOT_TABARD)
+    {
+        errorTextOut = "That is not a valid equipment slot.";
+        return false;
+    }
+
+    // Convert the client bag position into server terms
+    uint8 serverBag;
+    uint8 serverSlot;
+    if (ConvertClientBagPositionToServer(clientBagID, clientSlotID, serverBag, serverSlot) == false)
+    {
+        errorTextOut = "Only items in your bags can be stored.";
+        return false;
+    }
+
+    Item* item = player->GetItemByPos(serverBag, serverSlot);
+    if (item == nullptr || item->GetEntry() != expectedItemTemplateID)
+    {
+        errorTextOut = "That item could not be found in your bags.";
+        return false;
+    }
+    if (item->IsNotEmptyBag() == true)
+    {
+        errorTextOut = "That item cannot be stored.";
+        return false;
+    }
+    ItemTemplate const* itemTemplate = item->GetTemplate();
+    if (CanInventoryTypeGoIntoEquipSlot(itemTemplate->InventoryType, equipSlot) == false)
+    {
+        errorTextOut = "That item cannot go into that equipment slot.";
+        return false;
+    }
+    if (IsItemEQClassAllowedForPlayerSecondaryClass(player, eqClassID, item->GetEntry()) == false)
+    {
+        errorTextOut = "That item cannot be used by a " + GetEQClassStringFromID(eqClassID) + ".";
+        return false;
+    }
+
+    uint32 playerGUIDCounter = player->GetGUID().GetCounter();
+
+    // A stored two-hander demands an empty off hand and the reverse, since the restore-at-login path skips equip validation
+    if (equipSlot == EQUIPMENT_SLOT_MAINHAND && itemTemplate->InventoryType == INVTYPE_2HWEAPON)
+    {
+        QueryResult offHandResult = CharacterDatabase.Query("SELECT item FROM mod_everquest_character_class_inventory WHERE guid = {} AND eqclass = {} AND bag = 0 AND slot = {}", playerGUIDCounter, eqClassID, EQUIPMENT_SLOT_OFFHAND);
+        if (offHandResult)
+        {
+            errorTextOut = "Remove the stored off hand item before storing a two-handed weapon.";
+            return false;
+        }
+    }
+    if (equipSlot == EQUIPMENT_SLOT_OFFHAND)
+    {
+        QueryResult mainHandResult = CharacterDatabase.Query("SELECT II.itemEntry FROM mod_everquest_character_class_inventory CI INNER JOIN item_instance II ON II.guid = CI.item WHERE CI.guid = {} AND CI.eqclass = {} AND CI.bag = 0 AND CI.slot = {}", playerGUIDCounter, eqClassID, EQUIPMENT_SLOT_MAINHAND);
+        if (mainHandResult)
+        {
+            ItemTemplate const* mainHandTemplate = sObjectMgr->GetItemTemplate(mainHandResult->Fetch()[0].Get<uint32>());
+            if (mainHandTemplate != nullptr && mainHandTemplate->InventoryType == INVTYPE_2HWEAPON)
+            {
+                errorTextOut = "Remove the stored two-handed weapon before storing an off hand item.";
+                return false;
+            }
+        }
+    }
+
+    // Pre-load any stored occupant of the target slot so the two can swap
+    Item* occupantItem = nullptr;
+    QueryResult occupantResult = CharacterDatabase.Query("SELECT item FROM mod_everquest_character_class_inventory WHERE guid = {} AND eqclass = {} AND bag = 0 AND slot = {}", playerGUIDCounter, eqClassID, equipSlot);
+    if (occupantResult)
+    {
+        occupantItem = LoadDetachedItemForPlayer(occupantResult->Fetch()[0].Get<uint32>(), player);
+        if (occupantItem == nullptr)
+        {
+            errorTextOut = "The stored item in that slot could not be loaded.";
+            return false;
+        }
+    }
+
+    // Pull the incoming item out of the live inventory, freeing its bag position for the displaced occupant
+    uint32 itemGUIDCounter = item->GetGUID().GetCounter();
+    player->MoveItemFromInventory(serverBag, serverSlot, true);
+
+    // Make sure the displaced occupant has a home before committing to anything
+    ItemPosCountVec occupantDest;
+    if (occupantItem != nullptr)
+    {
+        InventoryResult storeResult = player->CanStoreItem(serverBag, serverSlot, occupantDest, occupantItem, false);
+        if (storeResult != EQUIP_ERR_OK)
+            storeResult = player->CanStoreItem(NULL_BAG, NULL_SLOT, occupantDest, occupantItem, false);
+        if (storeResult != EQUIP_ERR_OK)
+        {
+            // Undo the removal (the source slot was just freed, so this cannot fail in practice)
+            ItemPosCountVec revertDest;
+            if (player->CanStoreItem(serverBag, serverSlot, revertDest, item, false) == EQUIP_ERR_OK)
+            {
+                item->SetState(ITEM_UNCHANGED);
+                player->MoveItemToInventory(revertDest, item, true);
+            }
+            else
+                LOG_ERROR("module.EverQuest", "EverQuestMod EquipItemIntoSecondaryClassStorage could not revert item {} for guid {} after a failed swap", itemGUIDCounter, playerGUIDCounter);
+            delete occupantItem;
+            errorTextOut = "You do not have enough bag space to swap that item.";
+            return false;
+        }
+    }
+
+    CharacterDatabaseTransaction transaction = CharacterDatabase.BeginTransaction();
+
+    // Persist the incoming item's latest state and detach it from the live inventory rows
+    item->FSetState(ITEM_NEW);
+    item->SaveToDB(transaction);
+    Item::DeleteFromInventoryDB(transaction, itemGUIDCounter);
+
+    // A live item that was restored from storage at a past class switch still has its old row under the now-active class (the switch-in restore copies rows without deleting them)
+    transaction->Append("DELETE FROM mod_everquest_character_class_inventory WHERE item = {}", itemGUIDCounter);
+    transaction->Append("DELETE FROM mod_everquest_character_class_inventory WHERE guid = {} AND eqclass = {} AND bag = 0 AND slot = {}", playerGUIDCounter, eqClassID, equipSlot);
+    transaction->Append("INSERT INTO mod_everquest_character_class_inventory (guid, class, eqclass, bag, slot, item) VALUES ({}, {}, {}, 0, {}, {})", playerGUIDCounter, player->getClass(), eqClassID, equipSlot, itemGUIDCounter);
+
+    // Hand the displaced occupant to the player
+    if (occupantItem != nullptr)
+    {
+        occupantItem->SetState(ITEM_UNCHANGED);
+        player->MoveItemToInventory(occupantDest, occupantItem, true);
+    }
+
+    player->SaveInventoryAndGoldToDB(transaction);
+    QueuePendingEquipmentStorageTransaction(player, eqClassID, transaction);
+
+    delete item;
+    return true;
+}
+
+bool EverQuestMod::RemoveItemFromSecondaryClassStorage(Player* player, uint8 eqClassID, uint8 equipSlot, uint8 clientBagID, uint8 clientSlotID, bool useSpecificBagPosition, std::string& errorTextOut)
+{
+    if (IsEQClassValidEquipmentStorageTargetForPlayer(player, eqClassID) == false)
+    {
+        errorTextOut = "That is not one of your inactive secondary EQ classes.";
+        return false;
+    }
+    if (IsEquipmentStorageCommitPendingForPlayer(player) == true)
+    {
+        errorTextOut = "Your previous equipment change is still processing, try again in a moment.";
+        return false;
+    }
+    if (equipSlot > EQUIPMENT_SLOT_TABARD)
+    {
+        errorTextOut = "That is not a valid equipment slot.";
+        return false;
+    }
+
+    uint32 playerGUIDCounter = player->GetGUID().GetCounter();
+    QueryResult storedResult = CharacterDatabase.Query("SELECT item FROM mod_everquest_character_class_inventory WHERE guid = {} AND eqclass = {} AND bag = 0 AND slot = {}", playerGUIDCounter, eqClassID, equipSlot);
+    if (!storedResult)
+    {
+        errorTextOut = "There is no stored item in that slot.";
+        return false;
+    }
+    uint32 itemGUIDCounter = storedResult->Fetch()[0].Get<uint32>();
+    Item* item = LoadDetachedItemForPlayer(itemGUIDCounter, player);
+    if (item == nullptr)
+    {
+        errorTextOut = "The stored item could not be loaded.";
+        return false;
+    }
+
+    ItemPosCountVec dest;
+    if (useSpecificBagPosition == true)
+    {
+        uint8 serverBag;
+        uint8 serverSlot;
+        if (ConvertClientBagPositionToServer(clientBagID, clientSlotID, serverBag, serverSlot) == false)
+        {
+            delete item;
+            errorTextOut = "That is not a valid bag slot.";
+            return false;
+        }
+        if (player->GetItemByPos(serverBag, serverSlot) != nullptr)
+        {
+            delete item;
+            errorTextOut = "That bag slot is occupied.";
+            return false;
+        }
+        if (player->CanStoreItem(serverBag, serverSlot, dest, item, false) != EQUIP_ERR_OK)
+        {
+            delete item;
+            errorTextOut = "The item cannot go in that bag slot.";
+            return false;
+        }
+    }
+    else if (player->CanStoreItem(NULL_BAG, NULL_SLOT, dest, item, false) != EQUIP_ERR_OK)
+    {
+        delete item;
+        errorTextOut = "You do not have enough bag space.";
+        return false;
+    }
+
+    CharacterDatabaseTransaction transaction = CharacterDatabase.BeginTransaction();
+    transaction->Append("DELETE FROM mod_everquest_character_class_inventory WHERE guid = {} AND eqclass = {} AND bag = 0 AND slot = {} AND item = {}", playerGUIDCounter, eqClassID, equipSlot, itemGUIDCounter);
+    item->SetState(ITEM_UNCHANGED);
+    player->MoveItemToInventory(dest, item, true);
+    player->SaveInventoryAndGoldToDB(transaction);
+
+    QueuePendingEquipmentStorageTransaction(player, eqClassID, transaction);
+    return true;
+}
+
+bool EverQuestMod::MoveItemWithinSecondaryClassStorage(Player* player, uint8 eqClassID, uint8 fromEquipSlot, uint8 toEquipSlot, std::string& errorTextOut)
+{
+    if (IsEQClassValidEquipmentStorageTargetForPlayer(player, eqClassID) == false)
+    {
+        errorTextOut = "That is not one of your inactive secondary EQ classes.";
+        return false;
+    }
+    if (IsEquipmentStorageCommitPendingForPlayer(player) == true)
+    {
+        errorTextOut = "Your previous equipment change is still processing, try again in a moment.";
+        return false;
+    }
+    if (fromEquipSlot > EQUIPMENT_SLOT_TABARD || toEquipSlot > EQUIPMENT_SLOT_TABARD || fromEquipSlot == toEquipSlot)
+    {
+        errorTextOut = "That is not a valid equipment slot.";
+        return false;
+    }
+
+    // Pull the stored items in both slots (from must exist, to may be empty)
+    uint32 playerGUIDCounter = player->GetGUID().GetCounter();
+    uint32 fromItemGUIDCounter = 0;
+    uint32 toItemGUIDCounter = 0;
+    ItemTemplate const* fromItemTemplate = nullptr;
+    ItemTemplate const* toItemTemplate = nullptr;
+    QueryResult storedResult = CharacterDatabase.Query("SELECT CI.`slot`, CI.`item`, II.`itemEntry` FROM `mod_everquest_character_class_inventory` CI INNER JOIN `item_instance` II ON II.guid = CI.item WHERE CI.`guid` = {} AND CI.`eqclass` = {} AND CI.`bag` = 0 AND CI.`slot` IN ({}, {})", playerGUIDCounter, eqClassID, fromEquipSlot, toEquipSlot);
+    if (storedResult)
+    {
+        do
+        {
+            Field* fields = storedResult->Fetch();
+            uint8 slot = fields[0].Get<uint8>();
+            if (slot == fromEquipSlot)
+            {
+                fromItemGUIDCounter = fields[1].Get<uint32>();
+                fromItemTemplate = sObjectMgr->GetItemTemplate(fields[2].Get<uint32>());
+            }
+            else
+            {
+                toItemGUIDCounter = fields[1].Get<uint32>();
+                toItemTemplate = sObjectMgr->GetItemTemplate(fields[2].Get<uint32>());
+            }
+        } while (storedResult->NextRow());
+    }
+    if (fromItemGUIDCounter == 0 || fromItemTemplate == nullptr)
+    {
+        errorTextOut = "There is no stored item in that slot.";
+        return false;
+    }
+    if (CanInventoryTypeGoIntoEquipSlot(fromItemTemplate->InventoryType, toEquipSlot) == false)
+    {
+        errorTextOut = "That item cannot go into that equipment slot.";
+        return false;
+    }
+    if (toItemGUIDCounter != 0 && (toItemTemplate == nullptr || CanInventoryTypeGoIntoEquipSlot(toItemTemplate->InventoryType, fromEquipSlot) == false))
+    {
+        errorTextOut = "The stored items cannot swap slots.";
+        return false;
+    }
+
+    // Simulate the resulting main/off hand pair so a two-hander never ends up alongside an off hand item
+    if (fromEquipSlot == EQUIPMENT_SLOT_MAINHAND || fromEquipSlot == EQUIPMENT_SLOT_OFFHAND || toEquipSlot == EQUIPMENT_SLOT_MAINHAND || toEquipSlot == EQUIPMENT_SLOT_OFFHAND)
+    {
+        ItemTemplate const* resultingTemplates[2] = { nullptr, nullptr }; // 0 = main hand, 1 = off hand
+        QueryResult handsResult = CharacterDatabase.Query("SELECT CI.`slot`, II.`itemEntry` FROM `mod_everquest_character_class_inventory` CI INNER JOIN `item_instance` II ON II.guid = CI.item WHERE CI.`guid` = {} AND CI.`eqclass` = {} AND CI.`bag` = 0 AND CI.`slot` IN ({}, {})", playerGUIDCounter, eqClassID, EQUIPMENT_SLOT_MAINHAND, EQUIPMENT_SLOT_OFFHAND);
+        if (handsResult)
+        {
+            do
+            {
+                Field* fields = handsResult->Fetch();
+                resultingTemplates[fields[0].Get<uint8>() == EQUIPMENT_SLOT_MAINHAND ? 0 : 1] = sObjectMgr->GetItemTemplate(fields[1].Get<uint32>());
+            } while (handsResult->NextRow());
+        }
+        if (fromEquipSlot == EQUIPMENT_SLOT_MAINHAND)
+            resultingTemplates[0] = toItemTemplate; // The displaced item (or nothing) swaps back into the vacated slot
+        else if (fromEquipSlot == EQUIPMENT_SLOT_OFFHAND)
+            resultingTemplates[1] = toItemTemplate;
+        if (toEquipSlot == EQUIPMENT_SLOT_MAINHAND)
+            resultingTemplates[0] = fromItemTemplate;
+        else if (toEquipSlot == EQUIPMENT_SLOT_OFFHAND)
+            resultingTemplates[1] = fromItemTemplate;
+        if (resultingTemplates[0] != nullptr && resultingTemplates[0]->InventoryType == INVTYPE_2HWEAPON && resultingTemplates[1] != nullptr)
+        {
+            errorTextOut = "A stored two-handed weapon cannot be paired with an off hand item.";
+            return false;
+        }
+    }
+
+    CharacterDatabaseTransaction transaction = CharacterDatabase.BeginTransaction();
+    transaction->Append("DELETE FROM mod_everquest_character_class_inventory WHERE guid = {} AND eqclass = {} AND bag = 0 AND slot IN ({}, {})", playerGUIDCounter, eqClassID, fromEquipSlot, toEquipSlot);
+    transaction->Append("INSERT INTO mod_everquest_character_class_inventory (guid, class, eqclass, bag, slot, item) VALUES ({}, {}, {}, 0, {}, {})", playerGUIDCounter, player->getClass(), eqClassID, toEquipSlot, fromItemGUIDCounter);
+    if (toItemGUIDCounter != 0)
+        transaction->Append("INSERT INTO mod_everquest_character_class_inventory (guid, class, eqclass, bag, slot, item) VALUES ({}, {}, {}, 0, {}, {})", playerGUIDCounter, player->getClass(), eqClassID, fromEquipSlot, toItemGUIDCounter);
+
+    CharacterDatabase.DirectCommitTransaction(transaction);
+    return true;
+}
+
+bool EverQuestMod::SwapSecondaryClassStorageItemWithLiveEquipment(Player* player, uint8 eqClassID, uint8 storageEquipSlot, uint8 liveEquipSlot, std::string& errorTextOut)
+{
+    if (IsEQClassValidEquipmentStorageTargetForPlayer(player, eqClassID) == false)
+    {
+        errorTextOut = "That is not one of your inactive secondary EQ classes.";
+        return false;
+    }
+    if (IsEquipmentStorageCommitPendingForPlayer(player) == true)
+    {
+        errorTextOut = "Your previous equipment change is still processing, try again in a moment.";
+        return false;
+    }
+    if (storageEquipSlot > EQUIPMENT_SLOT_TABARD || liveEquipSlot > EQUIPMENT_SLOT_TABARD)
+    {
+        errorTextOut = "That is not a valid equipment slot.";
+        return false;
+    }
+
+    uint32 playerGUIDCounter = player->GetGUID().GetCounter();
+
+    uint32 storedItemGUIDCounter = 0;
+    QueryResult storedResult = CharacterDatabase.Query("SELECT item FROM mod_everquest_character_class_inventory WHERE guid = {} AND eqclass = {} AND bag = 0 AND slot = {}", playerGUIDCounter, eqClassID, storageEquipSlot);
+    if (storedResult)
+        storedItemGUIDCounter = storedResult->Fetch()[0].Get<uint32>();
+    Item* liveItem = player->GetItemByPos(INVENTORY_SLOT_BAG_0, liveEquipSlot);
+    if (storedItemGUIDCounter == 0 && liveItem == nullptr)
+    {
+        errorTextOut = "There is no item to move.";
+        return false;
+    }
+
+    Item* storedItem = nullptr;
+    if (storedItemGUIDCounter != 0)
+    {
+        storedItem = LoadDetachedItemForPlayer(storedItemGUIDCounter, player);
+        if (storedItem == nullptr)
+        {
+            errorTextOut = "The stored item could not be loaded.";
+            return false;
+        }
+    }
+    if (liveItem != nullptr)
+    {
+        ItemTemplate const* liveItemTemplate = liveItem->GetTemplate();
+        if (CanInventoryTypeGoIntoEquipSlot(liveItemTemplate->InventoryType, storageEquipSlot) == false)
+        {
+            delete storedItem;
+            errorTextOut = "Your equipped item cannot be stored in that slot.";
+            return false;
+        }
+        if (IsItemEQClassAllowedForPlayerSecondaryClass(player, eqClassID, liveItem->GetEntry()) == false)
+        {
+            delete storedItem;
+            errorTextOut = "Your equipped item cannot be used by a " + GetEQClassStringFromID(eqClassID) + ".";
+            return false;
+        }
+        // A two-hander entering storage main hand demands an empty stored off hand (the type check above already forces storageEquipSlot to be the main hand for a two-hander)
+        if (liveItemTemplate->InventoryType == INVTYPE_2HWEAPON)
+        {
+            QueryResult offHandResult = CharacterDatabase.Query("SELECT item FROM mod_everquest_character_class_inventory WHERE guid = {} AND eqclass = {} AND bag = 0 AND slot = {}", playerGUIDCounter, eqClassID, EQUIPMENT_SLOT_OFFHAND);
+            if (offHandResult)
+            {
+                delete storedItem;
+                errorTextOut = "Remove the stored off hand item before storing a two-handed weapon.";
+                return false;
+            }
+        }
+
+        // And an off hand item cannot enter an empty storage off hand slot alongside a stored two-handed main hand (when the slot was occupied, the storage invariant already rules a 2H main hand out)
+        if (storageEquipSlot == EQUIPMENT_SLOT_OFFHAND && storedItem == nullptr)
+        {
+            QueryResult mainHandResult = CharacterDatabase.Query("SELECT II.itemEntry FROM mod_everquest_character_class_inventory CI INNER JOIN item_instance II ON II.guid = CI.item WHERE CI.guid = {} AND CI.eqclass = {} AND CI.bag = 0 AND CI.slot = {}", playerGUIDCounter, eqClassID, EQUIPMENT_SLOT_MAINHAND);
+            if (mainHandResult)
+            {
+                ItemTemplate const* mainHandTemplate = sObjectMgr->GetItemTemplate(mainHandResult->Fetch()[0].Get<uint32>());
+                if (mainHandTemplate != nullptr && mainHandTemplate->InventoryType == INVTYPE_2HWEAPON)
+                {
+                    errorTextOut = "Remove the stored two-handed weapon before storing an off hand item.";
+                    return false;
+                }
+            }
+        }
+    }
+
+    uint16 equipDestination = 0;
+    if (storedItem != nullptr)
+    {
+        InventoryResult equipResult = player->CanEquipItem(liveEquipSlot, equipDestination, storedItem, liveItem != nullptr);
+        if (equipResult != EQUIP_ERR_OK)
+        {
+            player->SendEquipError(equipResult, storedItem, nullptr);
+            delete storedItem;
+            errorTextOut = "";
+            return false;
+        }
+    }
+
+    CharacterDatabaseTransaction transaction = CharacterDatabase.BeginTransaction();
+
+    // Pull the displaced live item off the character and detach it into the storage rows
+    uint32 liveItemGUIDCounter = 0;
+    if (liveItem != nullptr)
+    {
+        liveItemGUIDCounter = liveItem->GetGUID().GetCounter();
+        player->MoveItemFromInventory(INVENTORY_SLOT_BAG_0, liveEquipSlot, true);
+        liveItem->FSetState(ITEM_NEW);
+        liveItem->SaveToDB(transaction);
+        Item::DeleteFromInventoryDB(transaction, liveItemGUIDCounter);
+    }
+
+    transaction->Append("DELETE FROM mod_everquest_character_class_inventory WHERE guid = {} AND eqclass = {} AND bag = 0 AND slot = {}", playerGUIDCounter, eqClassID, storageEquipSlot);
+    if (liveItem != nullptr)
+    {
+        transaction->Append("DELETE FROM mod_everquest_character_class_inventory WHERE item = {}", liveItemGUIDCounter);
+        transaction->Append("INSERT INTO mod_everquest_character_class_inventory (guid, class, eqclass, bag, slot, item) VALUES ({}, {}, {}, 0, {}, {})", playerGUIDCounter, player->getClass(), eqClassID, storageEquipSlot, liveItemGUIDCounter);
+    }
+
+    if (storedItem != nullptr)
+    {
+        storedItem->SetState(ITEM_UNCHANGED);
+        player->EquipItem(equipDestination, storedItem, true);
+    }
+
+    player->SaveInventoryAndGoldToDB(transaction);
+
+    QueuePendingEquipmentStorageTransaction(player, eqClassID, transaction);
+
+    if (liveItem != nullptr)
+        delete liveItem;
+    return true;
+}
+
+// Sends the stored equipment of one of the player's non-active secondary classes to the client UI (the Secondary Class Equipment window) as a hidden addon message.
+// Payload (after the "EQCLASSEQUIP\t" prefix the 3.3.5 client strips): H|<classId>|<className> ~S|<slot>|<itemEntry>|<randomPropertyId>|<permEnchant>   (one per stored equipment slot)
+void EverQuestMod::SendClassEquipmentAddonMessageToPlayer(Player* player, uint8 eqClassID)
+{
+    if (player == nullptr)
+        return;
+
+    std::ostringstream payload;
+    payload << "H|" << uint32(eqClassID) << "|" << GetEQClassStringFromID(eqClassID);
+
+    QueryResult queryResult = CharacterDatabase.Query("SELECT CI.`slot`, II.`itemEntry`, II.`randomPropertyId`, II.`enchantments` FROM `mod_everquest_character_class_inventory` CI INNER JOIN `item_instance` II ON II.guid = CI.item WHERE CI.`guid` = {} AND CI.`eqclass` = {} AND CI.`bag` = 0 AND CI.`slot` <= 18 ORDER BY CI.`slot`", player->GetGUID().GetCounter(), eqClassID);
+    if (queryResult)
+    {
+        do
+        {
+            Field* fields = queryResult->Fetch();
+            uint8 slot = fields[0].Get<uint8>();
+            uint32 itemEntry = fields[1].Get<uint32>();
+            int32 randomPropertyID = fields[2].Get<int32>();
+            string enchantString = fields[3].Get<string>();
+
+            // Only the permanent enchant matters for the tooltip link
+            std::vector<std::string_view> tokens = Acore::Tokenize(enchantString, ' ', false);
+            uint32 permEnchant = 0;
+            if (tokens.size() > PERM_ENCHANTMENT_SLOT * MAX_ENCHANTMENT_OFFSET)
+                permEnchant = Acore::StringTo<uint32>(tokens[PERM_ENCHANTMENT_SLOT * MAX_ENCHANTMENT_OFFSET]).value_or(0);
+
+            payload << "~S|" << uint32(slot) << "|" << itemEntry << "|" << randomPropertyID << "|" << permEnchant;
+        } while (queryResult->NextRow());
+    }
+
+    std::string addonMessage = "EQCLASSEQUIP\t" + payload.str();
     WorldPacket data;
     ChatHandler::BuildChatPacket(data, CHAT_MSG_SYSTEM, LANG_ADDON, nullptr, nullptr, addonMessage);
     player->SendDirectMessage(&data);

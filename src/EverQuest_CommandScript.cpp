@@ -69,10 +69,15 @@ public:
     {
         static ChatCommandTable classCommandTable =
         {
-            { "change",    HandleMultiClassChangeClass,         SEC_PLAYER, Console::No },
-            { "info",      HandleMultiClassInfo,                SEC_PLAYER, Console::No },
-            { "uiinfo",    HandleMultiClassUIInfo,              SEC_PLAYER, Console::No },
-            { "poolspend", HandleSecondaryExpPoolSpend,         SEC_PLAYER, Console::No },
+            { "change",      HandleMultiClassChangeClass,       SEC_PLAYER, Console::No },
+            { "info",        HandleMultiClassInfo,              SEC_PLAYER, Console::No },
+            { "uiinfo",      HandleMultiClassUIInfo,            SEC_PLAYER, Console::No },
+            { "poolspend",   HandleSecondaryExpPoolSpend,       SEC_PLAYER, Console::No },
+            { "equipinfo",   HandleSecondaryEquipInfo,          SEC_PLAYER, Console::No },
+            { "equipset",    HandleSecondaryEquipSet,           SEC_PLAYER, Console::No },
+            { "equipremove", HandleSecondaryEquipRemove,        SEC_PLAYER, Console::No },
+            { "equipmove",   HandleSecondaryEquipMove,          SEC_PLAYER, Console::No },
+            { "equipswap",   HandleSecondaryEquipSwap,          SEC_PLAYER, Console::No },
         };
 
         static ChatCommandTable commandTable =
@@ -314,6 +319,133 @@ public:
 
         // Pushes the current EQ class state to the client UI (the EQ Class character tab) as an addon message
         EverQuest->SendClassInfoAddonMessageToPlayer(handler->GetPlayer());
+        return true;
+    }
+
+    static int ParseUnsignedArgs(const char* args, uint32* valuesOut, int maxCount)
+    {
+        if (!args || !*args)
+            return 0;
+        int parsedCount = 0;
+        char* token = strtok((char*)args, " ");
+        while (token != nullptr && parsedCount < maxCount)
+        {
+            for (size_t i = 0; token[i] != '\0'; ++i)
+            {
+                if (isdigit(static_cast<unsigned char>(token[i])) == 0)
+                    return parsedCount;
+            }
+            valuesOut[parsedCount] = static_cast<uint32>(strtoul(token, nullptr, 10));
+            parsedCount++;
+            token = strtok(nullptr, " ");
+        }
+        return parsedCount;
+    }
+
+    static bool HandleSecondaryEquipInfo(ChatHandler* handler, const char* args)
+    {
+        if (EverQuest->IsEnabled == false)
+            return true;
+
+        Player* player = handler->GetPlayer();
+        uint32 values[1];
+        if (ParseUnsignedArgs(args, values, 1) != 1)
+            return true;
+        uint8 eqClassID = static_cast<uint8>(values[0]);
+        if (EverQuest->IsEQClassValidEquipmentStorageTargetForPlayer(player, eqClassID) == false)
+            return true;
+        EverQuest->SendClassEquipmentAddonMessageToPlayer(player, eqClassID);
+        return true;
+    }
+
+    static bool HandleSecondaryEquipSet(ChatHandler* handler, const char* args)
+    {
+        if (EverQuest->IsEnabled == false)
+            return true;
+
+        Player* player = handler->GetPlayer();
+        uint32 values[5];
+        if (ParseUnsignedArgs(args, values, 5) != 5)
+            return true;
+        uint8 eqClassID = static_cast<uint8>(values[0]);
+
+        std::string errorText;
+        if (EverQuest->EquipItemIntoSecondaryClassStorage(player, eqClassID, static_cast<uint8>(values[1]), static_cast<uint8>(values[2]), static_cast<uint8>(values[3]), values[4], errorText) == false)
+        {
+            handler->PSendSysMessage("|cffFF0000{}|r", errorText);
+
+            // Resync the window after a rejected action
+            if (EverQuest->IsEQClassValidEquipmentStorageTargetForPlayer(player, eqClassID) == true)
+                EverQuest->SendClassEquipmentAddonMessageToPlayer(player, eqClassID);
+        }
+        return true;
+    }
+
+    static bool HandleSecondaryEquipRemove(ChatHandler* handler, const char* args)
+    {
+        if (EverQuest->IsEnabled == false)
+            return true;
+
+        Player* player = handler->GetPlayer();
+        uint32 values[4];
+        int parsedCount = ParseUnsignedArgs(args, values, 4);
+        if (parsedCount != 2 && parsedCount != 4)
+            return true;
+        uint8 eqClassID = static_cast<uint8>(values[0]);
+        bool useSpecificBagPosition = (parsedCount == 4);
+
+        std::string errorText;
+        if (EverQuest->RemoveItemFromSecondaryClassStorage(player, eqClassID, static_cast<uint8>(values[1]), useSpecificBagPosition ? static_cast<uint8>(values[2]) : 0, useSpecificBagPosition ? static_cast<uint8>(values[3]) : 0, useSpecificBagPosition, errorText) == false)
+        {
+            handler->PSendSysMessage("|cffFF0000{}|r", errorText);
+
+            if (EverQuest->IsEQClassValidEquipmentStorageTargetForPlayer(player, eqClassID) == true)
+                EverQuest->SendClassEquipmentAddonMessageToPlayer(player, eqClassID);
+        }
+        return true;
+    }
+
+    static bool HandleSecondaryEquipMove(ChatHandler* handler, const char* args)
+    {
+        if (EverQuest->IsEnabled == false)
+            return true;
+
+        Player* player = handler->GetPlayer();
+        uint32 values[3];
+        if (ParseUnsignedArgs(args, values, 3) != 3)
+            return true;
+        uint8 eqClassID = static_cast<uint8>(values[0]);
+
+        std::string errorText;
+        if (EverQuest->MoveItemWithinSecondaryClassStorage(player, eqClassID, static_cast<uint8>(values[1]), static_cast<uint8>(values[2]), errorText) == false)
+            handler->PSendSysMessage("|cffFF0000{}|r", errorText);
+
+        if (EverQuest->IsEQClassValidEquipmentStorageTargetForPlayer(player, eqClassID) == true)
+            EverQuest->SendClassEquipmentAddonMessageToPlayer(player, eqClassID);
+        return true;
+    }
+
+    static bool HandleSecondaryEquipSwap(ChatHandler* handler, const char* args)
+    {
+        if (EverQuest->IsEnabled == false)
+            return true;
+
+        Player* player = handler->GetPlayer();
+        uint32 values[3];
+        if (ParseUnsignedArgs(args, values, 3) != 3)
+            return true;
+        uint8 eqClassID = static_cast<uint8>(values[0]);
+
+        std::string errorText;
+        if (EverQuest->SwapSecondaryClassStorageItemWithLiveEquipment(player, eqClassID, static_cast<uint8>(values[1]), static_cast<uint8>(values[2]), errorText) == false)
+        {
+            // Equip failures already showed the standard client equip error and leave errorText empty
+            if (errorText.empty() == false)
+                handler->PSendSysMessage("|cffFF0000{}|r", errorText);
+
+            if (EverQuest->IsEQClassValidEquipmentStorageTargetForPlayer(player, eqClassID) == true)
+                EverQuest->SendClassEquipmentAddonMessageToPlayer(player, eqClassID);
+        }
         return true;
     }
 

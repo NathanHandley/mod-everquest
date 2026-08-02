@@ -868,6 +868,9 @@ public:
         if (EverQuest->IsEnabled == false)
             return;
 
+        // Any pending equipment storage commit must have executed before the logout save and class switch are queued
+        EverQuest->WaitForPendingEquipmentStorageCommitForPlayer(player->GetGUID());
+
         // If a class change is in progress, update the item visuals
         if (EverQuest->GetCurrentSecondEQClassForPlayer(player) != EverQuest->GetNextSecondEQClassForPlayer(player))
         {
