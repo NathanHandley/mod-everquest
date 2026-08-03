@@ -7082,6 +7082,13 @@ bool EverQuestMod::EquipItemIntoSecondaryClassStorage(Player* player, uint8 eqCl
     return true;
 }
 
+static bool IsInventoryResultAnItemUniquenessFailure(InventoryResult inventoryResult)
+{
+    return inventoryResult == EQUIP_ERR_CANT_CARRY_MORE_OF_THIS || inventoryResult == EQUIP_ERR_ITEM_MAX_LIMIT_CATEGORY_COUNT_EXCEEDED;
+}
+
+static const std::string EQ_EQUIPSTORAGE_UNIQUE_ITEM_ERROR_TEXT = "This item is unique and you already have one, move failed.";
+
 bool EverQuestMod::RemoveItemFromSecondaryClassStorage(Player* player, uint8 eqClassID, uint8 equipSlot, uint8 clientBagID, uint8 clientSlotID, bool useSpecificBagPosition, std::string& errorTextOut)
 {
     if (IsEQClassValidEquipmentStorageTargetForPlayer(player, eqClassID) == false)
@@ -7132,18 +7139,23 @@ bool EverQuestMod::RemoveItemFromSecondaryClassStorage(Player* player, uint8 eqC
             errorTextOut = "That bag slot is occupied.";
             return false;
         }
-        if (player->CanStoreItem(serverBag, serverSlot, dest, item, false) != EQUIP_ERR_OK)
+        InventoryResult storeResult = player->CanStoreItem(serverBag, serverSlot, dest, item, false);
+        if (storeResult != EQUIP_ERR_OK)
         {
             delete item;
-            errorTextOut = "The item cannot go in that bag slot.";
+            errorTextOut = IsInventoryResultAnItemUniquenessFailure(storeResult) ? EQ_EQUIPSTORAGE_UNIQUE_ITEM_ERROR_TEXT : "The item cannot go in that bag slot.";
             return false;
         }
     }
-    else if (player->CanStoreItem(NULL_BAG, NULL_SLOT, dest, item, false) != EQUIP_ERR_OK)
+    else
     {
-        delete item;
-        errorTextOut = "You do not have enough bag space.";
-        return false;
+        InventoryResult storeResult = player->CanStoreItem(NULL_BAG, NULL_SLOT, dest, item, false);
+        if (storeResult != EQUIP_ERR_OK)
+        {
+            delete item;
+            errorTextOut = IsInventoryResultAnItemUniquenessFailure(storeResult) ? EQ_EQUIPSTORAGE_UNIQUE_ITEM_ERROR_TEXT : "You do not have enough bag space.";
+            return false;
+        }
     }
 
     CharacterDatabaseTransaction transaction = CharacterDatabase.BeginTransaction();
