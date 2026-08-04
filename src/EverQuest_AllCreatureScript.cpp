@@ -78,6 +78,7 @@ public:
         EverQuest->RemoveVulakLockState(creature);
         EverQuest->RemoveCreatureDefendPlayerWatchState(creature);
         EverQuest->RemoveCreatureAggroPositionState(creature);
+        EverQuest->RemoveCreatureAgroZBlockState(creature);
     }
 
     void OnAllCreatureUpdate(Creature* creature, uint32 diff) override
@@ -93,6 +94,7 @@ public:
         EverQuest->UpdateCreatureCombatAbilities(creature, diff);
         EverQuest->UpdateCreatureUnstick(creature, diff);
         EverQuest->UpdateCreatureScaledSocialAggro(creature, diff);
+        EverQuest->UpdateCreatureAgroZBlock(creature, diff);
         EverQuest->UpdateCreatureEmotes(creature, diff);
         EverQuest->UpdateCreatureMovementSound(creature, diff);
         EverQuest->UpdateCreatureKillSpawnCombatWatch(creature, diff);

@@ -4115,8 +4115,26 @@ bool EverQuestMod::TryGetCustomSocialAggroScale(Creature* creature, float& scale
     return true;
 }
 
+bool EverQuestMod::IsSocialAggroOverrideNeededForCreature(Creature* creature, float& scaleOut, float& maxAgroZDistanceOut)
+{
+    scaleOut = 1.0f;
+    maxAgroZDistanceOut = -1.0f;
+    if (creature == nullptr)
+        return false;
+
+    bool hasCustomScale = TryGetCustomSocialAggroScale(creature, scaleOut);
+    if (hasCustomScale == false)
+        scaleOut = 1.0f;
+
+    uint32 mapID = creature->GetMapId();
+    if (mapID >= ConfigSystemMapDBCIDMin && mapID <= ConfigSystemMapDBCIDMax)
+        maxAgroZDistanceOut = GetMaxAgroZDistanceForMap(mapID);
+
+    return hasCustomScale == true || maxAgroZDistanceOut >= 0.0f;
+}
+
 // Kinda-sorta a mirror of Creature:CallAssistance, but need to override to make custom social behavior
-void EverQuestMod::DoScaledSocialAggroSearch(Creature* caller, Unit* victim, float scale)
+void EverQuestMod::DoScaledSocialAggroSearch(Creature* caller, Unit* victim, float scale, float maxAgroZDistance)
 {
     if (caller == nullptr || victim == nullptr)
         return;
@@ -4129,9 +4147,26 @@ void EverQuestMod::DoScaledSocialAggroSearch(Creature* caller, Unit* victim, flo
     Acore::AnyAssistCreatureInRangeCheck check(caller, victim, radius);
     Acore::CreatureListSearcher<Acore::AnyAssistCreatureInRangeCheck> searcher(caller, assistList, check);
     Cell::VisitObjects(caller, searcher, radius);
-
+    std::vector<ObjectGuid> assistantGUIDs;
+    assistantGUIDs.reserve(assistList.size());
     for (Creature* assistant : assistList)
     {
+        if (assistant == nullptr)
+            continue;
+        if (IsBlockedByAgroZDistance(assistant, caller, maxAgroZDistance) == true)
+            continue;
+
+        if (IsBlockedByAgroZDistance(assistant, victim, maxAgroZDistance) == true)
+            continue;
+        assistantGUIDs.push_back(assistant->GetGUID());
+    }
+
+    for (ObjectGuid assistantGUID : assistantGUIDs)
+    {
+        Creature* assistant = ObjectAccessor::GetCreature(*caller, assistantGUID);
+        if (assistant == nullptr || assistant->IsAlive() == false)
+            continue;
+
         // Suppress immediate call, link leash timers
         assistant->SetNoCallAssistance(true);
         assistant->EngageWithTarget(victim);
@@ -4142,18 +4177,126 @@ void EverQuestMod::DoScaledSocialAggroSearch(Creature* caller, Unit* victim, flo
 
 void EverQuestMod::ApplyScaledCreatureSocialAggroOnEngage(Creature* creature, Unit* victim)
 {
-    // Only apply if a creature has a custom setting
+    // Only apply if a creature has a custom setting, or the zone restricts vertical agro
     float scale = 1.0f;
-    if (TryGetCustomSocialAggroScale(creature, scale) == false)
+    float maxAgroZDistance = -1.0f;
+    if (IsSocialAggroOverrideNeededForCreature(creature, scale, maxAgroZDistance) == false)
         return;
 
     creature->SetNoCallAssistance(true);
-    DoScaledSocialAggroSearch(creature, victim, scale);
+    DoScaledSocialAggroSearch(creature, victim, scale, maxAgroZDistance);
 }
 
 void EverQuestMod::RemoveCreatureSocialAggroState(Creature* creature)
 {
     creature->CustomData.Erase(EQ_CREATURE_CUSTOMDATA_SOCIALAGGRO);
+}
+
+void EverQuestMod::MarkCreatureAgroZBlockOnEngage(Creature* creature, Unit* victim)
+{
+    if (creature == nullptr || victim == nullptr || creature == victim)
+        return;
+
+    uint32 mapID = creature->GetMapId();
+    if (mapID < ConfigSystemMapDBCIDMin || mapID > ConfigSystemMapDBCIDMax)
+        return;
+
+    // Must match the gate on UpdateCreatureAgroZBlock's caller, otherwise a pending block could be recorded and never consumed
+    uint32 entryID = creature->GetEntry();
+    if (entryID < ConfigSystemCreatureTemplateIDMin || entryID > ConfigSystemCreatureTemplateIDMax)
+        return;
+
+    float maxAgroZDistance = GetMaxAgroZDistanceForMap(mapID);
+    if (maxAgroZDistance < 0.0f)
+        return;
+
+    // Player owned creatures keep stock engine behavior
+    if (creature->IsPet() == true || creature->IsControlledByPlayer() == true || creature->IsCharmed() == true)
+        return;
+    if (IsBlockedByAgroZDistance(creature, victim, maxAgroZDistance) == false)
+        return;
+
+    // Only unprovoked agro is blocked.  Anything that is actually fighting this creature still gets a response, so the
+    // rule can never leave a creature unkillable from above or below
+    if (victim->GetVictim() == creature)
+        return;
+    if (creature->GetThreatMgr().GetThreat(victim) > 0.0f)
+        return;
+
+    EverQuestCreatureAgroZBlockState* state = creature->CustomData.GetDefault<EverQuestCreatureAgroZBlockState>(EQ_CREATURE_CUSTOMDATA_AGROZBLOCK);
+    state->BlockedVictimGUID = victim->GetGUID();
+    state->DropPending = true;
+}
+
+void EverQuestMod::UpdateCreatureAgroZBlock(Creature* creature, uint32 diff)
+{
+    if (creature == nullptr)
+        return;
+
+    // Only creatures that actually tripped the rule ever carry this state, so the normal path costs one lookup
+    EverQuestCreatureAgroZBlockState* state = creature->CustomData.Get<EverQuestCreatureAgroZBlockState>(EQ_CREATURE_CUSTOMDATA_AGROZBLOCK);
+    if (state == nullptr)
+        return;
+
+    // Release the post-block re-agro suppression when it runs out
+    if (state->SuppressRemainingMS > 0)
+    {
+        if (state->SuppressRemainingMS <= diff)
+        {
+            state->SuppressRemainingMS = 0;
+            if (state->RestoreAggressiveReactState == true)
+            {
+                creature->SetReactState(REACT_AGGRESSIVE);
+                state->RestoreAggressiveReactState = false;
+            }
+        }
+        else
+            state->SuppressRemainingMS -= diff;
+    }
+
+    if (state->DropPending == false)
+        return;
+    state->DropPending = false;
+
+    if (creature->IsAlive() == false || creature->IsInCombat() == false)
+        return;
+    if (creature->IsAIEnabled == false || creature->AI() == nullptr)
+        return;
+
+    // Re-verify from scratch, since a tick has passed since the engage and the situation may have changed.
+    // Resolving the GUID rather than holding a pointer keeps a despawned or deleted victim from being touched
+    Unit* victim = ObjectAccessor::GetUnit(*creature, state->BlockedVictimGUID);
+    if (victim == nullptr || victim->IsAlive() == false)
+        return;
+    if (IsBlockedByAgroZDistance(creature, victim, GetMaxAgroZDistanceForMap(creature->GetMapId())) == false)
+        return;
+    if (victim->GetVictim() == creature)
+        return;
+    if (creature->GetThreatMgr().GetThreat(victim) > 0.0f)
+        return;
+
+    // Every write to the state happens before the combat drop below.  Dropping combat can despawn a temporary summon,
+    // which runs OnCreatureRemoveWorld and erases this creature's CustomData, so 'state' must not be touched afterward.
+    // Holding the creature defensive briefly keeps the same out-of-range unit from re-triggering proximity agro on the
+    // very next relocation tick.  Defensive still fights back when attacked, so this never makes a creature passive to a real attack
+    if (creature->HasReactState(REACT_AGGRESSIVE) == true)
+    {
+        state->RestoreAggressiveReactState = true;
+        creature->SetReactState(REACT_DEFENSIVE);
+    }
+    state->SuppressRemainingMS = EQ_AGRO_Z_BLOCK_SUPPRESS_MS;
+    state = nullptr;
+
+    creature->GetThreatMgr().ClearThreat(victim);
+
+    // Anything else still on the threat list keeps the fight going, otherwise the creature heads home
+    if (creature->GetThreatMgr().IsThreatListEmpty(true) == true)
+        creature->AI()->EnterEvadeMode(CreatureAI::EVADE_REASON_OTHER);
+}
+
+void EverQuestMod::RemoveCreatureAgroZBlockState(Creature* creature)
+{
+    creature->CustomData.Erase(EQ_CREATURE_CUSTOMDATA_AGROZBLOCK);
 }
 
 // WoW doesn't have neutral creatures hit by AoE fight back, but EQ should
@@ -4188,9 +4331,8 @@ void EverQuestMod::UpdateCreatureScaledSocialAggro(Creature* creature, uint32 di
         return;
 
     float scale = 1.0f;
-    bool eligible = TryGetCustomSocialAggroScale(creature, scale) == true &&
-        creature->IsAlive() == true && creature->IsInCombat() == true &&
-        creature->IsPet() == false && creature->IsControlledByPlayer() == false;
+    float maxAgroZDistance = -1.0f;
+    bool eligible = IsSocialAggroOverrideNeededForCreature(creature, scale, maxAgroZDistance) == true && creature->IsAlive() == true && creature->IsInCombat() == true && creature->IsPet() == false && creature->IsControlledByPlayer() == false;
     Unit* victim = creature->GetVictim();
     if (victim == nullptr || victim->IsAlive() == false)
         eligible = false;
@@ -4215,7 +4357,7 @@ void EverQuestMod::UpdateCreatureScaledSocialAggro(Creature* creature, uint32 di
     EverQuestCreatureSocialAggroState* state = creature->CustomData.GetDefault<EverQuestCreatureSocialAggroState>(EQ_CREATURE_CUSTOMDATA_SOCIALAGGRO);
     if (state->RecallTimerMS <= diff)
     {
-        DoScaledSocialAggroSearch(creature, victim, scale);
+        DoScaledSocialAggroSearch(creature, victim, scale, maxAgroZDistance);
         state->RecallTimerMS = periodMS;
     }
     else
@@ -4504,7 +4646,7 @@ void EverQuestMod::LoadZoneData()
 {
     ZoneByMapID.clear();
 
-    QueryResult queryResult = WorldDatabase.Query("SELECT MapID, AllowBind, ExpansionID FROM mod_everquest_zone;");
+    QueryResult queryResult = WorldDatabase.Query("SELECT MapID, AllowBind, ExpansionID, MaxAgroZDistance FROM mod_everquest_zone;");
     if (queryResult)
     {
         do
@@ -4514,6 +4656,7 @@ void EverQuestMod::LoadZoneData()
             zone.MapID = fields[0].Get<uint32>();
             zone.AllowBind = fields[1].Get<uint8>() != 0;
             zone.ExpansionID = fields[2].Get<int32>();
+            zone.MaxAgroZDistance = fields[3].Get<float>();
             ZoneByMapID[zone.MapID] = zone;
         } while (queryResult->NextRow());
     }
@@ -4526,6 +4669,23 @@ bool EverQuestMod::IsBindAllowedForMap(uint32 mapID)
     if (zoneIt == ZoneByMapID.end())
         return false;
     return zoneIt->second.AllowBind;
+}
+
+float EverQuestMod::GetMaxAgroZDistanceForMap(uint32 mapID)
+{
+    auto zoneIt = ZoneByMapID.find(mapID);
+    if (zoneIt == ZoneByMapID.end())
+        return -1.0f;
+    return zoneIt->second.MaxAgroZDistance;
+}
+
+bool EverQuestMod::IsBlockedByAgroZDistance(WorldObject const* source, WorldObject const* target, float maxAgroZDistance)
+{
+    if (maxAgroZDistance < 0.0f)
+        return false;
+    if (source == nullptr || target == nullptr)
+        return false;
+    return std::fabs(source->GetPositionZ() - target->GetPositionZ()) > maxAgroZDistance;
 }
 
 bool EverQuestMod::IsMapRestrictedByExpansion(uint32 mapID)
@@ -5018,6 +5178,12 @@ void EverQuestMod::DoDefendFriendlyPlayersSearch(Creature* attacker, Player* att
     if (attacker == nullptr || attackedPlayer == nullptr)
         return;
 
+    // The zone's vertical agro limit applies to defenders too, since this is agro like any other
+    float maxAgroZDistance = -1.0f;
+    uint32 mapID = attackedPlayer->GetMapId();
+    if (mapID >= ConfigSystemMapDBCIDMin && mapID <= ConfigSystemMapDBCIDMax)
+        maxAgroZDistance = GetMaxAgroZDistanceForMap(mapID);
+
     std::list<Creature*> nearbyCreatures;
     Acore::AnyUnitInObjectRangeCheck check(attackedPlayer, EQ_DEFEND_PLAYERS_SEARCH_RADIUS);
     Acore::CreatureListSearcher<Acore::AnyUnitInObjectRangeCheck> searcher(attackedPlayer, nearbyCreatures, check);
@@ -5026,6 +5192,12 @@ void EverQuestMod::DoDefendFriendlyPlayersSearch(Creature* attacker, Player* att
     for (Creature* defender : nearbyCreatures)
     {
         if (defender == attacker)
+            continue;
+
+        // Both ends of the fight are checked, as the defender has to be able to reach the player it is coming to help as well as the attacker it would be engaging
+        if (IsBlockedByAgroZDistance(defender, attackedPlayer, maxAgroZDistance) == true)
+            continue;
+        if (IsBlockedByAgroZDistance(defender, attacker, maxAgroZDistance) == true)
             continue;
         auto factionIter = FactionsByFactionTemplateID.find(defender->GetFaction());
         if (factionIter == FactionsByFactionTemplateID.end() || factionIter->second.WillDefendFriendlyPlayers == false)
@@ -6363,6 +6535,10 @@ void EverQuestMod::MoveClassSpellsToModSpellsTable(Player* player, CharacterData
     for (auto& curSpell : player->GetSpellMap())
     {
         if (IsSpellExemptFromClassMove(curSpell.first) == true)
+            continue;
+
+        // Special consideration for WoW rogues when it comes to lockpicking
+        if (player->getClass() == CLASS_ROGUE && curSpell.first == 633)
             continue;
 
         // Skip deleting spells

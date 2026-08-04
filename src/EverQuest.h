@@ -41,7 +41,7 @@ class Aura;
 class AuraApplication;
 class WorldPacket;
 
-#define EQ_MOD_VERSION                              59
+#define EQ_MOD_VERSION                              61
 
 #define EQ_EQCLASS_NONE                             0
 #define EQ_EQCLASS_WARRIOR                          1
@@ -218,6 +218,9 @@ class WorldPacket;
 #define EQ_CREATURE_CUSTOMDATA_VULAKLOCK            "EQVulakLock"
 #define EQ_CREATURE_CUSTOMDATA_DEFENDPLAYERWATCH    "EQDefendPlayerWatch"
 #define EQ_CREATURE_CUSTOMDATA_AGGROPOSITION        "EQAggroPos"
+#define EQ_CREATURE_CUSTOMDATA_AGROZBLOCK           "EQAgroZBlock"
+
+#define EQ_AGRO_Z_BLOCK_SUPPRESS_MS                 2000
 
 #define EQ_DEFEND_PLAYERS_CHECK_MS                  2000
 #define EQ_DEFEND_PLAYERS_SEARCH_RADIUS             15.0f
@@ -451,6 +454,15 @@ public:
     float Z = 0.0f;
     float Orientation = 0.0f;
     bool HasPosition = false;
+};
+
+class EverQuestCreatureAgroZBlockState : public DataMap::Base
+{
+public:
+    ObjectGuid BlockedVictimGUID;
+    bool DropPending = false;
+    uint32 SuppressRemainingMS = 0;
+    bool RestoreAggressiveReactState = false;
 };
 
 class EverQuestPendingSummonRequest
@@ -742,6 +754,7 @@ public:
     uint32 MapID = 0;
     bool AllowBind = true;
     int32 ExpansionID = 0;
+    float MaxAgroZDistance = -1.0f;
 };
 
 class EverQuestFaction
@@ -1150,11 +1163,17 @@ public:
     void UpdateCreatureUnstick(Creature* creature, uint32 diff);
     void UpdateNonEQCreatureLeash(Creature* creature);
     bool TryGetCustomSocialAggroScale(Creature* creature, float& scaleOut);
-    void DoScaledSocialAggroSearch(Creature* caller, Unit* victim, float scale);
+    void DoScaledSocialAggroSearch(Creature* caller, Unit* victim, float scale, float maxAgroZDistance);
     void ApplyScaledCreatureSocialAggroOnEngage(Creature* creature, Unit* victim);
     void ProcessCreatureRetaliationOnDamage(Unit* attacker, Unit* victim);
     void UpdateCreatureScaledSocialAggro(Creature* creature, uint32 diff);
     void RemoveCreatureSocialAggroState(Creature* creature);
+    float GetMaxAgroZDistanceForMap(uint32 mapID);
+    bool IsBlockedByAgroZDistance(WorldObject const* source, WorldObject const* target, float maxAgroZDistance);
+    bool IsSocialAggroOverrideNeededForCreature(Creature* creature, float& scaleOut, float& maxAgroZDistanceOut);
+    void MarkCreatureAgroZBlockOnEngage(Creature* creature, Unit* victim);
+    void UpdateCreatureAgroZBlock(Creature* creature, uint32 diff);
+    void RemoveCreatureAgroZBlockState(Creature* creature);
     void StoreCreatureAggroPosition(Creature* creature);
     void RemoveCreatureAggroPositionState(Creature* creature);
     void TeleportCreatureToLastAggroPosition(Creature* creature, uint32 gateSpellID);

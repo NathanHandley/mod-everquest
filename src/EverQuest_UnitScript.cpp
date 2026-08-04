@@ -91,6 +91,10 @@ public:
         Creature* creature = unit->ToCreature();
         if (creature == nullptr)
             return;
+
+        // Record (do not act on) a zone vertical agro violation before the social call, so a blocked pull does not seed a chain
+        EverQuest->MarkCreatureAgroZBlockOnEngage(creature, victim);
+
         EverQuest->ApplyScaledCreatureSocialAggroOnEngage(creature, victim);
 
         // Enter combat emotes skip pets (like TAKP's EnterCombat DoNPCEmote)
