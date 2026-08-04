@@ -337,6 +337,9 @@ void EverQuestMod::LoadConfigurationFile()
     // Achievements
     ConfigAchievementAdventurerLevel = sConfigMgr->GetOption<uint32>("EverQuest.Achievement.AdventurerLevel", 60);
 
+    // Spells
+    ConfigSpellSummonPlayerAcrossZones = sConfigMgr->GetOption<bool>("EverQuest.Spell.SummonPlayerAcrossZones", false);
+
     // Cross-Class values
     ConfigCrossClassIncludeSkillIDs = GetSetFromConfigString("EverQuest.CrossClass.IncludeSkillIDs");
 
@@ -5695,6 +5698,175 @@ void EverQuestMod::ProcessForage(Player* player)
         }
     }
     ChatHandler(player->GetSession()).PSendSysMessage("You fail to locate any food nearby.");
+}
+
+bool EverQuestMod::IsSummonPlayerSpellBlockedByTarget(uint32 spellID, Unit* target, Unit* caster)
+{
+    if (caster == nullptr || caster->IsPlayer() == false)
+        return false;
+    if (spellID < ConfigSystemSpellDBCIDMin || spellID > ConfigSystemSpellDBCIDMax)
+        return false;
+
+    SpellInfo const* spellInfo = sSpellMgr->GetSpellInfo(spellID);
+    if (spellInfo == nullptr)
+        return false;
+    if (spellInfo->Effects[EFFECT_0].Effect != SPELL_EFFECT_DUMMY)
+        return false;
+    if (spellInfo->Effects[EFFECT_0].MiscValue != EQ_SPELLDUMMYTYPE_SUMMONPC)
+        return false;
+
+    // A non-player was picked on purpose, which never works regardless of where it stands
+    if (target != nullptr && target != caster && target->IsPlayer() == false)
+        return true;
+
+    Player* targetPlayer = ResolveSummonPlayerTarget(caster->ToPlayer(), target);
+    return targetPlayer == nullptr || targetPlayer == caster;
+}
+
+Player* EverQuestMod::ResolveSummonPlayerTarget(Player* caster, Unit* target)
+{
+    if (caster == nullptr)
+        return nullptr;
+
+    if (target != nullptr && target != caster)
+        return target->ToPlayer();
+
+    if (ConfigSpellSummonPlayerAcrossZones == false)
+        return nullptr;
+
+    ObjectGuid selectionGUID = caster->GetTarget();
+    if (selectionGUID.IsEmpty() == true || selectionGUID.IsPlayer() == false || selectionGUID == caster->GetGUID())
+        return nullptr;
+    return ObjectAccessor::FindPlayer(selectionGUID);
+}
+
+void EverQuestMod::SendSummonRequestToPlayer(Player* targetPlayer, ObjectGuid summonerGUID, uint32 summonerZoneID, uint32 mapID, float x, float y, float z)
+{
+    targetPlayer->SetSummonPoint(mapID, x, y, z);
+
+    WorldPacket data(SMSG_SUMMON_REQUEST, 8 + 4 + 4);
+    data << summonerGUID;                                       // Summoner
+    data << uint32(summonerZoneID);                             // Summoner's zone
+    data << uint32(MAX_PLAYER_SUMMON_DELAY * IN_MILLISECONDS);  // Auto-decline delay
+    targetPlayer->SendDirectMessage(&data);
+}
+
+void EverQuestMod::QueueCrossZoneSummonRequest(Player* caster, Player* targetPlayer)
+{
+    EverQuestPendingSummonRequest request;
+    request.CasterGUID = caster->GetGUID();
+    request.CasterName = caster->GetName();
+    request.MapID = caster->GetMapId();
+    request.ZoneID = caster->GetZoneId();
+    caster->GetPosition(request.X, request.Y, request.Z);
+
+    ObjectGuid targetPlayerGUID = targetPlayer->GetGUID();
+    {
+        std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+        PendingSummonRequestByTargetPlayerGUID[targetPlayerGUID] = request;
+    }
+
+    ChatHandler(caster->GetSession()).PSendSysMessage("You open a mystic portal for {}.", targetPlayer->GetName());
+}
+
+void EverQuestMod::ConsumePendingSummonRequest(Player* player)
+{
+    if (player == nullptr || player->GetSession() == nullptr)
+        return;
+
+    EverQuestPendingSummonRequest request;
+    {
+        std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+        if (PendingSummonRequestByTargetPlayerGUID.empty() == true)
+            return;
+        auto pendingIter = PendingSummonRequestByTargetPlayerGUID.find(player->GetGUID());
+        if (pendingIter == PendingSummonRequestByTargetPlayerGUID.end())
+            return;
+        request = pendingIter->second;
+        PendingSummonRequestByTargetPlayerGUID.erase(pendingIter);
+    }
+
+    if (player->IsInWorld() == false || player->IsAlive() == false)
+        return;
+    if (player->InBattleground() == true || player->InArena() == true)
+        return;
+    if (player->GetSummonExpireTimer() > GameTime::GetGameTime().count())
+        return;
+
+    SendSummonRequestToPlayer(player, request.CasterGUID, request.ZoneID, request.MapID, request.X, request.Y, request.Z);
+    ChatHandler(player->GetSession()).PSendSysMessage("{} beckons you through a mystic portal.", request.CasterName);
+}
+
+void EverQuestMod::ClearPendingSummonRequestForPlayer(ObjectGuid playerGUID)
+{
+    std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+    PendingSummonRequestByTargetPlayerGUID.erase(playerGUID);
+}
+
+void EverQuestMod::ProcessSummonPlayerToCaster(Player* caster, Unit* target)
+{
+    if (caster == nullptr || caster->GetSession() == nullptr)
+        return;
+
+    // Players only
+    if (target != nullptr && target != caster && target->IsPlayer() == false)
+    {
+        ChatHandler(caster->GetSession()).PSendSysMessage("This spell can only be cast on players.");
+        return;
+    }
+
+    // Default no target to self
+    Player* targetPlayer = ResolveSummonPlayerTarget(caster, target);
+    if (targetPlayer == nullptr || targetPlayer == caster || targetPlayer->GetSession() == nullptr)
+    {
+        ChatHandler(caster->GetSession()).PSendSysMessage("The spell failed, as it requires another player as the target.");
+        return;
+    }
+
+    if (targetPlayer->IsInWorld() == false)
+    {
+        ChatHandler(caster->GetSession()).PSendSysMessage("The spell failed, as the target could not be reached.");
+        return;
+    }
+
+    if (caster->GetMap() == nullptr || targetPlayer->GetMap() != caster->GetMap())
+    {
+        if (ConfigSpellSummonPlayerAcrossZones == false)
+        {
+            ChatHandler(caster->GetSession()).PSendSysMessage("The spell failed, as the target is not in this zone.");
+            return;
+        }
+        QueueCrossZoneSummonRequest(caster, targetPlayer);
+        return;
+    }
+
+    if (targetPlayer->IsAlive() == false)
+    {
+        ChatHandler(caster->GetSession()).PSendSysMessage("The spell failed, as the target could not be reached.");
+        return;
+    }
+
+    // Don't try to summon PVP
+    if (targetPlayer->InBattleground() == true || targetPlayer->InArena() == true)
+    {
+        ChatHandler(caster->GetSession()).PSendSysMessage("The spell failed, as the target cannot be summoned from where they are.");
+        return;
+    }
+
+    if (targetPlayer->GetSummonExpireTimer() > GameTime::GetGameTime().count())
+    {
+        ChatHandler(caster->GetSession()).PSendSysMessage("The spell failed, as the target already has a summon pending.");
+        return;
+    }
+
+    float casterX = 0.0f;
+    float casterY = 0.0f;
+    float casterZ = 0.0f;
+    caster->GetPosition(casterX, casterY, casterZ);
+    SendSummonRequestToPlayer(targetPlayer, caster->GetGUID(), caster->GetZoneId(), caster->GetMapId(), casterX, casterY, casterZ);
+
+    ChatHandler(caster->GetSession()).PSendSysMessage("You open a mystic portal for {}.", targetPlayer->GetName());
+    ChatHandler(targetPlayer->GetSession()).PSendSysMessage("{} beckons you through a mystic portal.", caster->GetName());
 }
 
 // Returns the cached controller data for the player, loading it from the database first if needed. The returned

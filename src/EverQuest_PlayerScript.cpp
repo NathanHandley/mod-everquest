@@ -298,6 +298,8 @@ public:
         EverQuest->ProcessLevelCapStateForPlayer(player);
         EverQuest->UpdatePlayerIllusionGearDisplay(player, p_time);
         EverQuest->ConsumePendingTemporaryFactionRecalculation(player);
+        if (EverQuest->ConfigSpellSummonPlayerAcrossZones == true)
+            EverQuest->ConsumePendingSummonRequest(player);
 
         // Some ways a shield leaves the offhand have no unequip hook (auto-unequip when a two-hander goes on, item destruction),
         // so revalidate while the form that cares about it is held
@@ -514,6 +516,10 @@ public:
             {
                 EverQuest->ProcessForage(player);
             }
+            else if (spell->m_spellInfo->Effects[EFFECT_0].MiscValue == EQ_SPELLDUMMYTYPE_SUMMONPC) // Summon a player to the caster
+            {
+                EverQuest->ProcessSummonPlayerToCaster(player, spell->m_targets.GetUnitTarget());
+            }
         }
     }
 
@@ -678,6 +684,9 @@ public:
 
         // Stop tracking any bear form shield armor shift
         EverQuest->ClearBearFormShieldArmorShiftForPlayer(player->GetGUID());
+
+        // Drop any cross-zone summon that never got picked up, so it cannot fire on a later login
+        EverQuest->ClearPendingSummonRequestForPlayer(player->GetGUID());
 
         // Take any Alliance-line faction bonus aura off its creature while the player is still on the map
         EverQuest->ClearTempFactionBonusForPlayer(player);

@@ -78,6 +78,13 @@ public:
             return;
         }
 
+        // Summoning a player needs another living player as the target
+        if (EverQuest->IsSummonPlayerSpellBlockedByTarget(spell->GetSpellInfo()->Id, target, spell->GetCaster()) == true)
+        {
+            res = SPELL_FAILED_BAD_TARGETS;
+            return;
+        }
+
         // Enforce buff restriction up front to avoid mana/cooldown triggers
         if (target == nullptr)
             return;

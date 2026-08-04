@@ -523,3 +523,17 @@ EverQuest.Achievement.AdventurerLevel = 60
 ###################################################################################################
 
 EverQuest.CrossClass.IncludeSkillIDs = 129, 164, 165, 171, 182, 185, 186, 197, 202, 333, 356, 393, 633, 755, 762, 773
+###################################################################################################
+# Spell Settings
+#
+# 	EverQuest.Spell.SummonPlayerAcrossZones
+#		If true, the EverQuest summon player effect (Call of the Hero and the like) can pull a
+#		player in from any zone on the server, instead of only from the zone the caster is standing
+#		in.  The summoned player gets the same accept or decline prompt either way, and the summon
+#		sends them to where the caster stood when the spell landed.  Player must be in the party or raid
+#		EverQuest itself could only summon inside a zone, so this is off by default.
+#	Default: False (a summon only reaches into the caster's own zone)
+#
+###################################################################################################
+
+EverQuest.Spell.SummonPlayerAcrossZones = False

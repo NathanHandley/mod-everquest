@@ -41,7 +41,7 @@ class Aura;
 class AuraApplication;
 class WorldPacket;
 
-#define EQ_MOD_VERSION                              58
+#define EQ_MOD_VERSION                              59
 
 #define EQ_EQCLASS_NONE                             0
 #define EQ_EQCLASS_WARRIOR                          1
@@ -90,6 +90,8 @@ class WorldPacket;
 #define EQ_SPELLDUMMYTYPE_FORAGE                    16
 #define EQ_SPELLDUMMYTYPE_SUMMONACTIVE              17
 #define EQ_SPELLDUMMYTYPE_SUCCOR                    18
+#define EQ_SPELLDUMMYTYPE_TRACK                     19
+#define EQ_SPELLDUMMYTYPE_SUMMONPC                  20
 
 #define EQ_FACTION_ALIGNMENT_NONE                   0
 #define EQ_FACTION_ALIGNMENT_NEUTRAL                1
@@ -443,6 +445,18 @@ public:
     float Z = 0.0f;
     float Orientation = 0.0f;
     bool HasPosition = false;
+};
+
+class EverQuestPendingSummonRequest
+{
+public:
+    ObjectGuid CasterGUID;
+    string CasterName;
+    uint32 MapID = 0;
+    uint32 ZoneID = 0;
+    float X = 0.0f;
+    float Y = 0.0f;
+    float Z = 0.0f;
 };
 
 class EverQuestCreatureEmote
@@ -892,6 +906,7 @@ public:
     bool ConfigPlayerAddMasterTotemToShamans;
     uint32 ConfigAchievementAdventurerLevel;
     std::set<uint32> ConfigCrossClassIncludeSkillIDs;
+    bool ConfigSpellSummonPlayerAcrossZones;
 
     unordered_set<uint32> CrossClassExemptSpellIDs;
     bool CrossClassExemptSpellIDsBuilt;
@@ -964,6 +979,7 @@ public:
     unordered_map<ObjectGuid, EverQuestPlayerTempFactionBonus> TempFactionBonusByPlayerGUID;
     unordered_map<ObjectGuid, vector<uint32>> ForcedFactionReactionIDsByPlayerGUID;
     unordered_set<ObjectGuid> PlayersPendingTempFactionRecalculation;
+    unordered_map<ObjectGuid, EverQuestPendingSummonRequest> PendingSummonRequestByTargetPlayerGUID;
     unordered_map<uint8, EverQuestClassMap> ClassMapByWOWClassID;
 
     static EverQuestMod* instance()
@@ -1175,6 +1191,13 @@ public:
     bool RollBashKickStunLands(Unit* attacker, Unit* defender);
     uint32 CalculateSpellFocusBoostValue(Unit* caster, uint32 spellID);
     void ProcessForage(Player* player);
+    bool IsSummonPlayerSpellBlockedByTarget(uint32 spellID, Unit* target, Unit* caster);
+    void ProcessSummonPlayerToCaster(Player* caster, Unit* target);
+    Player* ResolveSummonPlayerTarget(Player* caster, Unit* target);
+    void SendSummonRequestToPlayer(Player* targetPlayer, ObjectGuid summonerGUID, uint32 summonerZoneID, uint32 mapID, float x, float y, float z);
+    void QueueCrossZoneSummonRequest(Player* caster, Player* targetPlayer);
+    void ConsumePendingSummonRequest(Player* player);
+    void ClearPendingSummonRequestForPlayer(ObjectGuid playerGUID);
 
     uint8 GetCurrentSecondEQClassForPlayer(Player* player);
     uint8 GetNextSecondEQClassForPlayer(Player* player);
