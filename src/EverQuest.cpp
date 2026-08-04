@@ -115,6 +115,15 @@ EverQuestMod::EverQuestMod() :
     ConfigPlayerAddHearthstoneToNewCharacters(true),
     ConfigPlayerAddMasterTotemToShamans(true),
     ConfigAchievementAdventurerLevel(60),
+    ConfigTrackingEnabled(true),
+    ConfigTrackingRangerYardsPerLevel(20.0f),
+    ConfigTrackingDruidYardsPerLevel(15.0f),
+    ConfigTrackingBardYardsPerLevel(10.0f),
+    ConfigTrackingRangerMaxRange(600.0f),
+    ConfigTrackingDruidMaxRange(300.0f),
+    ConfigTrackingBardMaxRange(180.0f),
+    ConfigTrackingMaxResults(0),
+    ConfigTrackingPulseIntervalInMS(5000),
     CrossClassExemptSpellIDsBuilt(false),
     IllusionMaxFaceIndex(0)
 {
@@ -336,6 +345,19 @@ void EverQuestMod::LoadConfigurationFile()
 
     // Achievements
     ConfigAchievementAdventurerLevel = sConfigMgr->GetOption<uint32>("EverQuest.Achievement.AdventurerLevel", 60);
+
+    // Tracking
+    ConfigTrackingEnabled = sConfigMgr->GetOption<bool>("EverQuest.Tracking.Enabled", true);
+    ConfigTrackingRangerYardsPerLevel = sConfigMgr->GetOption<float>("EverQuest.Tracking.RangerYardsPerLevel", 20.0f);
+    ConfigTrackingDruidYardsPerLevel = sConfigMgr->GetOption<float>("EverQuest.Tracking.DruidYardsPerLevel", 15.0f);
+    ConfigTrackingBardYardsPerLevel = sConfigMgr->GetOption<float>("EverQuest.Tracking.BardYardsPerLevel", 10.0f);
+    ConfigTrackingRangerMaxRange = sConfigMgr->GetOption<float>("EverQuest.Tracking.RangerMaxRange", 600.0f);
+    ConfigTrackingDruidMaxRange = sConfigMgr->GetOption<float>("EverQuest.Tracking.DruidMaxRange", 300.0f);
+    ConfigTrackingBardMaxRange = sConfigMgr->GetOption<float>("EverQuest.Tracking.BardMaxRange", 180.0f);
+    ConfigTrackingMaxResults = sConfigMgr->GetOption<uint32>("EverQuest.Tracking.MaxResults", 0);
+    ConfigTrackingPulseIntervalInMS = sConfigMgr->GetOption<uint32>("EverQuest.Tracking.PulseIntervalInMS", 5000);
+    if (ConfigTrackingPulseIntervalInMS < 1000)
+        ConfigTrackingPulseIntervalInMS = 1000;
 
     // Spells
     ConfigSpellSummonPlayerAcrossZones = sConfigMgr->GetOption<bool>("EverQuest.Spell.SummonPlayerAcrossZones", false);
@@ -7604,6 +7626,283 @@ void EverQuestMod::SendClassEquipmentAddonMessageToPlayer(Player* player, uint8 
     WorldPacket data;
     ChatHandler::BuildChatPacket(data, CHAT_MSG_SYSTEM, LANG_ADDON, nullptr, nullptr, addonMessage);
     player->SendDirectMessage(&data);
+}
+
+static const char* GetTrackingCompassDirection(float angle)
+{
+    static const char* directionNames[8] = { "north", "northwest", "west", "southwest", "south", "southeast", "east", "northeast" };
+    const float pi = 3.14159265f;
+    const float twoPi = pi * 2.0f;
+    while (angle < 0)
+        angle += twoPi;
+    while (angle >= twoPi)
+        angle -= twoPi;
+    uint32 sectorIndex = uint32((angle + (pi / 8.0f)) / (pi / 4.0f)) % 8;
+    return directionNames[sectorIndex];
+}
+
+static const char* GetTrackingProximityDescription(float distance, float maxTrackDistance)
+{
+    if (maxTrackDistance <= 0 || distance <= maxTrackDistance * 0.33f)
+        return "close by";
+    else if (distance <= maxTrackDistance * 0.66f)
+        return "some distance away";
+    else
+        return "far away";
+}
+
+static bool IsCreatureTrackableForPlayer(Player* player, Creature* creature)
+{
+    if (creature == nullptr || creature->IsInWorld() == false || creature->IsAlive() == false)
+        return false;
+    if (creature->IsTrigger() == true || creature->IsTotem() == true)
+        return false;
+    if (player->CanSeeOrDetect(creature, true) == false)
+        return false;
+    return true;
+}
+
+static bool CompareTrackingEntriesByDistance(const std::pair<float, Creature*>& leftEntry, const std::pair<float, Creature*>& rightEntry)
+{
+    return leftEntry.first < rightEntry.first;
+}
+
+static void SendTrackingDirectionMessage(Player* player, EverQuestPlayerTrackingState* trackingState, Creature* creature, float distance)
+{
+    if (distance <= EQ_TRACKING_FOUND_DISTANCE)
+    {
+        ChatHandler(player->GetSession()).PSendSysMessage("|cff4CFF00{}|r is very close by!", trackingState->TrackedCreatureName);
+        return;
+    }
+    const char* direction = GetTrackingCompassDirection(player->GetAngle(creature));
+    const char* proximity = GetTrackingProximityDescription(distance, trackingState->MaxTrackDistance);
+    ChatHandler(player->GetSession()).PSendSysMessage("The trail of |cff4CFF00{}|r leads {}, {}.", trackingState->TrackedCreatureName, direction, proximity);
+}
+
+float EverQuestMod::GetTrackingRangeForEQClassAtLevel(uint8 eqClassID, uint8 level)
+{
+    float yardsPerLevel = 0;
+    float maxRange = 0;
+    switch (eqClassID)
+    {
+    case EQ_EQCLASS_RANGER: yardsPerLevel = ConfigTrackingRangerYardsPerLevel; maxRange = ConfigTrackingRangerMaxRange; break;
+    case EQ_EQCLASS_DRUID:  yardsPerLevel = ConfigTrackingDruidYardsPerLevel;  maxRange = ConfigTrackingDruidMaxRange;  break;
+    case EQ_EQCLASS_BARD:   yardsPerLevel = ConfigTrackingBardYardsPerLevel;   maxRange = ConfigTrackingBardMaxRange;   break;
+    default:                return 0;
+    }
+
+    float range = yardsPerLevel * float(level);
+    if (range > maxRange)
+        range = maxRange;
+    return range;
+}
+
+float EverQuestMod::GetTrackingMaxDistanceForPlayer(Player* player)
+{
+    if (ConfigTrackingEnabled == false || player == nullptr)
+        return 0;
+
+    uint8 level = player->GetLevel();
+    float primaryRange = GetTrackingRangeForEQClassAtLevel(GetClassMapForWOWClassID(player->getClass()).EQClassIDBase, level);
+    float secondaryRange = GetTrackingRangeForEQClassAtLevel(GetCurrentSecondEQClassForPlayer(player), level);
+    return primaryRange > secondaryRange ? primaryRange : secondaryRange;
+}
+
+void EverQuestMod::HandleTrackingRangeChangeForPlayer(Player* player)
+{
+    if (ConfigTrackingEnabled == false || player == nullptr)
+        return;
+
+    float maxTrackDistance = GetTrackingMaxDistanceForPlayer(player);
+    if (maxTrackDistance <= 0)
+        return;
+
+    EverQuestPlayerTrackingState* trackingState = player->CustomData.Get<EverQuestPlayerTrackingState>(EQ_PLAYER_CUSTOMDATA_TRACKING);
+    if (trackingState != nullptr && trackingState->TrackedCreatureGUID.IsEmpty() == false)
+        trackingState->MaxTrackDistance = maxTrackDistance;
+
+    std::ostringstream rangePayload;
+    rangePayload << "D|" << uint32(maxTrackDistance);
+    SendTrackingAddonMessageToPlayer(player, rangePayload.str());
+}
+
+void EverQuestMod::SendTrackingAddonMessageToPlayer(Player* player, const std::string& payload)
+{
+    if (player == nullptr)
+        return;
+
+    std::string addonMessage = "EQTRACK\t" + payload;
+    WorldPacket data;
+    ChatHandler::BuildChatPacket(data, CHAT_MSG_SYSTEM, LANG_ADDON, nullptr, nullptr, addonMessage);
+    player->SendDirectMessage(&data);
+}
+
+// Message stream (after the "EQTRACK\t" prefix): "H|<rowCount>|<maxDistance>|<trackedGUIDRaw or empty>", then rows batched a few per message as
+// "R|<guidRaw>|<level>|<distance>|<name>" joined with "~", then a final "F". Separately, "T|<guidRaw>" / "T|" is pushed when tracking starts / stops
+// so the addon can mark the tracked row live, and "D|<maxRange>" is pushed when the player's track range changes (level up).  Creature GUIDs are 64 bit values, so
+// the addon must keep them as strings (Lua numbers lose precision above 2^53) and echo them back in ".track start"
+void EverQuestMod::SendTrackingListToPlayer(Player* player)
+{
+    if (player == nullptr || player->IsInWorld() == false)
+        return;
+
+    float maxTrackDistance = GetTrackingMaxDistanceForPlayer(player);
+    if (maxTrackDistance <= 0)
+    {
+        ChatHandler(player->GetSession()).PSendSysMessage("You have no tracking ability.");
+        return;
+    }
+
+    // Throttle scans, since the addon (or a chat macro) can request them at will
+    EverQuestPlayerTrackingState* trackingState = player->CustomData.GetDefault<EverQuestPlayerTrackingState>(EQ_PLAYER_CUSTOMDATA_TRACKING);
+    uint64 nowMS = uint64(GameTime::GetGameTimeMS().count());
+    if (trackingState->LastScanMSTime != 0 && nowMS >= trackingState->LastScanMSTime && nowMS - trackingState->LastScanMSTime < EQ_TRACKING_SCAN_MIN_INTERVAL_MS)
+        return;
+    trackingState->LastScanMSTime = nowMS;
+
+    // Gather every trackable creature in range, nearest first
+    std::list<Creature*> nearbyCreatures;
+    Acore::AnyUnitInObjectRangeCheck check(player, maxTrackDistance);
+    Acore::CreatureListSearcher<Acore::AnyUnitInObjectRangeCheck> searcher(player, nearbyCreatures, check);
+    Cell::VisitObjects(player, searcher, maxTrackDistance);
+    std::vector<std::pair<float, Creature*>> sortedCreatureEntries;
+    for (Creature* creature : nearbyCreatures)
+    {
+        if (IsCreatureTrackableForPlayer(player, creature) == false)
+            continue;
+        sortedCreatureEntries.push_back(std::make_pair(player->GetDistance(creature), creature));
+    }
+    std::sort(sortedCreatureEntries.begin(), sortedCreatureEntries.end(), CompareTrackingEntriesByDistance);
+    if (ConfigTrackingMaxResults > 0 && sortedCreatureEntries.size() > size_t(ConfigTrackingMaxResults))
+        sortedCreatureEntries.resize(ConfigTrackingMaxResults);
+
+    std::ostringstream headerPayload;
+    headerPayload << "H|" << sortedCreatureEntries.size() << "|" << uint32(maxTrackDistance) << "|";
+    if (trackingState->TrackedCreatureGUID.IsEmpty() == false)
+        headerPayload << trackingState->TrackedCreatureGUID.GetRawValue();
+    SendTrackingAddonMessageToPlayer(player, headerPayload.str());
+
+    std::ostringstream rowPayload;
+    int rowsInMessage = 0;
+    for (const std::pair<float, Creature*>& creatureEntry : sortedCreatureEntries)
+    {
+        if (rowsInMessage > 0)
+            rowPayload << "~";
+        rowPayload << "R|" << creatureEntry.second->GetGUID().GetRawValue() << "|" << uint32(creatureEntry.second->GetLevel())
+            << "|" << uint32(creatureEntry.first) << "|" << creatureEntry.second->GetName();
+        rowsInMessage++;
+        if (rowsInMessage >= EQ_TRACKING_ADDON_ROWS_PER_MESSAGE)
+        {
+            SendTrackingAddonMessageToPlayer(player, rowPayload.str());
+            rowPayload.str("");
+            rowPayload.clear();
+            rowsInMessage = 0;
+        }
+    }
+    if (rowsInMessage > 0)
+        SendTrackingAddonMessageToPlayer(player, rowPayload.str());
+    SendTrackingAddonMessageToPlayer(player, "F");
+}
+
+void EverQuestMod::StartTrackingForPlayer(Player* player, uint64 rawCreatureGUID)
+{
+    if (player == nullptr || player->IsInWorld() == false)
+        return;
+
+    float maxTrackDistance = GetTrackingMaxDistanceForPlayer(player);
+    if (maxTrackDistance <= 0)
+    {
+        ChatHandler(player->GetSession()).PSendSysMessage("You have no tracking ability.");
+        return;
+    }
+
+    // The creature can be gone, dead, or out of range by the time the player picks it from the list
+    ObjectGuid creatureGUID = ObjectGuid(rawCreatureGUID);
+    Creature* creature = ObjectAccessor::GetCreature(*player, creatureGUID);
+    if (creature == nullptr || IsCreatureTrackableForPlayer(player, creature) == false)
+    {
+        ChatHandler(player->GetSession()).PSendSysMessage("You are unable to pick up that trail.");
+        return;
+    }
+    float distance = player->GetDistance(creature);
+    if (distance > maxTrackDistance * EQ_TRACKING_LOST_DISTANCE_MULTIPLIER)
+    {
+        ChatHandler(player->GetSession()).PSendSysMessage("You are unable to pick up that trail.");
+        return;
+    }
+
+    EverQuestPlayerTrackingState* trackingState = player->CustomData.GetDefault<EverQuestPlayerTrackingState>(EQ_PLAYER_CUSTOMDATA_TRACKING);
+    trackingState->TrackedCreatureGUID = creatureGUID;
+    trackingState->TrackedCreatureName = creature->GetName();
+    trackingState->MaxTrackDistance = maxTrackDistance;
+    trackingState->PulseTimerMS = 0;
+    ChatHandler(player->GetSession()).PSendSysMessage("You begin tracking |cff4CFF00{}|r.", trackingState->TrackedCreatureName);
+
+    // Tell the addon which creature is now tracked so it can mark the row
+    std::ostringstream trackedPayload;
+    trackedPayload << "T|" << creatureGUID.GetRawValue();
+    SendTrackingAddonMessageToPlayer(player, trackedPayload.str());
+    SendTrackingDirectionMessage(player, trackingState, creature, distance);
+}
+
+void EverQuestMod::StopTrackingForPlayer(Player* player, bool sendMessage)
+{
+    if (player == nullptr)
+        return;
+
+    EverQuestPlayerTrackingState* trackingState = player->CustomData.Get<EverQuestPlayerTrackingState>(EQ_PLAYER_CUSTOMDATA_TRACKING);
+    if (trackingState == nullptr || trackingState->TrackedCreatureGUID.IsEmpty() == true)
+    {
+        if (sendMessage == true)
+            ChatHandler(player->GetSession()).PSendSysMessage("You are not tracking anything.");
+        return;
+    }
+
+    trackingState->TrackedCreatureGUID.Clear();
+    trackingState->TrackedCreatureName.clear();
+    trackingState->PulseTimerMS = 0;
+
+    // Tell the addon nothing is tracked anymore so it can clear the row marker (covers manual stops and auto-drops)
+    SendTrackingAddonMessageToPlayer(player, "T|");
+    if (sendMessage == true)
+        ChatHandler(player->GetSession()).PSendSysMessage("You stop tracking.");
+}
+
+void EverQuestMod::UpdatePlayerTracking(Player* player, uint32 diffInMS)
+{
+    if (ConfigTrackingEnabled == false || player == nullptr || player->IsInWorld() == false)
+        return;
+
+    EverQuestPlayerTrackingState* trackingState = player->CustomData.Get<EverQuestPlayerTrackingState>(EQ_PLAYER_CUSTOMDATA_TRACKING);
+    if (trackingState == nullptr || trackingState->TrackedCreatureGUID.IsEmpty() == true)
+        return;
+
+    trackingState->PulseTimerMS += diffInMS;
+    if (trackingState->PulseTimerMS < ConfigTrackingPulseIntervalInMS)
+        return;
+    trackingState->PulseTimerMS = 0;
+
+    Creature* creature = ObjectAccessor::GetCreature(*player, trackingState->TrackedCreatureGUID);
+    if (creature == nullptr || creature->IsInWorld() == false)
+    {
+        ChatHandler(player->GetSession()).PSendSysMessage("You have lost the trail of |cff4CFF00{}|r.", trackingState->TrackedCreatureName);
+        StopTrackingForPlayer(player, false);
+        return;
+    }
+    if (creature->IsAlive() == false)
+    {
+        ChatHandler(player->GetSession()).PSendSysMessage("The trail of |cff4CFF00{}|r ends at its corpse.", trackingState->TrackedCreatureName);
+        StopTrackingForPlayer(player, false);
+        return;
+    }
+    float distance = player->GetDistance(creature);
+    if (distance > trackingState->MaxTrackDistance * EQ_TRACKING_LOST_DISTANCE_MULTIPLIER)
+    {
+        ChatHandler(player->GetSession()).PSendSysMessage("The trail of |cff4CFF00{}|r has gone cold.", trackingState->TrackedCreatureName);
+        StopTrackingForPlayer(player, false);
+        return;
+    }
+    SendTrackingDirectionMessage(player, trackingState, creature, distance);
 }
 
 set<uint32> GetSetFromConfigString(string configStringName)

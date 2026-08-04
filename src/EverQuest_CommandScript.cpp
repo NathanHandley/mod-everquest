@@ -80,12 +80,20 @@ public:
             { "equipswap",   HandleSecondaryEquipSwap,          SEC_PLAYER, Console::No },
         };
 
+        static ChatCommandTable trackCommandTable =
+        {
+            { "list",  HandleTrackList,  SEC_PLAYER, Console::No },
+            { "start", HandleTrackStart, SEC_PLAYER, Console::No },
+            { "stop",  HandleTrackStop,  SEC_PLAYER, Console::No },
+        };
+
         static ChatCommandTable commandTable =
         {
             { "eqgps",  HandleEQGPSCommand,                     SEC_PLAYER, Console::No },
             { "eqface", HandleEQFaceCommand,                    SEC_PLAYER, Console::No },
             { "eqshowbardpulse", HandleEQShowBardPulseCommand,  SEC_PLAYER, Console::No },
             { "class",  classCommandTable                                               },
+            { "track",  trackCommandTable                                               },
         };
 
         return commandTable;
@@ -309,6 +317,46 @@ public:
         EverQuest->SendClassInfoAddonMessageToPlayer(player);
 
         // Class change accepted
+        return true;
+    }
+
+    static bool HandleTrackList(ChatHandler* handler, const char* /*args*/)
+    {
+        if (EverQuest->IsEnabled == false)
+            return true;
+
+        EverQuest->SendTrackingListToPlayer(handler->GetPlayer());
+        return true;
+    }
+
+    static bool HandleTrackStart(ChatHandler* handler, const char* args)
+    {
+        if (EverQuest->IsEnabled == false)
+            return true;
+
+        if (!args || !*args)
+            return true;
+        char* guidToken = strtok((char*)args, " ");
+        std::string guidString = guidToken != nullptr ? guidToken : "";
+        if (guidString.empty() == true || guidString.size() > 20)
+            return true;
+        for (size_t i = 0; i < guidString.size(); ++i)
+        {
+            if (isdigit(static_cast<unsigned char>(guidString[i])) == 0)
+                return true;
+        }
+
+        uint64 rawCreatureGUID = strtoull(guidString.c_str(), nullptr, 10);
+        EverQuest->StartTrackingForPlayer(handler->GetPlayer(), rawCreatureGUID);
+        return true;
+    }
+
+    static bool HandleTrackStop(ChatHandler* handler, const char* /*args*/)
+    {
+        if (EverQuest->IsEnabled == false)
+            return true;
+
+        EverQuest->StopTrackingForPlayer(handler->GetPlayer(), true);
         return true;
     }
 

@@ -222,6 +222,12 @@ class WorldPacket;
 #define EQ_DEFEND_PLAYERS_CHECK_MS                  2000
 #define EQ_DEFEND_PLAYERS_SEARCH_RADIUS             15.0f
 
+#define EQ_PLAYER_CUSTOMDATA_TRACKING               "EQTracking"
+#define EQ_TRACKING_ADDON_ROWS_PER_MESSAGE          4       // List rows batched per addon message to stay under client chat limits
+#define EQ_TRACKING_LOST_DISTANCE_MULTIPLIER        1.25f   // Fraction of max track distance a tracked creature can stray before the trail goes cold
+#define EQ_TRACKING_FOUND_DISTANCE                  15.0f   // Within this many yards, the tracked creature counts as found
+#define EQ_TRACKING_SCAN_MIN_INTERVAL_MS            2000    // Minimum time between track scans for one player (guards against command spam)
+
 // Vulak`Aerr (Temple of Veeshan) spawns perma-rooted and "locked" (unattackable, non-aggro) until every required dragon is dead, matching Velious-era EQ
 #define EQ_VULAK_CREATURE_TEMPLATE_ID               55045
 #define EQ_VULAK_LOCK_RECHECK_MS                    3000
@@ -535,6 +541,16 @@ class EverQuestPlayerIllusionState
 public:
     uint32 FormSpellID = 0;
     uint32 RefreshTimerMS = 0;
+};
+
+class EverQuestPlayerTrackingState : public DataMap::Base
+{
+public:
+    ObjectGuid TrackedCreatureGUID;
+    std::string TrackedCreatureName;
+    float MaxTrackDistance = 0;
+    uint32 PulseTimerMS = 0;
+    uint64 LastScanMSTime = 0;
 };
 
 class EverQuestPet
@@ -906,6 +922,15 @@ public:
     bool ConfigPlayerAddMasterTotemToShamans;
     uint32 ConfigAchievementAdventurerLevel;
     std::set<uint32> ConfigCrossClassIncludeSkillIDs;
+    bool ConfigTrackingEnabled;
+    float ConfigTrackingRangerYardsPerLevel;
+    float ConfigTrackingDruidYardsPerLevel;
+    float ConfigTrackingBardYardsPerLevel;
+    float ConfigTrackingRangerMaxRange;
+    float ConfigTrackingDruidMaxRange;
+    float ConfigTrackingBardMaxRange;
+    uint32 ConfigTrackingMaxResults;
+    uint32 ConfigTrackingPulseIntervalInMS;
     bool ConfigSpellSummonPlayerAcrossZones;
 
     unordered_set<uint32> CrossClassExemptSpellIDs;
@@ -1198,6 +1223,15 @@ public:
     void QueueCrossZoneSummonRequest(Player* caster, Player* targetPlayer);
     void ConsumePendingSummonRequest(Player* player);
     void ClearPendingSummonRequestForPlayer(ObjectGuid playerGUID);
+
+    float GetTrackingRangeForEQClassAtLevel(uint8 eqClassID, uint8 level);
+    float GetTrackingMaxDistanceForPlayer(Player* player);
+    void HandleTrackingRangeChangeForPlayer(Player* player);
+    void SendTrackingAddonMessageToPlayer(Player* player, const std::string& payload);
+    void SendTrackingListToPlayer(Player* player);
+    void StartTrackingForPlayer(Player* player, uint64 rawCreatureGUID);
+    void StopTrackingForPlayer(Player* player, bool sendMessage);
+    void UpdatePlayerTracking(Player* player, uint32 diffInMS);
 
     uint8 GetCurrentSecondEQClassForPlayer(Player* player);
     uint8 GetNextSecondEQClassForPlayer(Player* player);

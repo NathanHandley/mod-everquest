@@ -298,6 +298,7 @@ public:
         EverQuest->ProcessLevelCapStateForPlayer(player);
         EverQuest->UpdatePlayerIllusionGearDisplay(player, p_time);
         EverQuest->ConsumePendingTemporaryFactionRecalculation(player);
+        EverQuest->UpdatePlayerTracking(player, p_time);
         if (EverQuest->ConfigSpellSummonPlayerAcrossZones == true)
             EverQuest->ConsumePendingSummonRequest(player);
 
@@ -516,6 +517,10 @@ public:
             {
                 EverQuest->ProcessForage(player);
             }
+            else if (spell->m_spellInfo->Effects[EFFECT_0].MiscValue == EQ_SPELLDUMMYTYPE_TRACK) // Tracking
+            {
+                EverQuest->SendTrackingListToPlayer(player);
+            }
             else if (spell->m_spellInfo->Effects[EFFECT_0].MiscValue == EQ_SPELLDUMMYTYPE_SUMMONPC) // Summon a player to the caster
             {
                 EverQuest->ProcessSummonPlayerToCaster(player, spell->m_targets.GetUnitTarget());
@@ -662,6 +667,9 @@ public:
 
         // Award the adventurer feat of strength if the required level is hit while the aura is still held
         EverQuest->ProcessAdventurerStateOnLevelChange(player);
+
+        // Track range scales with level, so push the new range to any active tracking and the client addon
+        EverQuest->HandleTrackingRangeChangeForPlayer(player);
     }
 
     void OnPlayerLogout(Player* player) override

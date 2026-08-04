@@ -522,7 +522,55 @@ EverQuest.Achievement.AdventurerLevel = 60
 #
 ###################################################################################################
 
-EverQuest.CrossClass.IncludeSkillIDs = 129, 164, 165, 171, 182, 185, 186, 197, 202, 333, 356, 393, 633, 755, 762, 773
+EverQuest.CrossClass.IncludeSkillIDs = 129, 164, 165, 171, 182, 185, 186, 197, 202, 333, 356, 393, 755, 762, 773
+
+###################################################################################################
+# Tracking Settings
+#
+# 	EverQuest.Tracking.Enabled
+#		If true, players with a primary or secondary EQ class of Ranger, Druid, or Bard can use
+#		the Tracking ability (cast the Tracking spell or use the EQ_Tracking addon window) to
+#		list nearby creatures and follow one via periodic direction messages
+#	Default: True (tracking is available)
+#
+# 	EverQuest.Tracking.RangerYardsPerLevel
+# 	EverQuest.Tracking.DruidYardsPerLevel
+# 	EverQuest.Tracking.BardYardsPerLevel
+#		How many yards of track range a class gets per level (range = level x this, clamped to
+#		the max range below).  Rangers are the best trackers in EverQuest, so this is the largest
+#	Default: 20 (Ranger), 15 (Druid), 10 (Bard)
+#
+# 	EverQuest.Tracking.RangerMaxRange
+# 	EverQuest.Tracking.DruidMaxRange
+# 	EverQuest.Tracking.BardMaxRange
+#		The most yards a class's track range can ever reach, no matter their level
+#	Default: 600 (Ranger), 300 (Druid), 180 (Bard)
+#
+#	NOTE: When both the primary and the secondary EQ class can track, only the class that
+#	 yields the highest range at the player's level is in effect
+#
+# 	EverQuest.Tracking.MaxResults
+#		The most creatures a track scan will return, nearest first.  0 means no limit (every
+#		trackable creature in range is listed)
+#	Default: 0
+#
+# 	EverQuest.Tracking.PulseIntervalInMS
+#		How often (in milliseconds) the direction message repeats while tracking a creature.
+#		Values under 1000 are raised to 1000
+#	Default: 5000 (every 5 seconds)
+#
+###################################################################################################
+
+EverQuest.Tracking.Enabled = True
+EverQuest.Tracking.RangerYardsPerLevel = 20
+EverQuest.Tracking.DruidYardsPerLevel = 15
+EverQuest.Tracking.BardYardsPerLevel = 10
+EverQuest.Tracking.RangerMaxRange = 600
+EverQuest.Tracking.DruidMaxRange = 300
+EverQuest.Tracking.BardMaxRange = 180
+EverQuest.Tracking.MaxResults = 0
+EverQuest.Tracking.PulseIntervalInMS = 5000
+
 ###################################################################################################
 # Spell Settings
 #
