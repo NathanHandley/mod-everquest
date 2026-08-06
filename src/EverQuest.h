@@ -1307,6 +1307,7 @@ public:
     void ProcessPendingEquipmentStorageTransactions();
     void WaitForPendingEquipmentStorageCommitForPlayer(ObjectGuid playerGUID);
     bool IsItemEQClassAllowedForPlayerSecondaryClass(Player* player, uint8 eqClassID, uint32 itemTemplateID);
+    void AppendCharacterRowLockAnchor(CharacterDatabaseTransaction& transaction, uint32 playerGUIDCounter);
     Item* LoadDetachedItemForPlayer(uint32 itemGUIDCounter, Player* player);
     bool EquipItemIntoSecondaryClassStorage(Player* player, uint8 eqClassID, uint8 clientBagID, uint8 clientSlotID, uint8 equipSlot, uint32 expectedItemTemplateID, std::string& errorTextOut);
     bool RemoveItemFromSecondaryClassStorage(Player* player, uint8 eqClassID, uint8 equipSlot, uint8 clientBagID, uint8 clientSlotID, bool useSpecificBagPosition, std::string& errorTextOut);

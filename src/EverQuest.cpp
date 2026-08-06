@@ -6903,6 +6903,7 @@ bool EverQuestMod::PerformClassSwitch(Player* player)
 
     // Set up the transaction
     CharacterDatabaseTransaction transaction = CharacterDatabase.BeginTransaction();
+    AppendCharacterRowLockAnchor(transaction, player->GetGUID().GetCounter());
 
     // Perform moves into the mod tables to reflect this character's class
     CopyCharacterDataIntoModCharacterTable(player, transaction);
@@ -7230,6 +7231,11 @@ bool EverQuestMod::IsItemEQClassAllowedForPlayerSecondaryClass(Player* player, u
     return (allowedEQClassMask & secondEQClassBit) != 0;
 }
 
+void EverQuestMod::AppendCharacterRowLockAnchor(CharacterDatabaseTransaction& transaction, uint32 playerGUIDCounter)
+{
+    transaction->Append("UPDATE characters SET online = online WHERE guid = {}", playerGUIDCounter);
+}
+
 Item* EverQuestMod::LoadDetachedItemForPlayer(uint32 itemGUIDCounter, Player* player)
 {
     // Never create a second live object for an item the player already holds
@@ -7427,6 +7433,7 @@ bool EverQuestMod::EquipItemIntoSecondaryClassStorage(Player* player, uint8 eqCl
     }
 
     CharacterDatabaseTransaction transaction = CharacterDatabase.BeginTransaction();
+    AppendCharacterRowLockAnchor(transaction, playerGUIDCounter);
 
     // Persist the incoming item's latest state and detach it from the live inventory rows
     item->FSetState(ITEM_NEW);
@@ -7529,6 +7536,7 @@ bool EverQuestMod::RemoveItemFromSecondaryClassStorage(Player* player, uint8 eqC
     }
 
     CharacterDatabaseTransaction transaction = CharacterDatabase.BeginTransaction();
+    AppendCharacterRowLockAnchor(transaction, playerGUIDCounter);
     transaction->Append("DELETE FROM mod_everquest_character_class_inventory WHERE guid = {} AND eqclass = {} AND bag = 0 AND slot = {} AND item = {}", playerGUIDCounter, eqClassID, equipSlot, itemGUIDCounter);
     item->SetState(ITEM_UNCHANGED);
     player->MoveItemToInventory(dest, item, true);
@@ -7733,6 +7741,7 @@ bool EverQuestMod::SwapSecondaryClassStorageItemWithLiveEquipment(Player* player
     }
 
     CharacterDatabaseTransaction transaction = CharacterDatabase.BeginTransaction();
+    AppendCharacterRowLockAnchor(transaction, playerGUIDCounter);
 
     // Pull the displaced live item off the character and detach it into the storage rows
     uint32 liveItemGUIDCounter = 0;
