@@ -71,7 +71,7 @@ public:
             uint32 creatureGUID = me->GetSpawnId();
             CreatureInstanceData = EverQuest->GetCreatureInstanceData(creatureGUID);
             CreatureWaypoints.clear();
-            if (CreatureInstanceData.WaypointListID != -1)
+            if (CreatureInstanceData.WaypointListID != uint32(-1))
                 CreatureWaypoints = EverQuest->GetWaypoints(CreatureInstanceData.MapID, CreatureInstanceData.WaypointListID);
         }
 
@@ -349,7 +349,7 @@ public:
             for (int cornerIndex = 1; cornerIndex < (int)pathNodes.size(); ++cornerIndex)
             {
                 Position corner(pathNodes[cornerIndex].x, pathNodes[cornerIndex].y, pathNodes[cornerIndex].z);
-                bool isFinalCorner = (cornerIndex == pathNodes.size() - 1);
+                bool isFinalCorner = (cornerIndex == (int)pathNodes.size() - 1);
 
                 float segDX = corner.GetPositionX() - previousPosition.GetPositionX();
                 float segDY = corner.GetPositionY() - previousPosition.GetPositionY();

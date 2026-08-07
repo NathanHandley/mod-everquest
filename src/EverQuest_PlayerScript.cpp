@@ -105,7 +105,7 @@ public:
         return false;
     }
 
-    void OnPlayerBeforeLoadPetFromDB(Player* player, uint32& petEntry, uint32& petNumber, bool& current, bool& forceLoadFromDB) override
+    void OnPlayerBeforeLoadPetFromDB(Player* player, uint32& petEntry, uint32& petNumber, bool& /*current*/, bool& forceLoadFromDB) override
     {
         if (EverQuest->IsEnabled == false)
             return;
