@@ -18,6 +18,7 @@
 #include "ObjectMgr.h"
 #include "Pet.h"
 #include "ScriptMgr.h"
+#include "SpellMgr.h"
 
 #include "EverQuest.h"
 
@@ -51,6 +52,20 @@ public:
             pet->SetUInt32Value(UNIT_VIRTUAL_ITEM_SLOT_ID + 0, petData.MainhandItemTemplateID);
         if (petData.OffhandItemTemplateID != 0)
             pet->SetUInt32Value(UNIT_VIRTUAL_ITEM_SLOT_ID + 1, petData.OffhandItemTemplateID);
+
+        if (EverQuest->ConfigSpellTalentAlignmentEnabled == true)
+        {
+            Unit* owner = pet->GetOwner();
+            if (owner != nullptr && owner->IsPlayer() == true)
+            {
+                // Warlock "Unholy Power" (and other talent modifying the pet passive) need this
+                pet->CastSpell(pet, EQ_SPELL_ID_WARLOCK_TAMED_PET_PASSIVE, true);
+
+                // Warlock "Soul Link" applies to freshly summoned pets
+                for (PetAura const* petAura : owner->m_petAuras)
+                    pet->CastPetAura(petAura);
+            }
+        }
     }
 };
 

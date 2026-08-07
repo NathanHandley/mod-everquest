@@ -29,6 +29,8 @@ void AddEverQuestCharmAuraScripts();
 void AddEverQuestIllusionSpellScripts();
 void AddEverQuestResistDiffSpellScripts();
 void AddEverQuestPlayerCasterOnlySpellScripts();
+void AddEverQuestFrostbiteChillSpellScripts();
+void AddEverQuestTalentInteractionScripts();
 void AddEverQuestItemScripts();
 void AddEverQuestPetScripts();
 void AddEverQuestCommandScripts();
@@ -55,6 +57,8 @@ void Addmod_everquestScripts()
     AddEverQuestIllusionSpellScripts();
     AddEverQuestResistDiffSpellScripts();
     AddEverQuestPlayerCasterOnlySpellScripts();
+    AddEverQuestFrostbiteChillSpellScripts();
+    AddEverQuestTalentInteractionScripts();
     AddEverQuestItemScripts();
     AddEverQuestPetScripts();
     AddEverQuestCommandScripts();

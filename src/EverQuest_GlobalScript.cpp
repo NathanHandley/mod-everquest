@@ -51,6 +51,31 @@ public:
             spell->AttributesEx3 |= SPELL_ATTR3_ALLOW_AURA_WHILE_DEAD;
         }
 
+        // A few WOW talent auras hide behind AuraEffect::IsAffectedOnSpell, which has no runtime hook the way spell modifiers do (see EverQuest_SpellTalentAlignment),
+        // so the only way to let them reach EverQuest spells is to adjust their loaded spell data
+        if (EverQuest->ConfigSpellTalentAlignmentEnabled == true)
+        {
+            // Shatter's crit bonus against frozen targets: family 0 is a wildcard in IsAffectedOnSpell, letting EverQuest spells benefit
+            // The mage's other spells benefit too, which the stock mask nearly covered anyway
+            if (spell->Id == EQ_SPELL_ID_MAGE_SHATTER_RANK1 || spell->Id == EQ_SPELL_ID_MAGE_SHATTER_RANK2 || spell->Id == EQ_SPELL_ID_MAGE_SHATTER_RANK3)
+                spell->SpellFamilyName = SPELLFAMILY_GENERIC;
+
+            // Fingers of Frost's "treated as frozen" buff has a similar condition.  The wildcard makes every aura-state check by this caster pass while the buff is up, which is safe for a mage
+            if (spell->Id == EQ_SPELL_ID_MAGE_FINGERS_OF_FROST_BUFF)
+                spell->SpellFamilyName = SPELLFAMILY_GENERIC;
+
+            // Frost Channeling's mana cost reduction only covers the three mage schools, so EverQuest spells of other schools would/ miss it.  Widening to all magic schools changes nothing for the mage's own spells, which all sit inside the original mask
+            if (spell->Id == EQ_SPELL_ID_MAGE_FROST_CHANNELING_RANK1 || spell->Id == EQ_SPELL_ID_MAGE_FROST_CHANNELING_RANK2 || spell->Id == EQ_SPELL_ID_MAGE_FROST_CHANNELING_RANK3)
+            {
+                if (spell->Effects[EFFECT_0].ApplyAuraName == SPELL_AURA_MOD_POWER_COST_SCHOOL_PCT)
+                    spell->Effects[EFFECT_0].MiscValue = SPELL_SCHOOL_MASK_MAGIC;
+            }
+
+            // Renewed Hope's crit bonus against Weakened Soul targets sits behind the same IsAffectedOnSpell gate as Shatter, so the wildcard treatment lets EverQuest heals benefit (the Weakened Soul condition itself stays in the core)
+            if (spell->Id == EQ_SPELL_ID_PRIEST_RENEWED_HOPE_RANK1 || spell->Id == EQ_SPELL_ID_PRIEST_RENEWED_HOPE_RANK2)
+                spell->SpellFamilyName = SPELLFAMILY_GENERIC;
+        }
+
         // Only adjust EQ-generated spells
         if (spell->Id < EverQuest->ConfigSystemSpellDBCIDMin || spell->Id > EverQuest->ConfigSystemSpellDBCIDMax)
             return;

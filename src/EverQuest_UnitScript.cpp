@@ -24,6 +24,7 @@
 #include "SpellInfo.h"
 
 #include "EverQuest.h"
+#include "EverQuest_SpellTalentAlignment.h"
 
 #include <cmath>
 
@@ -312,7 +313,7 @@ public:
         }
     }
 
-    void ModifyPeriodicDamageAurasTick(Unit* /*target*/, Unit* attacker, uint32& damage, SpellInfo const* spellInfo) override
+    void ModifyPeriodicDamageAurasTick(Unit* target, Unit* attacker, uint32& damage, SpellInfo const* spellInfo) override
     {
         if (EverQuest->IsEnabled == false)
             return;
@@ -326,11 +327,170 @@ public:
             return;
 
         uint32 boostPercent = EverQuest->CalculateSpellFocusBoostValue(attacker, spellID);
-        if (boostPercent == 0)
+        if (boostPercent != 0)
+        {
+            // Rounding is to match the non-periodic focus boost behavior
+            damage = uint32(std::ceil((float)damage * (1.0f + (float)boostPercent / 100.0f)));
+        }
+
+        // Also called for periodic heal ticks
+        if (EverQuest->ConfigSpellTalentAlignmentEnabled == true && target != nullptr && attacker->IsPlayer() == true && EverQuestSpellTalentAlignment::DoesSpellInfoDealPeriodicDamage(spellInfo) == true)
+        {
+            // Warlock "Death's Embrace" boosts periodic Shadow damage against low health targets too
+            int32 deathsEmbracePercent = GetDeathsEmbraceDamagePercent(target, attacker, spellInfo);
+            if (deathsEmbracePercent > 0)
+                damage += (damage * uint32(deathsEmbracePercent)) / 100;
+
+            // Warlock "Soul Siphon" boosts the periodic ticks of EverQuest lifetap spells too (the heal follows the damage)
+            int32 soulSiphonPercent = GetSoulSiphonDamagePercent(target, attacker, spellInfo);
+            if (soulSiphonPercent > 0)
+                damage += (damage * uint32(soulSiphonPercent)) / 100;
+
+            // Priest "Mind Melt" lets EverQuest Shadow damage over time spells critically tick.  A family 0 spell can never satisfy the aura that normally enables periodic crits, so the roll happens here (spell crit + the talent bonus)
+            if ((spellInfo->SchoolMask & SPELL_SCHOOL_MASK_SHADOW) != 0)
+            {
+                AuraEffect const* mindMeltEffect = attacker->GetAuraEffectOfRankedSpell(EQ_SPELL_ID_PRIEST_MIND_MELT_RANK1, EFFECT_1);
+                if (mindMeltEffect != nullptr)
+                {
+                    float critChance = attacker->ToPlayer()->GetFloatValue(static_cast<uint16>(PLAYER_SPELL_CRIT_PERCENTAGE1) + SPELL_SCHOOL_SHADOW)
+                        + float(mindMeltEffect->GetAmount());
+                    if (roll_chance_f(critChance) == true)
+                        damage += damage / 2;
+                }
+            }
+
+            // Warlock "Pandemic" grants EverQuest Shadow damage over time spells the same manual critical ticks, at the player's Shadow crit plus "Malediction"'s bonus, with Pandemic's increased critical damage (the base spell
+            // critical bonus of half the damage, raised by Pandemic's percent)
+            if ((spellInfo->SchoolMask & SPELL_SCHOOL_MASK_SHADOW) != 0)
+            {
+                AuraEffect const* pandemicEffect = attacker->GetAuraEffect(EQ_SPELL_ID_WARLOCK_PANDEMIC, EFFECT_0);
+                if (pandemicEffect != nullptr)
+                {
+                    float critChance = attacker->ToPlayer()->GetFloatValue(static_cast<uint16>(PLAYER_SPELL_CRIT_PERCENTAGE1) + SPELL_SCHOOL_SHADOW);
+                    AuraEffect const* maledictionEffect = attacker->GetAuraEffectOfRankedSpell(EQ_SPELL_ID_WARLOCK_MALEDICTION_RANK1, EFFECT_0);
+                    if (maledictionEffect != nullptr)
+                        critChance += float(maledictionEffect->GetAmount());
+                    if (roll_chance_f(critChance) == true)
+                    {
+                        uint32 criticalBonus = damage / 2;
+                        criticalBonus += (criticalBonus * uint32(pandemicEffect->GetAmount())) / 100;
+                        damage += criticalBonus;
+                    }
+                }
+            }
+        }
+    }
+
+    void ModifyHealReceived(Unit* target, Unit* healer, uint32& heal, SpellInfo const* spellInfo) override
+    {
+        if (EverQuest->IsEnabled == false || EverQuest->ConfigSpellTalentAlignmentEnabled == false)
+            return;
+        if (target == nullptr || healer == nullptr || spellInfo == nullptr || heal == 0)
+            return;
+        if (EverQuest->IsSpellAnEQSpell(spellInfo->Id) == false)
             return;
 
-        // Rounding is to match the non-periodic focus boost behavior
-        damage = uint32(std::ceil((float)damage * (1.0f + (float)boostPercent / 100.0f)));
+        // Priest "Improved Vampiric Embrace" also boosts the health returned by EverQuest lifetap spells with only the healing side is boosted here
+        if (target->IsPlayer() == true && EverQuestSpellTalentAlignment::DoesSpellInfoLeech(spellInfo) == true)
+        {
+            AuraEffect const* improvedVampiricEmbraceEffect = target->GetAuraEffectOfRankedSpell(EQ_SPELL_ID_PRIEST_IMPROVED_VAMPIRIC_EMBRACE_RANK1, EFFECT_0);
+            if (improvedVampiricEmbraceEffect != nullptr)
+                heal += (heal * uint32(improvedVampiricEmbraceEffect->GetAmount())) / 100;
+        }
+
+        // For Priest "Improved Flash Heal"
+        if (EverQuestSpellTalentAlignment::DoesSpellInfoDealDirectHeal(spellInfo) == true && EverQuestSpellTalentAlignment::DoesSpellInfoDealPeriodicHeal(spellInfo) == false)
+        {
+            Unit* healCaster = target;
+            Unit* healedUnit = healer;
+            if (healCaster->IsPlayer() == true && healedUnit->GetHealthPct() <= 50.0f)
+            {
+                AuraEffect const* improvedFlashHealEffect = healCaster->GetAuraEffectOfRankedSpell(EQ_SPELL_ID_PRIEST_IMPROVED_FLASH_HEAL_RANK1, EFFECT_0);
+                if (improvedFlashHealEffect != nullptr && roll_chance_i(improvedFlashHealEffect->GetAmount()) == true)
+                    heal += heal / 2;
+            }
+        }
+    }
+
+    uint32 GetEverQuestShadowDoTCountOnTarget(Unit* target, Unit* attacker)
+    {
+        uint32 shadowDoTCount = 0;
+        Unit::AuraApplicationMap const& targetAuraMap = target->GetAppliedAuras();
+        for (Unit::AuraApplicationMap::const_iterator iter = targetAuraMap.begin(); iter != targetAuraMap.end(); ++iter)
+        {
+            if (iter->second == nullptr)
+                continue;
+            Aura const* aura = iter->second->GetBase();
+            if (aura == nullptr || aura->GetCasterGUID() != attacker->GetGUID())
+                continue;
+            SpellInfo const* auraSpellInfo = aura->GetSpellInfo();
+            if (EverQuest->IsSpellAnEQSpell(auraSpellInfo->Id) == false)
+                continue;
+            if ((auraSpellInfo->SchoolMask & SPELL_SCHOOL_MASK_SHADOW) == 0)
+                continue;
+            if (EverQuestSpellTalentAlignment::DoesSpellInfoDealPeriodicDamage(auraSpellInfo) == false)
+                continue;
+            shadowDoTCount++;
+        }
+        return shadowDoTCount;
+    }
+
+    int32 GetSoulSiphonDamagePercent(Unit* target, Unit* attacker, SpellInfo const* spellInfo)
+    {
+        if (EverQuestSpellTalentAlignment::DoesSpellInfoLeech(spellInfo) == false)
+            return 0;
+        AuraEffect const* soulSiphonStepEffect = attacker->GetAuraEffectOfRankedSpell(EQ_SPELL_ID_WARLOCK_SOUL_SIPHON_RANK1, EFFECT_0);
+        if (soulSiphonStepEffect == nullptr)
+            return 0;
+        int32 modPercent = int32(GetEverQuestShadowDoTCountOnTarget(target, attacker)) * soulSiphonStepEffect->GetAmount();
+        if (modPercent <= 0)
+            return 0;
+        AuraEffect const* soulSiphonCapEffect = attacker->GetAuraEffectOfRankedSpell(EQ_SPELL_ID_WARLOCK_SOUL_SIPHON_RANK1, EFFECT_1);
+        if (soulSiphonCapEffect != nullptr && modPercent > soulSiphonCapEffect->GetAmount())
+            modPercent = soulSiphonCapEffect->GetAmount();
+        return modPercent;
+    }
+
+    int32 GetDeathsEmbraceDamagePercent(Unit* target, Unit* attacker, SpellInfo const* spellInfo)
+    {
+        if ((spellInfo->SchoolMask & SPELL_SCHOOL_MASK_SHADOW) == 0)
+            return 0;
+        if (target->HealthBelowPct(35) == false)
+            return 0;
+        AuraEffect const* deathsEmbraceEffect = attacker->GetAuraEffectOfRankedSpell(EQ_SPELL_ID_WARLOCK_DEATHS_EMBRACE_RANK1, EFFECT_1);
+        if (deathsEmbraceEffect == nullptr)
+            return 0;
+        return deathsEmbraceEffect->GetAmount();
+    }
+
+    // Only fires for direct spell damage, periodic runs through ModifyPeriodicDamageAurasTick above
+    void ModifySpellDamageTaken(Unit* target, Unit* attacker, int32& damage, SpellInfo const* spellInfo) override
+    {
+        if (EverQuest->IsEnabled == false || EverQuest->ConfigSpellTalentAlignmentEnabled == false)
+            return;
+        if (target == nullptr || attacker == nullptr || spellInfo == nullptr)
+            return;
+        if (damage <= 0)
+            return;
+        if (attacker->IsPlayer() == false)
+            return;
+        if (EverQuest->IsSpellAnEQSpell(spellInfo->Id) == false)
+            return;
+
+        // Mage "Torment the Weak"
+        AuraEffect const* tormentTheWeakEffect = attacker->GetAuraEffectOfRankedSpell(EQ_SPELL_ID_MAGE_TORMENT_THE_WEAK_RANK1, EFFECT_0);
+        if (tormentTheWeakEffect != nullptr && target->HasAuraWithMechanic((1 << MECHANIC_SNARE) | (1 << MECHANIC_SLOW_ATTACK)) == true)
+            damage += (damage * tormentTheWeakEffect->GetAmount()) / 100;
+
+        // Warlock "Death's Embrace"
+        int32 deathsEmbracePercent = GetDeathsEmbraceDamagePercent(target, attacker, spellInfo);
+        if (deathsEmbracePercent > 0)
+            damage += (damage * deathsEmbracePercent) / 100;
+
+        // Warlock "Soul Siphon"
+        int32 soulSiphonPercent = GetSoulSiphonDamagePercent(target, attacker, spellInfo);
+        if (soulSiphonPercent > 0)
+            damage += (damage * soulSiphonPercent) / 100;
     }
 
     void ModifyMeleeDamage(Unit* target, Unit* attacker, uint32& damage) override
