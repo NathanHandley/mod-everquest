@@ -48,8 +48,7 @@ public:
     ObjectGuid PaineelLiftGUID;
     ObjectGuid PaineelLiftTriggerTop;
     ObjectGuid PaineelLiftTriggerBottom;
-    bool PaineelLiftTriggerTopInitialized = false;
-    bool PaineelLiftTriggerBottomInitialized = false;
+    bool PaineelLiftTriggerMirrorInProgress = false;
 
     void OnGameObjectAddWorld(GameObject* go) override
     {
@@ -87,6 +86,18 @@ public:
         if (EverQuest->IsEnabled == false)
             return;
 
+        // Clear cached lift GUIDs so nothing points at an object that left the world
+        switch (go->GetEntry())
+        {
+        case LIFT_KELETHIN_NORTH_ENTRY: KelethinNorthLiftGUID.Clear(); break;
+        case LIFT_KELETHIN_CENTER_ENTRY: KelethinCenterLiftGUID.Clear(); break;
+        case LIFT_KELETHIN_EAST_ENTRY: KelethinEastLiftGUID.Clear(); break;
+        case LIFT_PAINEEL_ENTRY: PaineelLiftGUID.Clear(); break;
+        case LIFT_PAINEEL_TOP_TRIGGER_ENTRY: PaineelLiftTriggerTop.Clear(); break;
+        case LIFT_PAINEEL_BOTTOM_TRIGGER_ENTRY: PaineelLiftTriggerBottom.Clear(); break;
+        default: break;
+        }
+
         // Unregister ships so the trigger system can't call through a deleted GameObject
         if (go->GetEntry() >= EverQuest->ConfigSystemShipEntryTemplateIDMin &&
             go->GetEntry() <= EverQuest->ConfigSystemShipEntryTemplateIDMax)
@@ -112,6 +123,24 @@ public:
         }
     }
 
+    void ProcessPaineelLiftTrigger(GameObject* usedTrigger, ObjectGuid otherTriggerGUID)
+    {
+        // Only the trigger that actually changed may move the lift, otherwise every event drives the lift twice
+        if (PaineelLiftTriggerMirrorInProgress == true)
+            return;
+
+        ProcessLiftTrigger(usedTrigger->GetMap()->GetGameObject(PaineelLiftGUID));
+
+        // Keep both triggers showing the same animation state
+        GameObject* otherTrigger = usedTrigger->GetMap()->GetGameObject(otherTriggerGUID);
+        if (otherTrigger != nullptr && otherTrigger->GetGoState() != usedTrigger->GetGoState())
+        {
+            PaineelLiftTriggerMirrorInProgress = true;
+            otherTrigger->SetGoState(usedTrigger->GetGoState());
+            PaineelLiftTriggerMirrorInProgress = false;
+        }
+    }
+
     void OnGameObjectStateChanged(GameObject* go, uint32 state) override
     {
         if (EverQuest->IsEnabled == false)
@@ -121,6 +150,10 @@ public:
         {
             return;
         }
+
+        // Skip if not in world
+        if (go->IsInWorld() == false)
+            return;
 
         // Kelethin lifts
         if (state == 0)
@@ -146,32 +179,16 @@ public:
             }
         }
 
-        // Paineel lifts
+        // Paineel lift
         switch (go->GetEntry())
         {
             case LIFT_PAINEEL_BOTTOM_TRIGGER_ENTRY:
             {
-                if (PaineelLiftTriggerBottomInitialized == true)
-                {
-                    ProcessLiftTrigger(go->GetMap()->GetGameObject(PaineelLiftGUID));
-                    GameObject* topTrigger = go->GetMap()->GetGameObject(PaineelLiftTriggerTop);
-                    if (topTrigger != nullptr && topTrigger->GetGoState() != go->GetGoState())
-                        topTrigger->SetGoState(go->GetGoState());
-                }
-                else
-                    PaineelLiftTriggerBottomInitialized = true;
+                ProcessPaineelLiftTrigger(go, PaineelLiftTriggerTop);
             } break;
             case LIFT_PAINEEL_TOP_TRIGGER_ENTRY:
             {
-                if (PaineelLiftTriggerTopInitialized == true)
-                {
-                    ProcessLiftTrigger(go->GetMap()->GetGameObject(PaineelLiftGUID));
-                    GameObject* bottomTrigger = go->GetMap()->GetGameObject(PaineelLiftTriggerBottom);
-                    if (bottomTrigger != nullptr && bottomTrigger->GetGoState() != go->GetGoState())
-                        bottomTrigger->SetGoState(go->GetGoState());
-                }
-                else
-                    PaineelLiftTriggerTopInitialized = true;
+                ProcessPaineelLiftTrigger(go, PaineelLiftTriggerBottom);
             } break;
         default: break;
         }
