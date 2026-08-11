@@ -115,6 +115,7 @@ EverQuestMod::EverQuestMod() :
     ConfigPlayerAddHearthstoneToNewCharacters(true),
     ConfigPlayerAddMasterTotemToShamans(true),
     ConfigAchievementAdventurerLevel(60),
+    ConfigAchievementAdventurerProtectedInEQZones(true),
     ConfigTrackingEnabled(true),
     ConfigTrackingRangerYardsPerLevel(20.0f),
     ConfigTrackingDruidYardsPerLevel(15.0f),
@@ -345,6 +346,7 @@ void EverQuestMod::LoadConfigurationFile()
 
     // Achievements
     ConfigAchievementAdventurerLevel = sConfigMgr->GetOption<uint32>("EverQuest.Achievement.AdventurerLevel", 60);
+    ConfigAchievementAdventurerProtectedInEQZones = sConfigMgr->GetOption<bool>("EverQuest.Achievement.AdventurerProtectedInEQZones", true);
 
     // Tracking
     ConfigTrackingEnabled = sConfigMgr->GetOption<bool>("EverQuest.Tracking.Enabled", true);
@@ -3189,12 +3191,54 @@ void EverQuestMod::AddAdventurerAuraForNewCharacter(Player* player)
         player->GetGUID().GetCounter(), player->GetGUID().GetRawValue(), ConfigSystemAdventurerAuraSpellID);
 }
 
+bool EverQuestMod::IsMapIDAnEverQuestMap(uint32 mapID)
+{
+    if (ConfigSystemMapDBCIDMin == 0 || ConfigSystemMapDBCIDMax == 0)
+        return false;
+    if (mapID < ConfigSystemMapDBCIDMin || mapID > ConfigSystemMapDBCIDMax)
+        return false;
+    return true;
+}
+
+bool EverQuestMod::IsCreatureKillOutsideEverQuestForAdventurer(Unit* victim)
+{
+    if (victim == nullptr || victim->IsCreature() == false)
+        return false;
+    if (ConfigSystemCreatureTemplateIDMin == 0 || ConfigSystemCreatureTemplateIDMax == 0)
+        return false;
+
+    // Pets, guardians, totems, vehicles and other summons should be ignored since their parent is what matters
+    if (victim->IsSummon() == true || victim->IsPet() == true || victim->IsGuardian() == true || victim->IsTotem() == true || victim->IsVehicle() == true)
+        return false;
+    if (victim->IsControlledByPlayer() == true)
+        return false;
+    if (victim->GetCharmerOrOwnerGUID().IsEmpty() == false)
+        return false;
+
+    uint32 victimEntry = victim->GetEntry();
+    if (victimEntry >= ConfigSystemCreatureTemplateIDMin && victimEntry <= ConfigSystemCreatureTemplateIDMax)
+        return false;
+    return true;
+}
+
+bool EverQuestMod::IsQuestOutsideEverQuestForAdventurer(uint32 questID)
+{
+    if (ConfigSystemQuestSQLIDMin == 0 || ConfigSystemQuestSQLIDMax == 0)
+        return false;
+    if (questID >= ConfigSystemQuestSQLIDMin && questID <= ConfigSystemQuestSQLIDMax)
+        return false;
+    return true;
+}
+
 bool EverQuestMod::RevokeAdventurerAuraIfPresent(Player* player)
 {
     if (ConfigSystemAdventurerAuraSpellID == 0)
         return false;
     if (player->HasAura(ConfigSystemAdventurerAuraSpellID) == false)
         return false;
+    if (ConfigAchievementAdventurerProtectedInEQZones == true && IsMapIDAnEverQuestMap(player->GetMapId()) == true)
+        return false;
+
     player->RemoveAura(ConfigSystemAdventurerAuraSpellID);
     return true;
 }
@@ -6640,6 +6684,7 @@ void EverQuestMod::MoveAuraToModAuraTable(Player* player, CharacterDatabaseTrans
 
     // Build the list of spells that should remain on character_aura across a secondary class switch (like gate tether)
     string keptSpellsList = "";
+    bool adventurerAuraAlreadyKept = false;
     for (auto const& spellPair : SpellDataBySpellID)
     {
         if (spellPair.second.AuraStaysOnSecondaryClassSwitch == true)
@@ -6647,8 +6692,19 @@ void EverQuestMod::MoveAuraToModAuraTable(Player* player, CharacterDatabaseTrans
             if (keptSpellsList.empty() == false)
                 keptSpellsList += ",";
             keptSpellsList += std::to_string(spellPair.second.SpellID);
+            if (spellPair.second.SpellID == ConfigSystemAdventurerAuraSpellID)
+                adventurerAuraAlreadyKept = true;
         }
     }
+
+    // Make certain that the adventurer aura is never missed in retention
+    if (ConfigSystemAdventurerAuraSpellID != 0 && adventurerAuraAlreadyKept == false)
+    {
+        if (keptSpellsList.empty() == false)
+            keptSpellsList += ",";
+        keptSpellsList += std::to_string(ConfigSystemAdventurerAuraSpellID);
+    }
+
     if (keptSpellsList.empty() == true)
         keptSpellsList = "0"; // No spell uses id 0, so NOT IN (0) keeps nothing
 

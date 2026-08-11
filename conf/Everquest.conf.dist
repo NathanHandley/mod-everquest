@@ -510,9 +510,14 @@ EverQuest.Player.AddMasterTotemToShamans = True
 #		 (EQWOWConverter's ACHIEVEMENT_EQ_ADVENTURER_ENABLED).
 #	Default: 60
 #
+# 	EverQuest.Achievement.AdventurerProtectedInEQZones
+#       If true, a player in an EverQuest map/zone who has the Adventurer buff cannot lose it by any means
+#   Default: True (can't lose it in an EverQuest map)
+#
 ###################################################################################################
 
 EverQuest.Achievement.AdventurerLevel = 60
+EverQuest.Achievement.AdventurerProtectedInEQZones = True
 
 ###################################################################################################
 #

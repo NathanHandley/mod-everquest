@@ -148,7 +148,7 @@ public:
             return;
 
         // Completing a non-EQ quest costs the player the adventurer aura
-        if (quest->GetQuestId() < EverQuest->ConfigSystemQuestSQLIDMin || quest->GetQuestId() > EverQuest->ConfigSystemQuestSQLIDMax)
+        if (EverQuest->IsQuestOutsideEverQuestForAdventurer(quest->GetQuestId()) == true)
         {
             if (EverQuest->RevokeAdventurerAuraIfPresent(player) == true && player->GetSession() != nullptr)
                 ChatHandler(player->GetSession()).SendSysMessage("|cffFF0000You are no longer an Everquest Adventurer, as you completed a quest that is not from Everquest.|r");
@@ -361,15 +361,10 @@ public:
         }
 
         // Kill credit for a non-EQ creature costs the player the adventurer aura
-        Unit* adventurerKillVictim = rewarder->GetVictim();
-        if (adventurerKillVictim != nullptr && adventurerKillVictim->IsCreature() == true)
+        if (EverQuest->IsCreatureKillOutsideEverQuestForAdventurer(rewarder->GetVictim()) == true)
         {
-            uint32 victimEntry = adventurerKillVictim->GetEntry();
-            if (victimEntry < EverQuest->ConfigSystemCreatureTemplateIDMin || victimEntry > EverQuest->ConfigSystemCreatureTemplateIDMax)
-            {
-                if (EverQuest->RevokeAdventurerAuraIfPresent(player) == true && player->GetSession() != nullptr)
-                    ChatHandler(player->GetSession()).SendSysMessage("|cffFF0000You are no longer an Everquest Adventurer, as you gained kill credit for a creature that is not from Everquest.|r");
-            }
+            if (EverQuest->RevokeAdventurerAuraIfPresent(player) == true && player->GetSession() != nullptr)
+                ChatHandler(player->GetSession()).SendSysMessage("|cffFF0000You are no longer an Everquest Adventurer, as you gained kill credit for a creature that is not from Everquest.|r");
         }
 
         // Skip invalid victims
