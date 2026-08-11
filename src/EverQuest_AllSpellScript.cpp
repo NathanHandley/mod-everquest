@@ -223,12 +223,17 @@ public:
 
     void OnSpellCast(Spell* spell, Unit* caster , SpellInfo const* spellInfo, bool /*skipCheck*/) override
     {
+        if (spell == nullptr)
+            return;
+
+        // This was added to fix a crash associated with consuming the last stack of a throwing weapon when a throwing skillup occurred. The actual issue is upstream in
+        // the AzerothCore code specifically Player::UpdateWeaponSkill which was referencing an invalid pointer.
+        spell->m_weaponItem = nullptr;
+
         if (EverQuest->IsEnabled == false)
             return;
 
         // Verify it's an EQ spell that is mapped
-        if (spell == nullptr)
-            return;
         if (spellInfo == nullptr)
             return;
         if (spellInfo->Id < EverQuest->ConfigSystemSpellDBCIDMin || spellInfo->Id > EverQuest->ConfigSystemSpellDBCIDMax)
