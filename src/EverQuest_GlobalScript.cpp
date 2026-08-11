@@ -14,6 +14,7 @@
 //  You should have received a copy of the GNU General Public License
 //  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+#include "LootMgr.h"
 #include "ScriptMgr.h"
 #include "SpellInfo.h"
 
@@ -27,8 +28,11 @@ class EverQuest_GlobalScript: public GlobalScript
 public:
     EverQuest_GlobalScript() : GlobalScript("EverQuest_GlobalScript") {}
 
-    bool CouldLootSourceBePrerolledEQCreature(Loot& loot)
+    bool CouldLootSourceBePrerolledEQCreature(Loot& loot, LootStore const& lootStore)
     {
+        // Pick Pocket loot is its own loot table and is not prerolled, so the filter needs to ignore it
+        if (&lootStore == &LootTemplates_Pickpocketing)
+            return false;
         if (loot.sourceWorldObjectGUID.IsCreature() == false)
             return false;
         uint32 entryID = loot.sourceWorldObjectGUID.GetEntry();
@@ -141,11 +145,11 @@ public:
         }
     }
 
-    bool OnItemRoll(Player const* /*player*/, LootStoreItem const* lootStoreItem, float& chance, Loot& loot, LootStore const& /*lootStore*/) override
+    bool OnItemRoll(Player const* /*player*/, LootStoreItem const* lootStoreItem, float& chance, Loot& loot, LootStore const& lootStore) override
     {
         if (EverQuest->IsEnabled == false)
             return true;
-        if (CouldLootSourceBePrerolledEQCreature(loot) == false)
+        if (CouldLootSourceBePrerolledEQCreature(loot, lootStore) == false)
             return true;
 
         // For any items that are on prerolled creatures, restrict drops to align to what was prerolled
@@ -159,11 +163,11 @@ public:
         return true;
     }
 
-    void OnBeforeDropAddItem(Player const* /*player*/, Loot& loot, bool /*canRate*/, uint16 /*lootMode*/, LootStoreItem* lootStoreItem, LootStore const& /*store*/) override
+    void OnBeforeDropAddItem(Player const* /*player*/, Loot& loot, bool /*canRate*/, uint16 /*lootMode*/, LootStoreItem* lootStoreItem, LootStore const& store) override
     {
         if (EverQuest->IsEnabled == false)
             return;
-        if (CouldLootSourceBePrerolledEQCreature(loot) == false)
+        if (CouldLootSourceBePrerolledEQCreature(loot, store) == false)
             return;
 
         if (EverQuest->HasPreloadedLootItemIDsForCreatureGUID(loot.sourceWorldObjectGUID) == false)
@@ -183,11 +187,11 @@ public:
     }
 
     // Called when GroupID > 0 and chance == 0
-    bool OnBeforeLootEqualChanced(Player const* /*player*/, list<LootStoreItem*> /*equalChanced*/, Loot& loot, LootStore const& /*lootStore*/) override
+    bool OnBeforeLootEqualChanced(Player const* /*player*/, list<LootStoreItem*> /*equalChanced*/, Loot& loot, LootStore const& lootStore) override
     {
         if (EverQuest->IsEnabled == false)
             return true;
-        if (CouldLootSourceBePrerolledEQCreature(loot) == false)
+        if (CouldLootSourceBePrerolledEQCreature(loot, lootStore) == false)
             return true;
 
         // Fail it so only prerolled items drop

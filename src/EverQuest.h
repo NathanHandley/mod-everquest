@@ -41,7 +41,7 @@ class Aura;
 class AuraApplication;
 class WorldPacket;
 
-#define EQ_MOD_VERSION                              63
+#define EQ_MOD_VERSION                              64
 
 #define EQ_EQCLASS_NONE                             0
 #define EQ_EQCLASS_WARRIOR                          1
