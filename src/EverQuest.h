@@ -41,7 +41,7 @@ class Aura;
 class AuraApplication;
 class WorldPacket;
 
-#define EQ_MOD_VERSION                              64
+#define EQ_MOD_VERSION                              65
 
 #define EQ_EQCLASS_NONE                             0
 #define EQ_EQCLASS_WARRIOR                          1
@@ -248,6 +248,8 @@ class WorldPacket;
 #define EQ_TRACKING_LOST_DISTANCE_MULTIPLIER        1.25f   // Fraction of max track distance a tracked creature can stray before the trail goes cold
 #define EQ_TRACKING_FOUND_DISTANCE                  15.0f   // Within this many yards, the tracked creature counts as found
 #define EQ_TRACKING_SCAN_MIN_INTERVAL_MS            2000    // Minimum time between track scans for one player (guards against command spam)
+
+#define EQ_AGILE_FIGHTER_REFRESH_INTERVAL_MS        2000    // How often to scan for gear changes since some forms of unequip have no hook
 
 // Vulak`Aerr (Temple of Veeshan) spawns perma-rooted and "locked" (unattackable, non-aggro) until every required dragon is dead, matching Velious-era EQ
 #define EQ_VULAK_CREATURE_TEMPLATE_ID               55045
@@ -891,6 +893,9 @@ public:
     uint32 ConfigSystemItemTemplateIDMax;
     uint32 ConfigSystemAdventurerAchievementID;
     uint32 ConfigSystemAdventurerAuraSpellID;
+    uint32 ConfigSystemAgileFighterSpellID;
+    uint32 ConfigSystemAgileFighterCombatMasterSpellID;
+    uint32 ConfigSystemAgileFighterCombatExpertSpellID;
     uint32 ConfigSystemFactionGoodClassMask;
     uint32 ConfigSystemFactionEvilClassMask;
     uint32 ConfigSystemFactionGoodRaceMask;
@@ -1016,6 +1021,7 @@ public:
     unordered_set<ObjectGuid> PlayersPendingLevelCapExperiencePark;
     unordered_map<ObjectGuid, vector<EverQuestUnitHasteAuraEffect>> EQHasteAuraEffectsByUnitGUID;
     unordered_map<ObjectGuid, uint32> BearFormShieldArmorShiftAmountByPlayerGUID;
+    unordered_map<ObjectGuid, uint32> AgileFighterRefreshTimerMSByPlayerGUID;
     unordered_map<uint32, vector<EverQuestCreatureLootGroup>> CreatureLootGroupsByCreatureTemplateID;
     unordered_map<ObjectGuid, vector<uint32>> PreloadedLootItemIDsByCreatureGUID;
     unordered_map<ObjectGuid, unordered_map<uint32, uint32>> PreloadedLootCountsByCreatureGUID;
@@ -1121,6 +1127,11 @@ public:
     uint32 GetEquippedShieldBaseArmorForPlayer(Player* player);
     void RefreshBearFormShieldArmorShiftForPlayer(Player* player);
     void ClearBearFormShieldArmorShiftForPlayer(ObjectGuid playerGUID);
+    uint32 GetAgileFighterCombatAuraSpellIDForPlayer(Player* player);
+    void RefreshAgileFighterCombatAuraForPlayer(Player* player);
+    void ReapplyAgileFighterCombatAuraForPlayer(Player* player);
+    void UpdateAgileFighterCombatAura(Player* player, uint32 diffInMS);
+    void ClearAgileFighterTrackingForPlayer(ObjectGuid playerGUID);
     void LoadQuestCompletionReputations();
     const list<EverQuestQuestCompletionReputation>& GetQuestCompletionReputationsForQuestTemplate(uint32 questTemplateID);
     void LoadQuestReactions();

@@ -280,6 +280,9 @@ public:
 
         // Swapping a shield in or out changes how much armor bear/dire bear form should leave unmultiplied
         EverQuest->RefreshBearFormShieldArmorShiftForPlayer(player);
+
+        // Armor type and shield influence "Agile Fighter" (Monk ability)
+        EverQuest->RefreshAgileFighterCombatAuraForPlayer(player);
     }
 
     void OnPlayerUnequip(Player* player, Item* /*it*/) override
@@ -288,6 +291,7 @@ public:
             return;
 
         EverQuest->RefreshBearFormShieldArmorShiftForPlayer(player);
+        EverQuest->RefreshAgileFighterCombatAuraForPlayer(player);
     }
 
     void OnPlayerUpdate(Player* player, uint32 p_time) override
@@ -299,6 +303,7 @@ public:
         EverQuest->UpdatePlayerIllusionGearDisplay(player, p_time);
         EverQuest->ConsumePendingTemporaryFactionRecalculation(player);
         EverQuest->UpdatePlayerTracking(player, p_time);
+        EverQuest->UpdateAgileFighterCombatAura(player, p_time);
         if (EverQuest->ConfigSpellSummonPlayerAcrossZones == true)
             EverQuest->ConsumePendingSummonRequest(player);
 
@@ -650,6 +655,9 @@ public:
 
         // A saved bear/dire bear form comes back with the character, and armor is rebuilt from scratch on login
         EverQuest->RefreshBearFormShieldArmorShiftForPlayer(player);
+
+        // Check gear to see if the agile fighter buff should trigger a sub buff
+        EverQuest->ReapplyAgileFighterCombatAuraForPlayer(player);
     }
 
     void OnPlayerLevelChanged(Player* player, uint8 /*oldlevel*/) override
@@ -665,6 +673,9 @@ public:
 
         // Track range scales with level, so push the new range to any active tracking and the client addon
         EverQuest->HandleTrackingRangeChangeForPlayer(player);
+
+        // Autolearn may have just granted the Agile Fighter passive that gates the combat auras
+        EverQuest->RefreshAgileFighterCombatAuraForPlayer(player);
     }
 
     void OnPlayerLogout(Player* player) override
@@ -687,6 +698,9 @@ public:
 
         // Stop tracking any bear form shield armor shift
         EverQuest->ClearBearFormShieldArmorShiftForPlayer(player->GetGUID());
+
+        // Stop tracking the Agile Fighter combat aura refresh timer
+        EverQuest->ClearAgileFighterTrackingForPlayer(player->GetGUID());
 
         // Drop any cross-zone summon that never got picked up, so it cannot fire on a later login
         EverQuest->ClearPendingSummonRequestForPlayer(player->GetGUID());

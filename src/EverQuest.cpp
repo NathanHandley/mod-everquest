@@ -75,6 +75,9 @@ EverQuestMod::EverQuestMod() :
     ConfigSystemItemTemplateIDMax(0),
     ConfigSystemAdventurerAchievementID(0),
     ConfigSystemAdventurerAuraSpellID(0),
+    ConfigSystemAgileFighterSpellID(0),
+    ConfigSystemAgileFighterCombatMasterSpellID(0),
+    ConfigSystemAgileFighterCombatExpertSpellID(0),
     ConfigSystemFactionGoodClassMask(0),
     ConfigSystemFactionEvilClassMask(0),
     ConfigSystemFactionGoodRaceMask(0),
@@ -197,6 +200,12 @@ bool EverQuestMod::LoadConfigurationSystemDataFromDB()
                 ConfigSystemAdventurerAchievementID = (uint32)atoi(value.c_str());
             else if (key == "AdventurerAuraSpellID")
                 ConfigSystemAdventurerAuraSpellID = (uint32)atoi(value.c_str());
+            else if (key == "AgileFighterSpellID")
+                ConfigSystemAgileFighterSpellID = (uint32)atoi(value.c_str());
+            else if (key == "AgileFighterCombatMasterSpellID")
+                ConfigSystemAgileFighterCombatMasterSpellID = (uint32)atoi(value.c_str());
+            else if (key == "AgileFighterCombatExpertSpellID")
+                ConfigSystemAgileFighterCombatExpertSpellID = (uint32)atoi(value.c_str());
             else if (key == "MapDBCIDMin")
                 ConfigSystemMapDBCIDMin = (uint32)atoi(value.c_str());
             else if (key == "MapDBCIDMax")
@@ -2592,6 +2601,111 @@ void EverQuestMod::ClearBearFormShieldArmorShiftForPlayer(ObjectGuid playerGUID)
     // Only the tracking is dropped, since the stat modifiers themselves live on the player object and are rebuilt on the next login
     std::lock_guard<std::mutex> lock(RuntimeStateMutex);
     BearFormShieldArmorShiftAmountByPlayerGUID.erase(playerGUID);
+}
+
+uint32 EverQuestMod::GetAgileFighterCombatAuraSpellIDForPlayer(Player* player)
+{
+    if (player == nullptr)
+        return 0;
+    if (ConfigSystemAgileFighterSpellID == 0)
+        return 0;
+    if (player->HasSpell(ConfigSystemAgileFighterSpellID) == false)
+        return 0;
+
+    bool isWearingLeather = false;
+    bool isWearingMailOrPlate = false;
+    bool isUsingShield = false;
+    for (uint8 equipSlotIndex = EQUIPMENT_SLOT_START; equipSlotIndex < EQUIPMENT_SLOT_END; ++equipSlotIndex)
+    {
+        Item* equippedItem = player->GetItemByPos(INVENTORY_SLOT_BAG_0, equipSlotIndex);
+        if (equippedItem == nullptr)
+            continue;
+        ItemTemplate const* itemTemplate = equippedItem->GetTemplate();
+        if (itemTemplate == nullptr || itemTemplate->Class != ITEM_CLASS_ARMOR)
+            continue;
+        switch (itemTemplate->SubClass)
+        {
+        case ITEM_SUBCLASS_ARMOR_LEATHER:
+            isWearingLeather = true;
+            break;
+        case ITEM_SUBCLASS_ARMOR_MAIL:
+        case ITEM_SUBCLASS_ARMOR_PLATE:
+            isWearingMailOrPlate = true;
+            break;
+        case ITEM_SUBCLASS_ARMOR_SHIELD:
+            isUsingShield = true;
+            break;
+        default:
+            break;
+        }
+    }
+
+    // Mail, plate or a shield disqualifies both tiers, and cloth-only (or nothing) will elevate the player to Combat Master
+    if (isWearingMailOrPlate == true || isUsingShield == true)
+        return 0;
+    if (isWearingLeather == false)
+        return ConfigSystemAgileFighterCombatMasterSpellID;
+    return ConfigSystemAgileFighterCombatExpertSpellID;
+}
+
+void EverQuestMod::RefreshAgileFighterCombatAuraForPlayer(Player* player)
+{
+    if (player == nullptr)
+        return;
+    if (ConfigSystemAgileFighterSpellID == 0)
+        return;
+
+    uint32 desiredAuraSpellID = GetAgileFighterCombatAuraSpellIDForPlayer(player);
+
+    // Can't have both Combat Master and Combat Expert, so use higher
+    if (ConfigSystemAgileFighterCombatMasterSpellID != 0 && desiredAuraSpellID != ConfigSystemAgileFighterCombatMasterSpellID && player->HasAura(ConfigSystemAgileFighterCombatMasterSpellID) == true)
+        player->RemoveAurasDueToSpell(ConfigSystemAgileFighterCombatMasterSpellID);
+    if (ConfigSystemAgileFighterCombatExpertSpellID != 0 && desiredAuraSpellID != ConfigSystemAgileFighterCombatExpertSpellID && player->HasAura(ConfigSystemAgileFighterCombatExpertSpellID) == true)
+        player->RemoveAurasDueToSpell(ConfigSystemAgileFighterCombatExpertSpellID);
+
+    if (desiredAuraSpellID != 0 && player->HasAura(desiredAuraSpellID) == false)
+        player->AddAura(desiredAuraSpellID, player);
+}
+
+void EverQuestMod::ReapplyAgileFighterCombatAuraForPlayer(Player* player)
+{
+    if (player == nullptr)
+        return;
+    if (ConfigSystemAgileFighterSpellID == 0)
+        return;
+    if (ConfigSystemAgileFighterCombatMasterSpellID != 0 && player->HasAura(ConfigSystemAgileFighterCombatMasterSpellID) == true)
+        player->RemoveAurasDueToSpell(ConfigSystemAgileFighterCombatMasterSpellID);
+    if (ConfigSystemAgileFighterCombatExpertSpellID != 0 && player->HasAura(ConfigSystemAgileFighterCombatExpertSpellID) == true)
+        player->RemoveAurasDueToSpell(ConfigSystemAgileFighterCombatExpertSpellID);
+    RefreshAgileFighterCombatAuraForPlayer(player);
+}
+
+void EverQuestMod::UpdateAgileFighterCombatAura(Player* player, uint32 diffInMS)
+{
+    if (player == nullptr)
+        return;
+    if (ConfigSystemAgileFighterSpellID == 0)
+        return;
+
+    // Check occassionally in case equipment changed by a mechanism with no hook
+    uint32 refreshTimerMS = 0;
+    {
+        std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+        uint32& storedRefreshTimerMS = AgileFighterRefreshTimerMSByPlayerGUID[player->GetGUID()];
+        storedRefreshTimerMS += diffInMS;
+        refreshTimerMS = storedRefreshTimerMS;
+        if (refreshTimerMS >= EQ_AGILE_FIGHTER_REFRESH_INTERVAL_MS)
+            storedRefreshTimerMS = 0;
+    }
+    if (refreshTimerMS < EQ_AGILE_FIGHTER_REFRESH_INTERVAL_MS)
+        return;
+    RefreshAgileFighterCombatAuraForPlayer(player);
+}
+
+void EverQuestMod::ClearAgileFighterTrackingForPlayer(ObjectGuid playerGUID)
+{
+    std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+    AgileFighterRefreshTimerMSByPlayerGUID.erase(playerGUID);
 }
 
 void EverQuestMod::LoadQuestCompletionReputations()
@@ -7047,6 +7161,7 @@ bool EverQuestMod::PerformPlayerDelete(ObjectGuid guid)
         std::lock_guard<std::mutex> lock(RuntimeStateMutex);
         ActivePlayerClassControllerDataByGUID.erase(guid);
         PendingEquipmentStorageCommitMSByGUID.erase(guid);
+        AgileFighterRefreshTimerMSByPlayerGUID.erase(guid);
     }
     {
         std::lock_guard<std::mutex> lock(PendingStorageTransactionMutex);
