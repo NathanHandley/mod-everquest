@@ -363,6 +363,19 @@ EverQuest.Charm.CreatureCharmLimitsEnabled = True
 EverQuest.Charm.UncharmedPlayerCheckRadius = 100
 
 ###################################################################################################
+# Faction Settings
+#
+# 	EverQuest.Faction.DefendFriendlyPlayersEnabled
+#		If true, creatures on a faction flagged as WillDefendFriendlyPlayers (city guards, citizens,
+#		and the like) come to the aid of a nearby player they are friendly with when that player is
+#		attacked by a creature on a faction flagged as DefendersWillAttackToDefendPlayer.
+#	Default: True (friendly factions defend players)
+#
+###################################################################################################
+
+EverQuest.Faction.DefendFriendlyPlayersEnabled = True
+
+###################################################################################################
 # Creature Emote Settings (EQ-faithful creature says/emotes/yells)
 #
 # 	EverQuest.CreatureEmotes.Enabled

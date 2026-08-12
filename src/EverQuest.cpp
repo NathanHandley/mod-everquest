@@ -324,6 +324,9 @@ void EverQuestMod::LoadConfigurationFile()
     ConfigCharmCreatureCharmLimitsEnabled = sConfigMgr->GetOption<bool>("EverQuest.Charm.CreatureCharmLimitsEnabled", true);
     ConfigCharmUncharmedPlayerCheckRadius = sConfigMgr->GetOption<float>("EverQuest.Charm.UncharmedPlayerCheckRadius", 100.0f);
 
+    // Faction
+    ConfigFactionDefendFriendlyPlayersEnabled = sConfigMgr->GetOption<bool>("EverQuest.Faction.DefendFriendlyPlayersEnabled", true);
+
     // Creature emotes
     ConfigCreatureEmotesEnabled = sConfigMgr->GetOption<bool>("EverQuest.CreatureEmotes.Enabled", true);
     ConfigCreatureEmotesAmbientEnabled = sConfigMgr->GetOption<bool>("EverQuest.CreatureEmotes.AmbientEnabled", true);
@@ -5333,6 +5336,8 @@ bool EverQuestMod::IsPlayerFriendlyWithCreatureByReputation(Creature* creature, 
 
 void EverQuestMod::DoDefendFriendlyPlayersSearch(Creature* attacker, Player* attackedPlayer)
 {
+    if (ConfigFactionDefendFriendlyPlayersEnabled == false)
+        return;
     if (attacker == nullptr || attackedPlayer == nullptr)
         return;
 
@@ -5397,6 +5402,8 @@ void EverQuestMod::UpdateCreatureDefendFactionRestore(Creature* creature)
 
 void EverQuestMod::UpdateCreatureDefendFriendlyPlayers(Creature* creature, uint32 diff)
 {
+    if (ConfigFactionDefendFriendlyPlayersEnabled == false)
+        return;
     if (creature == nullptr || FactionsByFactionTemplateID.empty() == true)
         return;
 

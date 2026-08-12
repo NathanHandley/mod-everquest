@@ -945,6 +945,7 @@ public:
     float ConfigEvadeNonEQMapLeashRadius;
     bool ConfigCharmCreatureCharmLimitsEnabled;
     float ConfigCharmUncharmedPlayerCheckRadius;
+    bool ConfigFactionDefendFriendlyPlayersEnabled;
     bool ConfigCreatureEmotesEnabled;
     bool ConfigCreatureEmotesAmbientEnabled;
     bool ConfigCreatureMovementSoundsEnabled;
