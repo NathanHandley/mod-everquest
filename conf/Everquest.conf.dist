@@ -515,6 +515,18 @@ EverQuest.Player.AddMasterTotemToShamans = True
 
 ###################################################################################################
 #
+# 	EverQuest.Player.AddRacialGuiseItemOnLogin
+#		If true, every character is given their racial guise (based on start town) consumable at 
+#       login, but only one time.  If the player doesn't have space then it will be reattempted the
+#       next time they log in
+#	Default: True
+#
+###################################################################################################
+
+EverQuest.Player.AddRacialGuiseItemOnLogin = True
+
+###################################################################################################
+#
 # 	EverQuest.Achievement.AdventurerLevel
 #		Level a character must reach while still holding the "Everquest Adventurer" aura to earn
 #		the matching feat of strength for their account.  The aura is granted at character

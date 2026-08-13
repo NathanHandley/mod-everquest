@@ -41,7 +41,7 @@ class Aura;
 class AuraApplication;
 class WorldPacket;
 
-#define EQ_MOD_VERSION                              65
+#define EQ_MOD_VERSION                              66
 
 #define EQ_EQCLASS_NONE                             0
 #define EQ_EQCLASS_WARRIOR                          1
@@ -607,6 +607,7 @@ public:
     float PositionY = 0;
     float PositionZ = 0;
     float Orientation = 0;
+    uint32 IllusionItemID = 0;
 };
 
 class EverQuestQuestCompletionReputation
@@ -817,6 +818,7 @@ struct EverQuestPlayerControllerData
     uint32 SecondaryExpPool = 0;
     uint32 IllusionFaceID = 0;
     bool ShowBardPulse = true;
+    uint32 IssuedIllusionItemID = 0;
 };
 
 class EverQuestPlayerClassInfoItem
@@ -957,6 +959,7 @@ public:
     bool ConfigPlayerShieldArmorIgnoresBearFormMultiplier;
     bool ConfigPlayerAddHearthstoneToNewCharacters;
     bool ConfigPlayerAddMasterTotemToShamans;
+    bool ConfigPlayerAddRacialGuiseItemOnLogin;
     uint32 ConfigAchievementAdventurerLevel;
     bool ConfigAchievementAdventurerProtectedInEQZones;
     std::set<uint32> ConfigCrossClassIncludeSkillIDs;
@@ -1157,6 +1160,7 @@ public:
     bool IsItemTemplateAMasterTotem(Player* player, ItemTemplate const* itemTemplate);
     bool IsPlayerCarryingMasterTotem(Player* player);
     void AddMasterTotemForShaman(Player* player);
+    void AddRacialGuiseItemForPlayer(Player* player);
     void GrantLegacyAchievementIfEligible(Player* player);
     void AddAdventurerAuraForNewCharacter(Player* player);
     bool IsMapIDAnEverQuestMap(uint32 mapID);
@@ -1300,6 +1304,9 @@ public:
     bool GetShowBardPulseForPlayer(Player* player);
     void SetShowBardPulseForPlayer(Player* player, bool showBardPulse);
     void SaveShowBardPulseForPlayer(Player* player);
+    uint32 GetIssuedIllusionItemIDForPlayer(Player* player);
+    void SetIssuedIllusionItemIDForPlayer(Player* player, uint32 itemID);
+    void SaveIssuedIllusionItemIDForPlayer(Player* player);
     void HandleLevelCapOnBeforeExperienceGain(Player const* player, uint8& levelForExpGain);
     bool HandleLevelCapOnCanGiveLevel(Player* player, uint8 newLevel);
     void ProcessLevelCapStateForPlayer(Player* player);

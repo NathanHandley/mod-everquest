@@ -638,6 +638,9 @@ public:
         // Shamans need a master totem in order to cast their totem spells, so hand one out if they aren't carrying one
         EverQuest->AddMasterTotemForShaman(player);
 
+        // Hand out the character's racial guise item if they have never received one
+        EverQuest->AddRacialGuiseItemForPlayer(player);
+
         // Grab EQ class info for the login summary message
         EverQuestClassMap classMap = EverQuest->GetClassMapForWOWClassID(player->getClass());
         uint8 secondClassID = EverQuest->GetCurrentSecondEQClassForPlayer(player);

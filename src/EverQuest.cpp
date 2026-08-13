@@ -117,6 +117,7 @@ EverQuestMod::EverQuestMod() :
     ConfigPlayerLevelCap(0),
     ConfigPlayerAddHearthstoneToNewCharacters(true),
     ConfigPlayerAddMasterTotemToShamans(true),
+    ConfigPlayerAddRacialGuiseItemOnLogin(true),
     ConfigAchievementAdventurerLevel(60),
     ConfigAchievementAdventurerProtectedInEQZones(true),
     ConfigTrackingEnabled(true),
@@ -355,6 +356,9 @@ void EverQuestMod::LoadConfigurationFile()
 
     // Player Master Totem
     ConfigPlayerAddMasterTotemToShamans = sConfigMgr->GetOption<bool>("EverQuest.Player.AddMasterTotemToShamans", true);
+
+    // Player Racial Guise Item
+    ConfigPlayerAddRacialGuiseItemOnLogin = sConfigMgr->GetOption<bool>("EverQuest.Player.AddRacialGuiseItemOnLogin", true);
 
     // Achievements
     ConfigAchievementAdventurerLevel = sConfigMgr->GetOption<uint32>("EverQuest.Achievement.AdventurerLevel", 60);
@@ -3074,7 +3078,7 @@ const EverQuestPet& EverQuestMod::GetPetDataForCreatureTemplateID(uint32 creatur
 void EverQuestMod::LoadCreatePlayerData()
 {
     PlayerCreateInfoByRaceIDThenClassID.clear();
-    QueryResult queryResult = WorldDatabase.Query("SELECT race, class, map, zone, position_x, position_y, position_z, orientation FROM mod_everquest_playercreateinfo;");
+    QueryResult queryResult = WorldDatabase.Query("SELECT race, class, map, zone, position_x, position_y, position_z, orientation, illusionitem FROM mod_everquest_playercreateinfo;");
     if (queryResult)
     {
         do
@@ -3090,6 +3094,7 @@ void EverQuestMod::LoadCreatePlayerData()
             everQuestPlayerCreateInfo.PositionY = fields[5].Get<float>();
             everQuestPlayerCreateInfo.PositionZ = fields[6].Get<float>();
             everQuestPlayerCreateInfo.Orientation = fields[7].Get<float>();
+            everQuestPlayerCreateInfo.IllusionItemID = fields[8].Get<uint32>();
             PlayerCreateInfoByRaceIDThenClassID[everQuestPlayerCreateInfo.RaceID][everQuestPlayerCreateInfo.ClassID] = everQuestPlayerCreateInfo;
         } while (queryResult->NextRow());
     }
@@ -3273,6 +3278,27 @@ void EverQuestMod::AddMasterTotemForShaman(Player* player)
     InventoryResult invResult = player->CanStoreNewItem(NULL_BAG, NULL_SLOT, destPosition, EQ_MASTER_TOTEM_ITEM_ID, 1);
     if (invResult == EQUIP_ERR_OK)
         player->StoreNewItem(destPosition, EQ_MASTER_TOTEM_ITEM_ID, true);
+}
+
+void EverQuestMod::AddRacialGuiseItemForPlayer(Player* player)
+{
+    if (ConfigPlayerAddRacialGuiseItemOnLogin == false)
+        return;
+    if (HasCreatePlayerData(player->getRace(), player->getClass()) == false)
+        return;
+    uint32 guiseItemID = GetPlayerCreateInfo(player->getRace(), player->getClass()).IllusionItemID;
+    if (guiseItemID == 0)
+        return;
+    if (GetIssuedIllusionItemIDForPlayer(player) != 0)
+        return;
+
+    // Only mark it if the player got it, otherwise try again next time
+    ItemPosCountVec destPosition;
+    InventoryResult invResult = player->CanStoreNewItem(NULL_BAG, NULL_SLOT, destPosition, guiseItemID, 1);
+    if (invResult != EQUIP_ERR_OK)
+        return;
+    if (player->StoreNewItem(destPosition, guiseItemID, true) != nullptr)
+        SetIssuedIllusionItemIDForPlayer(player, guiseItemID);
 }
 
 void EverQuestMod::GrantLegacyAchievementIfEligible(Player* player)
@@ -6301,7 +6327,7 @@ EverQuestPlayerControllerData EverQuestMod::GetPlayerControllerData(Player* play
 {
     EverQuestPlayerControllerData controllerData;
     controllerData.GUID = player->GetGUID().GetCounter();
-    QueryResult queryResult = CharacterDatabase.Query("SELECT nextSecondaryClass, currentSecondaryClass, secondaryExpPool, illusionFaceId, showBardPulse FROM mod_everquest_character_settings WHERE guid = {}", player->GetGUID().GetCounter());
+    QueryResult queryResult = CharacterDatabase.Query("SELECT nextSecondaryClass, currentSecondaryClass, secondaryExpPool, illusionFaceId, showBardPulse, issuedIllusionItemId FROM mod_everquest_character_settings WHERE guid = {}", player->GetGUID().GetCounter());
     if (!queryResult || queryResult->GetRowCount() == 0)
     {
         const EverQuestClassMap classMap = GetClassMapForWOWClassID(player->getClass());
@@ -6310,6 +6336,7 @@ EverQuestPlayerControllerData EverQuestMod::GetPlayerControllerData(Player* play
         controllerData.SecondaryExpPool = 0;
         controllerData.IllusionFaceID = 0;
         controllerData.ShowBardPulse = true;
+        controllerData.IssuedIllusionItemID = 0;
     }
     else
     {
@@ -6319,6 +6346,7 @@ EverQuestPlayerControllerData EverQuestMod::GetPlayerControllerData(Player* play
         controllerData.SecondaryExpPool = fields[2].Get<uint32>();
         controllerData.IllusionFaceID = (uint32)std::max(0, fields[3].Get<int32>());
         controllerData.ShowBardPulse = fields[4].Get<bool>();
+        controllerData.IssuedIllusionItemID = fields[5].Get<uint32>();
     }
     return controllerData;
 }
@@ -6472,6 +6500,37 @@ void EverQuestMod::SaveShowBardPulseForPlayer(Player* player)
         controllerData.SecondaryExpPool,
         controllerData.ShowBardPulse == true ? 1 : 0,
         controllerData.ShowBardPulse == true ? 1 : 0);
+}
+
+uint32 EverQuestMod::GetIssuedIllusionItemIDForPlayer(Player* player)
+{
+    return GetOrLoadActivePlayerClassControllerData(player)->IssuedIllusionItemID;
+}
+
+void EverQuestMod::SetIssuedIllusionItemIDForPlayer(Player* player, uint32 itemID)
+{
+    GetOrLoadActivePlayerClassControllerData(player)->IssuedIllusionItemID = itemID;
+    SaveIssuedIllusionItemIDForPlayer(player);
+}
+
+void EverQuestMod::SaveIssuedIllusionItemIDForPlayer(Player* player)
+{
+    EverQuestPlayerControllerData controllerData;
+    {
+        std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+        auto controllerDataIt = ActivePlayerClassControllerDataByGUID.find(player->GetGUID());
+        if (controllerDataIt == ActivePlayerClassControllerDataByGUID.end())
+            return;
+        controllerData = controllerDataIt->second;
+    }
+
+    CharacterDatabase.Execute("INSERT INTO `mod_everquest_character_settings` (`guid`, `currentSecondaryClass`, `nextSecondaryClass`, `secondaryExpPool`, `issuedIllusionItemId`) VALUES ({}, {}, {}, {}, {}) ON DUPLICATE KEY UPDATE `issuedIllusionItemId` = {}",
+        player->GetGUID().GetCounter(),
+        controllerData.CurrentSecondClass,
+        controllerData.NextSecondClass,
+        controllerData.SecondaryExpPool,
+        controllerData.IssuedIllusionItemID,
+        controllerData.IssuedIllusionItemID);
 }
 
 void EverQuestMod::HandleLevelCapOnBeforeExperienceGain(Player const* player, uint8& levelForExpGain)
