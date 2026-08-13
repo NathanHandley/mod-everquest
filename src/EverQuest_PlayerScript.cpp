@@ -331,6 +331,15 @@ public:
         EverQuest->RefreshIllusionGearDisplayForPlayer(player);
     }
 
+    bool IsInGroupExperienceRangeOfKill(Player* member, Unit* victim)
+    {
+        if (victim == nullptr || member->IsInWorld() == false || victim->IsInWorld() == false)
+            return false;
+        if (member->GetMapId() != victim->GetMapId() || member->GetInstanceId() != victim->GetInstanceId())
+            return false;
+        return victim->GetDistance(member) <= sWorld->getFloatConfig(CONFIG_GROUP_XP_DISTANCE);
+    }
+
     void OnPlayerRewardKillRewarder(Player* player, KillRewarder* rewarder, bool /*isDungeon*/, float& rate) override
     {
         if (EverQuest->IsEnabled == false)
@@ -342,8 +351,7 @@ public:
             Group* group = player->GetGroup();
             if (group != nullptr)
             {
-                // Only count members that are online, alive, and in reward range 
-                Player* killer = rewarder->GetKiller();
+                // Only count members that are online, alive, and near the kill
                 Unit* rewardVictim = rewarder->GetVictim();
                 uint32 eligibleMemberCount = 0;
                 for (GroupReference* itr = group->GetFirstMember(); itr != nullptr; itr = itr->next())
@@ -351,7 +359,7 @@ public:
                     Player* member = itr->GetSource();
                     if (member == nullptr || member->IsAlive() == false)
                         continue;
-                    if (member != killer && (rewardVictim == nullptr || member->IsAtGroupRewardDistance(rewardVictim) == false))
+                    if (IsInGroupExperienceRangeOfKill(member, rewardVictim) == false)
                         continue;
                     eligibleMemberCount++;
                 }

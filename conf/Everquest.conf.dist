@@ -107,6 +107,8 @@ EverQuest.ExpLossOnDeath.AddLostExpToRestExp = True
 #		When enabled, this is how much bonus experience to grant each party member based on
 #       number in the group beyond 1.  For example, 20% would mean that if 3 party members are in the
 #       group then exp per member would be "(CreatureKillEXPReward / 3) + ((3 - 1) * 0.2"
+#       Only members that are online, alive, in the same zone as the kill, and within the core's
+#       MaxGroupXPDistance of it are counted toward the member number.
 #	Default: 20 (Matches EQ's 20% per member bonus in 2003)
 #
 ###################################################################################################
