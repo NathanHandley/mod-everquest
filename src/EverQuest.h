@@ -959,6 +959,7 @@ public:
     bool ConfigPlayerAddMasterTotemToShamans;
     uint32 ConfigAchievementAdventurerLevel;
     bool ConfigAchievementAdventurerProtectedInEQZones;
+    bool ConfigAchievementAdventurerGrantAuraOnLoginIfMissing;
     std::set<uint32> ConfigCrossClassIncludeSkillIDs;
     bool ConfigTrackingEnabled;
     float ConfigTrackingRangerYardsPerLevel;
@@ -1161,6 +1162,8 @@ public:
     void AddMasterTotemForShaman(Player* player);
     void GrantLegacyAchievementIfEligible(Player* player);
     void AddAdventurerAuraForNewCharacter(Player* player);
+    void GrantAdventurerAuraOnLoginIfMissing(Player* player);
+    void PersistAdventurerAuraOnPlayerSave(Player* player);
     bool IsMapIDAnEverQuestMap(uint32 mapID);
     bool IsCreatureKillOutsideEverQuestForAdventurer(Unit* victim);
     bool IsQuestOutsideEverQuestForAdventurer(uint32 questID);

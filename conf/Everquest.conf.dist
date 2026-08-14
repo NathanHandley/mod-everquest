@@ -527,10 +527,16 @@ EverQuest.Player.AddMasterTotemToShamans = True
 #       If true, a player in an EverQuest map/zone who has the Adventurer buff cannot lose it by any means
 #   Default: True (can't lose it in an EverQuest map)
 #
+# 	EverQuest.Achievement.AdventurerGrantAuraOnLoginIfMissing
+#       If true, any player who logs in without the "Everquest Adventurer" aura is granted it.  Designed
+#       to be used for EQ-only servers, so should generally be false
+#   Default: False
+#
 ###################################################################################################
 
 EverQuest.Achievement.AdventurerLevel = 60
 EverQuest.Achievement.AdventurerProtectedInEQZones = True
+EverQuest.Achievement.AdventurerGrantAuraOnLoginIfMissing = False
 
 ###################################################################################################
 #

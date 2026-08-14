@@ -121,6 +121,7 @@ EverQuestMod::EverQuestMod() :
     ConfigPlayerAddMasterTotemToShamans(true),
     ConfigAchievementAdventurerLevel(60),
     ConfigAchievementAdventurerProtectedInEQZones(true),
+    ConfigAchievementAdventurerGrantAuraOnLoginIfMissing(false),
     ConfigTrackingEnabled(true),
     ConfigTrackingRangerYardsPerLevel(20.0f),
     ConfigTrackingDruidYardsPerLevel(15.0f),
@@ -361,6 +362,7 @@ void EverQuestMod::LoadConfigurationFile()
     // Achievements
     ConfigAchievementAdventurerLevel = sConfigMgr->GetOption<uint32>("EverQuest.Achievement.AdventurerLevel", 60);
     ConfigAchievementAdventurerProtectedInEQZones = sConfigMgr->GetOption<bool>("EverQuest.Achievement.AdventurerProtectedInEQZones", true);
+    ConfigAchievementAdventurerGrantAuraOnLoginIfMissing = sConfigMgr->GetOption<bool>("EverQuest.Achievement.AdventurerGrantAuraOnLoginIfMissing", false);
 
     // Tracking
     ConfigTrackingEnabled = sConfigMgr->GetOption<bool>("EverQuest.Tracking.Enabled", true);
@@ -3308,6 +3310,29 @@ void EverQuestMod::AddAdventurerAuraForNewCharacter(Player* player)
     CharacterDatabase.Execute("INSERT INTO character_aura (guid, casterGuid, itemGuid, spell, effectMask, recalculateMask, stackcount, amount0, amount1, amount2, base_amount0, base_amount1, base_amount2, maxDuration, remainTime, remainCharges) "
         "VALUES ({}, {}, 0, {}, 1, 0, 1, 0, 0, 0, 0, 0, 0, -1, -1, 0)",
         player->GetGUID().GetCounter(), player->GetGUID().GetRawValue(), ConfigSystemAdventurerAuraSpellID);
+}
+
+void EverQuestMod::GrantAdventurerAuraOnLoginIfMissing(Player* player)
+{
+    if (ConfigAchievementAdventurerGrantAuraOnLoginIfMissing == false || ConfigSystemAdventurerAuraSpellID == 0)
+        return;
+    if (player->HasAura(ConfigSystemAdventurerAuraSpellID) == true)
+        return;
+
+    player->CastSpell(player, ConfigSystemAdventurerAuraSpellID, true);
+}
+
+void EverQuestMod::PersistAdventurerAuraOnPlayerSave(Player* player)
+{
+    if (ConfigSystemAdventurerAuraSpellID == 0)
+        return;
+    if (player->HasAura(ConfigSystemAdventurerAuraSpellID) == false)
+        return;
+
+    // The core's periodic (non-logout) saves rewrite character_aura but skip permanent auras (duration -1 fails the "less than 60 seconds remaining"
+    // skip check) so this makes sure this buff isn't lost on a crash or something like that
+    CharacterDatabase.Execute("REPLACE INTO character_aura (guid, casterGuid, itemGuid, spell, effectMask, recalculateMask, stackcount, amount0, amount1, amount2, base_amount0, base_amount1, base_amount2, maxDuration, remainTime, remainCharges) "
+        "VALUES ({}, {}, 0, {}, 1, 0, 1, 0, 0, 0, 0, 0, 0, -1, -1, 0)", player->GetGUID().GetCounter(), player->GetGUID().GetRawValue(), ConfigSystemAdventurerAuraSpellID);
 }
 
 bool EverQuestMod::IsMapIDAnEverQuestMap(uint32 mapID)
