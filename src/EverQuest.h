@@ -1016,6 +1016,8 @@ public:
     unordered_map<uint32, unordered_map<uint32, EverQuestCycleSpawnGroup>> CycleSpawnGroupsByMapIDThenSpawnGroupID;
     unordered_map<uint32, int32> CycleSpawnCheckTimerInMSByMapID;
     uint32 RestrictedMapCheckTimerInMS = 0;
+    uint32 DuePooledRespawnSweepTimerInMS = 0;
+    vector<Map*> DuePooledRespawnSweepGatheredMaps;
     unordered_map<ObjectGuid, deque<uint32>> PlayerCasterConcurrentBardSongs;
     unordered_set<ObjectGuid> PlayersWithAuctionUsableFilterActive;
     unordered_set<ObjectGuid> PlayersGainingExperience;
@@ -1228,6 +1230,9 @@ public:
     bool IsMapRestrictedForPlayers(uint32 mapID);
     bool RelocatePlayerOutOfRestrictedMap(Player* player);
     void UpdateRestrictedMapPlayerCheck(uint32 diff);
+    void UpdateDuePooledRespawnSweep(uint32 diff);
+    void GatherMapForDuePooledRespawnSweep(Map* map);
+    void ProcessDuePooledRespawnsForMap(Map* map);
     void LoadFactionData();
     void ResolveDefendCombatFactionTemplates();
     void ResolveEQReputationFactions();
