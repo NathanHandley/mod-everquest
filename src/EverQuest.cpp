@@ -208,6 +208,8 @@ bool EverQuestMod::LoadConfigurationSystemDataFromDB()
                 ConfigSystemAgileFighterCombatMasterSpellID = (uint32)atoi(value.c_str());
             else if (key == "AgileFighterCombatExpertSpellID")
                 ConfigSystemAgileFighterCombatExpertSpellID = (uint32)atoi(value.c_str());
+            else if (key == "RaidBossRespawnVarianceInSec")
+                ConfigSystemRaidBossRespawnVarianceInSec = (uint32)atoi(value.c_str());
             else if (key == "MapDBCIDMin")
                 ConfigSystemMapDBCIDMin = (uint32)atoi(value.c_str());
             else if (key == "MapDBCIDMax")
@@ -571,6 +573,41 @@ void EverQuestMod::ProcessCycleSpawnForCreatureDeath(Creature* deadCreature)
     action.RespawnTargetSpawnIDs.push_back(nextCreatureGUID);
     action.RemainingMS = 1;
     EnqueuePendingKillSpawnAction(mapID, action);
+}
+
+void EverQuestMod::ApplyRaidBossRespawnVariance(Creature* deadCreature)
+{
+    if (ConfigSystemRaidBossRespawnVarianceInSec == 0)
+        return;
+    if (HasCreatureDataForCreatureTemplateID(deadCreature->GetEntry()) == false)
+        return;
+    const EverQuestCreature& eqCreature = GetCreatureDataForCreatureTemplateID(deadCreature->GetEntry());
+    if (eqCreature.DifficultyType != EQ_CREATURE_DIFFICULTY_RAIDBOSS)
+        return;
+
+    // Only world spawns have a respawn to reschedule (summons and pets never do)
+    ObjectGuid::LowType spawnID = deadCreature->GetSpawnId();
+    if (spawnID == 0)
+        return;
+
+    // Base off spawn point's database timer since the creature's live respawn delay holds the previous roll and would drift with every death
+    CreatureData const* creatureData = sObjectMgr->GetCreatureData(spawnID);
+    if (creatureData == nullptr)
+        return;
+    uint32 centerInSec = creatureData->spawntimesecs;
+    if (centerInSec == 0)
+        return;
+
+    // Bosses that took the shorter EQ timer can have a center below the variance, so keep the swing from rolling them down to nearly nothing
+    uint32 varianceInSec = std::min(ConfigSystemRaidBossRespawnVarianceInSec, centerInSec / 2);
+    if (varianceInSec == 0)
+        return;
+    uint32 respawnInSec = (centerInSec - varianceInSec) + urand(0, varianceInSec * 2);
+
+    // The engine already set a respawn using the unrandomized delay back in setDeathState, so overwrite both it and the delay that corpse removal recalculates from
+    deadCreature->SetRespawnDelay(respawnInSec);
+    deadCreature->SetRespawnTime(respawnInSec + deadCreature->GetCorpseDelay());
+    deadCreature->SaveRespawnTime();
 }
 
 void EverQuestMod::UpdateCycleSpawns(Map* map, uint32 diff)

@@ -41,7 +41,7 @@ class Aura;
 class AuraApplication;
 class WorldPacket;
 
-#define EQ_MOD_VERSION                              68
+#define EQ_MOD_VERSION                              69
 
 #define EQ_EQCLASS_NONE                             0
 #define EQ_EQCLASS_WARRIOR                          1
@@ -911,6 +911,7 @@ public:
     uint32 ConfigSystemAgileFighterSpellID;
     uint32 ConfigSystemAgileFighterCombatMasterSpellID;
     uint32 ConfigSystemAgileFighterCombatExpertSpellID;
+    uint32 ConfigSystemRaidBossRespawnVarianceInSec;
     uint32 ConfigSystemFactionGoodClassMask;
     uint32 ConfigSystemFactionEvilClassMask;
     uint32 ConfigSystemFactionGoodRaceMask;
@@ -1082,6 +1083,7 @@ public:
     bool ShouldDespawnCreatureDueToSpawnRestrictions(int mapID, Creature* creature);
     ObjectGuid::LowType RollCycleSpawnCreatureGUID(const EverQuestCycleSpawnGroup& cycleSpawnGroup, uint32 excludedSpawnPointID, uint32 mapID);
     void ProcessCycleSpawnForCreatureDeath(Creature* deadCreature);
+    void ApplyRaidBossRespawnVariance(Creature* deadCreature);
     void UpdateCycleSpawns(Map* map, uint32 diff);
     void LoadCreatureKillSpawnData();
     void ResolveKillSpawnRespawnTargetSpawnPoints();
