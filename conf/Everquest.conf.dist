@@ -264,6 +264,21 @@ EverQuest.CombatSkills.RangedAttackDamageMultiplier = 1.0
 #		Max hate list members struck by one area rampage, when the creature does not specify its own
 #	Default: 999
 #
+# 	EverQuest.CombatSkills.RaidBossSummonEnabled
+#		If true, raid boss creatures will yank their current target back to them whenever that target
+#		is out of melee reach, which is the EQ "summon" behavior that stops bosses from being kited
+#		Only creatures marked as a raid boss by EQWOWConverter can do this
+#	Default: True
+#
+#	EverQuest.CombatSkills.RaidBossSummonMaxHealthPercent
+#		A boss will not summon until its health is at or below this percent, so a fully healthy boss
+#		leaves its target alone (mirrors TAKP)
+#	Default: 97
+#
+#	EverQuest.CombatSkills.RaidBossSummonCooldownInMS
+#		How long a boss waits between summons
+#	Default: 11000
+#
 ###################################################################################################
 
 EverQuest.CombatSkills.EnrageEnabled = True
@@ -278,6 +293,9 @@ EverQuest.CombatSkills.RampageDefaultRange = 75
 EverQuest.CombatSkills.WildRampageEnabled = True
 EverQuest.CombatSkills.WildRampageDefaultChancePercent = 20
 EverQuest.CombatSkills.WildRampageDefaultMaxTargets = 999
+EverQuest.CombatSkills.RaidBossSummonEnabled = True
+EverQuest.CombatSkills.RaidBossSummonMaxHealthPercent = 97
+EverQuest.CombatSkills.RaidBossSummonCooldownInMS = 11000
 
 ###################################################################################################
 # Evade / Unstick Settings (EverQuest maps only, except NonEQMapLeashRadius)

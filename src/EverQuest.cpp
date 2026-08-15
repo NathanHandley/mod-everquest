@@ -307,6 +307,9 @@ void EverQuestMod::LoadConfigurationFile()
     ConfigCombatSkillsWildRampageEnabled = sConfigMgr->GetOption<bool>("EverQuest.CombatSkills.WildRampageEnabled", true);
     ConfigCombatSkillsWildRampageDefaultChancePct = sConfigMgr->GetOption<uint32>("EverQuest.CombatSkills.WildRampageDefaultChancePercent", 20);
     ConfigCombatSkillsWildRampageDefaultMaxTargets = sConfigMgr->GetOption<uint32>("EverQuest.CombatSkills.WildRampageDefaultMaxTargets", 999);
+    ConfigCombatSkillsRaidBossSummonEnabled = sConfigMgr->GetOption<bool>("EverQuest.CombatSkills.RaidBossSummonEnabled", true);
+    ConfigCombatSkillsRaidBossSummonMaxHealthPct = sConfigMgr->GetOption<uint32>("EverQuest.CombatSkills.RaidBossSummonMaxHealthPercent", 97);
+    ConfigCombatSkillsRaidBossSummonCooldownInMS = sConfigMgr->GetOption<uint32>("EverQuest.CombatSkills.RaidBossSummonCooldownInMS", 11000);
 
     // Evade / unstick (EverQuest maps only)
     ConfigEvadeEnabled = sConfigMgr->GetOption<bool>("EverQuest.Evade.Enabled", true);
@@ -392,7 +395,7 @@ void EverQuestMod::LoadConfigurationFile()
 void EverQuestMod::LoadCreatureData()
 {
     CreaturesByTemplateID.clear();
-    QueryResult queryResult = WorldDatabase.Query("SELECT CreatureTemplateID, CanShowHeldLootItems, CanShowHeldLootShields, SpawnLimit, RangedAttackEnabled, RangedAttackMinRange, RangedAttackMaxRange, RangedAttackDamageModPct, AgroSocialDistanceMod, EnrageEnabled, EnrageHPPct, EnrageDurationInMS, EnrageCooldownInMS, FlurryEnabled, FlurryChancePct, RampageEnabled, RampageChancePct, RampageRange, RampageDamagePct, WildRampageEnabled, WildRampageChancePct, WildRampageMaxTargets, WildRampageDamagePct, AttackRoundTimeInMS FROM mod_everquest_creature ORDER BY CreatureTemplateID;");
+    QueryResult queryResult = WorldDatabase.Query("SELECT CreatureTemplateID, CanShowHeldLootItems, CanShowHeldLootShields, SpawnLimit, RangedAttackEnabled, RangedAttackMinRange, RangedAttackMaxRange, RangedAttackDamageModPct, AgroSocialDistanceMod, EnrageEnabled, EnrageHPPct, EnrageDurationInMS, EnrageCooldownInMS, FlurryEnabled, FlurryChancePct, RampageEnabled, RampageChancePct, RampageRange, RampageDamagePct, WildRampageEnabled, WildRampageChancePct, WildRampageMaxTargets, WildRampageDamagePct, AttackRoundTimeInMS, DifficultyType FROM mod_everquest_creature ORDER BY CreatureTemplateID;");
     if (queryResult)
     {
         do
@@ -424,6 +427,7 @@ void EverQuestMod::LoadCreatureData()
             everQuestCreature.WildRampageMaxTargets = fields[21].Get<uint32>();
             everQuestCreature.WildRampageDamagePct = fields[22].Get<uint32>();
             everQuestCreature.AttackRoundTimeInMS = fields[23].Get<uint32>();
+            everQuestCreature.DifficultyType = fields[24].Get<uint32>();
             CreaturesByTemplateID[everQuestCreature.CreatureTemplateID] = everQuestCreature;
         } while (queryResult->NextRow());
     }
@@ -3784,6 +3788,85 @@ void EverQuestMod::UpdateCreatureRangedAttack(Creature* creature, uint32 diff)
     EverQuestCreatureRangedAttackState* stateAfterCast = creature->CustomData.Get<EverQuestCreatureRangedAttackState>(EQ_CREATURE_CUSTOMDATA_RANGEDATTACK);
     if (stateAfterCast != nullptr)
         stateAfterCast->SwingTimerRemainingMS = swingTime;
+}
+
+void EverQuestMod::SetupCreatureSummon(Creature* creature)
+{
+    if (HasCreatureDataForCreatureTemplateID(creature->GetEntry()) == false)
+        return;
+    const EverQuestCreature& eqCreature = GetCreatureDataForCreatureTemplateID(creature->GetEntry());
+
+    // Only raid bosses summon (for now)
+    if (eqCreature.DifficultyType != EQ_CREATURE_DIFFICULTY_RAIDBOSS)
+        return;
+
+    // Reset runtime fields in case this creature object was recycled
+    EverQuestCreatureSummonState* state = creature->CustomData.GetDefault<EverQuestCreatureSummonState>(EQ_CREATURE_CUSTOMDATA_SUMMON);
+    state->CooldownRemainingMS = 0;
+}
+
+void EverQuestMod::RemoveCreatureSummonState(Creature* creature)
+{
+    creature->CustomData.Erase(EQ_CREATURE_CUSTOMDATA_SUMMON);
+}
+
+// Reference was TAKP's Mob::CheckHateSummon and Mob::HateSummon
+void EverQuestMod::UpdateCreatureSummon(Creature* creature, uint32 diff)
+{
+    if (creature == nullptr)
+        return;
+    if (ConfigCombatSkillsRaidBossSummonEnabled == false)
+        return;
+
+    EverQuestCreatureSummonState* state = creature->CustomData.Get<EverQuestCreatureSummonState>(EQ_CREATURE_CUSTOMDATA_SUMMON);
+    if (state == nullptr)
+        return;
+
+    // Tick down the reuse timer
+    if (state->CooldownRemainingMS > 0)
+    {
+        if (state->CooldownRemainingMS > diff)
+        {
+            state->CooldownRemainingMS -= diff;
+            return;
+        }
+        state->CooldownRemainingMS = 0;
+    }
+
+    if (creature->IsAlive() == false || creature->IsInCombat() == false)
+        return;
+
+    // A charmed or player-controlled boss should never summon its target
+    if (creature->IsCharmed() == true || creature->IsControlledByPlayer() == true)
+        return;
+
+    // Boss has to have taken damage
+    if (creature->GetHealthPct() > (float)ConfigCombatSkillsRaidBossSummonMaxHealthPct)
+        return;
+
+    Unit* victim = creature->GetVictim();
+    if (victim == nullptr || victim->IsAlive() == false)
+        return;
+    if (creature->IsValidAttackTarget(victim) == false)
+        return;
+
+    // Summoning only happens once the target has gotten out of melee reach
+    if (creature->IsWithinMeleeRange(victim) == true)
+        return;
+
+    // Put the target right in front of the boss
+    float destX = 0.0f;
+    float destY = 0.0f;
+    float destZ = 0.0f;
+    creature->GetClosePoint(destX, destY, destZ, victim->GetCombatReach(), 0.0f, 0.0f, victim, true);
+
+    creature->Say("You will not evade me, " + victim->GetName() + "!", LANG_UNIVERSAL, victim);
+    victim->NearTeleportTo(destX, destY, destZ, victim->GetOrientation());
+
+    // The teleport can despawn creatures (and erase state) through scripted side effects, so look the state up fresh instead of writing through the earlier pointer
+    EverQuestCreatureSummonState* stateAfterSummon = creature->CustomData.Get<EverQuestCreatureSummonState>(EQ_CREATURE_CUSTOMDATA_SUMMON);
+    if (stateAfterSummon != nullptr)
+        stateAfterSummon->CooldownRemainingMS = ConfigCombatSkillsRaidBossSummonCooldownInMS;
 }
 
 void EverQuestMod::SetupCreatureCombatAbilities(Creature* creature)

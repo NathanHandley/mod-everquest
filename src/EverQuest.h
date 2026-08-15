@@ -41,7 +41,7 @@ class Aura;
 class AuraApplication;
 class WorldPacket;
 
-#define EQ_MOD_VERSION                              67
+#define EQ_MOD_VERSION                              68
 
 #define EQ_EQCLASS_NONE                             0
 #define EQ_EQCLASS_WARRIOR                          1
@@ -142,6 +142,10 @@ class WorldPacket;
 #define EQ_PET_NAMING_TYPE_WARDER                   2
 #define EQ_PET_NAMING_TYPE_RANDOM                   3
 
+#define EQ_CREATURE_DIFFICULTY_NORMAL               0
+#define EQ_CREATURE_DIFFICULTY_RAIDTRASH            1
+#define EQ_CREATURE_DIFFICULTY_RAIDBOSS             2
+
 #define EQ_QUEST_REACTION_UNKNOWN                   0
 #define EQ_QUEST_REACTION_ATTACKPLAYER              1
 #define EQ_QUEST_REACTION_DESPAWN                   2
@@ -228,6 +232,7 @@ class WorldPacket;
 
 #define EQ_CREATURE_CUSTOMDATA_RANGEDATTACK         "EQRangedAtk"
 #define EQ_CREATURE_CUSTOMDATA_COMBATABILITY        "EQCombatAbility"
+#define EQ_CREATURE_CUSTOMDATA_SUMMON               "EQSummon"
 #define EQ_CREATURE_CUSTOMDATA_UNSTICK              "EQUnstick"
 #define EQ_CREATURE_CUSTOMDATA_SOCIALAGGRO          "EQSocialAggro"
 #define EQ_CREATURE_CUSTOMDATA_EMOTE                "EQEmote"
@@ -328,6 +333,7 @@ public:
     uint32 WildRampageMaxTargets = 0;
     uint32 WildRampageDamagePct = 0;
     uint32 AttackRoundTimeInMS = 0;
+    uint32 DifficultyType = EQ_CREATURE_DIFFICULTY_NORMAL;
 };
 
 class EverQuestCreatureSpawnPoint
@@ -448,6 +454,12 @@ public:
     uint32 EnrageCooldownRemainingMS = 0;
     uint32 SpecialAttackTimerRemainingMS = 0;
     uint32 ActiveSwingDamageModPct = 100;
+};
+
+class EverQuestCreatureSummonState : public DataMap::Base
+{
+public:
+    uint32 CooldownRemainingMS = 0;
 };
 
 class EverQuestCreatureUnstickState : public DataMap::Base
@@ -938,6 +950,9 @@ public:
     bool ConfigCombatSkillsWildRampageEnabled;
     uint32 ConfigCombatSkillsWildRampageDefaultChancePct;
     uint32 ConfigCombatSkillsWildRampageDefaultMaxTargets;
+    bool ConfigCombatSkillsRaidBossSummonEnabled;
+    uint32 ConfigCombatSkillsRaidBossSummonMaxHealthPct;
+    uint32 ConfigCombatSkillsRaidBossSummonCooldownInMS;
     bool ConfigEvadeEnabled;
     float ConfigEvadeUnreachableSeconds;
     float ConfigEvadeUnstickStallSeconds;
@@ -1194,6 +1209,9 @@ public:
     void UpdateCreatureCombatAbilities(Creature* creature, uint32 diff);
     void UpdateCreatureEnrage(Creature* creature, EverQuestCreatureCombatAbilityState* state, uint32 diff);
     void UpdateCreatureSpecialAttacks(Creature* creature, EverQuestCreatureCombatAbilityState* state, uint32 diff);
+    void SetupCreatureSummon(Creature* creature);
+    void RemoveCreatureSummonState(Creature* creature);
+    void UpdateCreatureSummon(Creature* creature, uint32 diff);
     void DoCreatureCombatAbilitySwingRound(Creature* creature, Unit* target, uint32 damagePct);
     void DoCreatureFlurry(Creature* creature, Unit* victim);
     void DoCreatureRampage(Creature* creature, Unit* victim, float range, uint32 damagePct);

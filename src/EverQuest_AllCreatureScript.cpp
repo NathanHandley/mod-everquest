@@ -58,6 +58,7 @@ public:
         SetupRangedAttack(creature);
         SetupSummonedPet(creature);
         EverQuest->SetupCreatureCombatAbilities(creature);
+        EverQuest->SetupCreatureSummon(creature);
     }
 
     void OnCreatureRemoveWorld(Creature* creature) override
@@ -70,6 +71,7 @@ public:
             EverQuest->RemoveCreatureAsLoaded(mapID, creature);
         EverQuest->RemoveCreatureRangedAttackState(creature);
         EverQuest->RemoveCreatureCombatAbilityState(creature);
+        EverQuest->RemoveCreatureSummonState(creature);
         EverQuest->RemoveCreatureUnstickState(creature);
         EverQuest->RemoveCreatureSocialAggroState(creature);
         EverQuest->RemoveCreatureEmoteState(creature);
@@ -92,6 +94,7 @@ public:
             return;
         EverQuest->UpdateCreatureRangedAttack(creature, diff);
         EverQuest->UpdateCreatureCombatAbilities(creature, diff);
+        EverQuest->UpdateCreatureSummon(creature, diff);
         EverQuest->UpdateCreatureUnstick(creature, diff);
         EverQuest->UpdateCreatureScaledSocialAggro(creature, diff);
         EverQuest->UpdateCreatureAgroZBlock(creature, diff);
