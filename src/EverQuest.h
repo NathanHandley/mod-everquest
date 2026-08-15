@@ -1046,6 +1046,7 @@ public:
     unordered_map<ObjectGuid, EverQuestPlayerTempFactionBonus> TempFactionBonusByPlayerGUID;
     unordered_map<ObjectGuid, vector<uint32>> ForcedFactionReactionIDsByPlayerGUID;
     unordered_set<ObjectGuid> PlayersPendingTempFactionRecalculation;
+    unordered_map<ObjectGuid, uint32> CorpseIllusionOriginalNativeDisplayByPlayerGUID;
     unordered_map<ObjectGuid, EverQuestPendingSummonRequest> PendingSummonRequestByTargetPlayerGUID;
     unordered_map<uint8, EverQuestClassMap> ClassMapByWOWClassID;
 
@@ -1161,6 +1162,8 @@ public:
     bool IsPlayerCarryingMasterTotem(Player* player);
     void AddMasterTotemForShaman(Player* player);
     void AddRacialGuiseItemForPlayer(Player* player);
+    void ApplyCorpseIllusionNativeDisplayOnDeath(Player* player);
+    void RestoreNativeDisplayAfterCorpseIllusion(Player* player);
     void GrantLegacyAchievementIfEligible(Player* player);
     void AddAdventurerAuraForNewCharacter(Player* player);
     bool IsMapIDAnEverQuestMap(uint32 mapID);

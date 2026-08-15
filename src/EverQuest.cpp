@@ -40,6 +40,7 @@
 #include "ScriptedGossip.h"
 #include "TemporarySummon.h"
 #include "CellImpl.h"
+#include "Corpse.h"
 #include "GridNotifiers.h"
 #include "GridNotifiersImpl.h"
 #include "WorldSessionMgr.h"
@@ -3299,6 +3300,35 @@ void EverQuestMod::AddRacialGuiseItemForPlayer(Player* player)
         return;
     if (player->StoreNewItem(destPosition, guiseItemID, true) != nullptr)
         SetIssuedIllusionItemIDForPlayer(player, guiseItemID);
+}
+
+void EverQuestMod::ApplyCorpseIllusionNativeDisplayOnDeath(Player* player)
+{
+    // Corspe object copies the native display id at creation and clients only pick the corpse model from the first recieved packet and nothing updates it
+    // so while an illusion that persists through death is at play, make the native display the same as the illusion display while the body exists
+    if (player->GetDisplayId() == player->GetNativeDisplayId())
+        return;
+    {
+        std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+        if (CorpseIllusionOriginalNativeDisplayByPlayerGUID.find(player->GetGUID()) != CorpseIllusionOriginalNativeDisplayByPlayerGUID.end())
+            return;
+        CorpseIllusionOriginalNativeDisplayByPlayerGUID[player->GetGUID()] = player->GetNativeDisplayId();
+    }
+    player->SetNativeDisplayId(player->GetDisplayId());
+}
+
+void EverQuestMod::RestoreNativeDisplayAfterCorpseIllusion(Player* player)
+{
+    uint32 originalNativeDisplayID = 0;
+    {
+        std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+        auto storedItr = CorpseIllusionOriginalNativeDisplayByPlayerGUID.find(player->GetGUID());
+        if (storedItr == CorpseIllusionOriginalNativeDisplayByPlayerGUID.end())
+            return;
+        originalNativeDisplayID = storedItr->second;
+        CorpseIllusionOriginalNativeDisplayByPlayerGUID.erase(storedItr);
+    }
+    player->SetNativeDisplayId(originalNativeDisplayID);
 }
 
 void EverQuestMod::GrantLegacyAchievementIfEligible(Player* player)

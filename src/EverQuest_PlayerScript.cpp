@@ -641,6 +641,10 @@ public:
         // Hand out the character's racial guise item if they have never received one
         EverQuest->AddRacialGuiseItemForPlayer(player);
 
+        // When a corpse and in an illusion that persists through death, the display won't survive logout so reapply when logging in dead but corpse isn't released
+        if (player->IsAlive() == false && player->HasPlayerFlag(PLAYER_FLAGS_GHOST) == false)
+            EverQuest->ApplyCorpseIllusionNativeDisplayOnDeath(player);
+
         // Grab EQ class info for the login summary message
         EverQuestClassMap classMap = EverQuest->GetClassMapForWOWClassID(player->getClass());
         uint8 secondClassID = EverQuest->GetCurrentSecondEQClassForPlayer(player);
@@ -689,10 +693,21 @@ public:
         EverQuest->RefreshAgileFighterCombatAuraForPlayer(player);
     }
 
+    void OnPlayerResurrect(Player* player, float /*restore_percent*/, bool& /*applySickness*/) override
+    {
+        if (EverQuest->IsEnabled == false)
+            return;
+
+        EverQuest->RestoreNativeDisplayAfterCorpseIllusion(player);
+    }
+
     void OnPlayerLogout(Player* player) override
     {
         if (EverQuest->IsEnabled == false)
             return;
+
+        // Don't leave a swapped native display behind (it is not saved, but the tracking entry must not linger)
+        EverQuest->RestoreNativeDisplayAfterCorpseIllusion(player);
 
         if (EverQuest->ConfigBardMaxConcurrentSongs != 0)
         {
@@ -797,12 +812,18 @@ public:
 
         // Alliance-line faction bonuses do not survive the caster's death, mirroring EQ death
         EverQuest->ClearTempFactionBonusForPlayer(player);
+
+        // If a cosmetic illusion is active, swap the native display so the corpse created on release shows the illusion
+        EverQuest->ApplyCorpseIllusionNativeDisplayOnDeath(player);
     }
 
     void OnPlayerReleasedGhost(Player* player) override
     {
         if (EverQuest->IsEnabled == false)
             return;
+
+        // The corpse now exists and copied the swapped native display, so put the real native display back
+        EverQuest->RestoreNativeDisplayAfterCorpseIllusion(player);
 
         if (EverQuest->ConfigExpLossOnDeathEnabled == true)
         {
