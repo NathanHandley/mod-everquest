@@ -268,6 +268,10 @@ public:
 
             EverQuest->HandleIllusionFormAuraRemove(unit->ToPlayer(), aurApp->GetBase()->GetId());
 
+            // Leaving a shapeshift form uncovers the illusion, so put the gear-matched illusion display back (the core has already restored the base transform model by this point)
+            if (aurApp->GetBase()->GetSpellInfo() != nullptr && aurApp->GetBase()->GetSpellInfo()->HasAura(SPELL_AURA_MOD_SHAPESHIFT) == true)
+                EverQuest->RefreshIllusionGearDisplayForPlayer(unit->ToPlayer());
+
             // Dropping an illusion form restores how factions naturally perceive the player
             if (EverQuest->GetSpellDataForSpellID(aurApp->GetBase()->GetId()).IllusionFormEQRaceID != 0)
                 EverQuest->RecalculateTemporaryFactionReactionsForPlayer(unit->ToPlayer());

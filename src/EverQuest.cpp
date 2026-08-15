@@ -2138,8 +2138,26 @@ uint32 EverQuestMod::GetIllusionGearDisplayIDForPlayer(Player* player, uint32 fo
     return GetIllusionDisplayIDWithFallback(formSpellID, bodySet, tintID, helmOn);
 }
 
+uint32 EverQuestMod::GetActiveShapeshiftModelIDForPlayer(Player* player)
+{
+    // Zero means no shapeshift form with its own model is active (like stances and other model-less forms)
+    Unit::AuraEffectList const& shapeshiftAuras = player->GetAuraEffectsByType(SPELL_AURA_MOD_SHAPESHIFT);
+    if (shapeshiftAuras.empty() == true)
+        return 0;
+    return player->GetModelForForm(player->GetShapeshiftForm(), shapeshiftAuras.front()->GetId());
+}
+
 void EverQuestMod::ApplyIllusionGearDisplayIfChanged(Player* player, EverQuestPlayerIllusionState* illusionState)
 {
+    // Shapeshift forms with their own model (druid forms, ghost wolf) show over the illusion
+    uint32 shapeshiftModelID = GetActiveShapeshiftModelIDForPlayer(player);
+    if (shapeshiftModelID != 0)
+    {
+        if (player->GetDisplayId() != shapeshiftModelID)
+            player->SetDisplayId(shapeshiftModelID);
+        return;
+    }
+
     // A zero result means no one doesn't exist, so leave the core's transform display alone
     uint32 gearDisplayID = GetIllusionGearDisplayIDForPlayer(player, illusionState->FormSpellID);
     if (gearDisplayID == 0)

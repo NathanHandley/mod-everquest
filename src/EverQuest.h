@@ -1117,6 +1117,7 @@ public:
     uint64 GetIllusionFaceLookupKey(uint32 baseDisplayID, uint32 faceIndex);
     uint32 GetIllusionFaceDisplayIDForPlayer(Player* player, uint32 baseDisplayID);
     uint32 GetIllusionGearDisplayIDForPlayer(Player* player, uint32 formSpellID);
+    uint32 GetActiveShapeshiftModelIDForPlayer(Player* player);
     void ApplyIllusionGearDisplayIfChanged(Player* player, EverQuestPlayerIllusionState* illusionState);
     void ApplyIllusionGearDisplayOnFormAuraApply(Player* player, uint32 formSpellID);
     void HandleIllusionFormAuraRemove(Player* player, uint32 spellID);
