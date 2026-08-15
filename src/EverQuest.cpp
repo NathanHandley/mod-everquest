@@ -1924,7 +1924,7 @@ void EverQuestMod::LoadSpellData()
 {
     SpellDataBySpellID.clear();
     BardSongTickSpellIDs.clear();
-    QueryResult queryResult = WorldDatabase.Query("SELECT SpellID, AuraDurationBaseInMS, AuraDurationAddPerLevelInMS, AuraDurationMaxInMS, AuraDurationCalcMinLevel, AuraDurationCalcMaxLevel, RecourseSpellID, SpellIDCastOnMeleeAttacker, FocusBoostType, PeriodicAuraSpellID, PeriodicAuraSpellRadius, MaleFormSpellID, FemaleFormSpellID, EffectFailChancePercent, EffectFailableType, StunUsesBashKickChance, SpellIDCastOnTargetWhenStunLands, AuraStaysOnSecondaryClassSwitch, MinTargetLevel, MaxCreatureTargetLevel, ResistDiff, HasteType, ModFactionRepValue, IllusionFormAlignment, IllusionFormEQRaceID FROM mod_everquest_spell ORDER BY SpellID;");
+    QueryResult queryResult = WorldDatabase.Query("SELECT SpellID, AuraDurationBaseInMS, AuraDurationAddPerLevelInMS, AuraDurationMaxInMS, AuraDurationCalcMinLevel, AuraDurationCalcMaxLevel, RecourseSpellID, SpellIDCastOnMeleeAttacker, FocusBoostType, PeriodicAuraSpellID, PeriodicAuraSpellRadius, MaleFormSpellID, FemaleFormSpellID, EffectFailChancePercent, EffectFailableType, StunUsesBashKickChance, SpellIDCastOnTargetWhenStunLands, AuraStaysOnSecondaryClassSwitch, MinTargetLevel, MaxCreatureTargetLevel, ResistDiff, HasteType, ModFactionRepValue, IllusionFormAlignment, IllusionFormEQRaceID, PersistOnClassChange FROM mod_everquest_spell ORDER BY SpellID;");
     if (queryResult)
     {
         do
@@ -1957,6 +1957,7 @@ void EverQuestMod::LoadSpellData()
             everQuestSpell.ModFactionRepValue = fields[22].Get<int32>();
             everQuestSpell.IllusionFormAlignment = fields[23].Get<uint8>();
             everQuestSpell.IllusionFormEQRaceID = fields[24].Get<uint32>();
+            everQuestSpell.PersistOnClassChange = fields[25].Get<bool>();
             SpellDataBySpellID[everQuestSpell.SpellID] = everQuestSpell;
             if (everQuestSpell.PeriodicAuraSpellID != 0)
                 BardSongTickSpellIDs.insert(everQuestSpell.PeriodicAuraSpellID);
@@ -6740,6 +6741,11 @@ bool EverQuestMod::IsSpellExemptFromClassMove(uint32 spellID)
 {
     // Death Knight abilities belong to the fixed WoW class rather than the active EQ secondary class, so persist across switches
     if (spellID == EQ_DEATHKNIGHT_DEATHGATE_SPELL_ID || spellID == EQ_DEATHKNIGHT_RUNEFORGING_SPELL_ID)
+        return true;
+
+    // Spells flagged by the converter as character-wide (like the racial guise spells) persist across switches
+    auto spellDataItr = SpellDataBySpellID.find(spellID);
+    if (spellDataItr != SpellDataBySpellID.end() && spellDataItr->second.PersistOnClassChange == true)
         return true;
 
     // Recipes / abilities mapped to a cross-class skill line via SkillLineAbility

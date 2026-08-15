@@ -41,7 +41,7 @@ class Aura;
 class AuraApplication;
 class WorldPacket;
 
-#define EQ_MOD_VERSION                              66
+#define EQ_MOD_VERSION                              67
 
 #define EQ_EQCLASS_NONE                             0
 #define EQ_EQCLASS_WARRIOR                          1
@@ -298,6 +298,7 @@ public:
     int32 ModFactionRepValue = 0;
     uint8 IllusionFormAlignment = EQ_FACTION_ALIGNMENT_NONE;
     uint32 IllusionFormEQRaceID = 0;
+    bool PersistOnClassChange = false;
 };
 
 class EverQuestCreature
