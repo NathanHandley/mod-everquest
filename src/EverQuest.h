@@ -41,7 +41,7 @@ class Aura;
 class AuraApplication;
 class WorldPacket;
 
-#define EQ_MOD_VERSION                              69
+#define EQ_MOD_VERSION                              70
 
 #define EQ_EQCLASS_NONE                             0
 #define EQ_EQCLASS_WARRIOR                          1
@@ -520,6 +520,13 @@ public:
     float Z = 0.0f;
 };
 
+class EverQuestPlayerClientVersionCheckState
+{
+public:
+    int32 MSUntilDeadline = 0;
+    bool FailedPendingKick = false;
+};
+
 class EverQuestCreatureEmote
 {
 public:
@@ -922,6 +929,8 @@ public:
     uint32 ConfigSystemAgileFighterCombatMasterSpellID;
     uint32 ConfigSystemAgileFighterCombatExpertSpellID;
     uint32 ConfigSystemRaidBossRespawnVarianceInSec;
+    uint32 ConfigSystemClientDataVersion = 0;
+    string ConfigSystemClientDataVersionMismatchMessage;
     uint32 ConfigSystemFactionGoodClassMask;
     uint32 ConfigSystemFactionEvilClassMask;
     uint32 ConfigSystemFactionGoodRaceMask;
@@ -931,6 +940,9 @@ public:
     bool ConfigMapRestrictPlayersToNorrath;
     int ConfigMapMaxExpansionID;
     uint32 ConfigMapRestrictedMapCheckIntervalInSeconds;
+    bool ConfigClientVersionCheckEnabled = false;
+    uint32 ConfigClientVersionCheckGraceTimeInSeconds = 30;
+    uint32 ConfigClientVersionCheckKickDelayInSeconds = 10;
     bool ConfigSpellTalentAlignmentEnabled;
     bool ConfigQuestGrantExpOnRepeatCompletion;
     bool ConfigExpLossOnDeathEnabled;
@@ -1047,6 +1059,7 @@ public:
     unordered_map<uint32, unordered_map<uint32, EverQuestCycleSpawnGroup>> CycleSpawnGroupsByMapIDThenSpawnGroupID;
     unordered_map<uint32, int32> CycleSpawnCheckTimerInMSByMapID;
     uint32 RestrictedMapCheckTimerInMS = 0;
+    unordered_map<ObjectGuid, EverQuestPlayerClientVersionCheckState> PendingClientVersionChecksByPlayerGUID;
     unordered_map<ObjectGuid, deque<uint32>> PlayerCasterConcurrentBardSongs;
     unordered_set<ObjectGuid> PlayersWithAuctionUsableFilterActive;
     unordered_set<ObjectGuid> PlayersGainingExperience;
@@ -1268,6 +1281,11 @@ public:
     bool IsMapRestrictedForPlayers(uint32 mapID);
     bool RelocatePlayerOutOfRestrictedMap(Player* player);
     void UpdateRestrictedMapPlayerCheck(uint32 diff);
+    void BeginClientVersionCheckForPlayer(Player* player);
+    void HandleClientVersionReportForPlayer(Player* player, uint32 reportedVersion);
+    void FailClientVersionCheckForPlayer(Player* player, EverQuestPlayerClientVersionCheckState& checkState);
+    void UpdateClientVersionChecks(uint32 diff);
+    void ClearClientVersionCheckForPlayer(ObjectGuid playerGUID);
     void LoadFactionData();
     void ResolveDefendCombatFactionTemplates();
     void ResolveEQReputationFactions();

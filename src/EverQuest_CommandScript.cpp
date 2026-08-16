@@ -90,6 +90,7 @@ public:
         static ChatCommandTable commandTable =
         {
             { "eqgps",  HandleEQGPSCommand,                     SEC_PLAYER, Console::No },
+            { "eqver",  HandleEQVerCommand,                     SEC_PLAYER, Console::No },
             { "eqface", HandleEQFaceCommand,                    SEC_PLAYER, Console::No },
             { "eqshowbardpulse", HandleEQShowBardPulseCommand,  SEC_PLAYER, Console::No },
             { "class",  classCommandTable                                               },
@@ -227,6 +228,19 @@ public:
             handler->PSendSysMessage("Bard song pulse graphics are now |cff4CFF00shown|r for you.");
         else
             handler->PSendSysMessage("Bard song pulse graphics are now |cff4CFF00hidden|r for you.");
+        return true;
+    }
+
+    static bool HandleEQVerCommand(ChatHandler* handler, const char* args)
+    {
+        if (EverQuest->IsEnabled == false)
+            return true;
+
+        // Sent automatically by the client UI shortly after entering the world, so bad input drops silently
+        uint32 values[1];
+        if (ParseUnsignedArgs(args, values, 1) != 1)
+            return true;
+        EverQuest->HandleClientVersionReportForPlayer(handler->GetPlayer(), values[0]);
         return true;
     }
 

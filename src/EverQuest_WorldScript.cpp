@@ -85,6 +85,7 @@ public:
             return;
 
         EverQuest->UpdateRestrictedMapPlayerCheck(diff);
+        EverQuest->UpdateClientVersionChecks(diff);
         EverQuest->ProcessPendingEquipmentStorageTransactions();
     }
 

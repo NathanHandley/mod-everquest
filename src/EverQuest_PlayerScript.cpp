@@ -569,6 +569,9 @@ public:
         if (EverQuest->IsEnabled == false)
             return;
 
+        // Start the grace timer for the client data version report (kicks stale clients that bypassed the update launcher)
+        EverQuest->BeginClientVersionCheckForPlayer(player);
+
         // First login behavior
         if (player->HasAtLoginFlag(AT_LOGIN_FIRST) == true)
         {
@@ -705,6 +708,8 @@ public:
     {
         if (EverQuest->IsEnabled == false)
             return;
+
+        EverQuest->ClearClientVersionCheckForPlayer(player->GetGUID());
 
         // Don't leave a swapped native display behind (it is not saved, but the tracking entry must not linger)
         EverQuest->RestoreNativeDisplayAfterCorpseIllusion(player);

@@ -210,6 +210,10 @@ bool EverQuestMod::LoadConfigurationSystemDataFromDB()
                 ConfigSystemAgileFighterCombatExpertSpellID = (uint32)atoi(value.c_str());
             else if (key == "RaidBossRespawnVarianceInSec")
                 ConfigSystemRaidBossRespawnVarianceInSec = (uint32)atoi(value.c_str());
+            else if (key == "ClientDataVersion")
+                ConfigSystemClientDataVersion = (uint32)atoi(value.c_str());
+            else if (key == "ClientDataVersionMismatchMessage")
+                ConfigSystemClientDataVersionMismatchMessage = value;
             else if (key == "MapDBCIDMin")
                 ConfigSystemMapDBCIDMin = (uint32)atoi(value.c_str());
             else if (key == "MapDBCIDMax")
@@ -267,6 +271,11 @@ void EverQuestMod::LoadConfigurationFile()
     ConfigMapRestrictPlayersToNorrath = sConfigMgr->GetOption<bool>("EverQuest.Map.RestrictPlayersToNorrath", false);
     ConfigMapMaxExpansionID = sConfigMgr->GetOption<int>("EverQuest.Map.MaxExpansionID", -1);
     ConfigMapRestrictedMapCheckIntervalInSeconds = sConfigMgr->GetOption<uint32>("EverQuest.Map.RestrictedMapCheckIntervalInSeconds", 300);
+
+    // Client Version Check
+    ConfigClientVersionCheckEnabled = sConfigMgr->GetOption<bool>("EverQuest.ClientVersionCheck.Enabled", false);
+    ConfigClientVersionCheckGraceTimeInSeconds = sConfigMgr->GetOption<uint32>("EverQuest.ClientVersionCheck.GraceTimeInSeconds", 30);
+    ConfigClientVersionCheckKickDelayInSeconds = sConfigMgr->GetOption<uint32>("EverQuest.ClientVersionCheck.KickDelayInSeconds", 10);
 
     // Spell
     ConfigSpellTalentAlignmentEnabled = sConfigMgr->GetOption<bool>("EverQuest.Spell.TalentAlignmentEnabled", true);
@@ -5149,6 +5158,96 @@ void EverQuestMod::UpdateRestrictedMapPlayerCheck(uint32 diff)
         if (RelocatePlayerOutOfRestrictedMap(player) == true)
             ChatHandler(player->GetSession()).PSendSysMessage("You have been returned, as you were somewhere you are not permitted to be.");
     }
+}
+
+void EverQuestMod::BeginClientVersionCheckForPlayer(Player* player)
+{
+    if (ConfigClientVersionCheckEnabled == false || ConfigSystemClientDataVersion == 0)
+        return;
+    if (player == nullptr || player->GetSession() == nullptr)
+        return;
+
+    // GM accounts are exempt so work-in-progress clients can still log in
+    if (player->GetSession()->GetSecurity() > SEC_PLAYER)
+        return;
+
+    EverQuestPlayerClientVersionCheckState checkState;
+    checkState.MSUntilDeadline = (int32)(ConfigClientVersionCheckGraceTimeInSeconds * IN_MILLISECONDS);
+    checkState.FailedPendingKick = false;
+    PendingClientVersionChecksByPlayerGUID[player->GetGUID()] = checkState;
+}
+
+void EverQuestMod::HandleClientVersionReportForPlayer(Player* player, uint32 reportedVersion)
+{
+    if (ConfigClientVersionCheckEnabled == false || ConfigSystemClientDataVersion == 0)
+        return;
+    if (player == nullptr || player->GetSession() == nullptr)
+        return;
+
+    if (reportedVersion == ConfigSystemClientDataVersion)
+    {
+        PendingClientVersionChecksByPlayerGUID.erase(player->GetGUID());
+        return;
+    }
+
+    // No pending entry means the player is exempt or already resolved, and an already-failed check keeps its kick countdown
+    unordered_map<ObjectGuid, EverQuestPlayerClientVersionCheckState>::iterator checkIter = PendingClientVersionChecksByPlayerGUID.find(player->GetGUID());
+    if (checkIter == PendingClientVersionChecksByPlayerGUID.end())
+        return;
+    if (checkIter->second.FailedPendingKick == true)
+        return;
+    FailClientVersionCheckForPlayer(player, checkIter->second);
+}
+
+void EverQuestMod::FailClientVersionCheckForPlayer(Player* player, EverQuestPlayerClientVersionCheckState& checkState)
+{
+    checkState.FailedPendingKick = true;
+    checkState.MSUntilDeadline = (int32)(ConfigClientVersionCheckKickDelayInSeconds * IN_MILLISECONDS);
+    ChatHandler(player->GetSession()).PSendSysMessage("|cffFF0000{}|r", ConfigSystemClientDataVersionMismatchMessage);
+    ChatHandler(player->GetSession()).SendNotification(ConfigSystemClientDataVersionMismatchMessage);
+}
+
+void EverQuestMod::UpdateClientVersionChecks(uint32 diff)
+{
+    if (ConfigClientVersionCheckEnabled == false || ConfigSystemClientDataVersion == 0)
+        return;
+    if (PendingClientVersionChecksByPlayerGUID.empty() == true)
+        return;
+
+    vector<ObjectGuid> playerGUIDsToKick;
+    for (unordered_map<ObjectGuid, EverQuestPlayerClientVersionCheckState>::iterator checkIter = PendingClientVersionChecksByPlayerGUID.begin(); checkIter != PendingClientVersionChecksByPlayerGUID.end(); ++checkIter)
+    {
+        checkIter->second.MSUntilDeadline -= (int32)diff;
+        if (checkIter->second.MSUntilDeadline > 0)
+            continue;
+
+        if (checkIter->second.FailedPendingKick == false)
+        {
+            // Grace time ran out with no version report
+            Player* player = ObjectAccessor::FindConnectedPlayer(checkIter->first);
+            if (player == nullptr || player->GetSession() == nullptr)
+            {
+                playerGUIDsToKick.push_back(checkIter->first);
+                continue;
+            }
+            FailClientVersionCheckForPlayer(player, checkIter->second);
+        }
+        else
+            playerGUIDsToKick.push_back(checkIter->first);
+    }
+
+    for (ObjectGuid& playerGUID : playerGUIDsToKick)
+    {
+        PendingClientVersionChecksByPlayerGUID.erase(playerGUID);
+        Player* player = ObjectAccessor::FindConnectedPlayer(playerGUID);
+        if (player != nullptr && player->GetSession() != nullptr)
+            player->GetSession()->KickPlayer("EverQuest client data version mismatch");
+    }
+}
+
+void EverQuestMod::ClearClientVersionCheckForPlayer(ObjectGuid playerGUID)
+{
+    PendingClientVersionChecksByPlayerGUID.erase(playerGUID);
 }
 
 void EverQuestMod::LoadFactionData()

@@ -575,6 +575,30 @@ EverQuest.Achievement.AdventurerProtectedInEQZones = True
 EverQuest.CrossClass.IncludeSkillIDs = 129, 164, 165, 171, 182, 185, 186, 197, 202, 333, 356, 393, 755, 762, 773
 
 ###################################################################################################
+# Client Version Check Settings
+#
+# 	EverQuest.ClientVersionCheck.Enabled
+#		If true, players must be running a client patch MPQ matching the deployed content or they
+#		are kicked shortly after entering the world.
+#	Default: False
+#
+# 	EverQuest.ClientVersionCheck.GraceTimeInSeconds
+#		How long after entering the world the server waits for the client's version report before
+#		treating the client as out of date
+#	Default: 30
+#
+# 	EverQuest.ClientVersionCheck.KickDelayInSeconds
+#		How long after showing the out-of-date message the player is kicked, so the message can
+#		be read
+#	Default: 10
+#
+###################################################################################################
+
+EverQuest.ClientVersionCheck.Enabled = False
+EverQuest.ClientVersionCheck.GraceTimeInSeconds = 30
+EverQuest.ClientVersionCheck.KickDelayInSeconds = 10
+
+###################################################################################################
 # Tracking Settings
 #
 # 	EverQuest.Tracking.Enabled
