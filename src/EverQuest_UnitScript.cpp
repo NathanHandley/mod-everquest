@@ -133,6 +133,8 @@ public:
                 EverQuest->DoCreatureEmoteEvent(killerCreature, EQ_CREATURE_EMOTE_EVENT_KILLEDNPC, creature);
         }
 
+        EverQuest->RemoveCreatureCrowdControlAurasFromPlayersOnDeath(creature);
+
         EverQuest->ProcessKillSpawnsForCreatureEvent(creature, killer, EQ_KILLSPAWN_TRIGGER_DEATH);
         EverQuest->ProcessTriggeredQuestKillSpawnsForCreatureDeath(creature, killer);
         EverQuest->ProcessCycleSpawnForCreatureDeath(creature);

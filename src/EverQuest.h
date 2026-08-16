@@ -1253,6 +1253,7 @@ public:
     void DoScaledSocialAggroSearch(Creature* caller, Unit* victim, float scale, float maxAgroZDistance);
     void ApplyScaledCreatureSocialAggroOnEngage(Creature* creature, Unit* victim);
     void ProcessCreatureRetaliationOnDamage(Unit* attacker, Unit* victim);
+    void RemoveCreatureCrowdControlAurasFromPlayersOnDeath(Creature* deadCreature);
     void UpdateCreatureScaledSocialAggro(Creature* creature, uint32 diff);
     void RemoveCreatureSocialAggroState(Creature* creature);
     float GetMaxAgroZDistanceForMap(uint32 mapID);

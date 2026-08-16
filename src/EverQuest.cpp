@@ -4707,6 +4707,44 @@ void EverQuestMod::ProcessCreatureRetaliationOnDamage(Unit* attacker, Unit* vict
     creature->AI()->AttackStart(attacker);
 }
 
+void EverQuestMod::RemoveCreatureCrowdControlAurasFromPlayersOnDeath(Creature* deadCreature)
+{
+    if (deadCreature == nullptr)
+        return;
+
+    // Pets and charmed creatures cast under player control, so their crowd control follows the player rules instead
+    if (deadCreature->IsPet() == true || deadCreature->IsControlledByPlayer() == true)
+        return;
+
+    // Charm and possess are left out since the core already breaks those through RemoveAllControlled on the death state change
+    static const AuraType crowdControlAuraTypes[] =
+    {
+        SPELL_AURA_MOD_ROOT,
+        SPELL_AURA_MOD_STUN,
+        SPELL_AURA_MOD_FEAR,
+        SPELL_AURA_MOD_CONFUSE,
+        SPELL_AURA_MOD_PACIFY,
+        SPELL_AURA_MOD_SILENCE,
+        SPELL_AURA_MOD_PACIFY_SILENCE,
+        SPELL_AURA_MOD_DECREASE_SPEED
+    };
+
+    ObjectGuid deadCreatureGUID = deadCreature->GetGUID();
+    Map::PlayerList const& mapPlayers = deadCreature->GetMap()->GetPlayers();
+    for (Map::PlayerList::const_iterator playerIter = mapPlayers.begin(); playerIter != mapPlayers.end(); ++playerIter)
+    {
+        Player* mapPlayer = playerIter->GetSource();
+        if (mapPlayer == nullptr || mapPlayer->IsInWorld() == false)
+            continue;
+        for (AuraType curAuraType : crowdControlAuraTypes)
+        {
+            if (mapPlayer->HasAuraTypeWithCaster(curAuraType, deadCreatureGUID) == false)
+                continue;
+            mapPlayer->RemoveAurasByType(curAuraType, deadCreatureGUID);
+        }
+    }
+}
+
 void EverQuestMod::UpdateCreatureScaledSocialAggro(Creature* creature, uint32 diff)
 {
     if (creature == nullptr)
