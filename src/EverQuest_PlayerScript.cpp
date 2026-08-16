@@ -579,6 +579,9 @@ public:
         // Start the grace timer for the client data version report (kicks stale clients that bypassed the update launcher)
         EverQuest->BeginClientVersionCheckForPlayer(player);
 
+        // Pick up a character that logged out inside a raid instance
+        EverQuest->UpdateRaidLowInstanceStateForPlayer(player);
+
         // First login behavior
         if (player->HasAtLoginFlag(AT_LOGIN_FIRST) == true)
         {
@@ -718,6 +721,9 @@ public:
 
         EverQuest->ClearClientVersionCheckForPlayer(player->GetGUID());
 
+        // Stop counting the character as being inside a raid instance
+        EverQuest->ClearRaidLowInstanceStateForPlayer(player->GetGUID());
+
         // Don't leave a swapped native display behind (it is not saved, but the tracking entry must not linger)
         EverQuest->RestoreNativeDisplayAfterCorpseIllusion(player);
 
@@ -793,6 +799,9 @@ public:
 
         // Catch map switches that bypass TeleportTo
         EverQuest->ClearTempFactionBonusForPlayer(player);
+
+        // Track entering and leaving raid instances, which drives whether a zone line back in should return the player to theirs
+        EverQuest->UpdateRaidLowInstanceStateForPlayer(player);
 
         // Restrict non-GMs to norrath if set
         if (EverQuest->ConfigMapRestrictPlayersToNorrath == true && player->IsGameMaster() == false)

@@ -40,6 +40,7 @@ void AddEverQuestTransportScripts();
 void AddEverQuestCreatureInstanceScripts();
 void AddEverQuestGossipScripts();
 void AddEverQuestMiscScripts();
+void AddEverQuestAreaTriggerScripts();
 
 void Addmod_everquestScripts()
 {
@@ -69,4 +70,5 @@ void Addmod_everquestScripts()
     AddEverQuestCreatureInstanceScripts();
     AddEverQuestGossipScripts();
     AddEverQuestMiscScripts();
+    AddEverQuestAreaTriggerScripts();
 }

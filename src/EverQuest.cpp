@@ -5382,8 +5382,9 @@ void EverQuestMod::LoadZoneSafePointData()
 void EverQuestMod::LoadZoneData()
 {
     ZoneByMapID.clear();
+    InstanceRaidLowMapIDs.clear();
 
-    QueryResult queryResult = WorldDatabase.Query("SELECT MapID, AllowBind, ExpansionID, MaxAgroZDistance FROM mod_everquest_zone;");
+    QueryResult queryResult = WorldDatabase.Query("SELECT MapID, AllowBind, ExpansionID, MaxAgroZDistance, InstanceRaidLowMapID FROM mod_everquest_zone;");
     if (queryResult)
     {
         do
@@ -5394,7 +5395,10 @@ void EverQuestMod::LoadZoneData()
             zone.AllowBind = fields[1].Get<uint8>() != 0;
             zone.ExpansionID = fields[2].Get<int32>();
             zone.MaxAgroZDistance = fields[3].Get<float>();
+            zone.InstanceRaidLowMapID = fields[4].Get<uint32>();
             ZoneByMapID[zone.MapID] = zone;
+            if (zone.InstanceRaidLowMapID != 0)
+                InstanceRaidLowMapIDs.insert(zone.InstanceRaidLowMapID);
         } while (queryResult->NextRow());
     }
 }
@@ -5414,6 +5418,108 @@ float EverQuestMod::GetMaxAgroZDistanceForMap(uint32 mapID)
     if (zoneIt == ZoneByMapID.end())
         return -1.0f;
     return zoneIt->second.MaxAgroZDistance;
+}
+
+uint32 EverQuestMod::GetInstanceRaidLowMapIDForMap(uint32 mapID)
+{
+    auto zoneIt = ZoneByMapID.find(mapID);
+    if (zoneIt == ZoneByMapID.end())
+        return 0;
+    return zoneIt->second.InstanceRaidLowMapID;
+}
+
+bool EverQuestMod::IsMapInstanceRaidLow(uint32 mapID)
+{
+    return InstanceRaidLowMapIDs.find(mapID) != InstanceRaidLowMapIDs.end();
+}
+
+void EverQuestMod::UpdateRaidLowInstanceStateForPlayer(Player* player)
+{
+    if (player == nullptr)
+        return;
+
+    uint32 mapID = player->GetMapId();
+    uint32 instanceID = player->GetInstanceId();
+    bool isInsideRaidLowInstance = (instanceID != 0 && IsMapInstanceRaidLow(mapID) == true);
+
+    std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+    if (isInsideRaidLowInstance == true)
+    {
+        EverQuestPlayerRaidLowInstanceState& raidLowInstanceState = RaidLowInstanceStateByPlayerGUID[player->GetGUID()];
+        raidLowInstanceState.RaidLowMapID = mapID;
+        raidLowInstanceState.InstanceID = instanceID;
+        raidLowInstanceState.IsInside = true;
+        return;
+    }
+
+    // Which instance was left is remembered, since that's what a zone line back into the zone needs to route to
+    auto raidLowInstanceStateIt = RaidLowInstanceStateByPlayerGUID.find(player->GetGUID());
+    if (raidLowInstanceStateIt != RaidLowInstanceStateByPlayerGUID.end())
+        raidLowInstanceStateIt->second.IsInside = false;
+}
+
+void EverQuestMod::ClearRaidLowInstanceStateForPlayer(ObjectGuid playerGUID)
+{
+    std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+    RaidLowInstanceStateByPlayerGUID.erase(playerGUID);
+}
+
+// True when the player's own last raid instance for this map still has somebody else standing in it
+bool EverQuestMod::HasOccupiedRaidLowInstanceForMap(ObjectGuid playerGUID, uint32 raidLowMapID)
+{
+    std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+    auto raidLowInstanceStateIt = RaidLowInstanceStateByPlayerGUID.find(playerGUID);
+    if (raidLowInstanceStateIt == RaidLowInstanceStateByPlayerGUID.end())
+        return false;
+    if (raidLowInstanceStateIt->second.RaidLowMapID != raidLowMapID || raidLowInstanceStateIt->second.InstanceID == 0)
+        return false;
+
+    uint32 instanceID = raidLowInstanceStateIt->second.InstanceID;
+    for (auto const& raidLowInstanceStateByPlayerGUID : RaidLowInstanceStateByPlayerGUID)
+    {
+        if (raidLowInstanceStateByPlayerGUID.first == playerGUID)
+            continue;
+        if (raidLowInstanceStateByPlayerGUID.second.IsInside == false)
+            continue;
+        if (raidLowInstanceStateByPlayerGUID.second.RaidLowMapID == raidLowMapID && raidLowInstanceStateByPlayerGUID.second.InstanceID == instanceID)
+            return true;
+    }
+    return false;
+}
+
+bool EverQuestMod::ShouldZoneLineEnterInstanceRaidLow(Player* player, uint32 raidLowMapID)
+{
+    if (player == nullptr || raidLowMapID == 0)
+        return false;
+
+    // Running back to a corpse left inside the instance
+    if (player->HasCorpse() == true && player->GetCorpseLocation().GetMapId() == raidLowMapID)
+        return true;
+
+    // The instance last entered is still occupied, so the rest of the raid is in there
+    return HasOccupiedRaidLowInstanceForMap(player->GetGUID(), raidLowMapID);
+}
+
+bool EverQuestMod::TryZoneLineIntoInstanceRaidLow(Player* player, AreaTrigger const* trigger)
+{
+    if (player == nullptr || trigger == nullptr)
+        return false;
+
+    AreaTriggerTeleport const* areaTriggerTeleport = sObjectMgr->GetAreaTriggerTeleport(trigger->entry);
+    if (areaTriggerTeleport == nullptr)
+        return false;
+
+    uint32 raidLowMapID = GetInstanceRaidLowMapIDForMap(areaTriggerTeleport->target_mapId);
+    if (raidLowMapID == 0)
+        return false;
+    if (player->GetMapId() == raidLowMapID)
+        return false;
+    if (ShouldZoneLineEnterInstanceRaidLow(player, raidLowMapID) == false)
+        return false;
+
+    // If the core refuses the instance (no raid group, bound elsewhere, full) then fall through and let the zone line work normally
+    return player->TeleportTo(raidLowMapID, areaTriggerTeleport->target_X, areaTriggerTeleport->target_Y, areaTriggerTeleport->target_Z,
+        areaTriggerTeleport->target_Orientation, TELE_TO_NOT_LEAVE_TRANSPORT);
 }
 
 bool EverQuestMod::IsBlockedByAgroZDistance(WorldObject const* source, WorldObject const* target, float maxAgroZDistance)

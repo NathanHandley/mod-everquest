@@ -40,8 +40,9 @@ class Unit;
 class Aura;
 class AuraApplication;
 class WorldPacket;
+struct AreaTrigger;
 
-#define EQ_MOD_VERSION                              71
+#define EQ_MOD_VERSION                              72
 
 #define EQ_EQCLASS_NONE                             0
 #define EQ_EQCLASS_WARRIOR                          1
@@ -807,9 +808,20 @@ public:
     bool AllowBind = true;
     int32 ExpansionID = 0;
     float MaxAgroZDistance = -1.0f;
+    uint32 InstanceRaidLowMapID = 0;
 };
 
-// mirror of the group totals that KillRewarder builds in _InitGroupData, but gathered for every group member in the zone
+// Where a player is (or last was) with respect to the raid instance copies of zones.  The last visited instance is remembered after leaving,
+// so a zone line can put a player back with their raid
+class EverQuestPlayerRaidLowInstanceState
+{
+public:
+    uint32 RaidLowMapID = 0;
+    uint32 InstanceID = 0;
+    bool IsInside = false;
+};
+
+// Mirror of the group totals that KillRewarder builds in _InitGroupData, but gathered for every group member in the zone
 // instead of only those inside the core's group reward distance
 struct EverQuestZoneWideKillReward
 {
@@ -1099,6 +1111,8 @@ public:
     unordered_map<uint32, uint32> ForageZoneItemTotalChanceByMapID;
     unordered_map<uint32, EverQuestZoneSafePoint> ZoneSafePointByMapID;
     unordered_map<uint32, EverQuestZone> ZoneByMapID;
+    unordered_set<uint32> InstanceRaidLowMapIDs;
+    unordered_map<ObjectGuid, EverQuestPlayerRaidLowInstanceState> RaidLowInstanceStateByPlayerGUID;
     unordered_map<uint32, EverQuestFaction> FactionsByFactionTemplateID;
     unordered_set<uint32> DefendCombatFactionTemplateIDs;
     unordered_map<uint32, EverQuestReputationFactionInfo> EQReputationFactionInfoByFactionID;
@@ -1305,6 +1319,13 @@ public:
     void LoadZoneSafePointData();
     void SendPlayerToZoneSafePoint(Player* player, bool includeGroup);
     void LoadZoneData();
+    uint32 GetInstanceRaidLowMapIDForMap(uint32 mapID);
+    bool IsMapInstanceRaidLow(uint32 mapID);
+    void UpdateRaidLowInstanceStateForPlayer(Player* player);
+    void ClearRaidLowInstanceStateForPlayer(ObjectGuid playerGUID);
+    bool HasOccupiedRaidLowInstanceForMap(ObjectGuid playerGUID, uint32 raidLowMapID);
+    bool ShouldZoneLineEnterInstanceRaidLow(Player* player, uint32 raidLowMapID);
+    bool TryZoneLineIntoInstanceRaidLow(Player* player, AreaTrigger const* trigger);
     bool IsBindAllowedForMap(uint32 mapID);
     bool IsMapRestrictedByExpansion(uint32 mapID);
     bool IsMapRestrictedForPlayers(uint32 mapID);
