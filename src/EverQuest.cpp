@@ -1293,6 +1293,18 @@ void EverQuestMod::UpdateCreatureMovementSound(Creature* creature, uint32 diff)
     if (ConfigCreatureMovementSoundsEnabled == false)
         return;
 
+    // Pets (summoned, charmed, or otherwise player controlled) don't make movement sounds since they follow their owner constantly
+    if (creature->IsPet() == true || creature->IsGuardian() == true || creature->IsControlledByPlayer() == true)
+    {
+        EverQuestCreatureMovementSoundState* petState = creature->CustomData.Get<EverQuestCreatureMovementSoundState>(EQ_CREATURE_CUSTOMDATA_MOVEMENTSOUND);
+        if (petState != nullptr)
+        {
+            petState->CurGait = EQ_CREATURE_MOVEMENT_GAIT_NONE;
+            petState->ListenersByGUID.clear();
+        }
+        return;
+    }
+
     // Walk vs Run sound picking
     uint8 curGait = EQ_CREATURE_MOVEMENT_GAIT_NONE;
     if (creature->IsAlive() == true && creature->isMoving() == true && creature->IsUnderWater() == false && creature->IsFlying() == false)
