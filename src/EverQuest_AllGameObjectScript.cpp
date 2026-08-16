@@ -54,6 +54,16 @@ public:
         if (go->GetEntry() < EverQuest->ConfigSystemGameObjectTemplateIDMin || go->GetEntry() > EverQuest->ConfigSystemGameObjectTemplateIDMax)
             return;
 
+        // In the core, Instances don't apply the 'state' for door/button types of objects, so they need to be done here otherwise drawbridges will be down etc
+        if (go->FindMap() != nullptr && go->GetMap()->Instanceable() == true && go->GetInstanceScript() == nullptr)
+        {
+            if (GameObjectData const* gameObjectData = go->GetGameObjectData())
+            {
+                if (go->GetGoState() != gameObjectData->go_state)
+                    go->SetGoState(gameObjectData->go_state);
+            }
+        }
+
         // Capture lifts
         switch (go->GetEntry())
         {
