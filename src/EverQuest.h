@@ -809,6 +809,21 @@ public:
     float MaxAgroZDistance = -1.0f;
 };
 
+// mirror of the group totals that KillRewarder builds in _InitGroupData, but gathered for every group member in the zone
+// instead of only those inside the core's group reward distance
+struct EverQuestZoneWideKillReward
+{
+    bool IsValid = false;
+    uint32 AliveMemberCount = 0;
+    uint32 AliveSumLevel = 0;
+    uint8 MaxLevel = 0;
+    Player* MaxNotGrayMember = nullptr;
+    uint8 MaxNotGrayMemberLevel = 0;
+    bool IsFullXP = false;
+    uint32 BaseExperience = 0;
+    float GroupRate = 1.0f;
+};
+
 class EverQuestFaction
 {
 public:
@@ -1014,6 +1029,7 @@ public:
     uint32 ConfigTrackingMaxResults;
     uint32 ConfigTrackingPulseIntervalInMS;
     bool ConfigSpellSummonPlayerAcrossZones;
+    bool ConfigGroupZoneWideLootAndExperienceEnabled;
 
     unordered_set<uint32> CrossClassExemptSpellIDs;
     unordered_set<uint32> RacialSpellIDs;
@@ -1212,6 +1228,16 @@ public:
     void GrantLegacyAchievementIfEligible(Player* player);
     void AddAdventurerAuraForNewCharacter(Player* player);
     bool IsMapIDAnEverQuestMap(uint32 mapID);
+    bool IsZoneWideGroupRewardEnabledForMap(uint32 mapID);
+    bool IsInZoneWideGroupRewardRange(Player* member, WorldObject* rewardSource);
+    uint8 GetPlayerLevelForExperienceGain(Player* player);
+    void BuildZoneWideKillReward(Group* group, Player* killer, Unit* victim, EverQuestZoneWideKillReward& outReward);
+    float GetZoneWideGroupExperienceRate(Player* player, const EverQuestZoneWideKillReward& reward);
+    float GetGroupExperienceRateForMember(Player* member, const EverQuestZoneWideKillReward& reward);
+    void ApplyEQOnkillReputationsForPlayer(Player* player, Unit* victim);
+    void GrantZoneWideGroupRewardsForKill(Player* killer, Unit* victim, const EverQuestZoneWideKillReward& reward);
+    void ApplyZoneWideGroupLootAccess(Loot* loot, Player* lootOwner, bool personal);
+    void ApplyZoneWideGroupMoneyShare(Player* looter, Loot* loot);
     bool IsCreatureKillOutsideEverQuestForAdventurer(Unit* victim);
     bool IsQuestOutsideEverQuestForAdventurer(uint32 questID);
     bool RevokeAdventurerAuraIfPresent(Player* player);

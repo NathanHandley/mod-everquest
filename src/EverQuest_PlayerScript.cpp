@@ -337,6 +337,11 @@ public:
             return false;
         if (member->GetMapId() != victim->GetMapId() || member->GetInstanceId() != victim->GetInstanceId())
             return false;
+
+        // In an EverQuest zone the whole zone counts as being at the kill
+        if (EverQuest->IsZoneWideGroupRewardEnabledForMap(victim->GetMapId()) == true)
+            return true;
+
         return victim->GetDistance(member) <= sWorld->getFloatConfig(CONFIG_GROUP_XP_DISTANCE);
     }
 
@@ -345,8 +350,26 @@ public:
         if (EverQuest->IsEnabled == false)
             return;
 
-        // Disable any group exp reduction if needed
-        if (EverQuest->ConfigAlternateGroupExperienceFormulaEnabled == true)
+        // Handle zone-wide award support
+        Unit* zoneWideVictim = rewarder->GetVictim();
+        Player* zoneWideKiller = rewarder->GetKiller();
+        bool zoneWideRateApplied = false;
+        if (zoneWideKiller != nullptr && zoneWideKiller->GetGroup() != nullptr && EverQuest->IsZoneWideGroupRewardEnabledForMap(zoneWideKiller->GetMapId()) == true)
+        {
+            EverQuestZoneWideKillReward zoneWideReward;
+            EverQuest->BuildZoneWideKillReward(zoneWideKiller->GetGroup(), zoneWideKiller, zoneWideVictim, zoneWideReward);
+            if (zoneWideReward.IsValid == true)
+            {
+                // This already accounts for the alternate group formula when it is turned on
+                rate = EverQuest->GetGroupExperienceRateForMember(player, zoneWideReward);
+                zoneWideRateApplied = true;
+                if (player == zoneWideKiller)
+                    EverQuest->GrantZoneWideGroupRewardsForKill(zoneWideKiller, zoneWideVictim, zoneWideReward);
+            }
+        }
+
+        // Disable any group exp reduction if needed. Kills that the zone wide share above already rated are left alone, so this covers Azeroth and any EverQuest kill that share did not apply to
+        if (zoneWideRateApplied == false && EverQuest->ConfigAlternateGroupExperienceFormulaEnabled == true)
         {
             Group* group = player->GetGroup();
             if (group != nullptr)
@@ -380,24 +403,8 @@ public:
                 ChatHandler(player->GetSession()).SendSysMessage("|cffFF0000You are no longer an Everquest Adventurer, as you gained kill credit for a creature that is not from Everquest.|r");
         }
 
-        // Skip invalid victims
-        Unit* victim = rewarder->GetVictim();
-        if (!victim || victim->IsPlayer() || victim->ToCreature()->IsReputationRewardDisabled())
-            return;
-        Creature* victimCreature = victim->ToCreature();
-
         // Grab the kill rewards, and apply any in the list
-        const list<EverQuestCreatureOnkillReputation>& onkillReputations = EverQuest->GetOnkillReputationsForCreatureTemplate(victimCreature->GetCreatureTemplate()->Entry);
-        for (const auto& onkillReputation : onkillReputations)
-        {
-            float repChange = player->CalculateReputationGain(REPUTATION_SOURCE_KILL, victim->GetLevel(), static_cast<float>(onkillReputation.KillRewardValue), onkillReputation.FactionID);
-
-            FactionEntry const* factionEntry = sFactionStore.LookupEntry(onkillReputation.FactionID);
-            if (factionEntry && repChange != 0)
-            {
-                player->GetReputationMgr().ModifyReputation(factionEntry, repChange, false, static_cast<ReputationRank>(7));
-            }
-        }
+        EverQuest->ApplyEQOnkillReputationsForPlayer(player, rewarder->GetVictim());
     }
 
     void OnPlayerBeforeChooseGraveyard(Player* player, TeamId teamId, bool nearCorpse, uint32& graveyardOverride) override
@@ -912,6 +919,13 @@ public:
             return;
 
         EverQuest->RemoveVisualEquippedItemForCreatureGUIDIfExists(player->GetMap(), lootguid, item->GetTemplate()->ItemId);
+    }
+
+    void OnPlayerBeforeLootMoney(Player* player, Loot* loot) override
+    {
+        if (EverQuest->IsEnabled == false)
+            return;
+        EverQuest->ApplyZoneWideGroupMoneyShare(player, loot);
     }
 
     void OnPlayerBeforeLogout(Player* player) override

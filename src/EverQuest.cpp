@@ -22,7 +22,11 @@
 #include "CreatureAI.h"
 #include "CreatureData.h"
 #include "DBCStores.h"
+#include "Formulas.h"
 #include "GameTime.h"
+#include "LootMgr.h"
+#include "Pet.h"
+#include "ScriptMgr.h"
 #include "ObjectMgr.h"
 #include "ReputationMgr.h"
 #include "SpellAuraDefines.h"
@@ -130,6 +134,7 @@ EverQuestMod::EverQuestMod() :
     ConfigTrackingBardMaxRange(180.0f),
     ConfigTrackingMaxResults(0),
     ConfigTrackingPulseIntervalInMS(5000),
+    ConfigGroupZoneWideLootAndExperienceEnabled(true),
     CrossClassExemptSpellIDsBuilt(false),
     IllusionMaxFaceIndex(0)
 {
@@ -293,7 +298,7 @@ void EverQuestMod::LoadConfigurationFile()
 
     // Group EXP rates
     ConfigAlternateGroupExperienceFormulaEnabled = sConfigMgr->GetOption<bool>("EverQuest.AlternateGroupExperienceFormula.Enabled", false);
-    ConfigAlternateGroupExperienceAddPercentPerAddedMember = sConfigMgr->GetOption<float>("EverQuest.AlternateGroupExperienceFormula.AddPercentPerMember", false);
+    ConfigAlternateGroupExperienceAddPercentPerAddedMember = sConfigMgr->GetOption<float>("EverQuest.AlternateGroupExperienceFormula.AddPercentPerMember", 20.0f);
 
     // Spells
     ConfigSpellDisableStackingOfSameDOT = sConfigMgr->GetOption<bool>("EverQuest.Spells.DisableStackingOfSameDOT", false);
@@ -396,6 +401,9 @@ void EverQuestMod::LoadConfigurationFile()
 
     // Spells
     ConfigSpellSummonPlayerAcrossZones = sConfigMgr->GetOption<bool>("EverQuest.Spell.SummonPlayerAcrossZones", false);
+
+    // Group
+    ConfigGroupZoneWideLootAndExperienceEnabled = sConfigMgr->GetOption<bool>("EverQuest.Group.ZoneWideLootAndExperienceEnabled", true);
 
     // Cross-Class values
     ConfigCrossClassIncludeSkillIDs = GetSetFromConfigString("EverQuest.CrossClass.IncludeSkillIDs");
@@ -3466,6 +3474,306 @@ bool EverQuestMod::IsMapIDAnEverQuestMap(uint32 mapID)
     if (mapID < ConfigSystemMapDBCIDMin || mapID > ConfigSystemMapDBCIDMax)
         return false;
     return true;
+}
+
+bool EverQuestMod::IsZoneWideGroupRewardEnabledForMap(uint32 mapID)
+{
+    if (ConfigGroupZoneWideLootAndExperienceEnabled == false)
+        return false;
+    return IsMapIDAnEverQuestMap(mapID);
+}
+
+bool EverQuestMod::IsInZoneWideGroupRewardRange(Player* member, WorldObject* rewardSource)
+{
+    if (member == nullptr || rewardSource == nullptr)
+        return false;
+    return member->IsInMap(rewardSource);
+}
+
+// Mirrors KillRewarder::_GetPlayerLevel so the level cap hook still gets a say in what counts for experience
+uint8 EverQuestMod::GetPlayerLevelForExperienceGain(Player* player)
+{
+    uint8 level = player->GetLevel();
+    sScriptMgr->OnPlayerBeforeGetLevelForXPGain(player, level);
+    return level;
+}
+
+// Rebuilds the totals KillRewarder::_InitGroupData produces, over every group member in the zone rather than only those within the core's group reward distance
+void EverQuestMod::BuildZoneWideKillReward(Group* group, Player* killer, Unit* victim, EverQuestZoneWideKillReward& outReward)
+{
+    if (group == nullptr || killer == nullptr || victim == nullptr)
+        return;
+    if (IsZoneWideGroupRewardEnabledForMap(victim->GetMapId()) == false)
+        return;
+
+    for (GroupReference* itr = group->GetFirstMember(); itr != nullptr; itr = itr->next())
+    {
+        Player* member = itr->GetSource();
+        if (member == nullptr)
+            continue;
+        if (member != killer && IsInZoneWideGroupRewardRange(member, victim) == false)
+            continue;
+
+        uint8 memberLevel = GetPlayerLevelForExperienceGain(member);
+        if (member->IsAlive() == true)
+        {
+            outReward.AliveMemberCount++;
+            outReward.AliveSumLevel += memberLevel;
+            if (outReward.MaxLevel < memberLevel)
+                outReward.MaxLevel = memberLevel;
+
+            uint32 grayLevel = Acore::XP::GetGrayLevel(memberLevel);
+            if (victim->GetLevel() > grayLevel && (outReward.MaxNotGrayMember == nullptr || outReward.MaxNotGrayMemberLevel < memberLevel))
+            {
+                outReward.MaxNotGrayMember = member;
+                outReward.MaxNotGrayMemberLevel = memberLevel;
+            }
+        }
+    }
+
+    // Nobody alive in the zone means the core awarded nothing either, so there is nothing
+    if (outReward.MaxLevel == 0 || outReward.AliveSumLevel == 0)
+        return;
+
+    outReward.IsFullXP = outReward.MaxNotGrayMember != nullptr && (outReward.MaxLevel == outReward.MaxNotGrayMemberLevel);
+
+    // Base experience comes from the highest level member the victim is not gray to, matching KillRewarder::_InitXP
+    if (outReward.MaxNotGrayMember != nullptr)
+    {
+        outReward.BaseExperience = Acore::XP::Gain(outReward.MaxNotGrayMember, victim, false);
+        if (outReward.BaseExperience > 0 && victim->IsCreature() == true)
+        {
+            CreatureTemplate const* creatureTemplate = victim->ToCreature()->GetCreatureTemplate();
+            if (creatureTemplate != nullptr && creatureTemplate->ModHealth <= 0.75f && creatureTemplate->ModHealth >= 0.0f)
+                outReward.BaseExperience = static_cast<uint32>(outReward.BaseExperience * creatureTemplate->ModHealth);
+        }
+    }
+    bool isPvPKill = false;
+    if (victim->IsPlayer() == true)
+        isPvPKill = true;
+    else if (victim->GetCharmerOrOwnerGUID().IsPlayer() == true)
+        isPvPKill = victim->IsVehicle() == false;
+
+    bool isRaidKill = false;
+    if (isPvPKill == false && group->isRaidGroup() == true)
+    {
+        MapEntry const* mapEntry = sMapStore.LookupEntry(killer->GetMapId());
+        isRaidKill = mapEntry != nullptr && mapEntry->IsRaid();
+    }
+
+    outReward.GroupRate = Acore::XP::xp_in_group_rate(outReward.AliveMemberCount, isRaidKill);
+    outReward.IsValid = true;
+}
+
+float EverQuestMod::GetZoneWideGroupExperienceRate(Player* player, const EverQuestZoneWideKillReward& reward)
+{
+    if (reward.IsValid == false || reward.AliveSumLevel == 0)
+        return 1.0f;
+    return reward.GroupRate * static_cast<float>(GetPlayerLevelForExperienceGain(player)) / static_cast<float>(reward.AliveSumLevel);
+}
+
+float EverQuestMod::GetGroupExperienceRateForMember(Player* member, const EverQuestZoneWideKillReward& reward)
+{
+    // The alternate formula is an even split plus a bonus per added member, and only covers party sized groups
+    if (ConfigAlternateGroupExperienceFormulaEnabled == true && reward.AliveMemberCount >= 2 && reward.AliveMemberCount <= 5)
+    {
+        float bonusTotalRatePercent = static_cast<float>(reward.AliveMemberCount - 1) * (ConfigAlternateGroupExperienceAddPercentPerAddedMember * 0.01f);
+        float splitBaseRate = 1.0f / static_cast<float>(reward.AliveMemberCount);
+        return splitBaseRate * (1.0f + bonusTotalRatePercent);
+    }
+
+    return GetZoneWideGroupExperienceRate(member, reward);
+}
+
+void EverQuestMod::ApplyEQOnkillReputationsForPlayer(Player* player, Unit* victim)
+{
+    if (player == nullptr || victim == nullptr || victim->IsPlayer() == true)
+        return;
+    Creature* victimCreature = victim->ToCreature();
+    if (victimCreature == nullptr || victimCreature->IsReputationRewardDisabled() == true)
+        return;
+
+    const list<EverQuestCreatureOnkillReputation>& onkillReputations = GetOnkillReputationsForCreatureTemplate(victimCreature->GetCreatureTemplate()->Entry);
+    for (const auto& onkillReputation : onkillReputations)
+    {
+        float repChange = player->CalculateReputationGain(REPUTATION_SOURCE_KILL, victim->GetLevel(), static_cast<float>(onkillReputation.KillRewardValue), onkillReputation.FactionID);
+
+        FactionEntry const* factionEntry = sFactionStore.LookupEntry(onkillReputation.FactionID);
+        if (factionEntry && repChange != 0)
+            player->GetReputationMgr().ModifyReputation(factionEntry, repChange, false, static_cast<ReputationRank>(7));
+    }
+}
+
+void EverQuestMod::GrantZoneWideGroupRewardsForKill(Player* killer, Unit* victim, const EverQuestZoneWideKillReward& reward)
+{
+    if (reward.IsValid == false)
+        return;
+    if (killer == nullptr || victim == nullptr)
+        return;
+
+    Group* group = killer->GetGroup();
+    if (group == nullptr)
+        return;
+
+    for (GroupReference* itr = group->GetFirstMember(); itr != nullptr; itr = itr->next())
+    {
+        Player* member = itr->GetSource();
+        if (member == nullptr || member == killer)
+            continue;
+
+        // Anything the core already paid out is left alone
+        if (member->IsAtGroupRewardDistance(victim) == true)
+            continue;
+        if (IsInZoneWideGroupRewardRange(member, victim) == false)
+            continue;
+
+        // The core rewards reputation off the back of the kill whether or not any experience came with it, and a dead member still earns it, so this runs ahead of the experience rules and outside of them
+        member->RewardReputation(victim);
+        ApplyEQOnkillReputationsForPlayer(member, victim);
+
+        if (reward.BaseExperience == 0)
+            continue;
+
+        // Mirrors KillRewarder::_RewardXP: gray members earn nothing and a partly gray group is only worth half
+        uint32 experience = 0;
+        if (member->IsAlive() == true && reward.MaxNotGrayMemberLevel >= GetPlayerLevelForExperienceGain(member))
+        {
+            float memberRate = GetGroupExperienceRateForMember(member, reward);
+            if (reward.IsFullXP == true)
+                experience = static_cast<uint32>(reward.BaseExperience * memberRate);
+            else
+                experience = static_cast<uint32>(reward.BaseExperience * memberRate / 2) + 1;
+        }
+        if (experience == 0)
+            continue;
+
+        // The core's power leveling guard, applied here too so distance is not a way around it
+        if (victim->IsCreature() == true)
+        {
+            uint8 highestAttackerLevel = victim->ToCreature()->GetHighestPlayerAttackerLevel();
+            if (highestAttackerLevel > reward.MaxLevel && victim->GetLevel() <= Acore::XP::GetGrayLevel(highestAttackerLevel))
+                experience = experience / 2 + 1;
+        }
+
+        experience = static_cast<uint32>(experience * member->GetTotalAuraMultiplier(SPELL_AURA_MOD_XP_PCT));
+        sScriptMgr->OnPlayerGiveXP(member, experience, victim, PlayerXPSource::XPSOURCE_KILL);
+        member->GiveXP(experience, victim, reward.GroupRate);
+
+        Pet* pet = member->GetPet();
+        if (pet != nullptr)
+            pet->GivePetXP(experience / 2);
+    }
+}
+
+void EverQuestMod::ApplyZoneWideGroupLootAccess(Loot* loot, Player* lootOwner, bool personal)
+{
+    if (loot == nullptr || lootOwner == nullptr || personal == true)
+        return;
+    if (IsZoneWideGroupRewardEnabledForMap(lootOwner->GetMapId()) == false)
+        return;
+
+    Group* group = lootOwner->GetGroup();
+    if (group == nullptr)
+        return;
+
+    Map* map = lootOwner->GetMap();
+    if (map == nullptr)
+        return;
+    Creature* lootSource = map->GetCreature(loot->sourceWorldObjectGUID);
+    if (lootSource == nullptr)
+        return;
+
+    for (GroupReference* itr = group->GetFirstMember(); itr != nullptr; itr = itr->next())
+    {
+        Player* member = itr->GetSource();
+        if (member == nullptr || member->GetSession() == nullptr)
+            continue;
+
+        // Creature::SetLootRecipient leaves these two off the list it builds for bosses, and converted content includes instanced maps where that list is already in play, so the same exclusion is kept here
+        if (member->IsGameMaster() == true || member->IsSpectator() == true)
+            continue;
+        if (IsInZoneWideGroupRewardRange(member, lootSource) == false)
+            continue;
+        lootSource->AddAllowedLooter(member->GetGUID());
+        if (member->IsAtLootRewardDistance(lootSource) == false)
+            loot->FillNotNormalLootFor(member);
+    }
+}
+
+void EverQuestMod::ApplyZoneWideGroupMoneyShare(Player* looter, Loot* loot)
+{
+    if (looter == nullptr || loot == nullptr || loot->gold == 0)
+        return;
+    if (IsZoneWideGroupRewardEnabledForMap(looter->GetMapId()) == false)
+        return;
+
+    Group* group = looter->GetGroup();
+    if (group == nullptr)
+        return;
+
+    // Only a killed creature's corpse splits its coin, so container, gameobject and pickpocket loot is left untouched
+    if (loot->loot_type != LOOT_CORPSE || loot->containerGUID.IsEmpty() == false || loot->sourceGameObject != nullptr)
+        return;
+    Map* map = looter->GetMap();
+    if (map == nullptr)
+        return;
+    Creature* lootSource = map->GetCreature(loot->sourceWorldObjectGUID);
+    if (lootSource == nullptr || lootSource->IsAlive() == true)
+        return;
+
+    uint32 nearMemberCount = 0;
+    uint32 totalMemberCount = 0;
+    for (GroupReference* itr = group->GetFirstMember(); itr != nullptr; itr = itr->next())
+    {
+        Player* member = itr->GetSource();
+        if (member == nullptr)
+            continue;
+
+        // The same test the core uses to build its near list
+        if (looter->IsAtLootRewardDistance(member) == true)
+            nearMemberCount++;
+        else if (IsInZoneWideGroupRewardRange(member, lootSource) == true)
+            totalMemberCount++;
+    }
+    if (totalMemberCount == 0 || nearMemberCount == 0)
+        return;
+    totalMemberCount += nearMemberCount;
+
+    uint32 goldPerPlayer = loot->gold / totalMemberCount;
+    if (goldPerPlayer == 0)
+        return;
+
+    for (GroupReference* itr = group->GetFirstMember(); itr != nullptr; itr = itr->next())
+    {
+        Player* member = itr->GetSource();
+        if (member == nullptr)
+            continue;
+        if (looter->IsAtLootRewardDistance(member) == true)
+            continue;
+        if (IsInZoneWideGroupRewardRange(member, lootSource) == false)
+            continue;
+
+        uint32 finalGold = goldPerPlayer;
+        if (member->HasPlayerFlag(PLAYER_FLAGS_NO_PLAY_TIME) == true)
+            continue;
+        if (member->HasPlayerFlag(PLAYER_FLAGS_PARTIAL_PLAY_TIME) == true)
+        {
+            finalGold /= 2;
+            if (finalGold == 0)
+                continue;
+        }
+
+        member->ModifyMoney(finalGold);
+        member->UpdateAchievementCriteria(ACHIEVEMENT_CRITERIA_TYPE_LOOT_MONEY, finalGold);
+
+        WorldPacket moneyPacket(SMSG_LOOT_MONEY_NOTIFY, 4 + 1);
+        moneyPacket << uint32(finalGold);
+        moneyPacket << uint8(0); // "Your share is..."
+        member->SendDirectMessage(&moneyPacket);
+    }
+
+    // What is left is one share for each member the core is about to pay
+    loot->gold = goldPerPlayer * nearMemberCount;
 }
 
 bool EverQuestMod::IsCreatureKillOutsideEverQuestForAdventurer(Unit* victim)
