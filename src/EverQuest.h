@@ -41,7 +41,7 @@ class Aura;
 class AuraApplication;
 class WorldPacket;
 
-#define EQ_MOD_VERSION                              70
+#define EQ_MOD_VERSION                              71
 
 #define EQ_EQCLASS_NONE                             0
 #define EQ_EQCLASS_WARRIOR                          1
@@ -155,6 +155,7 @@ class WorldPacket;
 #define EQ_CREATURE_DIFFICULTY_NORMAL               0
 #define EQ_CREATURE_DIFFICULTY_RAIDTRASH            1
 #define EQ_CREATURE_DIFFICULTY_RAIDBOSS             2
+#define EQ_CREATURE_DIFFICULTY_RAIDMINIBOSS         3
 
 #define EQ_QUEST_REACTION_UNKNOWN                   0
 #define EQ_QUEST_REACTION_ATTACKPLAYER              1
@@ -929,6 +930,7 @@ public:
     uint32 ConfigSystemAgileFighterCombatMasterSpellID;
     uint32 ConfigSystemAgileFighterCombatExpertSpellID;
     uint32 ConfigSystemRaidBossRespawnVarianceInSec;
+    uint32 ConfigSystemRaidMiniBossRespawnVarianceInSec = 0;
     uint32 ConfigSystemClientDataVersion = 0;
     string ConfigSystemClientDataVersionMismatchMessage;
     uint32 ConfigSystemFactionGoodClassMask;

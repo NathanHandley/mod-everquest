@@ -210,6 +210,8 @@ bool EverQuestMod::LoadConfigurationSystemDataFromDB()
                 ConfigSystemAgileFighterCombatExpertSpellID = (uint32)atoi(value.c_str());
             else if (key == "RaidBossRespawnVarianceInSec")
                 ConfigSystemRaidBossRespawnVarianceInSec = (uint32)atoi(value.c_str());
+            else if (key == "RaidMiniBossRespawnVarianceInSec")
+                ConfigSystemRaidMiniBossRespawnVarianceInSec = (uint32)atoi(value.c_str());
             else if (key == "ClientDataVersion")
                 ConfigSystemClientDataVersion = (uint32)atoi(value.c_str());
             else if (key == "ClientDataVersionMismatchMessage")
@@ -587,12 +589,19 @@ void EverQuestMod::ProcessCycleSpawnForCreatureDeath(Creature* deadCreature)
 
 void EverQuestMod::ApplyRaidBossRespawnVariance(Creature* deadCreature)
 {
-    if (ConfigSystemRaidBossRespawnVarianceInSec == 0)
-        return;
     if (HasCreatureDataForCreatureTemplateID(deadCreature->GetEntry()) == false)
         return;
     const EverQuestCreature& eqCreature = GetCreatureDataForCreatureTemplateID(deadCreature->GetEntry());
-    if (eqCreature.DifficultyType != EQ_CREATURE_DIFFICULTY_RAIDBOSS)
+
+    // Both boss tiers randomize their respawn, just around their own center with their own swing
+    uint32 configuredVarianceInSec;
+    if (eqCreature.DifficultyType == EQ_CREATURE_DIFFICULTY_RAIDBOSS)
+        configuredVarianceInSec = ConfigSystemRaidBossRespawnVarianceInSec;
+    else if (eqCreature.DifficultyType == EQ_CREATURE_DIFFICULTY_RAIDMINIBOSS)
+        configuredVarianceInSec = ConfigSystemRaidMiniBossRespawnVarianceInSec;
+    else
+        return;
+    if (configuredVarianceInSec == 0)
         return;
 
     // Raid instance copies never repop before the instance resets, so leave their timers alone
@@ -612,8 +621,8 @@ void EverQuestMod::ApplyRaidBossRespawnVariance(Creature* deadCreature)
     if (centerInSec == 0)
         return;
 
-    // Bosses that took the shorter EQ timer can have a center below the variance, so keep the swing from rolling them down to nearly nothing
-    uint32 varianceInSec = std::min(ConfigSystemRaidBossRespawnVarianceInSec, centerInSec / 2);
+    // A variance configured wider than the center would roll a near-instant respawn, so keep the swing inside half of it
+    uint32 varianceInSec = std::min(configuredVarianceInSec, centerInSec / 2);
     if (varianceInSec == 0)
         return;
     uint32 respawnInSec = (centerInSec - varianceInSec) + urand(0, varianceInSec * 2);
@@ -3859,8 +3868,8 @@ void EverQuestMod::SetupCreatureSummon(Creature* creature)
         return;
     const EverQuestCreature& eqCreature = GetCreatureDataForCreatureTemplateID(creature->GetEntry());
 
-    // Only raid bosses summon (for now)
-    if (eqCreature.DifficultyType != EQ_CREATURE_DIFFICULTY_RAIDBOSS)
+    // Only raid bosses and raid mini bosses summon (for now)
+    if (eqCreature.DifficultyType != EQ_CREATURE_DIFFICULTY_RAIDBOSS && eqCreature.DifficultyType != EQ_CREATURE_DIFFICULTY_RAIDMINIBOSS)
         return;
 
     // Reset runtime fields in case this creature object was recycled
