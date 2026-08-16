@@ -585,6 +585,10 @@ void EverQuestMod::ApplyRaidBossRespawnVariance(Creature* deadCreature)
     if (eqCreature.DifficultyType != EQ_CREATURE_DIFFICULTY_RAIDBOSS)
         return;
 
+    // Raid instance copies never repop before the instance resets, so leave their timers alone
+    if (deadCreature->GetMap()->Instanceable())
+        return;
+
     // Only world spawns have a respawn to reschedule (summons and pets never do)
     ObjectGuid::LowType spawnID = deadCreature->GetSpawnId();
     if (spawnID == 0)
