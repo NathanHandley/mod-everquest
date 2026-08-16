@@ -132,6 +132,10 @@ public:
         if (hasAuraEffect == true && EverQuest->IsWornEffectSpell(spell->Id) == false)
             spell->AttributesCu |= SPELL_ATTR0_CU_SINGLE_AURA_STACK;
 
+        // Self buffs that tick damage shouldn't break effects
+        if (allSelfTargeted && hasHarmfulPeriodic)
+            spell->AttributesEx4 |= SPELL_ATTR4_DAMAGE_DOESNT_BREAK_AURAS;
+
         // By default in WoW, buffs that have a cost are treated as a debuff (can't be removed).  That's not EQ behavior.
         if (allSelfTargeted && hasPositiveEffect && hasNegativeEffect)
         {
