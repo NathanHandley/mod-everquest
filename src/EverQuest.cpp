@@ -389,8 +389,9 @@ void EverQuestMod::LoadConfigurationFile()
     // Cross-Class values
     ConfigCrossClassIncludeSkillIDs = GetSetFromConfigString("EverQuest.CrossClass.IncludeSkillIDs");
 
-    // The cross-class exempt spell cache derives from the skill list above
+    // The cross-class exempt spell cache derives from the skill list above, and is built alongside the racial spell cache
     CrossClassExemptSpellIDs.clear();
+    RacialSpellIDs.clear();
     CrossClassExemptSpellIDsBuilt = false;
 }
 
@@ -6873,21 +6874,42 @@ void EverQuestMod::MoveTalentsToModTalentsTable(Player* player, CharacterDatabas
     transaction->Append("DELETE FROM `character_talent` WHERE guid = {}", player->GetGUID().GetCounter());
 }
 
+bool EverQuestMod::IsRacialSkillID(uint32 skillID)
+{
+    // Racial skill lines hold each race's innate abilities, which belong to the character rather than any secondary class
+    switch (skillID)
+    {
+    case EQ_RACIAL_SKILL_ID_DWARF:
+    case EQ_RACIAL_SKILL_ID_TAUREN:
+    case EQ_RACIAL_SKILL_ID_ORC:
+    case EQ_RACIAL_SKILL_ID_NIGHTELF:
+    case EQ_RACIAL_SKILL_ID_UNDEAD:
+    case EQ_RACIAL_SKILL_ID_TROLL:
+    case EQ_RACIAL_SKILL_ID_GNOME:
+    case EQ_RACIAL_SKILL_ID_HUMAN:
+    case EQ_RACIAL_SKILL_ID_BLOODELF:
+    case EQ_RACIAL_SKILL_ID_DRAENEI:
+        return true;
+    default:
+        return false;
+    }
+}
+
 void EverQuestMod::EnsureCrossClassExemptSpellIDsBuilt()
 {
     if (CrossClassExemptSpellIDsBuilt == true)
         return;
     CrossClassExemptSpellIDsBuilt = true;
 
-    // Cache every spell that is tied to a cross-class skill, so that they don't wipe on secondary class switch
-    if (ConfigCrossClassIncludeSkillIDs.empty() == true)
-        return;
+    // Cache every spell that is tied to a cross-class skill or a racial skill line, so that they don't wipe on secondary class switch
     for (SkillLineAbilityEntry const* skillLineAbility : sSkillLineAbilityStore)
     {
         if (skillLineAbility == nullptr)
             continue;
         if (ConfigCrossClassIncludeSkillIDs.find(skillLineAbility->SkillLine) != ConfigCrossClassIncludeSkillIDs.end())
             CrossClassExemptSpellIDs.insert(skillLineAbility->Spell);
+        if (IsRacialSkillID(skillLineAbility->SkillLine) == true)
+            RacialSpellIDs.insert(skillLineAbility->Spell);
     }
 }
 
@@ -6895,6 +6917,10 @@ bool EverQuestMod::IsSpellExemptFromClassMove(uint32 spellID)
 {
     // Death Knight abilities belong to the fixed WoW class rather than the active EQ secondary class, so persist across switches
     if (spellID == EQ_DEATHKNIGHT_DEATHGATE_SPELL_ID || spellID == EQ_DEATHKNIGHT_RUNEFORGING_SPELL_ID)
+        return true;
+
+    // Racial abilities are a property of the character's race, so they follow the character and not the active secondary class
+    if (RacialSpellIDs.find(spellID) != RacialSpellIDs.end())
         return true;
 
     // Spells flagged by the converter as character-wide (like the racial guise spells) persist across switches
@@ -6978,6 +7004,10 @@ bool EverQuestMod::IsSkillExemptFromClassMove(uint32 skillID)
 {
     // The Runeforging skill line belongs to the fixed WoW Death Knight class, so it persists across secondary switches
     if (skillID == EQ_DEATHKNIGHT_RUNEFORGING_SKILL_ID)
+        return true;
+
+    // Racial skill lines belong to the character's race, and taking them away would strip the racial abilities hung off them
+    if (IsRacialSkillID(skillID) == true)
         return true;
 
     // Shared skills (mounts/riding, tradeskills, etc.) configured to persist across secondary classes

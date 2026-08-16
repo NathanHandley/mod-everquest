@@ -69,6 +69,16 @@ class WorldPacket;
 #define EQ_DEATHKNIGHT_DEATHGATE_SPELL_ID           50977
 #define EQ_DEATHKNIGHT_RUNEFORGING_SPELL_ID         53428
 #define EQ_DEATHKNIGHT_RUNEFORGING_SKILL_ID         776
+#define EQ_RACIAL_SKILL_ID_DWARF                    101
+#define EQ_RACIAL_SKILL_ID_TAUREN                   124
+#define EQ_RACIAL_SKILL_ID_ORC                      125
+#define EQ_RACIAL_SKILL_ID_NIGHTELF                 126
+#define EQ_RACIAL_SKILL_ID_UNDEAD                   220
+#define EQ_RACIAL_SKILL_ID_TROLL                    733
+#define EQ_RACIAL_SKILL_ID_GNOME                    753
+#define EQ_RACIAL_SKILL_ID_HUMAN                    754
+#define EQ_RACIAL_SKILL_ID_BLOODELF                 756
+#define EQ_RACIAL_SKILL_ID_DRAENEI                  760
 #define EQ_HEARTHSTONE_ITEM_ID                      6948
 #define EQ_MASTER_TOTEM_ITEM_ID                     46978
 #define EQ_SPELL_ID_MAGE_SHATTER_RANK1              11170
@@ -992,6 +1002,7 @@ public:
     bool ConfigSpellSummonPlayerAcrossZones;
 
     unordered_set<uint32> CrossClassExemptSpellIDs;
+    unordered_set<uint32> RacialSpellIDs;
     bool CrossClassExemptSpellIDsBuilt;
 
     // Guards the runtime state containers (the trackers keyed by creature/player GUID below). Maps update on parallel
@@ -1349,6 +1360,7 @@ public:
     void MoveTalentsToModTalentsTable(Player* player, CharacterDatabaseTransaction& transaction);
     void MoveClassSpellsToModSpellsTable(Player* player, CharacterDatabaseTransaction& transaction);
     void EnsureCrossClassExemptSpellIDsBuilt();
+    bool IsRacialSkillID(uint32 skillID);
     bool IsSpellExemptFromClassMove(uint32 spellID);
     bool IsSkillExemptFromClassMove(uint32 skillID);
     void MoveClassSkillsToModSkillsTable(Player* player, CharacterDatabaseTransaction& transaction);
