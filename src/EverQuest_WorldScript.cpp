@@ -81,6 +81,9 @@ public:
     // player at once. This hook runs after the map updates have been waited on, so no map thread is touching players
     void OnUpdate(uint32 diff) override
     {
+        // Core has unsynchronized pool bookkeeping in parallel map update threads, which is a real issue for pool-heavy content like everquest
+        EverQuest->UpdateDuePooledRespawnSweep(diff);
+
         if (EverQuest->IsEnabled == false)
             return;
 

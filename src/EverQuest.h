@@ -1041,6 +1041,7 @@ public:
     bool ConfigPlayerAddRacialGuiseItemOnLogin;
     uint32 ConfigAchievementAdventurerLevel;
     bool ConfigAchievementAdventurerProtectedInEQZones;
+    bool ConfigAchievementAdventurerGrantAuraOnLoginIfMissing;
     std::set<uint32> ConfigCrossClassIncludeSkillIDs;
     bool ConfigTrackingEnabled;
     float ConfigTrackingRangerYardsPerLevel;
@@ -1101,6 +1102,8 @@ public:
     unordered_map<uint32, int32> CycleSpawnCheckTimerInMSByMapID;
     uint32 RestrictedMapCheckTimerInMS = 0;
     unordered_map<ObjectGuid, EverQuestPlayerClientVersionCheckState> PendingClientVersionChecksByPlayerGUID;
+    uint32 DuePooledRespawnSweepTimerInMS = 0;
+    vector<Map*> DuePooledRespawnSweepGatheredMaps;
     unordered_map<ObjectGuid, deque<uint32>> PlayerCasterConcurrentBardSongs;
     unordered_set<ObjectGuid> PlayersWithAuctionUsableFilterActive;
     unordered_set<ObjectGuid> PlayersGainingExperience;
@@ -1254,6 +1257,8 @@ public:
     void RestoreNativeDisplayAfterCorpseIllusion(Player* player);
     void GrantLegacyAchievementIfEligible(Player* player);
     void AddAdventurerAuraForNewCharacter(Player* player);
+    void GrantAdventurerAuraOnLoginIfMissing(Player* player);
+    void PersistAdventurerAuraOnPlayerSave(Player* player);
     bool IsMapIDAnEverQuestMap(uint32 mapID);
     bool IsZoneWideGroupRewardEnabledForMap(uint32 mapID);
     bool IsInZoneWideGroupRewardRange(Player* member, WorldObject* rewardSource);
@@ -1349,6 +1354,9 @@ public:
     void FailClientVersionCheckForPlayer(Player* player, EverQuestPlayerClientVersionCheckState& checkState);
     void UpdateClientVersionChecks(uint32 diff);
     void ClearClientVersionCheckForPlayer(ObjectGuid playerGUID);
+    void UpdateDuePooledRespawnSweep(uint32 diff);
+    void GatherMapForDuePooledRespawnSweep(Map* map);
+    void ProcessDuePooledRespawnsForMap(Map* map);
     void LoadFactionData();
     void ResolveDefendCombatFactionTemplates();
     void ResolveEQReputationFactions();

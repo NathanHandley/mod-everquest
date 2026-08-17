@@ -626,6 +626,7 @@ public:
 
         // Grant the adventurer feat of strength if another character on this account earned it
         EverQuest->GrantAdventurerAchievementIfAccountEarned(player);
+        EverQuest->GrantAdventurerAuraOnLoginIfMissing(player);
 
         // Grab any cast bard songs for the player
         if (EverQuest->ConfigBardMaxConcurrentSongs != 0)
@@ -712,6 +713,15 @@ public:
             return;
 
         EverQuest->RestoreNativeDisplayAfterCorpseIllusion(player);
+    }
+
+    void OnPlayerSave(Player* player) override
+    {
+        if (EverQuest->IsEnabled == false)
+            return;
+
+        // Periodic saves drop permanent auras from the database, so this prevents that for adventurer buff if the server crashes before the next clean logout
+        EverQuest->PersistAdventurerAuraOnPlayerSave(player);
     }
 
     void OnPlayerLogout(Player* player) override

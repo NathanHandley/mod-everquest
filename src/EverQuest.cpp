@@ -36,10 +36,12 @@
 #include "Timer.h"
 #include "Tokenize.h"
 #include "Map.h"
+#include "MapMgr.h"
 #include "MotionMaster.h"
 #include "MovementGenerator.h"
 #include "ObjectAccessor.h"
 #include "Opcodes.h"
+#include "PoolMgr.h"
 #include "WorldPacket.h"
 #include "GossipDef.h"
 #include "ScriptedGossip.h"
@@ -128,6 +130,7 @@ EverQuestMod::EverQuestMod() :
     ConfigPlayerAddRacialGuiseItemOnLogin(true),
     ConfigAchievementAdventurerLevel(60),
     ConfigAchievementAdventurerProtectedInEQZones(true),
+    ConfigAchievementAdventurerGrantAuraOnLoginIfMissing(false),
     ConfigTrackingEnabled(true),
     ConfigTrackingRangerYardsPerLevel(20.0f),
     ConfigTrackingDruidYardsPerLevel(15.0f),
@@ -390,6 +393,7 @@ void EverQuestMod::LoadConfigurationFile()
     // Achievements
     ConfigAchievementAdventurerLevel = sConfigMgr->GetOption<uint32>("EverQuest.Achievement.AdventurerLevel", 60);
     ConfigAchievementAdventurerProtectedInEQZones = sConfigMgr->GetOption<bool>("EverQuest.Achievement.AdventurerProtectedInEQZones", true);
+    ConfigAchievementAdventurerGrantAuraOnLoginIfMissing = sConfigMgr->GetOption<bool>("EverQuest.Achievement.AdventurerGrantAuraOnLoginIfMissing", false);
 
     // Tracking
     ConfigTrackingEnabled = sConfigMgr->GetOption<bool>("EverQuest.Tracking.Enabled", true);
@@ -3533,6 +3537,29 @@ void EverQuestMod::AddAdventurerAuraForNewCharacter(Player* player)
         player->GetGUID().GetCounter(), player->GetGUID().GetRawValue(), ConfigSystemAdventurerAuraSpellID);
 }
 
+void EverQuestMod::GrantAdventurerAuraOnLoginIfMissing(Player* player)
+{
+    if (ConfigAchievementAdventurerGrantAuraOnLoginIfMissing == false || ConfigSystemAdventurerAuraSpellID == 0)
+        return;
+    if (player->HasAura(ConfigSystemAdventurerAuraSpellID) == true)
+        return;
+
+    player->CastSpell(player, ConfigSystemAdventurerAuraSpellID, true);
+}
+
+void EverQuestMod::PersistAdventurerAuraOnPlayerSave(Player* player)
+{
+    if (ConfigSystemAdventurerAuraSpellID == 0)
+        return;
+    if (player->HasAura(ConfigSystemAdventurerAuraSpellID) == false)
+        return;
+
+    // The core's periodic (non-logout) saves rewrite character_aura but skip permanent auras (duration -1 fails the "less than 60 seconds remaining"
+    // skip check) so this makes sure this buff isn't lost on a crash or something like that
+    CharacterDatabase.Execute("REPLACE INTO character_aura (guid, casterGuid, itemGuid, spell, effectMask, recalculateMask, stackcount, amount0, amount1, amount2, base_amount0, base_amount1, base_amount2, maxDuration, remainTime, remainCharges) "
+        "VALUES ({}, {}, 0, {}, 1, 0, 1, 0, 0, 0, 0, 0, 0, -1, -1, 0)", player->GetGUID().GetCounter(), player->GetGUID().GetRawValue(), ConfigSystemAdventurerAuraSpellID);
+}
+
 bool EverQuestMod::IsMapIDAnEverQuestMap(uint32 mapID)
 {
     if (ConfigSystemMapDBCIDMin == 0 || ConfigSystemMapDBCIDMax == 0)
@@ -5775,6 +5802,79 @@ void EverQuestMod::UpdateClientVersionChecks(uint32 diff)
 void EverQuestMod::ClearClientVersionCheckForPlayer(ObjectGuid playerGUID)
 {
     PendingClientVersionChecksByPlayerGUID.erase(playerGUID);
+}
+
+static void GatherMapForDuePooledRespawnSweepWorker(Map* map)
+{
+    EverQuest->GatherMapForDuePooledRespawnSweep(map);
+}
+
+// In core, PoolMgr's ActivePoolData containers has no locking, but pooled creature respawns are processed inside Map::ProcessRespawns on the parallel map update threads
+// This sweep runs on the world thread while the map worker threads are resting, and takes every pooled respawn coming due out of the map respawn queues before a map thread
+// can ever see it, so all pool mutations stay on the world thread (the same thread the game event system already spawns pools from. blah blah blah, this works around a thread saftey issue in core.
+void EverQuestMod::UpdateDuePooledRespawnSweep(uint32 diff)
+{
+    DuePooledRespawnSweepTimerInMS += diff;
+    if (DuePooledRespawnSweepTimerInMS < 2000)
+        return;
+    DuePooledRespawnSweepTimerInMS = 0;
+
+    // Gather first and process after, since DoForAllMaps holds the MapMgr lock and the pool spawn calls below re-enter MapMgr::CreateBaseMap which takes that same lock
+    DuePooledRespawnSweepGatheredMaps.clear();
+    sMapMgr->DoForAllMaps(GatherMapForDuePooledRespawnSweepWorker);
+    for (size_t i = 0; i < DuePooledRespawnSweepGatheredMaps.size(); ++i)
+        ProcessDuePooledRespawnsForMap(DuePooledRespawnSweepGatheredMaps[i]);
+}
+
+void EverQuestMod::GatherMapForDuePooledRespawnSweep(Map* map)
+{
+    DuePooledRespawnSweepGatheredMaps.push_back(map);
+}
+
+void EverQuestMod::ProcessDuePooledRespawnsForMap(Map* map)
+{
+    // The core only routes pool respawns through the respawn queue on non-instanceable maps
+    if (map == nullptr || map->Instanceable() == true)
+        return;
+
+    // Everything coming due within the next 10 seconds is taken now (spawning slightly early), so an entry can never become due for a map thread in the gap between two sweeps
+    time_t dueHorizonTime = GameTime::GetGameTime().count() + 10;
+
+    // Removal invalidates the respawn time container iterators, so collect first
+    vector<ObjectGuid::LowType> dueCreatureSpawnIDs;
+    unordered_map<ObjectGuid::LowType, time_t> const& creatureRespawnTimes = map->GetCreatureRespawnTimes();
+    for (unordered_map<ObjectGuid::LowType, time_t>::const_iterator iter = creatureRespawnTimes.begin(); iter != creatureRespawnTimes.end(); ++iter)
+    {
+        if (iter->second > dueHorizonTime)
+            continue;
+        if (sPoolMgr->IsPartOfAPool<Creature>(iter->first) == 0)
+            continue;
+        dueCreatureSpawnIDs.push_back(iter->first);
+    }
+    for (size_t i = 0; i < dueCreatureSpawnIDs.size(); ++i)
+    {
+        // Same order as the pool branch in Map::ProcessCreatureRespawn, which these entries no longer reach since removing the respawn time also removes them from the map's respawn queue
+        uint32 poolID = sPoolMgr->IsPartOfAPool<Creature>(dueCreatureSpawnIDs[i]);
+        sPoolMgr->UpdatePool<Creature>(map->GetPoolData(), poolID, dueCreatureSpawnIDs[i]);
+        map->RemoveCreatureRespawnTime(dueCreatureSpawnIDs[i]);
+    }
+
+    vector<ObjectGuid::LowType> dueGameObjectSpawnIDs;
+    unordered_map<ObjectGuid::LowType, time_t> const& gameObjectRespawnTimes = map->GetGORespawnTimes();
+    for (unordered_map<ObjectGuid::LowType, time_t>::const_iterator iter = gameObjectRespawnTimes.begin(); iter != gameObjectRespawnTimes.end(); ++iter)
+    {
+        if (iter->second > dueHorizonTime)
+            continue;
+        if (sPoolMgr->IsPartOfAPool<GameObject>(iter->first) == 0)
+            continue;
+        dueGameObjectSpawnIDs.push_back(iter->first);
+    }
+    for (size_t i = 0; i < dueGameObjectSpawnIDs.size(); ++i)
+    {
+        uint32 poolID = sPoolMgr->IsPartOfAPool<GameObject>(dueGameObjectSpawnIDs[i]);
+        sPoolMgr->UpdatePool<GameObject>(map->GetPoolData(), poolID, dueGameObjectSpawnIDs[i]);
+        map->RemoveGORespawnTime(dueGameObjectSpawnIDs[i]);
+    }
 }
 
 void EverQuestMod::LoadFactionData()
