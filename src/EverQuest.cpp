@@ -33,6 +33,7 @@
 #include "SpellAuraEffects.h"
 #include "SpellAuras.h"
 #include "SpellMgr.h"
+#include "Timer.h"
 #include "Tokenize.h"
 #include "Map.h"
 #include "MotionMaster.h"
@@ -102,6 +103,8 @@ EverQuestMod::EverQuestMod() :
     ConfigSpellCrowdControlLevelRestrictionsEnabled(true),
     ConfigSpellHasteCapEnabled(true),
     ConfigSpellHasteCapPercent(100.0f),
+    ConfigSpellBardFearDiminishingReturnsEnabled(true),
+    ConfigSpellBardFearDiminishingReturnsResetTimeInMS(15000),
     ConfigCombatSkillsDisableBashKickStunOnPlayers(false),
     ConfigEvadeEnabled(true),
     ConfigEvadeUnreachableSeconds(10.0f),
@@ -306,6 +309,8 @@ void EverQuestMod::LoadConfigurationFile()
     ConfigSpellCrowdControlLevelRestrictionsEnabled = sConfigMgr->GetOption<bool>("EverQuest.Spells.CrowdControlLevelRestrictionsEnabled", true);
     ConfigSpellHasteCapEnabled = sConfigMgr->GetOption<bool>("EverQuest.Spells.HasteCapEnabled", true);
     ConfigSpellHasteCapPercent = sConfigMgr->GetOption<float>("EverQuest.Spells.HasteCapPercent", 100.0f);
+    ConfigSpellBardFearDiminishingReturnsEnabled = sConfigMgr->GetOption<bool>("EverQuest.Spells.BardFearDiminishingReturnsEnabled", true);
+    ConfigSpellBardFearDiminishingReturnsResetTimeInMS = sConfigMgr->GetOption<uint32>("EverQuest.Spells.BardFearDiminishingReturnsResetTimeInMS", 15000);
 
     // Combat Skills
     ConfigCombatSkillsDisableBashKickStunOnPlayers = sConfigMgr->GetOption<bool>("EverQuest.CombatSkills.DisableBashKickStunOnPlayers", false);
@@ -2417,6 +2422,67 @@ bool EverQuestMod::IsCreatureCharmBlockedByCharmLimits(uint32 spellID, Unit* tar
             return false;
     }
     return true;
+}
+
+bool EverQuestMod::ApplyBardSongFearDiminishingReturnsOnAuraApply(Unit* target, Aura* aura)
+{
+    // Diminishing returns will be 100% / 50% / 25% / immune chain for creature targets here, and returns true when shouldn't fear at all
+    if (ConfigSpellBardFearDiminishingReturnsEnabled == false)
+        return false;
+    if (target == nullptr || aura == nullptr)
+        return false;
+    Creature* creature = target->ToCreature();
+    if (creature == nullptr)
+        return false;
+    if (BardSongTickSpellIDs.find(aura->GetId()) == BardSongTickSpellIDs.end())
+        return false;
+    SpellInfo const* spellInfo = aura->GetSpellInfo();
+    if (spellInfo == nullptr || spellInfo->HasAura(SPELL_AURA_MOD_FEAR) == false)
+        return false;
+    Unit* caster = aura->GetCaster();
+    if (caster == nullptr || caster->IsCharmedOwnedByPlayerOrPlayer() == false)
+        return false;
+    if (caster->IsPlayer() == true && caster->ToPlayer()->IsGameMaster() == true)
+        return false;
+
+    int32 fullDurationInMS = aura->GetMaxDuration();
+    if (fullDurationInMS <= 0)
+        return false;
+
+    uint32 nowMS = GameTime::GetGameTimeMS().count();
+    EverQuestCreatureFearDiminishingReturnState* state = creature->CustomData.GetDefault<EverQuestCreatureFearDiminishingReturnState>(EQ_CREATURE_CUSTOMDATA_FEARDIMINISH);
+
+    // The chain resets once the creature has gone the whole window (the last landed fear's duration plus the reset time)
+    uint32 curLevel = state->Level;
+    if (curLevel > 0 && getMSTimeDiff(state->LastApplyTimeMS, nowMS) > state->ResetWindowInMS)
+        curLevel = 0;
+
+    float durationMod;
+    switch (curLevel)
+    {
+        case 0: durationMod = 1.0f; break;
+        case 1: durationMod = 0.5f; break;
+        case 2: durationMod = 0.25f; break;
+        default: durationMod = 0.0f; break;
+    }
+    if (durationMod == 0.0f)
+    {
+        state->Level = 3;
+        return true;
+    }
+
+    int32 newDurationInMS = int32(float(fullDurationInMS) * durationMod);
+    state->Level = curLevel + 1;
+    state->LastApplyTimeMS = nowMS;
+    state->ResetWindowInMS = uint32(newDurationInMS) + ConfigSpellBardFearDiminishingReturnsResetTimeInMS;
+    aura->SetMaxDuration(newDurationInMS);
+    aura->SetDuration(newDurationInMS);
+    return false;
+}
+
+void EverQuestMod::RemoveCreatureFearDiminishingReturnState(Creature* creature)
+{
+    creature->CustomData.Erase(EQ_CREATURE_CUSTOMDATA_FEARDIMINISH);
 }
 
 void EverQuestMod::TrackEQHasteAurasAndEnforceCapOnAuraApply(Unit* unit, Aura* aura)

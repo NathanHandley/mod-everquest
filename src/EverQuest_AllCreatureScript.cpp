@@ -81,6 +81,7 @@ public:
         EverQuest->RemoveCreatureDefendPlayerWatchState(creature);
         EverQuest->RemoveCreatureAggroPositionState(creature);
         EverQuest->RemoveCreatureAgroZBlockState(creature);
+        EverQuest->RemoveCreatureFearDiminishingReturnState(creature);
     }
 
     void OnAllCreatureUpdate(Creature* creature, uint32 diff) override

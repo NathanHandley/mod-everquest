@@ -196,6 +196,13 @@ public:
             return;
         }
 
+        // Bard fear songs re-land their fear every pulse, so they diminish against creatures the way the core already diminishes fear against players
+        if (EverQuest->ApplyBardSongFearDiminishingReturnsOnAuraApply(unit, aura) == true)
+        {
+            unit->RemoveAura(aura);
+            return;
+        }
+
         // ModFaction (Alliance line) auras landing on creatures grant the caster a temporary reputation bonus with the creature's faction
         if (unit->IsCreature() == true)
             EverQuest->HandleModFactionAuraApplyOnCreature(unit->ToCreature(), aura);

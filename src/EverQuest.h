@@ -254,6 +254,7 @@ struct AreaTrigger;
 #define EQ_CREATURE_CUSTOMDATA_DEFENDPLAYERWATCH    "EQDefendPlayerWatch"
 #define EQ_CREATURE_CUSTOMDATA_AGGROPOSITION        "EQAggroPos"
 #define EQ_CREATURE_CUSTOMDATA_AGROZBLOCK           "EQAgroZBlock"
+#define EQ_CREATURE_CUSTOMDATA_FEARDIMINISH         "EQFearDiminish"
 
 #define EQ_AGRO_Z_BLOCK_SUPPRESS_MS                 2000
 
@@ -499,6 +500,14 @@ public:
     float Z = 0.0f;
     float Orientation = 0.0f;
     bool HasPosition = false;
+};
+
+class EverQuestCreatureFearDiminishingReturnState : public DataMap::Base
+{
+public:
+    uint32 Level = 0;                 // 0 = full duration, 1 = half, 2 = quarter, 3 = immune
+    uint32 LastApplyTimeMS = 0;
+    uint32 ResetWindowInMS = 0;
 };
 
 class EverQuestCreatureAgroZBlockState : public DataMap::Base
@@ -985,6 +994,8 @@ public:
     bool ConfigSpellCrowdControlLevelRestrictionsEnabled;
     bool ConfigSpellHasteCapEnabled;
     float ConfigSpellHasteCapPercent;
+    bool ConfigSpellBardFearDiminishingReturnsEnabled;
+    uint32 ConfigSpellBardFearDiminishingReturnsResetTimeInMS;
     bool ConfigCombatSkillsDisableBashKickStunOnPlayers;
     bool ConfigCombatSkillsRangedAttackEnabled;
     float ConfigCombatSkillsRangedAttackDefaultMinRange;
@@ -1200,6 +1211,8 @@ public:
     bool IsSpellBlockedByMinTargetLevel(uint32 spellID, Unit* target, Unit* caster);
     bool IsSpellBlockedByMaxCreatureTargetLevel(uint32 spellID, Unit* target, Unit* caster);
     bool IsCreatureCharmBlockedByCharmLimits(uint32 spellID, Unit* target, Unit* caster);
+    bool ApplyBardSongFearDiminishingReturnsOnAuraApply(Unit* target, Aura* aura);
+    void RemoveCreatureFearDiminishingReturnState(Creature* creature);
     void TrackEQHasteAurasAndEnforceCapOnAuraApply(Unit* unit, Aura* aura);
     void UntrackEQHasteAurasAndEnforceCapOnAuraRemove(Unit* unit, Aura* aura);
     void EnforceEQHastePercentCapOnUnit(Unit* unit, vector<EverQuestUnitHasteAuraEffect>& trackedHasteAuraEffects);

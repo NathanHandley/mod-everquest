@@ -177,6 +177,24 @@ EverQuest.Spells.HasteCapPercent = 100
 
 ###################################################################################################
 #
+# 	EverQuest.Spells.BardFearDiminishingReturnsEnabled
+#		If true, the fear from a bard fear song diminishes on creature targets the way WoW fear
+#		already diminishes on players - the first landing lasts its full duration, the next one
+#		half, the one after a quarter, and then the creature is immune until the chain resets
+#	Default: True (bard song fear diminishes)
+#
+# 	EverQuest.Spells.BardFearDiminishingReturnsResetTimeInMS
+#		How long a creature must go without a new bard song fear landing on it, after the last
+#		one would have run out, before the diminishing chain resets back to full duration.
+#	Default: 15000 (15 seconds, matching the WoW diminishing returns reset)
+#
+###################################################################################################
+
+EverQuest.Spells.BardFearDiminishingReturnsEnabled = True
+EverQuest.Spells.BardFearDiminishingReturnsResetTimeInMS = 15000
+
+###################################################################################################
+#
 # 	EverQuest.CombatSkills.DisableBashKickStunOnPlayers
 #		If true, the stun part of Bash/Kick/Slam combat skills will never land on player targets.
 #	Default: False (players can be stunned by these combat skills)
