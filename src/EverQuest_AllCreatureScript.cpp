@@ -40,12 +40,12 @@ public:
         {
             // Despawn creatures that violate spawn restrictions (creature spawn limits, one creature alive per
             // spawn point, spawn group limits), with a respawn timer so the spawn re-rolls on a later cycle
-            if (EverQuest->ShouldDespawnCreatureDueToSpawnRestrictions(mapID, creature) == true)
+            if (EverQuest->ShouldDespawnCreatureDueToSpawnRestrictions(creature) == true)
             {
                 creature->DespawnOrUnsummon(Milliseconds(1), Seconds(creature->GetRespawnDelay()));
                 return;
             }
-            EverQuest->AddCreatureAsLoaded(mapID, creature);
+            EverQuest->AddCreatureAsLoaded(creature);
             EverQuest->SetupCreatureEmoteState(creature);
             RestrictCreatureOwnedPetAggroRange(creature);
         }
@@ -68,7 +68,7 @@ public:
         // Remove EverQuest creatures from the trackers
         uint32 mapID = creature->GetMap()->GetId();
         if (mapID >= EverQuest->ConfigSystemMapDBCIDMin && mapID <= EverQuest->ConfigSystemMapDBCIDMax)
-            EverQuest->RemoveCreatureAsLoaded(mapID, creature);
+            EverQuest->RemoveCreatureAsLoaded(creature);
         EverQuest->RemoveCreatureRangedAttackState(creature);
         EverQuest->RemoveCreatureCombatAbilityState(creature);
         EverQuest->RemoveCreatureSummonState(creature);

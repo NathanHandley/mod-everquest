@@ -1076,8 +1076,8 @@ public:
     unordered_map<uint32, EverQuestCreatureMovementSound> CreatureMovementSoundsByDisplayID;
 
     std::mutex PendingKillSpawnActionsMutex;
-    unordered_map<uint32, vector<EverQuestPendingKillSpawnAction>> PendingKillSpawnActionsByMapID;
-    unordered_map<uint32, vector<EverQuestTriggeredQuestKillSpawn>> TriggeredQuestKillSpawnsByMapID;
+    unordered_map<uint64, vector<EverQuestPendingKillSpawnAction>> PendingKillSpawnActionsByMapInstanceKey;
+    unordered_map<uint64, vector<EverQuestTriggeredQuestKillSpawn>> TriggeredQuestKillSpawnsByMapInstanceKey;
     unordered_map<uint32, EverQuestItemTemplate> ItemTemplatesByEntryID;
     unordered_set<uint32> WornEffectSpellIDs;
     unordered_map<uint32, EverQuestSpell> SpellDataBySpellID;
@@ -1094,10 +1094,10 @@ public:
     unordered_map<uint8, unordered_map<uint8, EverQuestPlayerCreateInfo>> PlayerCreateInfoByRaceIDThenClassID;
     unordered_map<uint8, list<uint32>> PlayerAutoLearnSkillsByEQClassID;
     unordered_map<uint8, list<EverQuestAutoLearnSpell>> PlayerAutoLearnSpellsByClassID;
-    unordered_map<int, unordered_map<int, vector<Creature*>>> AllLoadedCreaturesByMapIDThenCreatureEntryID;
+    unordered_map<uint64, unordered_map<int, vector<Creature*>>> AllLoadedCreaturesByMapInstanceKeyThenCreatureEntryID;
     unordered_map<uint32, EverQuestCreatureSpawnPoint> CreatureSpawnPointsByCreatureGUID;
-    unordered_map<int, unordered_map<uint32, vector<Creature*>>> AllLoadedCreaturesByMapIDThenSpawnPointID;
-    unordered_map<int, unordered_map<uint32, vector<Creature*>>> AllLoadedCreaturesByMapIDThenSpawnGroupID;
+    unordered_map<uint64, unordered_map<uint32, vector<Creature*>>> AllLoadedCreaturesByMapInstanceKeyThenSpawnPointID;
+    unordered_map<uint64, unordered_map<uint32, vector<Creature*>>> AllLoadedCreaturesByMapInstanceKeyThenSpawnGroupID;
     unordered_map<uint32, unordered_map<uint32, EverQuestCycleSpawnGroup>> CycleSpawnGroupsByMapIDThenSpawnGroupID;
     unordered_map<uint32, int32> CycleSpawnCheckTimerInMSByMapID;
     uint32 RestrictedMapCheckTimerInMS = 0;
@@ -1148,8 +1148,8 @@ public:
     bool HasCreatureDataForCreatureTemplateID(uint32 creatureTemplateID);
     const EverQuestCreature& GetCreatureDataForCreatureTemplateID(uint32 creatureTemplateID);
     void LoadCreatureSpawnPoints();
-    bool ShouldDespawnCreatureDueToSpawnRestrictions(int mapID, Creature* creature);
-    ObjectGuid::LowType RollCycleSpawnCreatureGUID(const EverQuestCycleSpawnGroup& cycleSpawnGroup, uint32 excludedSpawnPointID, uint32 mapID);
+    bool ShouldDespawnCreatureDueToSpawnRestrictions(Creature* creature);
+    ObjectGuid::LowType RollCycleSpawnCreatureGUID(const EverQuestCycleSpawnGroup& cycleSpawnGroup, uint32 excludedSpawnPointID, Map* map);
     void ProcessCycleSpawnForCreatureDeath(Creature* deadCreature);
     void ApplyRaidBossRespawnVariance(Creature* deadCreature);
     void UpdateCycleSpawns(Map* map, uint32 diff);
@@ -1175,10 +1175,10 @@ public:
     void UpdateVulakLock(Creature* creature, uint32 diff);
     void RemoveVulakLockState(Creature* creature);
     void ProcessTriggeredQuestKillSpawnsForCreatureDeath(Creature* deadCreature, Unit* killer);
-    void TriggerQuestKillSpawn(uint32 mapID, const EverQuestQuestReaction& questReaction);
-    void EnqueuePendingKillSpawnAction(uint32 mapID, EverQuestPendingKillSpawnAction& action);
+    void TriggerQuestKillSpawn(Map* map, const EverQuestQuestReaction& questReaction);
+    void EnqueuePendingKillSpawnAction(Map* map, EverQuestPendingKillSpawnAction& action);
     void UpdatePendingKillSpawnActions(Map* map, uint32 diff);
-    bool HasAliveCreatureWithEntryInMap(uint32 mapID, uint32 creatureTemplateID, Creature* ignoreCreature);
+    bool HasAliveCreatureWithEntryInMap(Map* map, uint32 creatureTemplateID, Creature* ignoreCreature);
     void ExecuteKillSpawnAction(Map* map, EverQuestPendingKillSpawnAction& action);
     void LoadCreatureOnkillReputations();
     const list<EverQuestCreatureOnkillReputation>& GetOnkillReputationsForCreatureTemplate(uint32 creatureTemplateID);
@@ -1380,9 +1380,10 @@ public:
     void SetNewBindHome(Player* player);
     void SetNewBindHome(Player* player, uint32 playerGUIDCounter, int mapID, int zoneID, float playerX, float playerY, float playerZ);
     void DeletePlayerBindHome(ObjectGuid guid);
-    void AddCreatureAsLoaded(int mapID, Creature* creature);
-    void RemoveCreatureAsLoaded(int mapID, Creature* creature);
-    vector<Creature*> GetLoadedCreaturesWithEntryID(int mapID, uint32 entryID);
+    uint64 GetMapInstanceKey(Map* map);
+    void AddCreatureAsLoaded(Creature* creature);
+    void RemoveCreatureAsLoaded(Creature* creature);
+    vector<Creature*> GetLoadedCreaturesWithEntryID(Map* map, uint32 entryID);
     void RollLootItemsForCreature(ObjectGuid creatureGUID, uint32 creatureTemplateEntryID);
     void RollLootGroupIntoCounts(const EverQuestCreatureLootGroup& lootGroup, unordered_map<uint32, uint32>& counts);
     void SpawnCreature(uint32 entryID, Map* map, float x, float y, float z, float orientation, bool enforceUniqueSpawn);

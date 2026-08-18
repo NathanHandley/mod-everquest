@@ -508,20 +508,20 @@ void EverQuestMod::LoadCreatureSpawnPoints()
     }
 }
 
-ObjectGuid::LowType EverQuestMod::RollCycleSpawnCreatureGUID(const EverQuestCycleSpawnGroup& cycleSpawnGroup, uint32 excludedSpawnPointID, uint32 mapID)
+ObjectGuid::LowType EverQuestMod::RollCycleSpawnCreatureGUID(const EverQuestCycleSpawnGroup& cycleSpawnGroup, uint32 excludedSpawnPointID, Map* map)
 {
     vector<uint32> eligibleSpawnPointIDs;
     unordered_set<ObjectGuid::LowType> corpseSpawnIDs;
     {
         std::lock_guard<std::mutex> lock(RuntimeStateMutex);
-        auto loadedMapIter = AllLoadedCreaturesByMapIDThenSpawnPointID.find((int)mapID);
+        auto loadedMapIter = AllLoadedCreaturesByMapInstanceKeyThenSpawnPointID.find(GetMapInstanceKey(map));
         for (auto& candidatesPair : cycleSpawnGroup.CandidatesBySpawnPointID)
         {
             uint32 spawnPointID = candidatesPair.first;
             if (spawnPointID == excludedSpawnPointID)
                 continue;
             bool hasAliveCreature = false;
-            if (loadedMapIter != AllLoadedCreaturesByMapIDThenSpawnPointID.end())
+            if (loadedMapIter != AllLoadedCreaturesByMapInstanceKeyThenSpawnPointID.end())
             {
                 auto spawnPointIter = loadedMapIter->second.find(spawnPointID);
                 if (spawnPointIter != loadedMapIter->second.end())
@@ -542,7 +542,7 @@ ObjectGuid::LowType EverQuestMod::RollCycleSpawnCreatureGUID(const EverQuestCycl
 
     // If skipping the excluded point left nothing (a single point group), allow every point instead
     if (eligibleSpawnPointIDs.empty() == true && excludedSpawnPointID != 0)
-        return RollCycleSpawnCreatureGUID(cycleSpawnGroup, 0, mapID);
+        return RollCycleSpawnCreatureGUID(cycleSpawnGroup, 0, map);
     if (eligibleSpawnPointIDs.empty() == true)
         return 0;
 
@@ -589,7 +589,7 @@ void EverQuestMod::ProcessCycleSpawnForCreatureDeath(Creature* deadCreature)
     if (cycleGroupIter == cycleMapIter->second.end())
         return;
     const EverQuestCycleSpawnGroup& cycleSpawnGroup = cycleGroupIter->second;
-    ObjectGuid::LowType nextCreatureGUID = RollCycleSpawnCreatureGUID(cycleSpawnGroup, spawnPoint.SpawnPointID, mapID);
+    ObjectGuid::LowType nextCreatureGUID = RollCycleSpawnCreatureGUID(cycleSpawnGroup, spawnPoint.SpawnPointID, deadCreature->GetMap());
     if (nextCreatureGUID == 0)
         return;
 
@@ -599,7 +599,7 @@ void EverQuestMod::ProcessCycleSpawnForCreatureDeath(Creature* deadCreature)
     action.RespawnTimeSec = cycleSpawnGroup.CycleRespawnTimeSec;
     action.RespawnTargetSpawnIDs.push_back(nextCreatureGUID);
     action.RemainingMS = 1;
-    EnqueuePendingKillSpawnAction(mapID, action);
+    EnqueuePendingKillSpawnAction(deadCreature->GetMap(), action);
 }
 
 void EverQuestMod::ApplyRaidBossRespawnVariance(Creature* deadCreature)
@@ -650,6 +650,9 @@ void EverQuestMod::ApplyRaidBossRespawnVariance(Creature* deadCreature)
 
 void EverQuestMod::UpdateCycleSpawns(Map* map, uint32 diff)
 {
+    // Cycle spawn groups only exist on world maps (instanced map copies never get spawn point rows)
+    if (map->GetInstanceId() != 0)
+        return;
     uint32 mapID = map->GetId();
     auto cycleMapIter = CycleSpawnGroupsByMapIDThenSpawnGroupID.find(mapID);
     if (cycleMapIter == CycleSpawnGroupsByMapIDThenSpawnGroupID.end())
@@ -668,8 +671,8 @@ void EverQuestMod::UpdateCycleSpawns(Map* map, uint32 diff)
         uint32 aliveCount = 0;
         {
             std::lock_guard<std::mutex> lock(RuntimeStateMutex);
-            auto loadedMapIter = AllLoadedCreaturesByMapIDThenSpawnGroupID.find((int)mapID);
-            if (loadedMapIter != AllLoadedCreaturesByMapIDThenSpawnGroupID.end())
+            auto loadedMapIter = AllLoadedCreaturesByMapInstanceKeyThenSpawnGroupID.find(GetMapInstanceKey(map));
+            if (loadedMapIter != AllLoadedCreaturesByMapInstanceKeyThenSpawnGroupID.end())
             {
                 auto loadedGroupIter = loadedMapIter->second.find(cycleSpawnGroup.SpawnGroupID);
                 if (loadedGroupIter != loadedMapIter->second.end())
@@ -700,7 +703,7 @@ void EverQuestMod::UpdateCycleSpawns(Map* map, uint32 diff)
         if (hasPendingRespawn == true)
             continue;
 
-        ObjectGuid::LowType nextCreatureGUID = RollCycleSpawnCreatureGUID(cycleSpawnGroup, 0, mapID);
+        ObjectGuid::LowType nextCreatureGUID = RollCycleSpawnCreatureGUID(cycleSpawnGroup, 0, map);
         if (nextCreatureGUID == 0)
             continue;
         time_t respawnTime = nowTime + (time_t)cycleSpawnGroup.CycleRespawnTimeSec;
@@ -708,7 +711,7 @@ void EverQuestMod::UpdateCycleSpawns(Map* map, uint32 diff)
     }
 }
 
-bool EverQuestMod::ShouldDespawnCreatureDueToSpawnRestrictions(int mapID, Creature* creature)
+bool EverQuestMod::ShouldDespawnCreatureDueToSpawnRestrictions(Creature* creature)
 {
     // Creatures loading in dead (corpses) never count against spawn restrictions
     if (creature->IsAlive() == false)
@@ -719,11 +722,12 @@ bool EverQuestMod::ShouldDespawnCreatureDueToSpawnRestrictions(int mapID, Creatu
         return false;
 
     // Restricted creatures (EQ "spawn_limit") can only have so many alive in a map at once
+    uint64 mapInstanceKey = GetMapInstanceKey(creature->GetMap());
     uint32 spawnLimit = GetCreatureDataForCreatureTemplateID(creature->GetEntry()).SpawnLimit;
     if (spawnLimit > 0)
     {
         uint32 aliveCount = 0;
-        for (Creature* loadedCreature : GetLoadedCreaturesWithEntryID(mapID, creature->GetEntry()))
+        for (Creature* loadedCreature : GetLoadedCreaturesWithEntryID(creature->GetMap(), creature->GetEntry()))
             if (loadedCreature != creature && loadedCreature->IsAlive() == true && loadedCreature->IsPet() == false && loadedCreature->IsSummon() == false)
                 aliveCount++;
         if (aliveCount >= spawnLimit)
@@ -735,17 +739,17 @@ bool EverQuestMod::ShouldDespawnCreatureDueToSpawnRestrictions(int mapID, Creatu
     {
         const EverQuestCreatureSpawnPoint& creatureSpawnPoint = CreatureSpawnPointsByCreatureGUID[creature->GetSpawnId()];
         std::lock_guard<std::mutex> lock(RuntimeStateMutex);
-        if (AllLoadedCreaturesByMapIDThenSpawnPointID.find(mapID) != AllLoadedCreaturesByMapIDThenSpawnPointID.end())
+        if (AllLoadedCreaturesByMapInstanceKeyThenSpawnPointID.find(mapInstanceKey) != AllLoadedCreaturesByMapInstanceKeyThenSpawnPointID.end())
         {
-            unordered_map<uint32, vector<Creature*>>& spawnPointMap = AllLoadedCreaturesByMapIDThenSpawnPointID[mapID];
+            unordered_map<uint32, vector<Creature*>>& spawnPointMap = AllLoadedCreaturesByMapInstanceKeyThenSpawnPointID[mapInstanceKey];
             if (spawnPointMap.find(creatureSpawnPoint.SpawnPointID) != spawnPointMap.end())
                 for (Creature* loadedCreature : spawnPointMap[creatureSpawnPoint.SpawnPointID])
                     if (loadedCreature != creature && loadedCreature->IsAlive() == true)
                         return true;
         }
-        if (creatureSpawnPoint.SpawnGroupLimit > 0 && AllLoadedCreaturesByMapIDThenSpawnGroupID.find(mapID) != AllLoadedCreaturesByMapIDThenSpawnGroupID.end())
+        if (creatureSpawnPoint.SpawnGroupLimit > 0 && AllLoadedCreaturesByMapInstanceKeyThenSpawnGroupID.find(mapInstanceKey) != AllLoadedCreaturesByMapInstanceKeyThenSpawnGroupID.end())
         {
-            unordered_map<uint32, vector<Creature*>>& spawnGroupMap = AllLoadedCreaturesByMapIDThenSpawnGroupID[mapID];
+            unordered_map<uint32, vector<Creature*>>& spawnGroupMap = AllLoadedCreaturesByMapInstanceKeyThenSpawnGroupID[mapInstanceKey];
             if (spawnGroupMap.find(creatureSpawnPoint.SpawnGroupID) != spawnGroupMap.end())
             {
                 uint32 aliveCount = 0;
@@ -1432,11 +1436,12 @@ void EverQuestMod::UpdateCreatureMovementSound(Creature* creature, uint32 diff)
     }
 }
 
-bool EverQuestMod::HasAliveCreatureWithEntryInMap(uint32 mapID, uint32 creatureTemplateID, Creature* ignoreCreature)
+bool EverQuestMod::HasAliveCreatureWithEntryInMap(Map* map, uint32 creatureTemplateID, Creature* ignoreCreature)
 {
+    uint64 mapInstanceKey = GetMapInstanceKey(map);
     std::lock_guard<std::mutex> lock(RuntimeStateMutex);
-    auto mapIter = AllLoadedCreaturesByMapIDThenCreatureEntryID.find(mapID);
-    if (mapIter == AllLoadedCreaturesByMapIDThenCreatureEntryID.end())
+    auto mapIter = AllLoadedCreaturesByMapInstanceKeyThenCreatureEntryID.find(mapInstanceKey);
+    if (mapIter == AllLoadedCreaturesByMapInstanceKeyThenCreatureEntryID.end())
         return false;
     auto entryIter = mapIter->second.find(creatureTemplateID);
     if (entryIter == mapIter->second.end())
@@ -1507,10 +1512,10 @@ void EverQuestMod::ProcessKillSpawnsForCreatureEvent(Creature* eventCreature, Un
             continue;
         bool requirementFailed = false;
         for (uint32 creatureTemplateID : killSpawn.RequireDeadCreatureTemplateIDs)
-            if (HasAliveCreatureWithEntryInMap(mapID, creatureTemplateID, eventCreature) == true)
+            if (HasAliveCreatureWithEntryInMap(map, creatureTemplateID, eventCreature) == true)
                 requirementFailed = true;
         for (uint32 creatureTemplateID : killSpawn.RequireAliveCreatureTemplateIDs)
-            if (HasAliveCreatureWithEntryInMap(mapID, creatureTemplateID, eventCreature) == false)
+            if (HasAliveCreatureWithEntryInMap(map, creatureTemplateID, eventCreature) == false)
                 requirementFailed = true;
         if (requirementFailed == true)
             continue;
@@ -1569,7 +1574,7 @@ void EverQuestMod::ProcessKillSpawnsForCreatureEvent(Creature* eventCreature, Un
         {
             action.RemainingMS = (int32)delayMS;
             std::lock_guard<std::mutex> lock(PendingKillSpawnActionsMutex);
-            PendingKillSpawnActionsByMapID[mapID].push_back(action);
+            PendingKillSpawnActionsByMapInstanceKey[GetMapInstanceKey(map)].push_back(action);
         }
     }
 }
@@ -1580,7 +1585,7 @@ void EverQuestMod::ExecuteKillSpawnAction(Map* map, EverQuestPendingKillSpawnAct
     {
         case EQ_KILLSPAWN_ACTION_SPAWN:
         {
-            if (action.OnlyIfNotAliveCreatureTemplateID != 0 && HasAliveCreatureWithEntryInMap(map->GetId(), action.OnlyIfNotAliveCreatureTemplateID, nullptr) == true)
+            if (action.OnlyIfNotAliveCreatureTemplateID != 0 && HasAliveCreatureWithEntryInMap(map, action.OnlyIfNotAliveCreatureTemplateID, nullptr) == true)
                 return;
             Position spawnPosition(action.PositionX, action.PositionY, action.PositionZ, action.Orientation);
             TempSummon* summonedCreature = map->SummonCreature(action.TargetCreatureTemplateID, spawnPosition);
@@ -1605,8 +1610,8 @@ void EverQuestMod::ExecuteKillSpawnAction(Map* map, EverQuestPendingKillSpawnAct
             vector<Creature*> despawnCandidates;
             {
                 std::lock_guard<std::mutex> lock(RuntimeStateMutex);
-                auto mapIter = AllLoadedCreaturesByMapIDThenCreatureEntryID.find(map->GetId());
-                if (mapIter != AllLoadedCreaturesByMapIDThenCreatureEntryID.end())
+                auto mapIter = AllLoadedCreaturesByMapInstanceKeyThenCreatureEntryID.find(GetMapInstanceKey(map));
+                if (mapIter != AllLoadedCreaturesByMapInstanceKeyThenCreatureEntryID.end())
                 {
                     auto entryIter = mapIter->second.find(action.TargetCreatureTemplateID);
                     if (entryIter != mapIter->second.end())
@@ -1744,12 +1749,11 @@ void EverQuestMod::UpdateCreatureKillSpawnCombatWatch(Creature* creature, uint32
 
 void EverQuestMod::UpdatePendingKillSpawnActions(Map* map, uint32 diff)
 {
-    uint32 mapID = map->GetId();
     vector<EverQuestPendingKillSpawnAction> dueActions;
     {
         std::lock_guard<std::mutex> lock(PendingKillSpawnActionsMutex);
-        auto pendingIter = PendingKillSpawnActionsByMapID.find(mapID);
-        if (pendingIter == PendingKillSpawnActionsByMapID.end())
+        auto pendingIter = PendingKillSpawnActionsByMapInstanceKey.find(GetMapInstanceKey(map));
+        if (pendingIter == PendingKillSpawnActionsByMapInstanceKey.end())
             return;
         vector<EverQuestPendingKillSpawnAction>& pendingActions = pendingIter->second;
         for (size_t i = pendingActions.size(); i > 0; --i)
@@ -1763,13 +1767,13 @@ void EverQuestMod::UpdatePendingKillSpawnActions(Map* map, uint32 diff)
             }
         }
         if (pendingActions.empty() == true)
-            PendingKillSpawnActionsByMapID.erase(pendingIter);
+            PendingKillSpawnActionsByMapInstanceKey.erase(pendingIter);
     }
     for (EverQuestPendingKillSpawnAction& action : dueActions)
         ExecuteKillSpawnAction(map, action);
 }
 
-void EverQuestMod::TriggerQuestKillSpawn(uint32 mapID, const EverQuestQuestReaction& questReaction)
+void EverQuestMod::TriggerQuestKillSpawn(Map* map, const EverQuestQuestReaction& questReaction)
 {
     EverQuestTriggeredQuestKillSpawn triggeredKillSpawn;
     triggeredKillSpawn.TriggerCreatureTemplateID = questReaction.QuestgiverCreatureTemplateID;
@@ -1780,21 +1784,21 @@ void EverQuestMod::TriggerQuestKillSpawn(uint32 mapID, const EverQuestQuestReact
     triggeredKillSpawn.Orientation = questReaction.Orientation;
 
     // Repeat turn-ins only trigger one spawn, like the flag in the EQ quest scripts
+    uint64 mapInstanceKey = GetMapInstanceKey(map);
     std::lock_guard<std::mutex> lock(PendingKillSpawnActionsMutex);
-    for (EverQuestTriggeredQuestKillSpawn& existing : TriggeredQuestKillSpawnsByMapID[mapID])
+    for (EverQuestTriggeredQuestKillSpawn& existing : TriggeredQuestKillSpawnsByMapInstanceKey[mapInstanceKey])
         if (existing.TriggerCreatureTemplateID == triggeredKillSpawn.TriggerCreatureTemplateID && existing.TargetCreatureTemplateID == triggeredKillSpawn.TargetCreatureTemplateID)
             return;
-    TriggeredQuestKillSpawnsByMapID[mapID].push_back(triggeredKillSpawn);
+    TriggeredQuestKillSpawnsByMapInstanceKey[mapInstanceKey].push_back(triggeredKillSpawn);
 }
 
 void EverQuestMod::ProcessTriggeredQuestKillSpawnsForCreatureDeath(Creature* deadCreature, Unit* killer)
 {
-    uint32 mapID = deadCreature->GetMapId();
     vector<EverQuestPendingKillSpawnAction> dueActions;
     {
         std::lock_guard<std::mutex> lock(PendingKillSpawnActionsMutex);
-        auto triggeredIter = TriggeredQuestKillSpawnsByMapID.find(mapID);
-        if (triggeredIter == TriggeredQuestKillSpawnsByMapID.end())
+        auto triggeredIter = TriggeredQuestKillSpawnsByMapInstanceKey.find(GetMapInstanceKey(deadCreature->GetMap()));
+        if (triggeredIter == TriggeredQuestKillSpawnsByMapInstanceKey.end())
             return;
         vector<EverQuestTriggeredQuestKillSpawn>& triggeredKillSpawns = triggeredIter->second;
         for (size_t i = triggeredKillSpawns.size(); i > 0; --i)
@@ -1816,16 +1820,16 @@ void EverQuestMod::ProcessTriggeredQuestKillSpawnsForCreatureDeath(Creature* dea
             triggeredKillSpawns.erase(triggeredKillSpawns.begin() + (i - 1));
         }
         if (triggeredKillSpawns.empty() == true)
-            TriggeredQuestKillSpawnsByMapID.erase(triggeredIter);
+            TriggeredQuestKillSpawnsByMapInstanceKey.erase(triggeredIter);
     }
     for (EverQuestPendingKillSpawnAction& action : dueActions)
         ExecuteKillSpawnAction(deadCreature->GetMap(), action);
 }
 
-void EverQuestMod::EnqueuePendingKillSpawnAction(uint32 mapID, EverQuestPendingKillSpawnAction& action)
+void EverQuestMod::EnqueuePendingKillSpawnAction(Map* map, EverQuestPendingKillSpawnAction& action)
 {
     std::lock_guard<std::mutex> lock(PendingKillSpawnActionsMutex);
-    PendingKillSpawnActionsByMapID[mapID].push_back(action);
+    PendingKillSpawnActionsByMapInstanceKey[GetMapInstanceKey(map)].push_back(action);
 }
 
 void EverQuestMod::LoadCreatureOnkillReputations()
@@ -3114,7 +3118,7 @@ bool EverQuestMod::HandleGossipSelect(Player* player, Creature* creature, uint32
                     pendingAction.PositionY = creature->GetPositionY();
                     pendingAction.PositionZ = creature->GetPositionZ();
                 }
-                EnqueuePendingKillSpawnAction(map->GetId(), pendingAction);
+                EnqueuePendingKillSpawnAction(map, pendingAction);
             }
             else if (gossipReaction.TargetCreatureTemplateID == creature->GetEntry())
             {
@@ -3139,7 +3143,7 @@ bool EverQuestMod::HandleGossipSelect(Player* player, Creature* creature, uint32
                 pendingAction.PositionZ = z;
                 pendingAction.Orientation = orientation;
                 pendingAction.RemainingMS = (int32)gossipReaction.DelayInMS;
-                EnqueuePendingKillSpawnAction(map->GetId(), pendingAction);
+                EnqueuePendingKillSpawnAction(map, pendingAction);
             }
             else
                 SpawnCreature(gossipReaction.TargetCreatureTemplateID, map, x, y, z, orientation, gossipReaction.ReactionType == EQ_QUEST_REACTION_SPAWNUNIQUE);
@@ -6499,25 +6503,34 @@ void EverQuestMod::DeletePlayerBindHome(ObjectGuid guid)
         "WHERE guid = {}", guid.GetCounter());
 }
 
-void EverQuestMod::AddCreatureAsLoaded(int mapID, Creature* creature)
+// Instanced maps (like the raid instance zone versions) run one copy of the map per instance ID, so all per-map runtime creature state must be keyed by map AND instance or
+// concurrent instances pollute each other (world maps always have an instance ID of 0)
+uint64 EverQuestMod::GetMapInstanceKey(Map* map)
 {
+    return (uint64(map->GetId()) << 32) | uint64(map->GetInstanceId());
+}
+
+void EverQuestMod::AddCreatureAsLoaded(Creature* creature)
+{
+    uint64 mapInstanceKey = GetMapInstanceKey(creature->GetMap());
     std::lock_guard<std::mutex> lock(RuntimeStateMutex);
-    AllLoadedCreaturesByMapIDThenCreatureEntryID[mapID][creature->GetEntry()].push_back(creature);
+    AllLoadedCreaturesByMapInstanceKeyThenCreatureEntryID[mapInstanceKey][creature->GetEntry()].push_back(creature);
 
     // Track by spawn point and spawn group, if this creature has one
     if (creature->GetSpawnId() != 0 && CreatureSpawnPointsByCreatureGUID.find(creature->GetSpawnId()) != CreatureSpawnPointsByCreatureGUID.end())
     {
         const EverQuestCreatureSpawnPoint& creatureSpawnPoint = CreatureSpawnPointsByCreatureGUID[creature->GetSpawnId()];
-        AllLoadedCreaturesByMapIDThenSpawnPointID[mapID][creatureSpawnPoint.SpawnPointID].push_back(creature);
-        AllLoadedCreaturesByMapIDThenSpawnGroupID[mapID][creatureSpawnPoint.SpawnGroupID].push_back(creature);
+        AllLoadedCreaturesByMapInstanceKeyThenSpawnPointID[mapInstanceKey][creatureSpawnPoint.SpawnPointID].push_back(creature);
+        AllLoadedCreaturesByMapInstanceKeyThenSpawnGroupID[mapInstanceKey][creatureSpawnPoint.SpawnGroupID].push_back(creature);
     }
 }
 
-void EverQuestMod::RemoveCreatureAsLoaded(int mapID, Creature* creature)
+void EverQuestMod::RemoveCreatureAsLoaded(Creature* creature)
 {
+    uint64 mapInstanceKey = GetMapInstanceKey(creature->GetMap());
     std::lock_guard<std::mutex> lock(RuntimeStateMutex);
-    auto entryMapIt = AllLoadedCreaturesByMapIDThenCreatureEntryID.find(mapID);
-    if (entryMapIt != AllLoadedCreaturesByMapIDThenCreatureEntryID.end())
+    auto entryMapIt = AllLoadedCreaturesByMapInstanceKeyThenCreatureEntryID.find(mapInstanceKey);
+    if (entryMapIt != AllLoadedCreaturesByMapInstanceKeyThenCreatureEntryID.end())
     {
         unordered_map<int, vector<Creature*>>& innerMap = entryMapIt->second;
 
@@ -6545,7 +6558,7 @@ void EverQuestMod::RemoveCreatureAsLoaded(int mapID, Creature* creature)
             {
                 innerMap.erase(bucketIt);
                 if (innerMap.empty())
-                    AllLoadedCreaturesByMapIDThenCreatureEntryID.erase(entryMapIt);
+                    AllLoadedCreaturesByMapInstanceKeyThenCreatureEntryID.erase(entryMapIt);
             }
         }
     }
@@ -6554,9 +6567,9 @@ void EverQuestMod::RemoveCreatureAsLoaded(int mapID, Creature* creature)
     if (creature->GetSpawnId() != 0 && CreatureSpawnPointsByCreatureGUID.find(creature->GetSpawnId()) != CreatureSpawnPointsByCreatureGUID.end())
     {
         const EverQuestCreatureSpawnPoint& creatureSpawnPoint = CreatureSpawnPointsByCreatureGUID[creature->GetSpawnId()];
-        if (AllLoadedCreaturesByMapIDThenSpawnPointID.find(mapID) != AllLoadedCreaturesByMapIDThenSpawnPointID.end())
+        if (AllLoadedCreaturesByMapInstanceKeyThenSpawnPointID.find(mapInstanceKey) != AllLoadedCreaturesByMapInstanceKeyThenSpawnPointID.end())
         {
-            unordered_map<uint32, vector<Creature*>>& spawnPointMap = AllLoadedCreaturesByMapIDThenSpawnPointID[mapID];
+            unordered_map<uint32, vector<Creature*>>& spawnPointMap = AllLoadedCreaturesByMapInstanceKeyThenSpawnPointID[mapInstanceKey];
             if (spawnPointMap.find(creatureSpawnPoint.SpawnPointID) != spawnPointMap.end())
             {
                 vector<Creature*>& spawnPointCreatureVector = spawnPointMap[creatureSpawnPoint.SpawnPointID];
@@ -6568,14 +6581,14 @@ void EverQuestMod::RemoveCreatureAsLoaded(int mapID, Creature* creature)
                     {
                         spawnPointMap.erase(creatureSpawnPoint.SpawnPointID);
                         if (spawnPointMap.empty())
-                            AllLoadedCreaturesByMapIDThenSpawnPointID.erase(mapID);
+                            AllLoadedCreaturesByMapInstanceKeyThenSpawnPointID.erase(mapInstanceKey);
                     }
                 }
             }
         }
-        if (AllLoadedCreaturesByMapIDThenSpawnGroupID.find(mapID) != AllLoadedCreaturesByMapIDThenSpawnGroupID.end())
+        if (AllLoadedCreaturesByMapInstanceKeyThenSpawnGroupID.find(mapInstanceKey) != AllLoadedCreaturesByMapInstanceKeyThenSpawnGroupID.end())
         {
-            unordered_map<uint32, vector<Creature*>>& spawnGroupMap = AllLoadedCreaturesByMapIDThenSpawnGroupID[mapID];
+            unordered_map<uint32, vector<Creature*>>& spawnGroupMap = AllLoadedCreaturesByMapInstanceKeyThenSpawnGroupID[mapInstanceKey];
             if (spawnGroupMap.find(creatureSpawnPoint.SpawnGroupID) != spawnGroupMap.end())
             {
                 vector<Creature*>& spawnGroupCreatureVector = spawnGroupMap[creatureSpawnPoint.SpawnGroupID];
@@ -6587,7 +6600,7 @@ void EverQuestMod::RemoveCreatureAsLoaded(int mapID, Creature* creature)
                     {
                         spawnGroupMap.erase(creatureSpawnPoint.SpawnGroupID);
                         if (spawnGroupMap.empty())
-                            AllLoadedCreaturesByMapIDThenSpawnGroupID.erase(mapID);
+                            AllLoadedCreaturesByMapInstanceKeyThenSpawnGroupID.erase(mapInstanceKey);
                     }
                 }
             }
@@ -6599,11 +6612,12 @@ void EverQuestMod::RemoveCreatureAsLoaded(int mapID, Creature* creature)
     VisualEquippedItemsByCreatureGUID.erase(creature->GetGUID());
 }
 
-vector<Creature*> EverQuestMod::GetLoadedCreaturesWithEntryID(int mapID, uint32 entryID)
+vector<Creature*> EverQuestMod::GetLoadedCreaturesWithEntryID(Map* map, uint32 entryID)
 {
+    uint64 mapInstanceKey = GetMapInstanceKey(map);
     std::lock_guard<std::mutex> lock(RuntimeStateMutex);
-    auto entryMapIt = AllLoadedCreaturesByMapIDThenCreatureEntryID.find(mapID);
-    if (entryMapIt == AllLoadedCreaturesByMapIDThenCreatureEntryID.end())
+    auto entryMapIt = AllLoadedCreaturesByMapInstanceKeyThenCreatureEntryID.find(mapInstanceKey);
+    if (entryMapIt == AllLoadedCreaturesByMapInstanceKeyThenCreatureEntryID.end())
         return vector<Creature*>();
     auto bucketIt = entryMapIt->second.find(entryID);
     if (bucketIt == entryMapIt->second.end())
@@ -6728,7 +6742,7 @@ void EverQuestMod::SpawnCreature(uint32 entryID, Map* map, float x, float y, flo
     // Cancel out if it should be a unique spawn, and the creature exists
     if (enforceUniqueSpawn == true)
     {
-        vector<Creature*> loadedCreatures = GetLoadedCreaturesWithEntryID(map->GetId(), entryID);
+        vector<Creature*> loadedCreatures = GetLoadedCreaturesWithEntryID(map, entryID);
         if (loadedCreatures.size() > 0)
             return;
     }
@@ -6765,7 +6779,7 @@ void EverQuestMod::SpawnCreature(uint32 entryID, Map* map, float x, float y, flo
 
 void EverQuestMod::DespawnCreature(uint32 entryID, Map* map)
 {
-    vector<Creature*> loadedCreatures = GetLoadedCreaturesWithEntryID(map->GetId(), entryID);
+    vector<Creature*> loadedCreatures = GetLoadedCreaturesWithEntryID(map, entryID);
     for (Creature* creature : loadedCreatures)
         if (creature != nullptr)
         {
@@ -6776,7 +6790,7 @@ void EverQuestMod::DespawnCreature(uint32 entryID, Map* map)
 
 void EverQuestMod::MakeCreatureAttackPlayer(uint32 entryID, Map* map, Player* player)
 {
-    vector<Creature*> loadedCreatures = GetLoadedCreaturesWithEntryID(map->GetId(), entryID);
+    vector<Creature*> loadedCreatures = GetLoadedCreaturesWithEntryID(map, entryID);
     for (Creature* creature : loadedCreatures)
         if (creature != nullptr)
         {
