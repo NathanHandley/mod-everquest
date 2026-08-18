@@ -1215,6 +1215,7 @@ public:
     bool IsCreatureCharmBlockedByCharmLimits(uint32 spellID, Unit* target, Unit* caster);
     bool ApplyBardSongFearDiminishingReturnsOnAuraApply(Unit* target, Aura* aura);
     void RemoveCreatureFearDiminishingReturnState(Creature* creature);
+    uint64 GetHasteTrackingKeyForUnit(Unit* unit);
     void TrackEQHasteAurasAndEnforceCapOnAuraApply(Unit* unit, Aura* aura);
     void UntrackEQHasteAurasAndEnforceCapOnAuraRemove(Unit* unit, Aura* aura);
     void EnforceEQHastePercentCapOnUnit(Unit* unit, vector<EverQuestUnitHasteAuraEffect>& trackedHasteAuraEffects);

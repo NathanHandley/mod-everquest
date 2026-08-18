@@ -2501,6 +2501,13 @@ void EverQuestMod::RemoveCreatureFearDiminishingReturnState(Creature* creature)
     creature->CustomData.Erase(EQ_CREATURE_CUSTOMDATA_FEARDIMINISH);
 }
 
+uint64 EverQuestMod::GetHasteTrackingKeyForUnit(Unit* unit)
+{
+    if (unit->IsPlayer() == true)
+        return 0;
+    return GetMapInstanceKey(unit->GetMap());
+}
+
 void EverQuestMod::TrackEQHasteAurasAndEnforceCapOnAuraApply(Unit* unit, Aura* aura)
 {
     if (ConfigSpellHasteCapEnabled == false)
@@ -2533,7 +2540,7 @@ void EverQuestMod::TrackEQHasteAurasAndEnforceCapOnAuraApply(Unit* unit, Aura* a
     vector<EverQuestUnitHasteAuraEffect>* trackedHasteAuraEffects = nullptr;
     {
         std::lock_guard<std::mutex> lock(RuntimeStateMutex);
-        trackedHasteAuraEffects = &EQHasteAuraEffectsByMapInstanceKeyThenUnitGUID[GetMapInstanceKey(unit->GetMap())][unit->GetGUID()];
+        trackedHasteAuraEffects = &EQHasteAuraEffectsByMapInstanceKeyThenUnitGUID[GetHasteTrackingKeyForUnit(unit)][unit->GetGUID()];
     }
 
     // EQ haste category comes from the spell row, falling back to worn-spell lookup then the spell/song for safety
@@ -2591,7 +2598,7 @@ void EverQuestMod::UntrackEQHasteAurasAndEnforceCapOnAuraRemove(Unit* unit, Aura
     vector<EverQuestUnitHasteAuraEffect>* trackedHasteAuraEffects = nullptr;
     {
         std::lock_guard<std::mutex> lock(RuntimeStateMutex);
-        auto trackedMapIter = EQHasteAuraEffectsByMapInstanceKeyThenUnitGUID.find(GetMapInstanceKey(unit->GetMap()));
+        auto trackedMapIter = EQHasteAuraEffectsByMapInstanceKeyThenUnitGUID.find(GetHasteTrackingKeyForUnit(unit));
         if (trackedMapIter == EQHasteAuraEffectsByMapInstanceKeyThenUnitGUID.end())
             return;
         auto trackedIter = trackedMapIter->second.find(unit->GetGUID());
@@ -2617,7 +2624,7 @@ void EverQuestMod::UntrackEQHasteAurasAndEnforceCapOnAuraRemove(Unit* unit, Aura
     if (trackedHasteAuraEffects->empty() == true)
     {
         std::lock_guard<std::mutex> lock(RuntimeStateMutex);
-        auto trackedMapIter = EQHasteAuraEffectsByMapInstanceKeyThenUnitGUID.find(GetMapInstanceKey(unit->GetMap()));
+        auto trackedMapIter = EQHasteAuraEffectsByMapInstanceKeyThenUnitGUID.find(GetHasteTrackingKeyForUnit(unit));
         if (trackedMapIter != EQHasteAuraEffectsByMapInstanceKeyThenUnitGUID.end())
         {
             trackedMapIter->second.erase(unit->GetGUID());
@@ -4179,7 +4186,8 @@ void EverQuestMod::TryDoCreatureEQMeleeExtraAttacks(Unit* attacker, Unit* victim
     uint64 mapInstanceKey = GetMapInstanceKey(creature->GetMap());
     {
         std::lock_guard<std::mutex> lock(RuntimeStateMutex);
-        if (CreaturesResolvingEQMeleeExtraAttacksByMapInstanceKey[mapInstanceKey].count(attackerGUID) > 0)
+        auto guardMapIt = CreaturesResolvingEQMeleeExtraAttacksByMapInstanceKey.find(mapInstanceKey);
+        if (guardMapIt != CreaturesResolvingEQMeleeExtraAttacksByMapInstanceKey.end() && guardMapIt->second.count(attackerGUID) > 0)
             return;
     }
 
