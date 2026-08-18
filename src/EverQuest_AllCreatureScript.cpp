@@ -174,9 +174,9 @@ private:
         bool hasBow = false;
         bool hasArrow = false;
         uint32 bowVisualItemID = 0;
-        if (EverQuest->HasPreloadedLootItemIDsForCreatureGUID(creature->GetGUID()) == true)
+        if (EverQuest->HasPreloadedLootItemIDsForCreatureGUID(creature->GetMap(), creature->GetGUID()) == true)
         {
-            for (uint32 itemTemplateID : EverQuest->GetPreloadedLootIDsForCreatureGUID(creature->GetGUID()))
+            for (uint32 itemTemplateID : EverQuest->GetPreloadedLootIDsForCreatureGUID(creature->GetMap(), creature->GetGUID()))
             {
                 uint32 itemTemplateForNPCEquipID = EverQuest->GetNPCEquipItemTemplateIDForItemTemplate(itemTemplateID);
                 ItemTemplate const* itemTemplate = sObjectMgr->GetItemTemplate(itemTemplateForNPCEquipID);
@@ -209,9 +209,9 @@ private:
 
     void ApplyLootWornEffectAuras(Creature* creature)
     {
-        if (EverQuest->HasPreloadedLootItemIDsForCreatureGUID(creature->GetGUID()) == false)
+        if (EverQuest->HasPreloadedLootItemIDsForCreatureGUID(creature->GetMap(), creature->GetGUID()) == false)
             return;
-        for (uint32 itemTemplateID : EverQuest->GetPreloadedLootIDsForCreatureGUID(creature->GetGUID()))
+        for (uint32 itemTemplateID : EverQuest->GetPreloadedLootIDsForCreatureGUID(creature->GetMap(), creature->GetGUID()))
         {
             uint32 wornEffectSpellID = EverQuest->GetWornEffectSpellIDForItemTemplate(itemTemplateID);
             if (wornEffectSpellID == 0)
@@ -230,15 +230,15 @@ private:
 
         // Roll items for only EQ creatures
         if (EverQuest->HasCreatureLootDataForCreatureTemplateEntryID(creature->GetEntry()))
-            EverQuest->RollLootItemsForCreature(creature->GetGUID(), creature->GetEntry());
+            EverQuest->RollLootItemsForCreature(creature);
 
         // Reset
         creature->SetUInt32Value(UNIT_VIRTUAL_ITEM_SLOT_ID + 0, 0);
         creature->SetUInt32Value(UNIT_VIRTUAL_ITEM_SLOT_ID + 1, 0);
-        EverQuest->ClearVisualEquippedItemsForCreatureGUID(creature->GetGUID());
+        EverQuest->ClearVisualEquippedItemsForCreatureGUID(creature->GetMap(), creature->GetGUID());
 
         EverQuestCreature eqCreature = EverQuest->GetCreatureDataForCreatureTemplateID(creature->GetEntry());
-        if (eqCreature.CanShowHeldLootItems == false || EverQuest->HasPreloadedLootItemIDsForCreatureGUID(creature->GetGUID()) == false)
+        if (eqCreature.CanShowHeldLootItems == false || EverQuest->HasPreloadedLootItemIDsForCreatureGUID(creature->GetMap(), creature->GetGUID()) == false)
             return;
 
         // Prioritize what items to show as worn
@@ -247,7 +247,7 @@ private:
         vector<ItemTemplate const*> shields;
         vector<ItemTemplate const*> heldItems;
         vector<ItemTemplate const*> fishingPoles;
-        for (uint32 itemTemplateID : EverQuest->GetPreloadedLootIDsForCreatureGUID(creature->GetGUID()))
+        for (uint32 itemTemplateID : EverQuest->GetPreloadedLootIDsForCreatureGUID(creature->GetMap(), creature->GetGUID()))
         {
             uint32 itemTemplateForNPCEquipID = EverQuest->GetNPCEquipItemTemplateIDForItemTemplate(itemTemplateID);
             ItemTemplate const* itemTemplate = sObjectMgr->GetItemTemplate(itemTemplateForNPCEquipID);
@@ -319,7 +319,7 @@ private:
         if (mainHandItem != nullptr || offHandItem != nullptr)
         {
             creature->SetSheath(SHEATH_STATE_MELEE);
-            EverQuest->TrackVisualEquippedItemsForCreatureGUID(creature->GetGUID(), mainhandItemID, offhandItemID, isDualWielding);
+            EverQuest->TrackVisualEquippedItemsForCreatureGUID(creature->GetMap(), creature->GetGUID(), mainhandItemID, offhandItemID, isDualWielding);
         }
 
         // Reset combat type

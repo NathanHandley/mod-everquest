@@ -149,35 +149,43 @@ public:
         }
     }
 
-    bool OnItemRoll(Player const* /*player*/, LootStoreItem const* lootStoreItem, float& chance, Loot& loot, LootStore const& lootStore) override
+    bool OnItemRoll(Player const* player, LootStoreItem const* lootStoreItem, float& chance, Loot& loot, LootStore const& lootStore) override
     {
         if (EverQuest->IsEnabled == false)
             return true;
         if (CouldLootSourceBePrerolledEQCreature(loot, lootStore) == false)
             return true;
 
+        // Prerolls are keyed by map instance since creature GUIDs repeat across instance copies of a map
+        if (player == nullptr)
+            return true;
+        Map* lootMap = player->GetMap();
+
         // For any items that are on prerolled creatures, restrict drops to align to what was prerolled
-        if (EverQuest->HasPreloadedLootItemIDsForCreatureGUID(loot.sourceWorldObjectGUID) == false)
+        if (EverQuest->HasPreloadedLootItemIDsForCreatureGUID(lootMap, loot.sourceWorldObjectGUID) == false)
             return true;
 
-        if (EverQuest->HasPreloadedLootItemIDForCreatureGUID(loot.sourceWorldObjectGUID, lootStoreItem->itemid))
+        if (EverQuest->HasPreloadedLootItemIDForCreatureGUID(lootMap, loot.sourceWorldObjectGUID, lootStoreItem->itemid))
             chance = 100.0f;
         else
             chance = 0.0f;
         return true;
     }
 
-    void OnBeforeDropAddItem(Player const* /*player*/, Loot& loot, bool /*canRate*/, uint16 /*lootMode*/, LootStoreItem* lootStoreItem, LootStore const& store) override
+    void OnBeforeDropAddItem(Player const* player, Loot& loot, bool /*canRate*/, uint16 /*lootMode*/, LootStoreItem* lootStoreItem, LootStore const& store) override
     {
         if (EverQuest->IsEnabled == false)
             return;
         if (CouldLootSourceBePrerolledEQCreature(loot, store) == false)
             return;
+        if (player == nullptr)
+            return;
+        Map* lootMap = player->GetMap();
 
-        if (EverQuest->HasPreloadedLootItemIDsForCreatureGUID(loot.sourceWorldObjectGUID) == false)
+        if (EverQuest->HasPreloadedLootItemIDsForCreatureGUID(lootMap, loot.sourceWorldObjectGUID) == false)
             return;
 
-        uint32 prerolledCount = EverQuest->GetPreloadedLootCountForCreatureGUID(loot.sourceWorldObjectGUID, lootStoreItem->itemid);
+        uint32 prerolledCount = EverQuest->GetPreloadedLootCountForCreatureGUID(lootMap, loot.sourceWorldObjectGUID, lootStoreItem->itemid);
         if (prerolledCount > 0)
         {
             // Clamp so a large quantity doesn't truncate vs the uint8 limit
@@ -191,15 +199,17 @@ public:
     }
 
     // Called when GroupID > 0 and chance == 0
-    bool OnBeforeLootEqualChanced(Player const* /*player*/, list<LootStoreItem*> /*equalChanced*/, Loot& loot, LootStore const& lootStore) override
+    bool OnBeforeLootEqualChanced(Player const* player, list<LootStoreItem*> /*equalChanced*/, Loot& loot, LootStore const& lootStore) override
     {
         if (EverQuest->IsEnabled == false)
             return true;
         if (CouldLootSourceBePrerolledEQCreature(loot, lootStore) == false)
             return true;
+        if (player == nullptr)
+            return true;
 
         // Fail it so only prerolled items drop
-        if (EverQuest->HasPreloadedLootItemIDsForCreatureGUID(loot.sourceWorldObjectGUID))
+        if (EverQuest->HasPreloadedLootItemIDsForCreatureGUID(player->GetMap(), loot.sourceWorldObjectGUID))
             return false;
 
         return true;

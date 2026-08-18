@@ -405,7 +405,7 @@ public:
     uint32 TriggerMinLevel = 0;
     uint32 TriggerMaxLevel = 0;
     uint32 RespawnTimeSec = 0;
-    vector<ObjectGuid::LowType> TargetSpawnIDs;
+    unordered_map<uint32, vector<ObjectGuid::LowType>> TargetSpawnIDsByMapID; // Spawn rows differ between the open world zone and its raid instance copy, so respawn targets resolve per map
 };
 
 class EverQuestPendingKillSpawnAction
@@ -1071,7 +1071,7 @@ public:
     unordered_map<uint32, vector<EverQuestCreatureKillSpawn>> CreatureKillSpawnsByTriggerCreatureTemplateID;
     unordered_set<uint32> EvadeKillSpawnTriggerCreatureTemplateIDs;
     unordered_map<uint32, uint32> OocTimerKillSpawnDurationMSByCreatureTemplateID;
-    vector<ObjectGuid::LowType> VulakRequiredDragonSpawnIDs;
+    unordered_map<uint32, vector<ObjectGuid::LowType>> VulakRequiredDragonSpawnIDsByMapID; // Keyed by map ID, since the raid instance copy of the zone has its own dragon spawn rows
     unordered_map<uint32, vector<EverQuestCreatureEmote>> CreatureEmotesByCreatureTemplateID;
     unordered_map<uint32, EverQuestCreatureMovementSound> CreatureMovementSoundsByDisplayID;
 
@@ -1106,14 +1106,14 @@ public:
     unordered_set<ObjectGuid> PlayersWithAuctionUsableFilterActive;
     unordered_set<ObjectGuid> PlayersGainingExperience;
     unordered_set<ObjectGuid> PlayersPendingLevelCapExperiencePark;
-    unordered_map<ObjectGuid, vector<EverQuestUnitHasteAuraEffect>> EQHasteAuraEffectsByUnitGUID;
+    unordered_map<uint64, unordered_map<ObjectGuid, vector<EverQuestUnitHasteAuraEffect>>> EQHasteAuraEffectsByMapInstanceKeyThenUnitGUID; // Map-instance keyed since creature GUIDs repeat across instance copies of a map
     unordered_map<ObjectGuid, uint32> BearFormShieldArmorShiftAmountByPlayerGUID;
     unordered_map<ObjectGuid, uint32> AgileFighterRefreshTimerMSByPlayerGUID;
     unordered_map<uint32, vector<EverQuestCreatureLootGroup>> CreatureLootGroupsByCreatureTemplateID;
-    unordered_map<ObjectGuid, vector<uint32>> PreloadedLootItemIDsByCreatureGUID;
-    unordered_map<ObjectGuid, unordered_map<uint32, uint32>> PreloadedLootCountsByCreatureGUID;
-    unordered_map<ObjectGuid, EverQuestLoadedCreatureEquippedVisualItems> VisualEquippedItemsByCreatureGUID;
-    unordered_set<ObjectGuid> CreaturesResolvingEQMeleeExtraAttacks;
+    unordered_map<uint64, unordered_map<ObjectGuid, vector<uint32>>> PreloadedLootItemIDsByMapInstanceKeyThenCreatureGUID; // Map-instance keyed since creature GUIDs repeat across instance copies of a map
+    unordered_map<uint64, unordered_map<ObjectGuid, unordered_map<uint32, uint32>>> PreloadedLootCountsByMapInstanceKeyThenCreatureGUID;
+    unordered_map<uint64, unordered_map<ObjectGuid, EverQuestLoadedCreatureEquippedVisualItems>> VisualEquippedItemsByMapInstanceKeyThenCreatureGUID;
+    unordered_map<uint64, unordered_set<ObjectGuid>> CreaturesResolvingEQMeleeExtraAttacksByMapInstanceKey; // Map-instance keyed since creature GUIDs repeat across instance copies of a map
     unordered_map<uint32, vector<EverQuestTransportShipTrigger>> ShipTriggersByTriggeringGameObjectTemplateEntryID;
     unordered_map<uint32, int> ShipWaitNodesByGameObjectTemplateEntryID;
     unordered_map<uint32, GameObject*> ShipGameObjectsByTemplateEntryID;
@@ -1124,6 +1124,7 @@ public:
     unordered_map<uint32, EverQuestZoneSafePoint> ZoneSafePointByMapID;
     unordered_map<uint32, EverQuestZone> ZoneByMapID;
     unordered_set<uint32> InstanceRaidLowMapIDs;
+    unordered_map<uint32, uint32> OpenWorldMapIDByInstanceRaidLowMapID;
     unordered_map<ObjectGuid, EverQuestPlayerRaidLowInstanceState> RaidLowInstanceStateByPlayerGUID;
     unordered_map<uint32, EverQuestFaction> FactionsByFactionTemplateID;
     unordered_set<uint32> DefendCombatFactionTemplateIDs;
@@ -1275,14 +1276,14 @@ public:
     void ProcessAdventurerStateOnLevelChange(Player* player);
     void LoadCreatureLootData();
     bool HasCreatureLootDataForCreatureTemplateEntryID(uint32 creatureTemplateEntryID);
-    bool HasPreloadedLootItemIDsForCreatureGUID(ObjectGuid creatureGUID);
-    bool HasPreloadedLootItemIDForCreatureGUID(ObjectGuid creatureGUID, uint32 itemTemplateID);
-    uint32 GetPreloadedLootCountForCreatureGUID(ObjectGuid creatureGUID, uint32 itemTemplateID);
-    const vector<uint32>& GetPreloadedLootIDsForCreatureGUID(ObjectGuid creatureGUID);
-    void ClearPreloadedLootIDsForCreatureGUID(ObjectGuid creatureGUID);
-    void TrackVisualEquippedItemsForCreatureGUID(ObjectGuid creatureGUID, uint32 mainhandItemID, uint32 offhandItemID, bool isDualWielding);
-    void ClearVisualEquippedItemsForCreatureGUID(ObjectGuid creatureGUID);
-    bool IsCreatureDualWielding(ObjectGuid creatureGUID);
+    bool HasPreloadedLootItemIDsForCreatureGUID(Map* map, ObjectGuid creatureGUID);
+    bool HasPreloadedLootItemIDForCreatureGUID(Map* map, ObjectGuid creatureGUID, uint32 itemTemplateID);
+    uint32 GetPreloadedLootCountForCreatureGUID(Map* map, ObjectGuid creatureGUID, uint32 itemTemplateID);
+    const vector<uint32>& GetPreloadedLootIDsForCreatureGUID(Map* map, ObjectGuid creatureGUID);
+    void ClearPreloadedLootIDsForCreatureGUID(Map* map, ObjectGuid creatureGUID);
+    void TrackVisualEquippedItemsForCreatureGUID(Map* map, ObjectGuid creatureGUID, uint32 mainhandItemID, uint32 offhandItemID, bool isDualWielding);
+    void ClearVisualEquippedItemsForCreatureGUID(Map* map, ObjectGuid creatureGUID);
+    bool IsCreatureDualWielding(Map* map, ObjectGuid creatureGUID);
     uint32 GetEQNPCMeleeWeaponSkillForLevel(uint32 level);
     void TryDoCreatureEQMeleeExtraAttacks(Unit* attacker, Unit* victim);
     void StoreCreatureRangedAttackState(Creature* creature, float minRange, float maxRange, int32 damageModPct);
@@ -1336,6 +1337,7 @@ public:
     void SendPlayerToZoneSafePoint(Player* player, bool includeGroup);
     void LoadZoneData();
     uint32 GetInstanceRaidLowMapIDForMap(uint32 mapID);
+    uint32 GetOpenWorldMapIDForMapID(uint32 mapID);
     bool IsMapInstanceRaidLow(uint32 mapID);
     void UpdateRaidLowInstanceStateForPlayer(Player* player);
     void ClearRaidLowInstanceStateForPlayer(ObjectGuid playerGUID);
@@ -1384,7 +1386,7 @@ public:
     void AddCreatureAsLoaded(Creature* creature);
     void RemoveCreatureAsLoaded(Creature* creature);
     vector<Creature*> GetLoadedCreaturesWithEntryID(Map* map, uint32 entryID);
-    void RollLootItemsForCreature(ObjectGuid creatureGUID, uint32 creatureTemplateEntryID);
+    void RollLootItemsForCreature(Creature* creature);
     void RollLootGroupIntoCounts(const EverQuestCreatureLootGroup& lootGroup, unordered_map<uint32, uint32>& counts);
     void SpawnCreature(uint32 entryID, Map* map, float x, float y, float z, float orientation, bool enforceUniqueSpawn);
     void DespawnCreature(uint32 entryID, Map* map);

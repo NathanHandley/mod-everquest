@@ -851,16 +851,19 @@ void EverQuestMod::ResolveKillSpawnRespawnTargetSpawnPoints()
         {
             if (killSpawn.ActionType != EQ_KILLSPAWN_ACTION_RESPAWNTARGET)
                 continue;
+
+            // The raid instance copy of the zone has its own static spawn rows, so targets resolve for that map too when one exists
+            uint32 instanceRaidLowMapID = GetInstanceRaidLowMapIDForMap(killSpawn.MapID);
             for (auto const& creatureDataPair : sObjectMgr->GetAllCreatureData())
             {
                 CreatureData const& creatureData = creatureDataPair.second;
-                if (creatureData.mapid != killSpawn.MapID)
+                if (creatureData.mapid != killSpawn.MapID && (instanceRaidLowMapID == 0 || creatureData.mapid != instanceRaidLowMapID))
                     continue;
                 if (creatureData.id != killSpawn.TargetCreatureTemplateID && creatureData.id2 != killSpawn.TargetCreatureTemplateID && creatureData.id3 != killSpawn.TargetCreatureTemplateID)
                     continue;
-                killSpawn.TargetSpawnIDs.push_back(creatureDataPair.first);
+                killSpawn.TargetSpawnIDsByMapID[creatureData.mapid].push_back(creatureDataPair.first);
             }
-            if (killSpawn.TargetSpawnIDs.empty() == true)
+            if (killSpawn.TargetSpawnIDsByMapID.find(killSpawn.MapID) == killSpawn.TargetSpawnIDsByMapID.end())
                 LOG_ERROR("module.EverQuest", "EverQuestMod::ResolveKillSpawnRespawnTargetSpawnPoints found no spawn points for kill spawn ID {} with target creature template {} on map {}", killSpawn.ID, killSpawn.TargetCreatureTemplateID, killSpawn.MapID);
         }
     }
@@ -888,7 +891,9 @@ void EverQuestMod::ResolveVulakRequiredDragonSpawnPoints()
             CreatureData const& creatureData = creatureDataPair.second;
             if (creatureData.id != requiredDragonCreatureTemplateID && creatureData.id2 != requiredDragonCreatureTemplateID && creatureData.id3 != requiredDragonCreatureTemplateID)
                 continue;
-            VulakRequiredDragonSpawnIDs.push_back(creatureDataPair.first);
+
+            // Grouped by map so the open world zone and its raid instance copy each track only their own dragons
+            VulakRequiredDragonSpawnIDsByMapID[creatureData.mapid].push_back(creatureDataPair.first);
             foundSpawnPoint = true;
         }
         if (foundSpawnPoint == false)
@@ -905,11 +910,12 @@ void EverQuestMod::SetVulakLocked(Creature* creature, bool locked)
 
 bool EverQuestMod::AreAllVulakRequiredDragonsDead(Map* map)
 {
-    if (VulakRequiredDragonSpawnIDs.empty() == true)
+    auto dragonSpawnIDsIt = VulakRequiredDragonSpawnIDsByMapID.find(map->GetId());
+    if (dragonSpawnIDsIt == VulakRequiredDragonSpawnIDsByMapID.end() || dragonSpawnIDsIt->second.empty() == true)
         return false;
 
     // Spawn points only carry a pending respawn time while the creature is dead
-    for (ObjectGuid::LowType dragonSpawnID : VulakRequiredDragonSpawnIDs)
+    for (ObjectGuid::LowType dragonSpawnID : dragonSpawnIDsIt->second)
         if (map->GetCreatureRespawnTime(dragonSpawnID) == 0)
             return false;
     return true;
@@ -1462,7 +1468,9 @@ void EverQuestMod::ProcessKillSpawnsForCreatureEvent(Creature* eventCreature, Un
     if (killSpawnIter == CreatureKillSpawnsByTriggerCreatureTemplateID.end())
         return;
     Map* map = eventCreature->GetMap();
-    uint32 mapID = map->GetId();
+
+    // Kill spawn rows only exist for the open world copy of a zone, so events inside a raid instance copy match against its open world map
+    uint32 mapID = GetOpenWorldMapIDForMapID(map->GetId());
     uint32 eventCreatureLevel = eventCreature->GetLevel();
 
     // Roll which alternative wins in each alt group (weighted across distinct alt IDs)
@@ -1536,9 +1544,11 @@ void EverQuestMod::ProcessKillSpawnsForCreatureEvent(Creature* eventCreature, Un
         }
         else if (killSpawn.ActionType == EQ_KILLSPAWN_ACTION_RESPAWNTARGET)
         {
-            action.RespawnTargetSpawnIDs = killSpawn.TargetSpawnIDs;
-            if (action.RespawnTargetSpawnIDs.empty() == true)
+            // Use the spawn rows of the map the event actually happened on, since the raid instance copy has its own spawn rows
+            auto targetSpawnIDsIt = killSpawn.TargetSpawnIDsByMapID.find(map->GetId());
+            if (targetSpawnIDsIt == killSpawn.TargetSpawnIDsByMapID.end() || targetSpawnIDsIt->second.empty() == true)
                 continue;
+            action.RespawnTargetSpawnIDs = targetSpawnIDsIt->second;
         }
         else if (killSpawn.SpawnAtCorpse == true)
         {
@@ -2523,7 +2533,7 @@ void EverQuestMod::TrackEQHasteAurasAndEnforceCapOnAuraApply(Unit* unit, Aura* a
     vector<EverQuestUnitHasteAuraEffect>* trackedHasteAuraEffects = nullptr;
     {
         std::lock_guard<std::mutex> lock(RuntimeStateMutex);
-        trackedHasteAuraEffects = &EQHasteAuraEffectsByUnitGUID[unit->GetGUID()];
+        trackedHasteAuraEffects = &EQHasteAuraEffectsByMapInstanceKeyThenUnitGUID[GetMapInstanceKey(unit->GetMap())][unit->GetGUID()];
     }
 
     // EQ haste category comes from the spell row, falling back to worn-spell lookup then the spell/song for safety
@@ -2581,8 +2591,11 @@ void EverQuestMod::UntrackEQHasteAurasAndEnforceCapOnAuraRemove(Unit* unit, Aura
     vector<EverQuestUnitHasteAuraEffect>* trackedHasteAuraEffects = nullptr;
     {
         std::lock_guard<std::mutex> lock(RuntimeStateMutex);
-        auto trackedIter = EQHasteAuraEffectsByUnitGUID.find(unit->GetGUID());
-        if (trackedIter == EQHasteAuraEffectsByUnitGUID.end())
+        auto trackedMapIter = EQHasteAuraEffectsByMapInstanceKeyThenUnitGUID.find(GetMapInstanceKey(unit->GetMap()));
+        if (trackedMapIter == EQHasteAuraEffectsByMapInstanceKeyThenUnitGUID.end())
+            return;
+        auto trackedIter = trackedMapIter->second.find(unit->GetGUID());
+        if (trackedIter == trackedMapIter->second.end())
             return;
         trackedHasteAuraEffects = &trackedIter->second;
     }
@@ -2604,7 +2617,13 @@ void EverQuestMod::UntrackEQHasteAurasAndEnforceCapOnAuraRemove(Unit* unit, Aura
     if (trackedHasteAuraEffects->empty() == true)
     {
         std::lock_guard<std::mutex> lock(RuntimeStateMutex);
-        EQHasteAuraEffectsByUnitGUID.erase(unit->GetGUID());
+        auto trackedMapIter = EQHasteAuraEffectsByMapInstanceKeyThenUnitGUID.find(GetMapInstanceKey(unit->GetMap()));
+        if (trackedMapIter != EQHasteAuraEffectsByMapInstanceKeyThenUnitGUID.end())
+        {
+            trackedMapIter->second.erase(unit->GetGUID());
+            if (trackedMapIter->second.empty())
+                EQHasteAuraEffectsByMapInstanceKeyThenUnitGUID.erase(trackedMapIter);
+        }
         return;
     }
 
@@ -4032,20 +4051,23 @@ bool EverQuestMod::HasCreatureLootDataForCreatureTemplateEntryID(uint32 creature
     return true;
 }
 
-bool EverQuestMod::HasPreloadedLootItemIDsForCreatureGUID(ObjectGuid creatureGUID)
+bool EverQuestMod::HasPreloadedLootItemIDsForCreatureGUID(Map* map, ObjectGuid creatureGUID)
 {
     std::lock_guard<std::mutex> lock(RuntimeStateMutex);
-    if (PreloadedLootItemIDsByCreatureGUID.find(creatureGUID) != PreloadedLootItemIDsByCreatureGUID.end())
-        return true;
-    else
+    auto mapIt = PreloadedLootItemIDsByMapInstanceKeyThenCreatureGUID.find(GetMapInstanceKey(map));
+    if (mapIt == PreloadedLootItemIDsByMapInstanceKeyThenCreatureGUID.end())
         return false;
+    return mapIt->second.find(creatureGUID) != mapIt->second.end();
 }
 
-bool EverQuestMod::HasPreloadedLootItemIDForCreatureGUID(ObjectGuid creatureGUID, uint32 itemTemplateID)
+bool EverQuestMod::HasPreloadedLootItemIDForCreatureGUID(Map* map, ObjectGuid creatureGUID, uint32 itemTemplateID)
 {
     std::lock_guard<std::mutex> lock(RuntimeStateMutex);
-    auto preloadedIt = PreloadedLootItemIDsByCreatureGUID.find(creatureGUID);
-    if (preloadedIt == PreloadedLootItemIDsByCreatureGUID.end())
+    auto mapIt = PreloadedLootItemIDsByMapInstanceKeyThenCreatureGUID.find(GetMapInstanceKey(map));
+    if (mapIt == PreloadedLootItemIDsByMapInstanceKeyThenCreatureGUID.end())
+        return false;
+    auto preloadedIt = mapIt->second.find(creatureGUID);
+    if (preloadedIt == mapIt->second.end())
         return false;
 
     for (uint32 preloadedLootItemTemplateID : preloadedIt->second)
@@ -4056,11 +4078,14 @@ bool EverQuestMod::HasPreloadedLootItemIDForCreatureGUID(ObjectGuid creatureGUID
     return false;
 }
 
-uint32 EverQuestMod::GetPreloadedLootCountForCreatureGUID(ObjectGuid creatureGUID, uint32 itemTemplateID)
+uint32 EverQuestMod::GetPreloadedLootCountForCreatureGUID(Map* map, ObjectGuid creatureGUID, uint32 itemTemplateID)
 {
     std::lock_guard<std::mutex> lock(RuntimeStateMutex);
-    auto countsByItem = PreloadedLootCountsByCreatureGUID.find(creatureGUID);
-    if (countsByItem == PreloadedLootCountsByCreatureGUID.end())
+    auto mapIt = PreloadedLootCountsByMapInstanceKeyThenCreatureGUID.find(GetMapInstanceKey(map));
+    if (mapIt == PreloadedLootCountsByMapInstanceKeyThenCreatureGUID.end())
+        return 0;
+    auto countsByItem = mapIt->second.find(creatureGUID);
+    if (countsByItem == mapIt->second.end())
         return 0;
     auto count = countsByItem->second.find(itemTemplateID);
     if (count == countsByItem->second.end())
@@ -4068,42 +4093,56 @@ uint32 EverQuestMod::GetPreloadedLootCountForCreatureGUID(ObjectGuid creatureGUI
     return count->second;
 }
 
-const vector<uint32>& EverQuestMod::GetPreloadedLootIDsForCreatureGUID(ObjectGuid creatureGUID)
+const vector<uint32>& EverQuestMod::GetPreloadedLootIDsForCreatureGUID(Map* map, ObjectGuid creatureGUID)
 {
+    static const vector<uint32> returnEmpty;
     std::lock_guard<std::mutex> lock(RuntimeStateMutex);
-    auto preloadedIt = PreloadedLootItemIDsByCreatureGUID.find(creatureGUID);
-    if (preloadedIt != PreloadedLootItemIDsByCreatureGUID.end())
-    {
-        return preloadedIt->second;
-    }
-    else
-    {
-        static const vector<uint32> returnEmpty;
+    auto mapIt = PreloadedLootItemIDsByMapInstanceKeyThenCreatureGUID.find(GetMapInstanceKey(map));
+    if (mapIt == PreloadedLootItemIDsByMapInstanceKeyThenCreatureGUID.end())
         return returnEmpty;
+    auto preloadedIt = mapIt->second.find(creatureGUID);
+    if (preloadedIt != mapIt->second.end())
+        return preloadedIt->second;
+    return returnEmpty;
+}
+
+void EverQuestMod::ClearPreloadedLootIDsForCreatureGUID(Map* map, ObjectGuid creatureGUID)
+{
+    uint64 mapInstanceKey = GetMapInstanceKey(map);
+    std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+    auto preloadedMapIt = PreloadedLootItemIDsByMapInstanceKeyThenCreatureGUID.find(mapInstanceKey);
+    if (preloadedMapIt != PreloadedLootItemIDsByMapInstanceKeyThenCreatureGUID.end())
+    {
+        preloadedMapIt->second.erase(creatureGUID);
+        if (preloadedMapIt->second.empty())
+            PreloadedLootItemIDsByMapInstanceKeyThenCreatureGUID.erase(preloadedMapIt);
+    }
+    auto countsMapIt = PreloadedLootCountsByMapInstanceKeyThenCreatureGUID.find(mapInstanceKey);
+    if (countsMapIt != PreloadedLootCountsByMapInstanceKeyThenCreatureGUID.end())
+    {
+        countsMapIt->second.erase(creatureGUID);
+        if (countsMapIt->second.empty())
+            PreloadedLootCountsByMapInstanceKeyThenCreatureGUID.erase(countsMapIt);
     }
 }
 
-void EverQuestMod::ClearPreloadedLootIDsForCreatureGUID(ObjectGuid creatureGUID)
+void EverQuestMod::TrackVisualEquippedItemsForCreatureGUID(Map* map, ObjectGuid creatureGUID, uint32 mainhandItemID, uint32 offhandItemID, bool isDualWielding)
 {
     std::lock_guard<std::mutex> lock(RuntimeStateMutex);
-    PreloadedLootItemIDsByCreatureGUID.erase(creatureGUID);
-    PreloadedLootCountsByCreatureGUID.erase(creatureGUID);
-}
-
-void EverQuestMod::TrackVisualEquippedItemsForCreatureGUID(ObjectGuid creatureGUID, uint32 mainhandItemID, uint32 offhandItemID, bool isDualWielding)
-{
-    std::lock_guard<std::mutex> lock(RuntimeStateMutex);
-    EverQuestLoadedCreatureEquippedVisualItems& visualItems = VisualEquippedItemsByCreatureGUID[creatureGUID];
+    EverQuestLoadedCreatureEquippedVisualItems& visualItems = VisualEquippedItemsByMapInstanceKeyThenCreatureGUID[GetMapInstanceKey(map)][creatureGUID];
     visualItems.MainhandItemID = mainhandItemID;
     visualItems.OffhandItemID = offhandItemID;
     visualItems.IsDualWielding = isDualWielding;
 }
 
-bool EverQuestMod::IsCreatureDualWielding(ObjectGuid creatureGUID)
+bool EverQuestMod::IsCreatureDualWielding(Map* map, ObjectGuid creatureGUID)
 {
     std::lock_guard<std::mutex> lock(RuntimeStateMutex);
-    auto it = VisualEquippedItemsByCreatureGUID.find(creatureGUID);
-    if (it == VisualEquippedItemsByCreatureGUID.end())
+    auto mapIt = VisualEquippedItemsByMapInstanceKeyThenCreatureGUID.find(GetMapInstanceKey(map));
+    if (mapIt == VisualEquippedItemsByMapInstanceKeyThenCreatureGUID.end())
+        return false;
+    auto it = mapIt->second.find(creatureGUID);
+    if (it == mapIt->second.end())
         return false;
     return it->second.IsDualWielding;
 }
@@ -4137,9 +4176,10 @@ void EverQuestMod::TryDoCreatureEQMeleeExtraAttacks(Unit* attacker, Unit* victim
 
     // Prevent injected swings from repeating
     ObjectGuid attackerGUID = attacker->GetGUID();
+    uint64 mapInstanceKey = GetMapInstanceKey(creature->GetMap());
     {
         std::lock_guard<std::mutex> lock(RuntimeStateMutex);
-        if (CreaturesResolvingEQMeleeExtraAttacks.count(attackerGUID) > 0)
+        if (CreaturesResolvingEQMeleeExtraAttacksByMapInstanceKey[mapInstanceKey].count(attackerGUID) > 0)
             return;
     }
 
@@ -4154,7 +4194,7 @@ void EverQuestMod::TryDoCreatureEQMeleeExtraAttacks(Unit* attacker, Unit* victim
 
     {
         std::lock_guard<std::mutex> lock(RuntimeStateMutex);
-        CreaturesResolvingEQMeleeExtraAttacks.insert(attackerGUID);
+        CreaturesResolvingEQMeleeExtraAttacksByMapInstanceKey[mapInstanceKey].insert(attackerGUID);
     }
 
     // Main-hand double attack. "effectiveSkill" out of 500. Warrior creatures 60+ rolls for a triple attack at 13.5%
@@ -4169,7 +4209,7 @@ void EverQuestMod::TryDoCreatureEQMeleeExtraAttacks(Unit* attacker, Unit* victim
 
     // For creatures with an off-hand weapon only, calc per-round chance out of effectiveSkill 375.
     // Also, connecting off-hand swing can double attack once the creature's skil reaches 150 (level 30+)
-    if (victim->IsAlive() == true && IsCreatureDualWielding(attackerGUID) == true)
+    if (victim->IsAlive() == true && IsCreatureDualWielding(creature->GetMap(), attackerGUID) == true)
     {
         if (effectiveSkill > urand(0, 374))
         {
@@ -4183,7 +4223,13 @@ void EverQuestMod::TryDoCreatureEQMeleeExtraAttacks(Unit* attacker, Unit* victim
 
     {
         std::lock_guard<std::mutex> lock(RuntimeStateMutex);
-        CreaturesResolvingEQMeleeExtraAttacks.erase(attackerGUID);
+        auto guardMapIt = CreaturesResolvingEQMeleeExtraAttacksByMapInstanceKey.find(mapInstanceKey);
+        if (guardMapIt != CreaturesResolvingEQMeleeExtraAttacksByMapInstanceKey.end())
+        {
+            guardMapIt->second.erase(attackerGUID);
+            if (guardMapIt->second.empty())
+                CreaturesResolvingEQMeleeExtraAttacksByMapInstanceKey.erase(guardMapIt);
+        }
     }
 }
 
@@ -4632,18 +4678,25 @@ void EverQuestMod::TryDoCreatureEnrageRiposteCounter(Unit* victim, Unit* attacke
 
     Creature* enragedCreature = victim->ToCreature();
     ObjectGuid enragedCreatureGUID = enragedCreature->GetGUID();
+    uint64 mapInstanceKey = GetMapInstanceKey(enragedCreature->GetMap());
     {
         std::lock_guard<std::mutex> lock(RuntimeStateMutex);
-        if (CreaturesResolvingEQMeleeExtraAttacks.count(enragedCreatureGUID) > 0)
+        if (CreaturesResolvingEQMeleeExtraAttacksByMapInstanceKey[mapInstanceKey].count(enragedCreatureGUID) > 0)
             return;
-        CreaturesResolvingEQMeleeExtraAttacks.insert(enragedCreatureGUID);
+        CreaturesResolvingEQMeleeExtraAttacksByMapInstanceKey[mapInstanceKey].insert(enragedCreatureGUID);
     }
 
     enragedCreature->AttackerStateUpdate(attacker, BASE_ATTACK, true);
 
     {
         std::lock_guard<std::mutex> lock(RuntimeStateMutex);
-        CreaturesResolvingEQMeleeExtraAttacks.erase(enragedCreatureGUID);
+        auto guardMapIt = CreaturesResolvingEQMeleeExtraAttacksByMapInstanceKey.find(mapInstanceKey);
+        if (guardMapIt != CreaturesResolvingEQMeleeExtraAttacksByMapInstanceKey.end())
+        {
+            guardMapIt->second.erase(enragedCreatureGUID);
+            if (guardMapIt->second.empty())
+                CreaturesResolvingEQMeleeExtraAttacksByMapInstanceKey.erase(guardMapIt);
+        }
     }
 }
 
@@ -5261,10 +5314,15 @@ bool EverQuestMod::RollBashKickStunLands(Unit* attacker, Unit* defender)
     return ((int)urand(0, 99) < stunChance);
 }
 
-void EverQuestMod::ClearVisualEquippedItemsForCreatureGUID(ObjectGuid creatureGUID)
+void EverQuestMod::ClearVisualEquippedItemsForCreatureGUID(Map* map, ObjectGuid creatureGUID)
 {
     std::lock_guard<std::mutex> lock(RuntimeStateMutex);
-    VisualEquippedItemsByCreatureGUID.erase(creatureGUID);
+    auto mapIt = VisualEquippedItemsByMapInstanceKeyThenCreatureGUID.find(GetMapInstanceKey(map));
+    if (mapIt == VisualEquippedItemsByMapInstanceKeyThenCreatureGUID.end())
+        return;
+    mapIt->second.erase(creatureGUID);
+    if (mapIt->second.empty())
+        VisualEquippedItemsByMapInstanceKeyThenCreatureGUID.erase(mapIt);
 }
 
 void EverQuestMod::RemoveVisualEquippedItemForCreatureGUIDIfExists(Map* map, ObjectGuid creatureGUID, uint32 itemTemplateID)
@@ -5272,8 +5330,11 @@ void EverQuestMod::RemoveVisualEquippedItemForCreatureGUIDIfExists(Map* map, Obj
     EverQuestLoadedCreatureEquippedVisualItems* visualItems = nullptr;
     {
         std::lock_guard<std::mutex> lock(RuntimeStateMutex);
-        auto visualItemsIt = VisualEquippedItemsByCreatureGUID.find(creatureGUID);
-        if (visualItemsIt == VisualEquippedItemsByCreatureGUID.end())
+        auto mapIt = VisualEquippedItemsByMapInstanceKeyThenCreatureGUID.find(GetMapInstanceKey(map));
+        if (mapIt == VisualEquippedItemsByMapInstanceKeyThenCreatureGUID.end())
+            return;
+        auto visualItemsIt = mapIt->second.find(creatureGUID);
+        if (visualItemsIt == mapIt->second.end())
             return;
         visualItems = &visualItemsIt->second;
     }
@@ -5478,6 +5539,7 @@ void EverQuestMod::LoadZoneData()
 {
     ZoneByMapID.clear();
     InstanceRaidLowMapIDs.clear();
+    OpenWorldMapIDByInstanceRaidLowMapID.clear();
 
     QueryResult queryResult = WorldDatabase.Query("SELECT MapID, AllowBind, ExpansionID, MaxAgroZDistance, InstanceRaidLowMapID FROM mod_everquest_zone;");
     if (queryResult)
@@ -5493,7 +5555,10 @@ void EverQuestMod::LoadZoneData()
             zone.InstanceRaidLowMapID = fields[4].Get<uint32>();
             ZoneByMapID[zone.MapID] = zone;
             if (zone.InstanceRaidLowMapID != 0)
+            {
                 InstanceRaidLowMapIDs.insert(zone.InstanceRaidLowMapID);
+                OpenWorldMapIDByInstanceRaidLowMapID[zone.InstanceRaidLowMapID] = zone.MapID;
+            }
         } while (queryResult->NextRow());
     }
 }
@@ -5526,6 +5591,15 @@ uint32 EverQuestMod::GetInstanceRaidLowMapIDForMap(uint32 mapID)
 bool EverQuestMod::IsMapInstanceRaidLow(uint32 mapID)
 {
     return InstanceRaidLowMapIDs.find(mapID) != InstanceRaidLowMapIDs.end();
+}
+
+uint32 EverQuestMod::GetOpenWorldMapIDForMapID(uint32 mapID)
+{
+    // Any data rows keyed by a map ID (kill spawns, forage) are only generated for the open world copy so instanced copies resolve back to the open version
+    auto openWorldMapIDIt = OpenWorldMapIDByInstanceRaidLowMapID.find(mapID);
+    if (openWorldMapIDIt == OpenWorldMapIDByInstanceRaidLowMapID.end())
+        return mapID;
+    return openWorldMapIDIt->second;
 }
 
 void EverQuestMod::UpdateRaidLowInstanceStateForPlayer(Player* player)
@@ -6607,9 +6681,27 @@ void EverQuestMod::RemoveCreatureAsLoaded(Creature* creature)
         }
     }
 
-    PreloadedLootItemIDsByCreatureGUID.erase(creature->GetGUID());
-    PreloadedLootCountsByCreatureGUID.erase(creature->GetGUID());
-    VisualEquippedItemsByCreatureGUID.erase(creature->GetGUID());
+    auto preloadedMapIt = PreloadedLootItemIDsByMapInstanceKeyThenCreatureGUID.find(mapInstanceKey);
+    if (preloadedMapIt != PreloadedLootItemIDsByMapInstanceKeyThenCreatureGUID.end())
+    {
+        preloadedMapIt->second.erase(creature->GetGUID());
+        if (preloadedMapIt->second.empty())
+            PreloadedLootItemIDsByMapInstanceKeyThenCreatureGUID.erase(preloadedMapIt);
+    }
+    auto countsMapIt = PreloadedLootCountsByMapInstanceKeyThenCreatureGUID.find(mapInstanceKey);
+    if (countsMapIt != PreloadedLootCountsByMapInstanceKeyThenCreatureGUID.end())
+    {
+        countsMapIt->second.erase(creature->GetGUID());
+        if (countsMapIt->second.empty())
+            PreloadedLootCountsByMapInstanceKeyThenCreatureGUID.erase(countsMapIt);
+    }
+    auto visualMapIt = VisualEquippedItemsByMapInstanceKeyThenCreatureGUID.find(mapInstanceKey);
+    if (visualMapIt != VisualEquippedItemsByMapInstanceKeyThenCreatureGUID.end())
+    {
+        visualMapIt->second.erase(creature->GetGUID());
+        if (visualMapIt->second.empty())
+            VisualEquippedItemsByMapInstanceKeyThenCreatureGUID.erase(visualMapIt);
+    }
 }
 
 vector<Creature*> EverQuestMod::GetLoadedCreaturesWithEntryID(Map* map, uint32 entryID)
@@ -6625,22 +6717,25 @@ vector<Creature*> EverQuestMod::GetLoadedCreaturesWithEntryID(Map* map, uint32 e
     return bucketIt->second;
 }
 
-void EverQuestMod::RollLootItemsForCreature(ObjectGuid creatureGUID, uint32 creatureTemplateEntryID)
+void EverQuestMod::RollLootItemsForCreature(Creature* creature)
 {
+    ObjectGuid creatureGUID = creature->GetGUID();
+    uint64 mapInstanceKey = GetMapInstanceKey(creature->GetMap());
+
     // Clear previous rolls (and empty counts map means it drops nothing). The values are only touched by this
     // creature's own map thread after this, so only the lookups need the lock
     vector<uint32>* preloadedItemIDs = nullptr;
     unordered_map<uint32, uint32>* counts = nullptr;
     {
         std::lock_guard<std::mutex> lock(RuntimeStateMutex);
-        preloadedItemIDs = &PreloadedLootItemIDsByCreatureGUID[creatureGUID];
-        counts = &PreloadedLootCountsByCreatureGUID[creatureGUID];
+        preloadedItemIDs = &PreloadedLootItemIDsByMapInstanceKeyThenCreatureGUID[mapInstanceKey][creatureGUID];
+        counts = &PreloadedLootCountsByMapInstanceKeyThenCreatureGUID[mapInstanceKey][creatureGUID];
     }
     preloadedItemIDs->clear();
     counts->clear();
 
     // Skip creatures with no loot data
-    auto creatureLootGroups = CreatureLootGroupsByCreatureTemplateID.find(creatureTemplateEntryID);
+    auto creatureLootGroups = CreatureLootGroupsByCreatureTemplateID.find(creature->GetEntry());
     if (creatureLootGroups == CreatureLootGroupsByCreatureTemplateID.end())
         return;
 
@@ -6891,6 +6986,9 @@ void EverQuestMod::ProcessForage(Player* player)
         ChatHandler(player->GetSession()).PSendSysMessage("There is nothing to forage outside of Norrath.");
         return;
     }
+
+    // Forage rows only exist for the open world copy of a zone, so a raid instance copy forages from its open world map's list
+    mapID = GetOpenWorldMapIDForMapID(mapID);
     vector<EverQuestForageZoneItem> forageZoneItems = GetForageZoneItemsInMap(mapID);
     if (forageZoneItems.empty() == true)
     {
