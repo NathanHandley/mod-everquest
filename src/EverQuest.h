@@ -1259,6 +1259,8 @@ public:
     void LoadPetData();
     void LoadPetSilentDisplayData();
     uint32 GetSilentFidgetDisplayIDForDisplayID(uint32 displayID);
+    void RemoveInvalidPetSilentDisplays();
+    uint32 GetSilentFidgetDisplayIDForDisplayID(uint32 displayID) const;
     void UpdatePetFidgetSilence(Creature* creature);
     bool HasPetDataForCreatureTemplateID(uint32 creatureTemplateID);
     const EverQuestPet& GetPetDataForCreatureTemplateID(uint32 creatureTemplateID);

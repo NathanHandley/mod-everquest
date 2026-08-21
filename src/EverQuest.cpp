@@ -3388,7 +3388,22 @@ void EverQuestMod::LoadPetSilentDisplayData()
     }
 }
 
-uint32 EverQuestMod::GetSilentFidgetDisplayIDForDisplayID(uint32 displayID)
+void EverQuestMod::RemoveInvalidPetSilentDisplays()
+{
+    unordered_map<uint32, uint32>::iterator displayIter = SilentFidgetDisplayIDsByDisplayID.begin();
+    while (displayIter != SilentFidgetDisplayIDsByDisplayID.end())
+    {
+        if (sCreatureDisplayInfoStore.LookupEntry(displayIter->second) == nullptr)
+        {
+            LOG_ERROR("module.EverQuest", "EverQuestMod::RemoveInvalidPetSilentDisplays dropped display ID {} as its silent display ID {} is missing from CreatureDisplayInfo.dbc.  Deploy the current DBC files.", displayIter->first, displayIter->second);
+            displayIter = SilentFidgetDisplayIDsByDisplayID.erase(displayIter);
+        }
+        else
+            ++displayIter;
+    }
+}
+
+uint32 EverQuestMod::GetSilentFidgetDisplayIDForDisplayID(uint32 displayID) const
 {
     unordered_map<uint32, uint32>::const_iterator displayIter = SilentFidgetDisplayIDsByDisplayID.find(displayID);
     if (displayIter == SilentFidgetDisplayIDsByDisplayID.end())
