@@ -585,7 +585,7 @@ EverQuest.Player.AddRacialGuiseItemOnLogin = True
 #		Set to 0 to stop the feat of strength from ever being awarded through leveling.
 #		NOTE: This has no effect unless the converter generated the achievement and its aura
 #		 (EQWOWConverter's ACHIEVEMENT_EQ_ADVENTURER_ENABLED).
-#	Default: 60
+#	Default: 50
 #
 # 	EverQuest.Achievement.AdventurerProtectedInEQZones
 #       If true, a player in an EverQuest map/zone who has the Adventurer buff cannot lose it by any means
@@ -598,7 +598,7 @@ EverQuest.Player.AddRacialGuiseItemOnLogin = True
 #
 ###################################################################################################
 
-EverQuest.Achievement.AdventurerLevel = 60
+EverQuest.Achievement.AdventurerLevel = 50
 EverQuest.Achievement.AdventurerProtectedInEQZones = True
 EverQuest.Achievement.AdventurerGrantAuraOnLoginIfMissing = False
 

@@ -126,7 +126,7 @@ EverQuestMod::EverQuestMod() :
     ConfigPlayerAddHearthstoneToNewCharacters(true),
     ConfigPlayerAddMasterTotemToShamans(true),
     ConfigPlayerAddRacialGuiseItemOnLogin(true),
-    ConfigAchievementAdventurerLevel(60),
+    ConfigAchievementAdventurerLevel(50),
     ConfigAchievementAdventurerProtectedInEQZones(true),
     ConfigAchievementAdventurerGrantAuraOnLoginIfMissing(false),
     ConfigTrackingEnabled(true),
@@ -392,7 +392,7 @@ void EverQuestMod::LoadConfigurationFile()
     ConfigPlayerAddRacialGuiseItemOnLogin = sConfigMgr->GetOption<bool>("EverQuest.Player.AddRacialGuiseItemOnLogin", true);
 
     // Achievements
-    ConfigAchievementAdventurerLevel = sConfigMgr->GetOption<uint32>("EverQuest.Achievement.AdventurerLevel", 60);
+    ConfigAchievementAdventurerLevel = sConfigMgr->GetOption<uint32>("EverQuest.Achievement.AdventurerLevel", 50);
     ConfigAchievementAdventurerProtectedInEQZones = sConfigMgr->GetOption<bool>("EverQuest.Achievement.AdventurerProtectedInEQZones", true);
     ConfigAchievementAdventurerGrantAuraOnLoginIfMissing = sConfigMgr->GetOption<bool>("EverQuest.Achievement.AdventurerGrantAuraOnLoginIfMissing", false);
 
