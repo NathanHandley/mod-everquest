@@ -14,6 +14,8 @@
 //  You should have received a copy of the GNU General Public License
 //  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+// TODO: Getting too big, break up
+
 #ifndef EVERQUEST_H
 #define EVERQUEST_H
 
@@ -40,9 +42,11 @@ class Unit;
 class Aura;
 class AuraApplication;
 class WorldPacket;
+class ByteBuffer;
 struct AreaTrigger;
+struct BuildValuesCachePosPointers;
 
-#define EQ_MOD_VERSION                              72
+#define EQ_MOD_VERSION                              73
 
 #define EQ_EQCLASS_NONE                             0
 #define EQ_EQCLASS_WARRIOR                          1
@@ -609,6 +613,13 @@ public:
     uint32 IllusionTintID = 0;
 };
 
+class EverQuestGearSwapCandidate
+{
+public:
+    uint32 ItemTemplateID = 0;
+    uint32 ItemDisplayID = 0;
+};
+
 class EverQuestPlayerIllusionState
 {
 public:
@@ -886,6 +897,7 @@ struct EverQuestPlayerControllerData
     uint32 IllusionFaceID = 0;
     bool ShowBardPulse = true;
     uint32 IssuedIllusionItemID = 0;
+    bool HideWoWGear = false;
 };
 
 class EverQuestPlayerClassInfoItem
@@ -1079,6 +1091,7 @@ public:
     unordered_map<uint64, vector<EverQuestPendingKillSpawnAction>> PendingKillSpawnActionsByMapInstanceKey;
     unordered_map<uint64, vector<EverQuestTriggeredQuestKillSpawn>> TriggeredQuestKillSpawnsByMapInstanceKey;
     unordered_map<uint32, EverQuestItemTemplate> ItemTemplatesByEntryID;
+    unordered_map<uint64, vector<EverQuestGearSwapCandidate>> GearSwapCandidatesByLookupKey;
     unordered_set<uint32> WornEffectSpellIDs;
     unordered_map<uint32, EverQuestSpell> SpellDataBySpellID;
     unordered_set<uint32> BardSongTickSpellIDs;
@@ -1187,6 +1200,10 @@ public:
     uint32 GetNPCEquipItemTemplateIDForItemTemplate(uint32 itemTemplateID);
     uint32 GetWornEffectSpellIDForItemTemplate(uint32 itemTemplateID);
     bool IsItemEQClassAllowedForPlayer(Player* player, uint32 itemTemplateID);
+    bool IsItemTemplateIDAnEQItemTemplateID(uint32 itemTemplateID);
+    void LoadItemWoWToEQSwapData();
+    uint32 GetGearSwapItemTemplateIDForWornItem(Player* wearingPlayer, uint8 equipSlot, uint32 itemTemplateID);
+    void PatchVisibleGearFieldsInValuesUpdate(Player* wearingPlayer, ByteBuffer& valuesUpdateBuf, BuildValuesCachePosPointers& posPointers);
     void SetAuctionUsableFilterActiveForPlayer(ObjectGuid playerGUID, bool active);
     bool IsAuctionUsableFilterActiveForPlayer(ObjectGuid playerGUID);
     bool BuildEQClassFilteredAuctionListPacket(Player* player, WorldPacket const& packet, WorldPacket& filteredPacket);
@@ -1428,6 +1445,10 @@ public:
     bool GetShowBardPulseForPlayer(Player* player);
     void SetShowBardPulseForPlayer(Player* player, bool showBardPulse);
     void SaveShowBardPulseForPlayer(Player* player);
+    bool GetHideWoWGearForPlayer(Player* player);
+    void SetHideWoWGearForPlayer(Player* player, bool hideWoWGear);
+    void SaveHideWoWGearForPlayer(Player* player);
+    void ResendVisibleGearOfNearbyPlayersToPlayer(Player* player);
     uint32 GetIssuedIllusionItemIDForPlayer(Player* player);
     void SetIssuedIllusionItemIDForPlayer(Player* player, uint32 itemID);
     void SaveIssuedIllusionItemIDForPlayer(Player* player);

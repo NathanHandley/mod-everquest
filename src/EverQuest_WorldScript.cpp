@@ -57,6 +57,7 @@ public:
         EverQuest->LoadCreatureMovementSoundData();
         EverQuest->LoadCreatureOnkillReputations();
         EverQuest->LoadItemTemplateData();
+        EverQuest->LoadItemWoWToEQSwapData();
         EverQuest->LoadSpellData();
         EverQuest->LoadIllusionDisplayData();
         EverQuest->LoadIllusionFaceData();

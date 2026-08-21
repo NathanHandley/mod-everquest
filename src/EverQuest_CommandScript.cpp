@@ -93,6 +93,7 @@ public:
             { "eqver",  HandleEQVerCommand,                     SEC_PLAYER, Console::No },
             { "eqface", HandleEQFaceCommand,                    SEC_PLAYER, Console::No },
             { "eqshowbardpulse", HandleEQShowBardPulseCommand,  SEC_PLAYER, Console::No },
+            { "eqhidewowgear", HandleEQHideWoWGearCommand,      SEC_PLAYER, Console::No },
             { "class",  classCommandTable                                               },
             { "track",  trackCommandTable                                               },
         };
@@ -228,6 +229,51 @@ public:
             handler->PSendSysMessage("Bard song pulse graphics are now |cff4CFF00shown|r for you.");
         else
             handler->PSendSysMessage("Bard song pulse graphics are now |cff4CFF00hidden|r for you.");
+        return true;
+    }
+
+    static bool HandleEQHideWoWGearCommand(ChatHandler* handler, const char* args)
+    {
+        if (EverQuest->IsEnabled == false)
+            return true;
+
+        Player* player = handler->GetPlayer();
+
+        // Validate the passed value is either "on" or "off"
+        bool isValidValue = false;
+        bool hideWoWGear = false;
+        if (*args)
+        {
+            char* valueToken = strtok((char*)args, " ");
+            std::string valueString = valueToken != nullptr ? valueToken : "";
+            boost::algorithm::to_lower(valueString);
+            if (valueString == "on")
+            {
+                hideWoWGear = true;
+                isValidValue = true;
+            }
+            else if (valueString == "off")
+            {
+                hideWoWGear = false;
+                isValidValue = true;
+            }
+        }
+        if (isValidValue == false)
+        {
+            string currentStateString = EverQuest->GetHideWoWGearForPlayer(player) == true ? "on" : "off";
+            handler->PSendSysMessage(".eqhidewowgear 'on' or 'off'");
+            handler->PSendSysMessage("When on, WoW equipment on other players is replaced for you with plain EverQuest looks of the same kind, anything with no EverQuest equivalent (cloaks, helms, shoulders, tabards) is hidden, and weapon enchant glows are suppressed. Example: '.eqhidewowgear on'");
+            handler->PSendSysMessage("Only what you see is affected (nobody's actual gear changes), and WoW gear hiding is currently |cff4CFF00{}|r for you.", currentStateString);
+            return true;
+        }
+
+        // Store the setting, then re-send nearby players' visible gear so the change shows without needing to re-enter view range
+        EverQuest->SetHideWoWGearForPlayer(player, hideWoWGear);
+        EverQuest->ResendVisibleGearOfNearbyPlayersToPlayer(player);
+        if (hideWoWGear == true)
+            handler->PSendSysMessage("WoW gear on other players is now |cff4CFF00hidden|r for you.");
+        else
+            handler->PSendSysMessage("WoW gear on other players is now |cff4CFF00shown|r for you.");
         return true;
     }
 

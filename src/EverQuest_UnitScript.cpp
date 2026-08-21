@@ -612,6 +612,33 @@ public:
         // Entering or leaving bear/dire bear form changes whether an equipped shield's armor gets multiplied by the form
         EverQuest->RefreshBearFormShieldArmorShiftForPlayer(unit->ToPlayer());
     }
+
+    // Records the buffer positions of player visible item fields when value update packets build, so that OnPatchValuesUpdate below can
+    // rewrite them for viewers who have WoW gear hidden (.eqhidewowgear)
+    bool ShouldTrackValuesUpdatePosByIndex(Unit const* unit, uint8 /*updateType*/, uint16 index) override
+    {
+        if (index < PLAYER_VISIBLE_ITEM_1_ENTRYID || index > PLAYER_VISIBLE_ITEM_19_ENCHANTMENT)
+            return false;
+        if (EverQuest->IsEnabled == false)
+            return false;
+        return unit->IsPlayer();
+    }
+
+    // This runs inside player values-update builds, and the setting lookup below takes RuntimeStateMutex, so code holding that mutex must never synchronously
+    // build another player's values update (e.g. Group::AddMember) (that is already the mutex's documented no-engine-calls rule). The empty() check keeps the common case (health/power
+    // ticks, which carry no visible item fields) off the mutex entirely
+    void OnPatchValuesUpdate(Unit const* unit, ByteBuffer& valuesUpdateBuf, BuildValuesCachePosPointers& posPointers, Player* target) override
+    {
+        if (EverQuest->IsEnabled == false)
+            return;
+        if (posPointers.other.empty() == true)
+            return;
+        if (target == nullptr || unit == target || unit->IsPlayer() == false)
+            return;
+        if (EverQuest->GetHideWoWGearForPlayer(target) == false)
+            return;
+        EverQuest->PatchVisibleGearFieldsInValuesUpdate(const_cast<Unit*>(unit)->ToPlayer(), valuesUpdateBuf, posPointers);
+    }
 };
 
 void AddEverQuestUnitScripts()

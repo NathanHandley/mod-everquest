@@ -1907,6 +1907,143 @@ bool EverQuestMod::IsWornEffectSpell(uint32 spellID)
     return WornEffectSpellIDs.find(spellID) != WornEffectSpellIDs.end();
 }
 
+bool EverQuestMod::IsItemTemplateIDAnEQItemTemplateID(uint32 itemTemplateID)
+{
+    return itemTemplateID >= ConfigSystemItemTemplateIDMin && itemTemplateID <= ConfigSystemItemTemplateIDMax;
+}
+
+static uint64 GetGearSwapLookupKey(uint32 inventoryType, uint32 itemClassID, uint32 itemSubClassID, uint32 eqClassID)
+{
+    // A gear swap pool is keyed on the properties of the WoW item being worn, plus the EverQuest class of the wearer
+    return ((uint64)inventoryType << 48) | ((uint64)itemClassID << 32) | ((uint64)itemSubClassID << 16) | (uint64)eqClassID;
+}
+
+static uint32 GetGearSwapStableRoll(uint32 seedA, uint32 seedB, uint32 seedC)
+{
+    // Picks are rolled from the seeds instead of urand so that a given character keeps the same disguise across every
+    // values update, since a fresh roll per update would make the gear visibly churn
+    // Note: Claude came up with these values, but they seem to work well but if an issue do analysis on how to make them proper
+    uint64 mixedValue = ((uint64)seedA + 0x9E3779B97F4A7C15ull) * 0xBF58476D1CE4E5B9ull;
+    mixedValue ^= ((uint64)seedB + 0x165667B19E3779F9ull) * 0x94D049BB133111EBull;
+    mixedValue ^= ((uint64)seedC + 0x27D4EB2F165667C5ull) * 0xC2B2AE3D27D4EB4Full;
+    mixedValue ^= mixedValue >> 31;
+    mixedValue *= 0xFF51AFD7ED558CCDull;
+    mixedValue ^= mixedValue >> 29;
+    return (uint32)(mixedValue & 0x7FFFFFFFull);
+}
+
+static bool IsGearSwapRenderedEquipSlot(uint8 equipSlot)
+{
+    // Only the slots that actually draw on a character get swapped, so slots like rings still inspect correctly
+    switch (equipSlot)
+    {
+        case EQUIPMENT_SLOT_HEAD:
+        case EQUIPMENT_SLOT_SHOULDERS:
+        case EQUIPMENT_SLOT_BODY:
+        case EQUIPMENT_SLOT_CHEST:
+        case EQUIPMENT_SLOT_WAIST:
+        case EQUIPMENT_SLOT_LEGS:
+        case EQUIPMENT_SLOT_FEET:
+        case EQUIPMENT_SLOT_WRISTS:
+        case EQUIPMENT_SLOT_HANDS:
+        case EQUIPMENT_SLOT_BACK:
+        case EQUIPMENT_SLOT_MAINHAND:
+        case EQUIPMENT_SLOT_OFFHAND:
+        case EQUIPMENT_SLOT_RANGED:
+        case EQUIPMENT_SLOT_TABARD: return true;
+        default: return false;
+    }
+}
+
+void EverQuestMod::LoadItemWoWToEQSwapData()
+{
+    GearSwapCandidatesByLookupKey.clear();
+
+    QueryResult queryResult = WorldDatabase.Query("SELECT InventoryType, ItemClassID, ItemSubClassID, EQClassID, ItemTemplateID, ItemDisplayID FROM mod_everquest_item_wow_to_eq_swap;");
+    if (!queryResult)
+    {
+        LOG_INFO("module.EverQuest", "EverQuestMod::LoadItemWoWToEQSwapData found no mod_everquest_item_wow_to_eq_swap rows, so .eqhidewowgear will hide WoW gear instead of swapping it for EverQuest looks");
+        return;
+    }
+    uint32 candidateCount = 0;
+    do
+    {
+        Field* fields = queryResult->Fetch();
+        uint32 inventoryType = fields[0].Get<uint32>();
+        uint32 itemClassID = fields[1].Get<uint32>();
+        uint32 itemSubClassID = fields[2].Get<uint32>();
+        uint32 eqClassID = fields[3].Get<uint32>();
+        EverQuestGearSwapCandidate swapCandidate;
+        swapCandidate.ItemTemplateID = fields[4].Get<uint32>();
+        swapCandidate.ItemDisplayID = fields[5].Get<uint32>();
+        GearSwapCandidatesByLookupKey[GetGearSwapLookupKey(inventoryType, itemClassID, itemSubClassID, eqClassID)].push_back(swapCandidate);
+        ++candidateCount;
+    } while (queryResult->NextRow());
+    LOG_INFO("module.EverQuest", "EverQuestMod::LoadItemWoWToEQSwapData loaded {} gear swap candidates across {} pools", candidateCount, (uint32)GearSwapCandidatesByLookupKey.size());
+}
+
+uint32 EverQuestMod::GetGearSwapItemTemplateIDForWornItem(Player* wearingPlayer, uint8 equipSlot, uint32 itemTemplateID)
+{
+    ItemTemplate const* itemProto = sObjectMgr->GetItemTemplate(itemTemplateID);
+    if (itemProto == nullptr)
+        return 0;
+
+    // Either of the character's two EverQuest classes can drive the look, and which one it is stays fixed per character
+    const EverQuestClassMap classMap = GetClassMapForWOWClassID(wearingPlayer->getClass());
+    uint8 primaryEQClassID = classMap.EQClassIDBase;
+    uint8 secondaryEQClassID = GetCurrentSecondEQClassForPlayer(wearingPlayer);
+    uint32 wearingPlayerGUIDCounter = wearingPlayer->GetGUID().GetCounter();
+    uint8 rolledEQClassID = primaryEQClassID;
+    uint8 fallbackEQClassID = secondaryEQClassID;
+    if (secondaryEQClassID != EQ_EQCLASS_NONE && secondaryEQClassID != primaryEQClassID && (GetGearSwapStableRoll(wearingPlayerGUIDCounter, 0, 0) % 2) == 1)
+    {
+        rolledEQClassID = secondaryEQClassID;
+        fallbackEQClassID = primaryEQClassID;
+    }
+
+    // The rolled class is used when it has a pool for this item, and otherwise the other class fills in
+    const vector<EverQuestGearSwapCandidate>* swapCandidates = nullptr;
+    auto swapCandidatesItr = GearSwapCandidatesByLookupKey.find(GetGearSwapLookupKey(itemProto->InventoryType, itemProto->Class, itemProto->SubClass, rolledEQClassID));
+    if (swapCandidatesItr != GearSwapCandidatesByLookupKey.end())
+        swapCandidates = &swapCandidatesItr->second;
+    else if (fallbackEQClassID != EQ_EQCLASS_NONE && fallbackEQClassID != rolledEQClassID)
+    {
+        swapCandidatesItr = GearSwapCandidatesByLookupKey.find(GetGearSwapLookupKey(itemProto->InventoryType, itemProto->Class, itemProto->SubClass, fallbackEQClassID));
+        if (swapCandidatesItr != GearSwapCandidatesByLookupKey.end())
+            swapCandidates = &swapCandidatesItr->second;
+    }
+
+    // Anything with no EverQuest stand-in at all (cloaks, helms, tabards, wands) simply does not render
+    if (swapCandidates == nullptr || swapCandidates->empty() == true)
+        return 0;
+
+    uint32 candidateIndex = GetGearSwapStableRoll(wearingPlayerGUIDCounter, (uint32)equipSlot, itemTemplateID) % (uint32)swapCandidates->size();
+    return swapCandidates->at(candidateIndex).ItemTemplateID;
+}
+
+void EverQuestMod::PatchVisibleGearFieldsInValuesUpdate(Player* wearingPlayer, ByteBuffer& valuesUpdateBuf, BuildValuesCachePosPointers& posPointers)
+{
+    for (uint8 equipSlot = 0; equipSlot < EQUIPMENT_SLOT_END; ++equipSlot)
+    {
+        uint16 entryFieldIndex = (uint16)(PLAYER_VISIBLE_ITEM_1_ENTRYID + (equipSlot * 2));
+        unordered_map<uint16, uint32>::const_iterator entryPosItr = posPointers.other.find(entryFieldIndex);
+        if (entryPosItr != posPointers.other.end() && IsGearSwapRenderedEquipSlot(equipSlot) == true)
+        {
+            uint32 visibleItemID = valuesUpdateBuf.read<uint32>(entryPosItr->second);
+            if (visibleItemID != 0 && IsItemTemplateIDAnEQItemTemplateID(visibleItemID) == false)
+                valuesUpdateBuf.put(entryPosItr->second, GetGearSwapItemTemplateIDForWornItem(wearingPlayer, equipSlot, visibleItemID));
+        }
+
+        // EverQuest has no enchant visuals (weapon glows, shoulder inscriptions), so clear any enchant being sent
+        unordered_map<uint16, uint32>::const_iterator enchantPosItr = posPointers.other.find((uint16)(entryFieldIndex + 1));
+        if (enchantPosItr != posPointers.other.end())
+        {
+            if (valuesUpdateBuf.read<uint32>(enchantPosItr->second) != 0)
+                valuesUpdateBuf.put(enchantPosItr->second, (uint32)0);
+        }
+    }
+}
+
 uint32 EverQuestMod::GetNPCEquipItemTemplateIDForItemTemplate(uint32 itemTemplateID)
 {
     if (ItemTemplatesByEntryID.find(itemTemplateID) == ItemTemplatesByEntryID.end())
@@ -7284,7 +7421,7 @@ EverQuestPlayerControllerData EverQuestMod::GetPlayerControllerData(Player* play
 {
     EverQuestPlayerControllerData controllerData;
     controllerData.GUID = player->GetGUID().GetCounter();
-    QueryResult queryResult = CharacterDatabase.Query("SELECT nextSecondaryClass, currentSecondaryClass, secondaryExpPool, illusionFaceId, showBardPulse, issuedIllusionItemId FROM mod_everquest_character_settings WHERE guid = {}", player->GetGUID().GetCounter());
+    QueryResult queryResult = CharacterDatabase.Query("SELECT nextSecondaryClass, currentSecondaryClass, secondaryExpPool, illusionFaceId, showBardPulse, issuedIllusionItemId, hideWoWGear FROM mod_everquest_character_settings WHERE guid = {}", player->GetGUID().GetCounter());
     if (!queryResult || queryResult->GetRowCount() == 0)
     {
         const EverQuestClassMap classMap = GetClassMapForWOWClassID(player->getClass());
@@ -7294,6 +7431,7 @@ EverQuestPlayerControllerData EverQuestMod::GetPlayerControllerData(Player* play
         controllerData.IllusionFaceID = 0;
         controllerData.ShowBardPulse = true;
         controllerData.IssuedIllusionItemID = 0;
+        controllerData.HideWoWGear = false;
     }
     else
     {
@@ -7304,6 +7442,7 @@ EverQuestPlayerControllerData EverQuestMod::GetPlayerControllerData(Player* play
         controllerData.IllusionFaceID = (uint32)std::max(0, fields[3].Get<int32>());
         controllerData.ShowBardPulse = fields[4].Get<bool>();
         controllerData.IssuedIllusionItemID = fields[5].Get<uint32>();
+        controllerData.HideWoWGear = fields[6].Get<bool>();
     }
     return controllerData;
 }
@@ -7457,6 +7596,60 @@ void EverQuestMod::SaveShowBardPulseForPlayer(Player* player)
         controllerData.SecondaryExpPool,
         controllerData.ShowBardPulse == true ? 1 : 0,
         controllerData.ShowBardPulse == true ? 1 : 0);
+}
+
+bool EverQuestMod::GetHideWoWGearForPlayer(Player* player)
+{
+    return GetOrLoadActivePlayerClassControllerData(player)->HideWoWGear;
+}
+
+void EverQuestMod::SetHideWoWGearForPlayer(Player* player, bool hideWoWGear)
+{
+    GetOrLoadActivePlayerClassControllerData(player)->HideWoWGear = hideWoWGear;
+    SaveHideWoWGearForPlayer(player);
+}
+
+void EverQuestMod::SaveHideWoWGearForPlayer(Player* player)
+{
+    EverQuestPlayerControllerData controllerData;
+    {
+        std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+        auto controllerDataIt = ActivePlayerClassControllerDataByGUID.find(player->GetGUID());
+        if (controllerDataIt == ActivePlayerClassControllerDataByGUID.end())
+            return;
+        controllerData = controllerDataIt->second;
+    }
+
+    CharacterDatabase.Execute("INSERT INTO `mod_everquest_character_settings` (`guid`, `currentSecondaryClass`, `nextSecondaryClass`, `secondaryExpPool`, `hideWoWGear`) VALUES ({}, {}, {}, {}, {}) ON DUPLICATE KEY UPDATE `hideWoWGear` = {}",
+        player->GetGUID().GetCounter(),
+        controllerData.CurrentSecondClass,
+        controllerData.NextSecondClass,
+        controllerData.SecondaryExpPool,
+        controllerData.HideWoWGear == true ? 1 : 0,
+        controllerData.HideWoWGear == true ? 1 : 0);
+}
+
+void EverQuestMod::ResendVisibleGearOfNearbyPlayersToPlayer(Player* player)
+{
+    // Forcing the fields dirty rebroadcasts them to every viewer of each nearby player
+    Map* map = player->GetMap();
+    if (map == nullptr)
+        return;
+    Map::PlayerList const& mapPlayers = map->GetPlayers();
+    for (Map::PlayerList::const_iterator playerIter = mapPlayers.begin(); playerIter != mapPlayers.end(); ++playerIter)
+    {
+        Player* mapPlayer = playerIter->GetSource();
+        if (mapPlayer == nullptr || mapPlayer == player || mapPlayer->IsInWorld() == false)
+            continue;
+        if (player->IsWithinDistInMap(mapPlayer, map->GetVisibilityRange()) == false)
+            continue;
+        for (uint8 equipSlot = 0; equipSlot < EQUIPMENT_SLOT_END; ++equipSlot)
+        {
+            uint16 entryFieldIndex = (uint16)(PLAYER_VISIBLE_ITEM_1_ENTRYID + (equipSlot * 2));
+            mapPlayer->ForceValuesUpdateAtIndex(entryFieldIndex);
+            mapPlayer->ForceValuesUpdateAtIndex(entryFieldIndex + 1);
+        }
+    }
 }
 
 uint32 EverQuestMod::GetIssuedIllusionItemIDForPlayer(Player* player)
