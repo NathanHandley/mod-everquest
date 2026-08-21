@@ -76,6 +76,17 @@ public:
         return true;
     }
 
+    // Unprovoked creature agro onto an idle player owned pet is suppressed by making the creature read the pet as neutral
+    [[nodiscard]] bool IfNormalReaction(Unit const* unit, Unit const* target, ReputationRank& repRank) override
+    {
+        if (EverQuest->IsEnabled == false)
+            return true;
+        if (EverQuest->ShouldBlockCreatureInitialAgroOnPet(unit, target) == false)
+            return true;
+        repRank = REP_NEUTRAL;
+        return false;
+    }
+
     void OnDamage(Unit* attacker, Unit* victim, uint32& /*damage*/) override
     {
         if (EverQuest->IsEnabled == false)

@@ -356,6 +356,9 @@ void EverQuestMod::LoadConfigurationFile()
     // Faction
     ConfigFactionDefendFriendlyPlayersEnabled = sConfigMgr->GetOption<bool>("EverQuest.Faction.DefendFriendlyPlayersEnabled", true);
 
+    // Pet
+    ConfigPetDisableInitialCreatureAgro = sConfigMgr->GetOption<bool>("EverQuest.Pet.DisableInitialCreatureAgro", true);
+
     // Creature emotes
     ConfigCreatureEmotesEnabled = sConfigMgr->GetOption<bool>("EverQuest.CreatureEmotes.Enabled", true);
     ConfigCreatureEmotesAmbientEnabled = sConfigMgr->GetOption<bool>("EverQuest.CreatureEmotes.AmbientEnabled", true);
@@ -5303,6 +5306,36 @@ void EverQuestMod::UpdateCreatureAgroZBlock(Creature* creature, uint32 diff)
 void EverQuestMod::RemoveCreatureAgroZBlockState(Creature* creature)
 {
     creature->CustomData.Erase(EQ_CREATURE_CUSTOMDATA_AGROZBLOCK);
+}
+
+bool EverQuestMod::ShouldBlockCreatureInitialAgroOnPet(Unit const* unit, Unit const* target)
+{
+    if (ConfigPetDisableInitialCreatureAgro == false)
+        return false;
+    if (unit == nullptr || target == nullptr || unit == target)
+        return false;
+
+    // Only player owned creatures are protected (pets, guardians, charmed creatures), never players themselves
+    if (target->IsControlledByPlayer() == false || target->IsCreature() == false)
+        return false;
+
+    // Only creatures that aren't themselves player owned ever have their reaction changed
+    if (unit->IsCreature() == false || unit->IsControlledByPlayer() == true)
+        return false;
+
+    uint32 mapID = unit->GetMapId();
+    if (mapID < ConfigSystemMapDBCIDMin || mapID > ConfigSystemMapDBCIDMax)
+        return false;
+
+    // Fighting pets should still be allowed
+    if (unit->IsEngagedBy(target) == true)
+        return false;
+    if (unit->GetVictim() == target)
+        return false;
+    if (target->getAttackerForHelper() != nullptr)
+        return false;
+
+    return true;
 }
 
 // WoW doesn't have neutral creatures hit by AoE fight back, but EQ should

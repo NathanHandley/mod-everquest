@@ -414,6 +414,20 @@ EverQuest.Charm.UncharmedPlayerCheckRadius = 100
 EverQuest.Faction.DefendFriendlyPlayersEnabled = True
 
 ###################################################################################################
+# Pet Settings
+#
+# 	EverQuest.Pet.DisableInitialCreatureAgro
+#		If true, a creature in an EQ zone will not start a fight with an idle player owned pet on its
+#		own.  A creature that wanders past a pet standing around (or one parked away from its owner)
+#		walks on by instead of pulling it.  Note that this is IGNORED if the player is in an illusion
+#       that modifies reputation
+#	Default: True
+#
+###################################################################################################
+
+EverQuest.Pet.DisableInitialCreatureAgro = True
+
+###################################################################################################
 # Creature Emote Settings (EQ-faithful creature says/emotes/yells)
 #
 # 	EverQuest.CreatureEmotes.Enabled

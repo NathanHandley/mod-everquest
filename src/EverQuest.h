@@ -1039,6 +1039,7 @@ public:
     bool ConfigCharmCreatureCharmLimitsEnabled;
     float ConfigCharmUncharmedPlayerCheckRadius;
     bool ConfigFactionDefendFriendlyPlayersEnabled;
+    bool ConfigPetDisableInitialCreatureAgro;
     bool ConfigCreatureEmotesEnabled;
     bool ConfigCreatureEmotesAmbientEnabled;
     bool ConfigCreatureMovementSoundsEnabled;
@@ -1340,6 +1341,7 @@ public:
     void MarkCreatureAgroZBlockOnEngage(Creature* creature, Unit* victim);
     void UpdateCreatureAgroZBlock(Creature* creature, uint32 diff);
     void RemoveCreatureAgroZBlockState(Creature* creature);
+    bool ShouldBlockCreatureInitialAgroOnPet(Unit const* unit, Unit const* target);
     void StoreCreatureAggroPosition(Creature* creature);
     void RemoveCreatureAggroPositionState(Creature* creature);
     void TeleportCreatureToLastAggroPosition(Creature* creature, uint32 gateSpellID);
