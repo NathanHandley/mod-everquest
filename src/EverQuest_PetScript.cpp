@@ -34,6 +34,9 @@ public:
         if (EverQuest->IsEnabled == false)
             return;
 
+        // Pets do not play idle (fidget) sounds while under player control
+        EverQuest->UpdatePetFidgetSilence(pet);
+
         // Skip non-EQ pets
         if (EverQuest->HasPetDataForCreatureTemplateID(pet->GetCreatureTemplate()->Entry) == false)
             return;

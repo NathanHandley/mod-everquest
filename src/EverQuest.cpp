@@ -3372,6 +3372,43 @@ void EverQuestMod::LoadPetData()
     }
 }
 
+void EverQuestMod::LoadPetSilentDisplayData()
+{
+    SilentFidgetDisplayIDsByDisplayID.clear();
+    QueryResult queryResult = WorldDatabase.Query("SELECT DisplayID, SilentDisplayID FROM mod_everquest_pet_silent_display;");
+    if (queryResult)
+    {
+        do
+        {
+            Field* fields = queryResult->Fetch();
+            uint32 displayID = fields[0].Get<uint32>();
+            uint32 silentDisplayID = fields[1].Get<uint32>();
+            SilentFidgetDisplayIDsByDisplayID[displayID] = silentDisplayID;
+        } while (queryResult->NextRow());
+    }
+}
+
+uint32 EverQuestMod::GetSilentFidgetDisplayIDForDisplayID(uint32 displayID)
+{
+    unordered_map<uint32, uint32>::const_iterator displayIter = SilentFidgetDisplayIDsByDisplayID.find(displayID);
+    if (displayIter == SilentFidgetDisplayIDsByDisplayID.end())
+        return 0;
+    return displayIter->second;
+}
+
+void EverQuestMod::UpdatePetFidgetSilence(Creature* creature)
+{
+    // Tamed pets copies the display of the world creature it came from, but swap out that display ID for a silent one
+    if (creature->IsPet() == false)
+        return;
+    uint32 silentDisplayID = GetSilentFidgetDisplayIDForDisplayID(creature->GetDisplayId());
+    if (silentDisplayID == 0)
+        return;
+
+    // The object scale must be passed back in, since it otherwise resets to 1.  Only the visible display is changed, as the native display is what gets saved into character_pet
+    creature->SetDisplayId(silentDisplayID, creature->GetObjectScale());
+}
+
 void EverQuestMod::FixInvalidCharacterPetModelIDs()
 {
     // character_pet model IDs can become 'bad' if the server doesn't recast the same model ID. Shouldn't happen anymore, but many saved now can be broken and crash the server

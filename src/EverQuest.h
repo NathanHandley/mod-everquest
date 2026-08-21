@@ -46,7 +46,7 @@ class ByteBuffer;
 struct AreaTrigger;
 struct BuildValuesCachePosPointers;
 
-#define EQ_MOD_VERSION                              73
+#define EQ_MOD_VERSION                              74
 
 #define EQ_EQCLASS_NONE                             0
 #define EQ_EQCLASS_WARRIOR                          1
@@ -1087,6 +1087,7 @@ public:
     unordered_map<uint32, vector<ObjectGuid::LowType>> VulakRequiredDragonSpawnIDsByMapID; // Keyed by map ID, since the raid instance copy of the zone has its own dragon spawn rows
     unordered_map<uint32, vector<EverQuestCreatureEmote>> CreatureEmotesByCreatureTemplateID;
     unordered_map<uint32, EverQuestCreatureMovementSound> CreatureMovementSoundsByDisplayID;
+    unordered_map<uint32, uint32> SilentFidgetDisplayIDsByDisplayID;
 
     std::mutex PendingKillSpawnActionsMutex;
     unordered_map<uint64, vector<EverQuestPendingKillSpawnAction>> PendingKillSpawnActionsByMapInstanceKey;
@@ -1256,6 +1257,9 @@ public:
     bool HandleGossipSelect(Player* player, Creature* creature, uint32 sender, uint32 action);
     string FormatGossipTextForPlayer(Player* player, const string& text);
     void LoadPetData();
+    void LoadPetSilentDisplayData();
+    uint32 GetSilentFidgetDisplayIDForDisplayID(uint32 displayID);
+    void UpdatePetFidgetSilence(Creature* creature);
     bool HasPetDataForCreatureTemplateID(uint32 creatureTemplateID);
     const EverQuestPet& GetPetDataForCreatureTemplateID(uint32 creatureTemplateID);
     void FixInvalidCharacterPetModelIDs();

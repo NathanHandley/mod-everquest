@@ -93,6 +93,7 @@ public:
         uint32 entryID = creature->GetEntry();
         if (entryID < EverQuest->ConfigSystemCreatureTemplateIDMin || entryID > EverQuest->ConfigSystemCreatureTemplateIDMax)
             return;
+        EverQuest->UpdatePetFidgetSilence(creature);
         EverQuest->UpdateCreatureRangedAttack(creature, diff);
         EverQuest->UpdateCreatureCombatAbilities(creature, diff);
         EverQuest->UpdateCreatureSummon(creature, diff);

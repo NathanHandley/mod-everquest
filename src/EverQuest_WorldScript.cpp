@@ -65,6 +65,7 @@ public:
         EverQuest->LoadQuestReactions();
         EverQuest->LoadGossipReactions();
         EverQuest->LoadPetData();
+        EverQuest->LoadPetSilentDisplayData();
         EverQuest->LoadCreatePlayerData();
         EverQuest->LoadCreatureLootData();
         EverQuest->LoadShipTriggerData();
