@@ -418,9 +418,10 @@ void EverQuestMod::LoadConfigurationFile()
     // Cross-Class values
     ConfigCrossClassIncludeSkillIDs = GetSetFromConfigString("EverQuest.CrossClass.IncludeSkillIDs");
 
-    // The cross-class exempt spell cache derives from the skill list above, and is built alongside the racial spell cache
+    // The cross-class exempt spell cache derives from the skill list above, and is built alongside the racial and death knight spell caches
     CrossClassExemptSpellIDs.clear();
     RacialSpellIDs.clear();
+    DeathKnightSpellIDs.clear();
     CrossClassExemptSpellIDsBuilt = false;
 }
 
@@ -3615,6 +3616,28 @@ void EverQuestMod::ApplyAutoLearnedClassSkillsAndSpells(Player* player)
     // Only force an update to the player if there is one
     if (needsUpdate == true)
         player->UpdateSkillsForLevel();
+
+    // Grant starter DK abilities
+    GrantDeathKnightStarterAbilitiesIfNeeded(player);
+}
+
+void EverQuestMod::GrantDeathKnightStarterAbilitiesIfNeeded(Player* player)
+{
+    if (ConfigDeathKnightsStartLikeOtherClasses == false)
+        return;
+    if (player->getClass() != CLASS_DEATH_KNIGHT)
+        return;
+
+    // Avoid granting lower ranks if higher ranks exist
+    uint32 curRankSpellID = EQ_DEATHKNIGHT_BLOODSTRIKE_SPELL_ID;
+    while (curRankSpellID != 0)
+    {
+        if (player->HasSpell(curRankSpellID) == true)
+            return;
+        curRankSpellID = sSpellMgr->GetNextSpellInChain(curRankSpellID);
+    }
+
+    player->learnSpell(EQ_DEATHKNIGHT_BLOODSTRIKE_SPELL_ID);
 }
 
 void EverQuestMod::AddHearthstoneForNewCharacter(Player* player)
@@ -7964,7 +7987,7 @@ void EverQuestMod::EnsureCrossClassExemptSpellIDsBuilt()
         return;
     CrossClassExemptSpellIDsBuilt = true;
 
-    // Cache every spell that is tied to a cross-class skill or a racial skill line, so that they don't wipe on secondary class switch
+    // Cache every spell that is tied to a cross-class skill, a racial skill line, or a death knight skill line, so that they don't wipe on secondary class switch
     for (SkillLineAbilityEntry const* skillLineAbility : sSkillLineAbilityStore)
     {
         if (skillLineAbility == nullptr)
@@ -7973,6 +7996,23 @@ void EverQuestMod::EnsureCrossClassExemptSpellIDsBuilt()
             CrossClassExemptSpellIDs.insert(skillLineAbility->Spell);
         if (IsRacialSkillID(skillLineAbility->SkillLine) == true)
             RacialSpellIDs.insert(skillLineAbility->Spell);
+        if (IsDeathKnightSkillID(skillLineAbility->SkillLine) == true)
+            DeathKnightSpellIDs.insert(skillLineAbility->Spell);
+    }
+}
+
+bool EverQuestMod::IsDeathKnightSkillID(uint32 skillID)
+{
+    // These skill lines carry the death knight class kit, which belongs to the fixed WoW class rather than any secondary EQ class
+    switch (skillID)
+    {
+    case EQ_DEATHKNIGHT_SKILL_ID_BLOOD:
+    case EQ_DEATHKNIGHT_SKILL_ID_FROST:
+    case EQ_DEATHKNIGHT_SKILL_ID_UNHOLY:
+    case EQ_DEATHKNIGHT_RUNEFORGING_SKILL_ID:
+        return true;
+    default:
+        return false;
     }
 }
 
@@ -7980,6 +8020,8 @@ bool EverQuestMod::IsSpellExemptFromClassMove(uint32 spellID)
 {
     // Death Knight abilities belong to the fixed WoW class rather than the active EQ secondary class, so persist across switches
     if (spellID == EQ_DEATHKNIGHT_DEATHGATE_SPELL_ID || spellID == EQ_DEATHKNIGHT_RUNEFORGING_SPELL_ID)
+        return true;
+    if (DeathKnightSpellIDs.find(spellID) != DeathKnightSpellIDs.end())
         return true;
 
     // Racial abilities are a property of the character's race, so they follow the character and not the active secondary class
@@ -8065,8 +8107,8 @@ void EverQuestMod::MoveClassSpellsToModSpellsTable(Player* player, CharacterData
 
 bool EverQuestMod::IsSkillExemptFromClassMove(uint32 skillID)
 {
-    // The Runeforging skill line belongs to the fixed WoW Death Knight class, so it persists across secondary switches
-    if (skillID == EQ_DEATHKNIGHT_RUNEFORGING_SKILL_ID)
+    // The Blood/Frost/Unholy/Runeforging skill lines belong to the fixed WoW Death Knight class, so they persist across secondary switches
+    if (IsDeathKnightSkillID(skillID) == true)
         return true;
 
     // Racial skill lines belong to the character's race, and taking them away would strip the racial abilities hung off them

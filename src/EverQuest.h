@@ -74,6 +74,10 @@ struct BuildValuesCachePosPointers;
 #define EQ_DEATHKNIGHT_DEATHGATE_SPELL_ID           50977
 #define EQ_DEATHKNIGHT_RUNEFORGING_SPELL_ID         53428
 #define EQ_DEATHKNIGHT_RUNEFORGING_SKILL_ID         776
+#define EQ_DEATHKNIGHT_BLOODSTRIKE_SPELL_ID         45902
+#define EQ_DEATHKNIGHT_SKILL_ID_BLOOD               770
+#define EQ_DEATHKNIGHT_SKILL_ID_FROST               771
+#define EQ_DEATHKNIGHT_SKILL_ID_UNHOLY              772
 #define EQ_RACIAL_SKILL_ID_DWARF                    101
 #define EQ_RACIAL_SKILL_ID_TAUREN                   124
 #define EQ_RACIAL_SKILL_ID_ORC                      125
@@ -1070,6 +1074,7 @@ public:
 
     unordered_set<uint32> CrossClassExemptSpellIDs;
     unordered_set<uint32> RacialSpellIDs;
+    unordered_set<uint32> DeathKnightSpellIDs;
     bool CrossClassExemptSpellIDsBuilt;
 
     // Guards the runtime state containers (the trackers keyed by creature/player GUID below). Maps update on parallel
@@ -1258,7 +1263,6 @@ public:
     string FormatGossipTextForPlayer(Player* player, const string& text);
     void LoadPetData();
     void LoadPetSilentDisplayData();
-    uint32 GetSilentFidgetDisplayIDForDisplayID(uint32 displayID);
     void RemoveInvalidPetSilentDisplays();
     uint32 GetSilentFidgetDisplayIDForDisplayID(uint32 displayID) const;
     void UpdatePetFidgetSilence(Creature* creature);
@@ -1273,6 +1277,7 @@ public:
     void LoadAutoLearnSpellsData();
     const list<EverQuestAutoLearnSpell>& GetAutoLearnSpellsForClass(uint8 classID);
     void ApplyAutoLearnedClassSkillsAndSpells(Player* player);
+    void GrantDeathKnightStarterAbilitiesIfNeeded(Player* player);
     void AddHearthstoneForNewCharacter(Player* player);
     bool IsItemTemplateAMasterTotem(Player* player, ItemTemplate const* itemTemplate);
     bool IsPlayerCarryingMasterTotem(Player* player);
@@ -1479,6 +1484,7 @@ public:
     void MoveClassSpellsToModSpellsTable(Player* player, CharacterDatabaseTransaction& transaction);
     void EnsureCrossClassExemptSpellIDsBuilt();
     bool IsRacialSkillID(uint32 skillID);
+    bool IsDeathKnightSkillID(uint32 skillID);
     bool IsSpellExemptFromClassMove(uint32 spellID);
     bool IsSkillExemptFromClassMove(uint32 skillID);
     void MoveClassSkillsToModSkillsTable(Player* player, CharacterDatabaseTransaction& transaction);
