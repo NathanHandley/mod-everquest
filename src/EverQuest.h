@@ -1202,7 +1202,8 @@ public:
     bool IsItemEQClassAllowedForPlayer(Player* player, uint32 itemTemplateID);
     bool IsItemTemplateIDAnEQItemTemplateID(uint32 itemTemplateID);
     void LoadItemWoWToEQSwapData();
-    uint32 GetGearSwapItemTemplateIDForWornItem(Player* wearingPlayer, uint8 equipSlot, uint32 itemTemplateID);
+    bool TryGetGearSwapPlayerState(Player* player, bool& hideWoWGear, uint8& secondEQClassID);
+    uint32 GetGearSwapItemTemplateIDForWornItem(uint32 wearingPlayerGUIDCounter, uint8 rolledEQClassID, uint8 fallbackEQClassID, uint8 equipSlot, uint32 itemTemplateID);
     void PatchVisibleGearFieldsInValuesUpdate(Player* wearingPlayer, ByteBuffer& valuesUpdateBuf, BuildValuesCachePosPointers& posPointers);
     void SetAuctionUsableFilterActiveForPlayer(ObjectGuid playerGUID, bool active);
     bool IsAuctionUsableFilterActiveForPlayer(ObjectGuid playerGUID);

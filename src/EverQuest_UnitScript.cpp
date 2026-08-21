@@ -624,9 +624,10 @@ public:
         return unit->IsPlayer();
     }
 
-    // This runs inside player values-update builds, and the setting lookup below takes RuntimeStateMutex, so code holding that mutex must never synchronously
-    // build another player's values update (e.g. Group::AddMember) (that is already the mutex's documented no-engine-calls rule). The empty() check keeps the common case (health/power
-    // ticks, which carry no visible item fields) off the mutex entirely
+    // This runs inside player values-update builds on a map thread, and the settings lookups below take RuntimeStateMutex, so code holding that mutex must never
+    // synchronously build another player's values update (that is already the mutex's documented no-engine-calls rule). The lookups copy their values out under the
+    // lock and never fall back to a database load, so nothing here can stall a map thread on a query or read a record another thread is retiring. The empty() check
+    // keeps the common case (health/power ticks, which carry no visible item fields) off the mutex entirely
     void OnPatchValuesUpdate(Unit const* unit, ByteBuffer& valuesUpdateBuf, BuildValuesCachePosPointers& posPointers, Player* target) override
     {
         if (EverQuest->IsEnabled == false)
@@ -635,7 +636,13 @@ public:
             return;
         if (target == nullptr || unit == target || unit->IsPlayer() == false)
             return;
-        if (EverQuest->GetHideWoWGearForPlayer(target) == false)
+
+        // A viewer with no cached settings yet (still logging in) sees gear untouched rather than blocking the map thread on a load
+        bool targetHideWoWGear = false;
+        uint8 targetSecondEQClassID = 0;
+        if (EverQuest->TryGetGearSwapPlayerState(target, targetHideWoWGear, targetSecondEQClassID) == false)
+            return;
+        if (targetHideWoWGear == false)
             return;
         EverQuest->PatchVisibleGearFieldsInValuesUpdate(const_cast<Unit*>(unit)->ToPlayer(), valuesUpdateBuf, posPointers);
     }
