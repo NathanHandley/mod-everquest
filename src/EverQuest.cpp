@@ -6721,6 +6721,22 @@ bool EverQuestMod::IsEQClassABaseEQClass(uint8 eqClassID)
     return false;
 }
 
+bool EverQuestMod::DoesPlayerHaveEQClassOfWOWClass(Player* player, uint8 wowClassID)
+{
+    if (player == nullptr)
+        return false;
+    if (player->getClass() == wowClassID)
+        return true;
+
+    // Resolve the EQ class that this WoW class represents, since the mapping is data-driven and can change
+    uint8 mappedEQClassID = GetClassMapForWOWClassID(wowClassID).EQClassIDBase;
+    if (mappedEQClassID == EQ_EQCLASS_NONE)
+        return false;
+    if (GetClassMapForWOWClassID(player->getClass()).EQClassIDBase == mappedEQClassID)
+        return true;
+    return (GetCurrentSecondEQClassForPlayer(player) == mappedEQClassID);
+}
+
 void EverQuestMod::StorePositionAsLastGate(Player* player)
 {
     // Fail if there is no map, or if the map is invalid

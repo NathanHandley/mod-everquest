@@ -52,6 +52,10 @@ public:
         if (context == CLASS_CONTEXT_PET && playerClass == CLASS_WARLOCK && player->getClass() == CLASS_DEATH_KNIGHT)
             return true;
 
+        // Allows for non-rogues to pick pocket
+        if (context == CLASS_CONTEXT_ABILITY && playerClass == CLASS_ROGUE && EverQuest->DoesPlayerHaveEQClassOfWOWClass(const_cast<Player*>(player), CLASS_ROGUE) == true)
+            return true;
+
         return std::nullopt;
     }
 

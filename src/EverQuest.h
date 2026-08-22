@@ -1406,6 +1406,7 @@ public:
     void LoadClassMapData();
     const EverQuestClassMap& GetClassMapForWOWClassID(uint8 wowClassID);
     bool IsEQClassABaseEQClass(uint8 eqClassID);
+    bool DoesPlayerHaveEQClassOfWOWClass(Player* player, uint8 wowClassID);
 
     void StorePositionAsLastGate(Player* player);
     void SendPlayerToLastGate(Player* player);
