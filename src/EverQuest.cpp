@@ -127,8 +127,6 @@ EverQuestMod::EverQuestMod() :
     ConfigPlayerAddMasterTotemToShamans(true),
     ConfigPlayerAddRacialGuiseItemOnLogin(true),
     ConfigAchievementAdventurerLevel(50),
-    ConfigAchievementAdventurerProtectedInEQZones(true),
-    ConfigAchievementAdventurerGrantAuraOnLoginIfMissing(false),
     ConfigTrackingEnabled(true),
     ConfigTrackingRangerYardsPerLevel(20.0f),
     ConfigTrackingDruidYardsPerLevel(15.0f),
@@ -393,8 +391,6 @@ void EverQuestMod::LoadConfigurationFile()
 
     // Achievements
     ConfigAchievementAdventurerLevel = sConfigMgr->GetOption<uint32>("EverQuest.Achievement.AdventurerLevel", 50);
-    ConfigAchievementAdventurerProtectedInEQZones = sConfigMgr->GetOption<bool>("EverQuest.Achievement.AdventurerProtectedInEQZones", true);
-    ConfigAchievementAdventurerGrantAuraOnLoginIfMissing = sConfigMgr->GetOption<bool>("EverQuest.Achievement.AdventurerGrantAuraOnLoginIfMissing", false);
 
     // Tracking
     ConfigTrackingEnabled = sConfigMgr->GetOption<bool>("EverQuest.Tracking.Enabled", true);
@@ -3783,38 +3779,22 @@ void EverQuestMod::GrantLegacyAchievementIfEligible(Player* player)
     player->CompletedAchievement(achievementEntry);
 }
 
-void EverQuestMod::AddAdventurerAuraForNewCharacter(Player* player)
+void EverQuestMod::ApplyAdventurerAuraStateOnLogin(Player* player)
 {
     if (ConfigSystemAdventurerAuraSpellID == 0)
         return;
 
-    // Character creation commits to the database before this fires and the player object is discarded after, so writing the aura row directly and it will load with the character on first login
-    CharacterDatabase.Execute("INSERT INTO character_aura (guid, casterGuid, itemGuid, spell, effectMask, recalculateMask, stackcount, amount0, amount1, amount2, base_amount0, base_amount1, base_amount2, maxDuration, remainTime, remainCharges) "
-        "VALUES ({}, {}, 0, {}, 1, 0, 1, 0, 0, 0, 0, 0, 0, -1, -1, 0)",
-        player->GetGUID().GetCounter(), player->GetGUID().GetRawValue(), ConfigSystemAdventurerAuraSpellID);
-}
-
-void EverQuestMod::GrantAdventurerAuraOnLoginIfMissing(Player* player)
-{
-    if (ConfigAchievementAdventurerGrantAuraOnLoginIfMissing == false || ConfigSystemAdventurerAuraSpellID == 0)
+    bool hasAura = player->HasAura(ConfigSystemAdventurerAuraSpellID);
+    if (IsPlayerDisqualifiedFromAdventurer(player) == true)
+    {
+        // Losing it is permanent, so clear the aura if it came back through some other path
+        if (hasAura == true)
+            player->RemoveAura(ConfigSystemAdventurerAuraSpellID);
         return;
-    if (player->HasAura(ConfigSystemAdventurerAuraSpellID) == true)
-        return;
+    }
 
-    player->CastSpell(player, ConfigSystemAdventurerAuraSpellID, true);
-}
-
-void EverQuestMod::PersistAdventurerAuraOnPlayerSave(Player* player)
-{
-    if (ConfigSystemAdventurerAuraSpellID == 0)
-        return;
-    if (player->HasAura(ConfigSystemAdventurerAuraSpellID) == false)
-        return;
-
-    // The core's periodic (non-logout) saves rewrite character_aura but skip permanent auras (duration -1 fails the "less than 60 seconds remaining"
-    // skip check) so this makes sure this buff isn't lost on a crash or something like that
-    CharacterDatabase.Execute("REPLACE INTO character_aura (guid, casterGuid, itemGuid, spell, effectMask, recalculateMask, stackcount, amount0, amount1, amount2, base_amount0, base_amount1, base_amount2, maxDuration, remainTime, remainCharges) "
-        "VALUES ({}, {}, 0, {}, 1, 0, 1, 0, 0, 0, 0, 0, 0, -1, -1, 0)", player->GetGUID().GetCounter(), player->GetGUID().GetRawValue(), ConfigSystemAdventurerAuraSpellID);
+    if (hasAura == false)
+        player->CastSpell(player, ConfigSystemAdventurerAuraSpellID, true);
 }
 
 bool EverQuestMod::IsMapIDAnEverQuestMap(uint32 mapID)
@@ -4126,11 +4106,15 @@ void EverQuestMod::ApplyZoneWideGroupMoneyShare(Player* looter, Loot* loot)
     loot->gold = goldPerPlayer * nearMemberCount;
 }
 
-bool EverQuestMod::IsCreatureKillOutsideEverQuestForAdventurer(Unit* victim)
+bool EverQuestMod::IsCreatureKillDisqualifyingForAdventurer(Player* player, Unit* victim)
 {
-    if (victim == nullptr || victim->IsCreature() == false)
+    if (player == nullptr || victim == nullptr || victim->IsCreature() == false)
         return false;
     if (ConfigSystemCreatureTemplateIDMin == 0 || ConfigSystemCreatureTemplateIDMax == 0)
+        return false;
+
+    // Only a kill made outside of an EverQuest map can ever count against the player
+    if (IsMapIDAnEverQuestMap(player->GetMapId()) == true)
         return false;
 
     // Pets, guardians, totems, vehicles and other summons should be ignored since their parent is what matters
@@ -4147,26 +4131,60 @@ bool EverQuestMod::IsCreatureKillOutsideEverQuestForAdventurer(Unit* victim)
     return true;
 }
 
-bool EverQuestMod::IsQuestOutsideEverQuestForAdventurer(uint32 questID)
+bool EverQuestMod::IsQuestDisqualifyingForAdventurer(Player* player, uint32 questID)
 {
+    if (player == nullptr)
+        return false;
     if (ConfigSystemQuestSQLIDMin == 0 || ConfigSystemQuestSQLIDMax == 0)
+        return false;
+
+    // Only a quest completed outside of an EverQuest map can ever count against the player
+    if (IsMapIDAnEverQuestMap(player->GetMapId()) == true)
         return false;
     if (questID >= ConfigSystemQuestSQLIDMin && questID <= ConfigSystemQuestSQLIDMax)
         return false;
     return true;
 }
 
-bool EverQuestMod::RevokeAdventurerAuraIfPresent(Player* player)
+bool EverQuestMod::IsPlayerDisqualifiedFromAdventurer(Player* player)
+{
+    return GetOrLoadActivePlayerClassControllerData(player)->AdventurerDisqualified;
+}
+
+bool EverQuestMod::DisqualifyPlayerFromAdventurer(Player* player)
 {
     if (ConfigSystemAdventurerAuraSpellID == 0)
         return false;
-    if (player->HasAura(ConfigSystemAdventurerAuraSpellID) == false)
-        return false;
-    if (ConfigAchievementAdventurerProtectedInEQZones == true && IsMapIDAnEverQuestMap(player->GetMapId()) == true)
-        return false;
 
-    player->RemoveAura(ConfigSystemAdventurerAuraSpellID);
+    EverQuestPlayerControllerData& controllerData = *GetOrLoadActivePlayerClassControllerData(player);
+    if (controllerData.AdventurerDisqualified == true)
+        return false;
+    controllerData.AdventurerDisqualified = true;
+    SaveAdventurerDisqualifiedForPlayer(player);
+
+    if (player->HasAura(ConfigSystemAdventurerAuraSpellID) == true)
+        player->RemoveAura(ConfigSystemAdventurerAuraSpellID);
     return true;
+}
+
+void EverQuestMod::SaveAdventurerDisqualifiedForPlayer(Player* player)
+{
+    EverQuestPlayerControllerData controllerData;
+    {
+        std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+        auto controllerDataIt = ActivePlayerClassControllerDataByGUID.find(player->GetGUID());
+        if (controllerDataIt == ActivePlayerClassControllerDataByGUID.end())
+            return;
+        controllerData = controllerDataIt->second;
+    }
+
+    CharacterDatabase.Execute("INSERT INTO `mod_everquest_character_settings` (`guid`, `currentSecondaryClass`, `nextSecondaryClass`, `secondaryExpPool`, `adventurerDisqualified`) VALUES ({}, {}, {}, {}, {}) ON DUPLICATE KEY UPDATE `adventurerDisqualified` = {}",
+        player->GetGUID().GetCounter(),
+        controllerData.CurrentSecondClass,
+        controllerData.NextSecondClass,
+        controllerData.SecondaryExpPool,
+        controllerData.AdventurerDisqualified == true ? 1 : 0,
+        controllerData.AdventurerDisqualified == true ? 1 : 0);
 }
 
 void EverQuestMod::GrantAdventurerAchievementIfAccountEarned(Player* player)
@@ -4197,7 +4215,9 @@ void EverQuestMod::ProcessAdventurerStateOnLevelChange(Player* player)
         return;
     if (player->GetLevel() < ConfigAchievementAdventurerLevel)
         return;
-    if (player->HasAura(ConfigSystemAdventurerAuraSpellID) == false)
+
+    // The tracked setting decides this, not the aura, since the aura can be missing for reasons the player did not cause
+    if (IsPlayerDisqualifiedFromAdventurer(player) == true)
         return;
 
     if (player->HasAchieved(ConfigSystemAdventurerAchievementID) == false)

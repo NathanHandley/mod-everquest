@@ -1286,9 +1286,7 @@ public:
     void ApplyCorpseIllusionNativeDisplayOnDeath(Player* player);
     void RestoreNativeDisplayAfterCorpseIllusion(Player* player);
     void GrantLegacyAchievementIfEligible(Player* player);
-    void AddAdventurerAuraForNewCharacter(Player* player);
-    void GrantAdventurerAuraOnLoginIfMissing(Player* player);
-    void PersistAdventurerAuraOnPlayerSave(Player* player);
+    void ApplyAdventurerAuraStateOnLogin(Player* player);
     bool IsMapIDAnEverQuestMap(uint32 mapID);
     bool IsZoneWideGroupRewardEnabledForMap(uint32 mapID);
     bool IsInZoneWideGroupRewardRange(Player* member, WorldObject* rewardSource);
@@ -1300,9 +1298,11 @@ public:
     void GrantZoneWideGroupRewardsForKill(Player* killer, Unit* victim, const EverQuestZoneWideKillReward& reward);
     void ApplyZoneWideGroupLootAccess(Loot* loot, Player* lootOwner, bool personal);
     void ApplyZoneWideGroupMoneyShare(Player* looter, Loot* loot);
-    bool IsCreatureKillOutsideEverQuestForAdventurer(Unit* victim);
-    bool IsQuestOutsideEverQuestForAdventurer(uint32 questID);
-    bool RevokeAdventurerAuraIfPresent(Player* player);
+    bool IsCreatureKillDisqualifyingForAdventurer(Player* player, Unit* victim);
+    bool IsQuestDisqualifyingForAdventurer(Player* player, uint32 questID);
+    bool IsPlayerDisqualifiedFromAdventurer(Player* player);
+    bool DisqualifyPlayerFromAdventurer(Player* player);
+    void SaveAdventurerDisqualifiedForPlayer(Player* player);
     void GrantAdventurerAchievementIfAccountEarned(Player* player);
     void ProcessAdventurerStateOnLevelChange(Player* player);
     void LoadCreatureLootData();

@@ -1,4 +1,4 @@
-//  Author: Nathan Handley (nathanhandley@protonmail.com)
+﻿//  Author: Nathan Handley (nathanhandley@protonmail.com)
 //  Copyright (c) 2025 Nathan Handley
 //
 //  This program is free software; you can redistribute it and/or modify it
@@ -30,6 +30,7 @@ void AddEverQuestIllusionSpellScripts();
 void AddEverQuestResistDiffSpellScripts();
 void AddEverQuestPlayerCasterOnlySpellScripts();
 void AddEverQuestFrostbiteChillSpellScripts();
+void AddEverQuestRainWaveAreaCapSpellScripts();
 void AddEverQuestTalentInteractionScripts();
 void AddEverQuestItemScripts();
 void AddEverQuestPetScripts();
@@ -60,6 +61,7 @@ void Addmod_everquestScripts()
     AddEverQuestResistDiffSpellScripts();
     AddEverQuestPlayerCasterOnlySpellScripts();
     AddEverQuestFrostbiteChillSpellScripts();
+    AddEverQuestRainWaveAreaCapSpellScripts();
     AddEverQuestTalentInteractionScripts();
     AddEverQuestItemScripts();
     AddEverQuestPetScripts();

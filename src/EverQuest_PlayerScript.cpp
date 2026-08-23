@@ -151,10 +151,10 @@ public:
         if (EverQuest->IsEnabled == false)
             return;
 
-        // Completing a non-EQ quest costs the player the adventurer aura
-        if (EverQuest->IsQuestOutsideEverQuestForAdventurer(quest->GetQuestId()) == true)
+        // Completing a non-EQ quest outside of an EQ zone permanently costs the player the adventurer aura
+        if (EverQuest->IsQuestDisqualifyingForAdventurer(player, quest->GetQuestId()) == true)
         {
-            if (EverQuest->RevokeAdventurerAuraIfPresent(player) == true && player->GetSession() != nullptr)
+            if (EverQuest->DisqualifyPlayerFromAdventurer(player) == true && player->GetSession() != nullptr)
                 ChatHandler(player->GetSession()).SendSysMessage("|cffFF0000You are no longer an Everquest Adventurer, as you completed a quest that is not from Everquest.|r");
         }
 
@@ -400,10 +400,10 @@ public:
             }
         }
 
-        // Kill credit for a non-EQ creature costs the player the adventurer aura
-        if (EverQuest->IsCreatureKillOutsideEverQuestForAdventurer(rewarder->GetVictim()) == true)
+        // Kill credit for a non-EQ creature outside of an EQ zone permanently costs the player the adventurer aura
+        if (EverQuest->IsCreatureKillDisqualifyingForAdventurer(player, rewarder->GetVictim()) == true)
         {
-            if (EverQuest->RevokeAdventurerAuraIfPresent(player) == true && player->GetSession() != nullptr)
+            if (EverQuest->DisqualifyPlayerFromAdventurer(player) == true && player->GetSession() != nullptr)
                 ChatHandler(player->GetSession()).SendSysMessage("|cffFF0000You are no longer an Everquest Adventurer, as you gained kill credit for a creature that is not from Everquest.|r");
         }
 
@@ -562,7 +562,6 @@ public:
             return;
 
         EverQuest->SetInitialCreatePositionForPlayer(player);
-        EverQuest->AddAdventurerAuraForNewCharacter(player);
     }
 
     bool OnPlayerCheckItemInSlotAtLoadInventory(Player* player, Item* /*item*/, uint8 /*slot*/, uint8& /*err*/, uint16& /*dest*/) override
@@ -630,7 +629,9 @@ public:
 
         // Grant the adventurer feat of strength if another character on this account earned it
         EverQuest->GrantAdventurerAchievementIfAccountEarned(player);
-        EverQuest->GrantAdventurerAuraOnLoginIfMissing(player);
+
+        // Put the adventurer aura back if the character never did anything to lose it (it is granted here for new characters too)
+        EverQuest->ApplyAdventurerAuraStateOnLogin(player);
 
         // Grab any cast bard songs for the player
         if (EverQuest->ConfigBardMaxConcurrentSongs != 0)
@@ -717,15 +718,6 @@ public:
             return;
 
         EverQuest->RestoreNativeDisplayAfterCorpseIllusion(player);
-    }
-
-    void OnPlayerSave(Player* player) override
-    {
-        if (EverQuest->IsEnabled == false)
-            return;
-
-        // Periodic saves drop permanent auras from the database, so this prevents that for adventurer buff if the server crashes before the next clean logout
-        EverQuest->PersistAdventurerAuraOnPlayerSave(player);
     }
 
     void OnPlayerLogout(Player* player) override

@@ -578,29 +578,22 @@ EverQuest.Player.AddRacialGuiseItemOnLogin = True
 ###################################################################################################
 #
 # 	EverQuest.Achievement.AdventurerLevel
-#		Level a character must reach while still holding the "Everquest Adventurer" aura to earn
-#		the matching feat of strength for their account.  The aura is granted at character
-#		creation and is lost by taking part in any non-Everquest content, so reaching this level
-#		with it still active means the character only ever adventured through Everquest content.
+#		Level a character must reach without ever having taken part in non-Everquest content to
+#		earn the matching feat of strength for their account.  The "Everquest Adventurer" aura is
+#		granted at character creation and is lost for good by completing a non-Everquest quest or
+#		by getting kill credit on a non-Everquest creature while outside of an Everquest map, so
+#		reaching this level with it still held means the character only ever adventured through
+#		Everquest content.  Nothing done inside an Everquest map can cost a character the aura,
+#		and the aura is put back at login if it went missing without the character ever having
+#		earned the loss (a server crash, an aura wipe, and so on).
 #		Set to 0 to stop the feat of strength from ever being awarded through leveling.
 #		NOTE: This has no effect unless the converter generated the achievement and its aura
 #		 (EQWOWConverter's ACHIEVEMENT_EQ_ADVENTURER_ENABLED).
 #	Default: 50
 #
-# 	EverQuest.Achievement.AdventurerProtectedInEQZones
-#       If true, a player in an EverQuest map/zone who has the Adventurer buff cannot lose it by any means
-#   Default: True (can't lose it in an EverQuest map)
-#
-# 	EverQuest.Achievement.AdventurerGrantAuraOnLoginIfMissing
-#       If true, any player who logs in without the "Everquest Adventurer" aura is granted it.  Designed
-#       to be used for EQ-only servers, so should generally be false
-#   Default: False
-#
 ###################################################################################################
 
 EverQuest.Achievement.AdventurerLevel = 50
-EverQuest.Achievement.AdventurerProtectedInEQZones = True
-EverQuest.Achievement.AdventurerGrantAuraOnLoginIfMissing = False
 
 ###################################################################################################
 #
