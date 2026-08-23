@@ -76,6 +76,7 @@ public:
         EverQuest->LoadForageData();
         EverQuest->LoadZoneSafePointData();
         EverQuest->LoadZoneData();
+        EverQuest->LoadZoneTeleportDestinationData();
         EverQuest->LoadFactionData();
     }
 
@@ -91,10 +92,23 @@ public:
         EverQuest->ProcessPendingEquipmentStorageTransactions();
     }
 
+    // The module writes through the asynchronous database queues and depends on those writes landing in the order they were queued (a class
+    // switch runs right behind the logout save it reads from, and a runtime creature spawn deletes the rows its own save just wrote).  Every
+    // asynchronous connection of a pool pulls from one shared queue, so more than one worker thread per pool makes that order undefined
+    void WarnOnUnsupportedDatabaseWorkerThreadCounts()
+    {
+        if (sConfigMgr->GetOption<int32>("CharacterDatabase.WorkerThreads", 1) > 1)
+            LOG_ERROR("module.EverQuest", "EverQuestMod requires CharacterDatabase.WorkerThreads to be 1. With more than one, character data writes can be applied out of order and a secondary class switch can lose spells, skills, actions or equipment.");
+        if (sConfigMgr->GetOption<int32>("WorldDatabase.WorkerThreads", 1) > 1)
+            LOG_ERROR("module.EverQuest", "EverQuestMod requires WorldDatabase.WorkerThreads to be 1. With more than one, a runtime creature spawn can delete its own creature row before that row is written, leaving the spawn behind permanently.");
+    }
+
     void OnStartup() override
     {
         if (EverQuest->IsEnabled == false)
             return;
+
+        WarnOnUnsupportedDatabaseWorkerThreadCounts();
 
         // Talent alignment reads Talent.dbc, SkillLineAbility.dbc and the spell store, none of which are ready when the config loads, so it builds here instead
         if (EverQuest->ConfigSpellTalentAlignmentEnabled == true)

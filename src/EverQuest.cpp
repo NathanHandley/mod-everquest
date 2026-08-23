@@ -486,7 +486,10 @@ void EverQuestMod::LoadCreatureSpawnPoints()
 
     // Cycle group spawn metadata
     CycleSpawnGroupsByMapIDThenSpawnGroupID.clear();
-    CycleSpawnCheckTimerInMSByMapID.clear();
+    {
+        std::lock_guard<std::mutex> lock(CycleSpawnCheckTimerMutex);
+        CycleSpawnCheckTimerInMSByMapInstanceKey.clear();
+    }
     for (auto& spawnPointPair : CreatureSpawnPointsByCreatureGUID)
     {
         const EverQuestCreatureSpawnPoint& spawnPoint = spawnPointPair.second;
@@ -502,9 +505,6 @@ void EverQuestMod::LoadCreatureSpawnPoints()
         cycleSpawnCandidate.CreatureGUID = spawnPoint.CreatureGUID;
         cycleSpawnCandidate.Chance = spawnPoint.CycleChance;
         cycleSpawnGroup.CandidatesBySpawnPointID[spawnPoint.SpawnPointID].push_back(cycleSpawnCandidate);
-
-        // Pre-create the per-map check timer so map update threads never change the container's shape
-        CycleSpawnCheckTimerInMSByMapID[spawnPoint.MapID] = 0;
     }
 }
 
@@ -619,8 +619,9 @@ void EverQuestMod::ApplyRaidBossRespawnVariance(Creature* deadCreature)
     if (configuredVarianceInSec == 0)
         return;
 
-    // Raid instance copies never repop before the instance resets, so leave their timers alone
-    if (deadCreature->GetMap()->Instanceable())
+    // Named raid creatures inside a raid instance are generated with a respawn time of the whole instance reset, so the variance must not reschedule them shorter
+    // Everything else in a raid instance, and all of a dungeon instance, mirrors the open world
+    if (IsMapInstanceRaidLow(deadCreature->GetMap()->GetId()) == true)
         return;
 
     // Only world spawns have a respawn to reschedule (summons and pets never do)
@@ -650,17 +651,25 @@ void EverQuestMod::ApplyRaidBossRespawnVariance(Creature* deadCreature)
 
 void EverQuestMod::UpdateCycleSpawns(Map* map, uint32 diff)
 {
-    // Cycle spawn groups only exist on world maps (instanced map copies never get spawn point rows)
-    if (map->GetInstanceId() != 0)
+    // The MapInstanced container of an instanceable map holds no spawns itself, only its child instances do
+    if (map->Instanceable() == true && map->GetInstanceId() == 0)
         return;
+
+    // Instanced copies of a zone mirror the open world spawns and get their own spawn point rows, so they run their own cycles
     uint32 mapID = map->GetId();
     auto cycleMapIter = CycleSpawnGroupsByMapIDThenSpawnGroupID.find(mapID);
     if (cycleMapIter == CycleSpawnGroupsByMapIDThenSpawnGroupID.end())
         return;
-    CycleSpawnCheckTimerInMSByMapID[mapID] -= (int32)diff;
-    if (CycleSpawnCheckTimerInMSByMapID[mapID] > 0)
-        return;
-    CycleSpawnCheckTimerInMSByMapID[mapID] = EQ_CYCLE_SPAWN_CHECK_INTERVAL_IN_MS;
+
+    // Each instance of a map updates on its own thread, so the check timers are both per-instance and guarded
+    {
+        std::lock_guard<std::mutex> lock(CycleSpawnCheckTimerMutex);
+        int32& cycleSpawnCheckTimerInMS = CycleSpawnCheckTimerInMSByMapInstanceKey[GetMapInstanceKey(map)];
+        cycleSpawnCheckTimerInMS -= (int32)diff;
+        if (cycleSpawnCheckTimerInMS > 0)
+            return;
+        cycleSpawnCheckTimerInMS = EQ_CYCLE_SPAWN_CHECK_INTERVAL_IN_MS;
+    }
 
     time_t nowTime = GameTime::GetGameTime().count();
     for (auto& cycleSpawnGroupPair : cycleMapIter->second)
@@ -852,12 +861,13 @@ void EverQuestMod::ResolveKillSpawnRespawnTargetSpawnPoints()
             if (killSpawn.ActionType != EQ_KILLSPAWN_ACTION_RESPAWNTARGET)
                 continue;
 
-            // The raid instance copy of the zone has its own static spawn rows, so targets resolve for that map too when one exists
+            // The instance copies of the zone have their own spawn rows, so targets resolve for those maps too when they exist
             uint32 instanceRaidLowMapID = GetInstanceRaidLowMapIDForMap(killSpawn.MapID);
+            uint32 instanceDungeonMapID = GetInstanceDungeonMapIDForMap(killSpawn.MapID);
             for (auto const& creatureDataPair : sObjectMgr->GetAllCreatureData())
             {
                 CreatureData const& creatureData = creatureDataPair.second;
-                if (creatureData.mapid != killSpawn.MapID && (instanceRaidLowMapID == 0 || creatureData.mapid != instanceRaidLowMapID))
+                if (creatureData.mapid != killSpawn.MapID && (instanceRaidLowMapID == 0 || creatureData.mapid != instanceRaidLowMapID) && (instanceDungeonMapID == 0 || creatureData.mapid != instanceDungeonMapID))
                     continue;
                 if (creatureData.id != killSpawn.TargetCreatureTemplateID && creatureData.id2 != killSpawn.TargetCreatureTemplateID && creatureData.id3 != killSpawn.TargetCreatureTemplateID)
                     continue;
@@ -1596,6 +1606,8 @@ void EverQuestMod::ExecuteKillSpawnAction(Map* map, EverQuestPendingKillSpawnAct
         case EQ_KILLSPAWN_ACTION_SPAWN:
         {
             if (action.OnlyIfNotAliveCreatureTemplateID != 0 && HasAliveCreatureWithEntryInMap(map, action.OnlyIfNotAliveCreatureTemplateID, nullptr) == true)
+                return;
+            if (IsRaidCreatureBlockedFromMap(action.TargetCreatureTemplateID, map) == true)
                 return;
             Position spawnPosition(action.PositionX, action.PositionY, action.PositionZ, action.Orientation);
             TempSummon* summonedCreature = map->SummonCreature(action.TargetCreatureTemplateID, spawnPosition);
@@ -5651,6 +5663,7 @@ void EverQuestMod::RemoveVisualEquippedItemForCreatureGUIDIfExists(Map* map, Obj
 void EverQuestMod::LoadShipTriggerData()
 {
     ShipTriggersByTriggeringGameObjectTemplateEntryID.clear();
+    ShipWaitNodesByGameObjectTemplateEntryID.clear();
 
     // Pulls in all the kill faction rewards
     QueryResult queryResult = WorldDatabase.Query("SELECT TriggeringShipEntryID, TriggeredShipEntryID, TriggeringNodeID, TriggeredActivateNodeID FROM mod_everquest_transport_trigger;");
@@ -5826,9 +5839,10 @@ void EverQuestMod::LoadZoneData()
 {
     ZoneByMapID.clear();
     InstanceRaidLowMapIDs.clear();
-    OpenWorldMapIDByInstanceRaidLowMapID.clear();
+    InstanceDungeonMapIDs.clear();
+    OpenWorldMapIDByInstanceMapID.clear();
 
-    QueryResult queryResult = WorldDatabase.Query("SELECT MapID, AllowBind, ExpansionID, MaxAgroZDistance, InstanceRaidLowMapID FROM mod_everquest_zone;");
+    QueryResult queryResult = WorldDatabase.Query("SELECT MapID, AllowBind, ExpansionID, MaxAgroZDistance, InstanceRaidLowMapID, InstanceDungeonMapID FROM mod_everquest_zone;");
     if (queryResult)
     {
         do
@@ -5840,14 +5854,67 @@ void EverQuestMod::LoadZoneData()
             zone.ExpansionID = fields[2].Get<int32>();
             zone.MaxAgroZDistance = fields[3].Get<float>();
             zone.InstanceRaidLowMapID = fields[4].Get<uint32>();
+            zone.InstanceDungeonMapID = fields[5].Get<uint32>();
             ZoneByMapID[zone.MapID] = zone;
             if (zone.InstanceRaidLowMapID != 0)
             {
                 InstanceRaidLowMapIDs.insert(zone.InstanceRaidLowMapID);
-                OpenWorldMapIDByInstanceRaidLowMapID[zone.InstanceRaidLowMapID] = zone.MapID;
+                OpenWorldMapIDByInstanceMapID[zone.InstanceRaidLowMapID] = zone.MapID;
+            }
+            if (zone.InstanceDungeonMapID != 0)
+            {
+                InstanceDungeonMapIDs.insert(zone.InstanceDungeonMapID);
+                OpenWorldMapIDByInstanceMapID[zone.InstanceDungeonMapID] = zone.MapID;
             }
         } while (queryResult->NextRow());
     }
+}
+
+void EverQuestMod::LoadZoneTeleportDestinationData()
+{
+    ZoneTeleportDestinationsByMapID.clear();
+
+    // 62 is SMART_ACTION_TELEPORT, which carries its destination map in the first action parameter and its landing spot in the target columns
+    QueryResult queryResult = WorldDatabase.Query("SELECT action_param1, target_x, target_y, target_z FROM smart_scripts WHERE action_type = 62;");
+    if (queryResult)
+    {
+        do
+        {
+            Field* fields = queryResult->Fetch();
+            uint32 destinationMapID = fields[0].Get<uint32>();
+
+            // Only a zone that has a private copy can ever be rerouted into one, so the rest are not worth holding on to
+            if (GetInstanceDungeonMapIDForMap(destinationMapID) == 0 && GetInstanceRaidLowMapIDForMap(destinationMapID) == 0)
+                continue;
+
+            EverQuestZoneTeleportDestination zoneTeleportDestination;
+            zoneTeleportDestination.X = fields[1].Get<float>();
+            zoneTeleportDestination.Y = fields[2].Get<float>();
+            zoneTeleportDestination.Z = fields[3].Get<float>();
+            ZoneTeleportDestinationsByMapID[destinationMapID].push_back(zoneTeleportDestination);
+        } while (queryResult->NextRow());
+    }
+}
+
+bool EverQuestMod::IsZoneTeleportDestination(uint32 mapID, float x, float y, float z)
+{
+    auto zoneTeleportDestinationsIter = ZoneTeleportDestinationsByMapID.find(mapID);
+    if (zoneTeleportDestinationsIter == ZoneTeleportDestinationsByMapID.end())
+        return false;
+
+    // The position comes back out of the same rows it went in through
+    const float positionTolerance = 0.1f;
+    for (const EverQuestZoneTeleportDestination& zoneTeleportDestination : zoneTeleportDestinationsIter->second)
+    {
+        if (std::fabs(zoneTeleportDestination.X - x) > positionTolerance)
+            continue;
+        if (std::fabs(zoneTeleportDestination.Y - y) > positionTolerance)
+            continue;
+        if (std::fabs(zoneTeleportDestination.Z - z) > positionTolerance)
+            continue;
+        return true;
+    }
+    return false;
 }
 
 bool EverQuestMod::IsBindAllowedForMap(uint32 mapID)
@@ -5883,10 +5950,36 @@ bool EverQuestMod::IsMapInstanceRaidLow(uint32 mapID)
 uint32 EverQuestMod::GetOpenWorldMapIDForMapID(uint32 mapID)
 {
     // Any data rows keyed by a map ID (kill spawns, forage) are only generated for the open world copy so instanced copies resolve back to the open version
-    auto openWorldMapIDIt = OpenWorldMapIDByInstanceRaidLowMapID.find(mapID);
-    if (openWorldMapIDIt == OpenWorldMapIDByInstanceRaidLowMapID.end())
+    auto openWorldMapIDIt = OpenWorldMapIDByInstanceMapID.find(mapID);
+    if (openWorldMapIDIt == OpenWorldMapIDByInstanceMapID.end())
         return mapID;
     return openWorldMapIDIt->second;
+}
+
+uint32 EverQuestMod::GetInstanceDungeonMapIDForMap(uint32 mapID)
+{
+    auto zoneIt = ZoneByMapID.find(mapID);
+    if (zoneIt == ZoneByMapID.end())
+        return 0;
+    return zoneIt->second.InstanceDungeonMapID;
+}
+
+bool EverQuestMod::IsMapInstanceDungeon(uint32 mapID)
+{
+    return InstanceDungeonMapIDs.find(mapID) != InstanceDungeonMapIDs.end();
+}
+
+bool EverQuestMod::IsRaidCreatureBlockedFromMap(uint32 creatureTemplateID, Map* map)
+{
+    if (map == nullptr)
+        return false;
+    if (IsMapInstanceDungeon(map->GetId()) == false)
+        return false;
+    if (HasCreatureDataForCreatureTemplateID(creatureTemplateID) == false)
+        return false;
+
+    uint32 difficultyType = GetCreatureDataForCreatureTemplateID(creatureTemplateID).DifficultyType;
+    return difficultyType == EQ_CREATURE_DIFFICULTY_RAIDTRASH || difficultyType == EQ_CREATURE_DIFFICULTY_RAIDBOSS || difficultyType == EQ_CREATURE_DIFFICULTY_RAIDMINIBOSS;
 }
 
 void EverQuestMod::UpdateRaidLowInstanceStateForPlayer(Player* player)
@@ -5976,6 +6069,146 @@ bool EverQuestMod::TryZoneLineIntoInstanceRaidLow(Player* player, AreaTrigger co
     // If the core refuses the instance (no raid group, bound elsewhere, full) then fall through and let the zone line work normally
     return player->TeleportTo(raidLowMapID, areaTriggerTeleport->target_X, areaTriggerTeleport->target_Y, areaTriggerTeleport->target_Z,
         areaTriggerTeleport->target_Orientation, TELE_TO_NOT_LEAVE_TRANSPORT);
+}
+
+bool EverQuestMod::TryZoneLineIntoInstanceDungeon(Player* player, AreaTrigger const* trigger)
+{
+    if (player == nullptr || trigger == nullptr)
+        return false;
+
+    AreaTriggerTeleport const* areaTriggerTeleport = sObjectMgr->GetAreaTriggerTeleport(trigger->entry);
+    if (areaTriggerTeleport == nullptr)
+        return false;
+
+    uint32 dungeonMapID = GetInstanceDungeonMapIDForMap(areaTriggerTeleport->target_mapId);
+    if (dungeonMapID == 0)
+        return false;
+    if (player->GetMapId() == dungeonMapID)
+        return false;
+    if (GetDungeonModeInstancedForPlayer(player) == false)
+        return false;
+
+    // If the core refuses the instance (full, someone else's group already inside, too many instances this hour) then fall through and let the zone line put the player in the open world copy of the zone instead
+    return player->TeleportTo(dungeonMapID, areaTriggerTeleport->target_X, areaTriggerTeleport->target_Y, areaTriggerTeleport->target_Z,
+        areaTriggerTeleport->target_Orientation, TELE_TO_NOT_LEAVE_TRANSPORT);
+}
+
+uint32 EverQuestMod::GetInstanceMapIDForZoneTeleport(Player* player, uint32 destinationMapID)
+{
+    uint32 instanceDungeonMapID = GetInstanceDungeonMapIDForMap(destinationMapID);
+    uint32 instanceRaidLowMapID = GetInstanceRaidLowMapIDForMap(destinationMapID);
+
+    // Already standing in a private copy of the destination zone, so a teleport from one part of it to another stays in that copy.  Without this a pad inside an instance would quietly drop the character back out
+    // into the shared world, since the pad only knows the open world map
+    if (instanceDungeonMapID != 0 && player->GetMapId() == instanceDungeonMapID)
+        return instanceDungeonMapID;
+    if (instanceRaidLowMapID != 0 && player->GetMapId() == instanceRaidLowMapID)
+        return instanceRaidLowMapID;
+
+    // Travelling into the zone from outside it, which is the same decision a zone line makes
+    if (instanceDungeonMapID != 0 && GetDungeonModeInstancedForPlayer(player) == true)
+        return instanceDungeonMapID;
+    if (instanceRaidLowMapID != 0 && ShouldZoneLineEnterInstanceRaidLow(player, instanceRaidLowMapID) == true)
+        return instanceRaidLowMapID;
+    return 0;
+}
+
+bool EverQuestMod::TryRerouteZoneTeleportIntoInstance(Player* player, uint32 destinationMapID, float x, float y, float z, float orientation, uint32 options)
+{
+    if (player == nullptr)
+        return false;
+    if (player->m_InstanceValid == false)
+        return false;
+    if (IsZoneTeleportDestination(destinationMapID, x, y, z) == false)
+        return false;
+
+    uint32 instanceMapID = GetInstanceMapIDForZoneTeleport(player, destinationMapID);
+    if (instanceMapID == 0)
+        return false;
+
+    return player->TeleportTo(instanceMapID, x, y, z, orientation, options);
+}
+
+void EverQuestMod::SendInstanceDungeonEntryMessageToPlayer(Player* player)
+{
+    if (player == nullptr || player->GetSession() == nullptr)
+        return;
+
+    // The MapInstanced container of an instanceable map holds no players itself, only its child instances do
+    Map* map = player->FindMap();
+    if (map == nullptr || map->GetInstanceId() == 0)
+        return;
+    if (IsMapInstanceDungeon(map->GetId()) == false)
+        return;
+
+    // The instance copy's own map name carries a suffix, so the zone's plain name comes off the open world version
+    std::string zoneName = map->GetMapName();
+    MapEntry const* openWorldMapEntry = sMapStore.LookupEntry(GetOpenWorldMapIDForMapID(map->GetId()));
+    if (openWorldMapEntry != nullptr)
+        zoneName = openWorldMapEntry->name[sWorld->GetDefaultDbcLocale()];
+
+    ChatHandler(player->GetSession()).PSendSysMessage("You have entered an |cff4CFF00instanced|r version of {}, a private copy for you and your group.", zoneName);
+}
+
+void EverQuestMod::RestoreInstanceValidityOutsideInstances(Player* player)
+{
+    if (player == nullptr || player->m_InstanceValid == true)
+        return;
+    Map* map = player->FindMap();
+    if (map == nullptr || map->IsDungeon() == true)
+        return;
+    player->m_InstanceValid = true;
+}
+
+bool EverQuestMod::TeleportPlayerOutOfInstanceForEviction(Player* player)
+{
+    Map* map = player->FindMap();
+    if (map == nullptr)
+        return false;
+
+    uint32 openWorldMapID = GetOpenWorldMapIDForMapID(map->GetId());
+    if (openWorldMapID != map->GetId())
+    {
+        auto zoneSafePointIter = ZoneSafePointByMapID.find(openWorldMapID);
+        if (zoneSafePointIter != ZoneSafePointByMapID.end())
+        {
+            const EverQuestZoneSafePoint& zoneSafePoint = zoneSafePointIter->second;
+            player->TeleportTo({ openWorldMapID, { zoneSafePoint.X, zoneSafePoint.Y, zoneSafePoint.Z, zoneSafePoint.Orientation } });
+            return true;
+        }
+
+        // An instance copy is a clone of the open world zone's geometry, so the position stood in is a valid one over there
+        player->TeleportTo({ openWorldMapID, { player->GetPositionX(), player->GetPositionY(), player->GetPositionZ(), player->GetOrientation() } });
+        return true;
+    }
+
+    // No open world copy to land in, so the character's own bind point stands in for it
+    uint32 bindMapID = 0;
+    float bindX = 0;
+    float bindY = 0;
+    float bindZ = 0;
+    if (TryGetEQBindHomePosition(player, bindMapID, bindX, bindY, bindZ) == true && bindMapID != map->GetId())
+    {
+        player->TeleportTo({ bindMapID, { bindX, bindY, bindZ, player->GetOrientation() } });
+        return true;
+    }
+    return false;
+}
+
+bool EverQuestMod::HandleInstanceEvictionRepop(Player* player)
+{
+    if (player == nullptr || player->m_InstanceValid == true)
+        return true;
+
+    // Player::UpdateHomebindTime never evicts a game master, so neither does this
+    if (player->IsGameMaster() == true)
+        return true;
+    Map* map = player->FindMap();
+    if (map == nullptr || map->IsDungeon() == false)
+        return true;
+    if (IsMapInstanceDungeon(map->GetId()) == false && IsMapInstanceRaidLow(map->GetId()) == false)
+        return true;
+    return TeleportPlayerOutOfInstanceForEviction(player) == false;
 }
 
 bool EverQuestMod::IsBlockedByAgroZDistance(WorldObject const* source, WorldObject const* target, float maxAgroZDistance)
@@ -7579,7 +7812,7 @@ EverQuestPlayerControllerData EverQuestMod::GetPlayerControllerData(Player* play
 {
     EverQuestPlayerControllerData controllerData;
     controllerData.GUID = player->GetGUID().GetCounter();
-    QueryResult queryResult = CharacterDatabase.Query("SELECT nextSecondaryClass, currentSecondaryClass, secondaryExpPool, illusionFaceId, showBardPulse, issuedIllusionItemId, hideWoWGear FROM mod_everquest_character_settings WHERE guid = {}", player->GetGUID().GetCounter());
+    QueryResult queryResult = CharacterDatabase.Query("SELECT nextSecondaryClass, currentSecondaryClass, secondaryExpPool, illusionFaceId, showBardPulse, issuedIllusionItemId, hideWoWGear, dungeonMode, adventurerDisqualified FROM mod_everquest_character_settings WHERE guid = {}", player->GetGUID().GetCounter());
     if (!queryResult || queryResult->GetRowCount() == 0)
     {
         const EverQuestClassMap classMap = GetClassMapForWOWClassID(player->getClass());
@@ -7590,6 +7823,8 @@ EverQuestPlayerControllerData EverQuestMod::GetPlayerControllerData(Player* play
         controllerData.ShowBardPulse = true;
         controllerData.IssuedIllusionItemID = 0;
         controllerData.HideWoWGear = false;
+        controllerData.DungeonModeInstanced = false;
+        controllerData.AdventurerDisqualified = false;
     }
     else
     {
@@ -7601,6 +7836,8 @@ EverQuestPlayerControllerData EverQuestMod::GetPlayerControllerData(Player* play
         controllerData.ShowBardPulse = fields[4].Get<bool>();
         controllerData.IssuedIllusionItemID = fields[5].Get<uint32>();
         controllerData.HideWoWGear = fields[6].Get<bool>();
+        controllerData.DungeonModeInstanced = fields[7].Get<bool>();
+        controllerData.AdventurerDisqualified = fields[8].Get<bool>();
     }
     return controllerData;
 }
@@ -7787,6 +8024,57 @@ void EverQuestMod::SaveHideWoWGearForPlayer(Player* player)
         controllerData.HideWoWGear == true ? 1 : 0);
 }
 
+bool EverQuestMod::GetDungeonModeInstancedForPlayer(Player* player)
+{
+    return GetOrLoadActivePlayerClassControllerData(player)->DungeonModeInstanced;
+}
+
+void EverQuestMod::SetDungeonModeInstancedForPlayer(Player* player, bool dungeonModeInstanced)
+{
+    GetOrLoadActivePlayerClassControllerData(player)->DungeonModeInstanced = dungeonModeInstanced;
+    SaveDungeonModeInstancedForPlayer(player);
+}
+
+void EverQuestMod::SaveDungeonModeInstancedForPlayer(Player* player)
+{
+    EverQuestPlayerControllerData controllerData;
+    {
+        std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+        auto controllerDataIt = ActivePlayerClassControllerDataByGUID.find(player->GetGUID());
+        if (controllerDataIt == ActivePlayerClassControllerDataByGUID.end())
+            return;
+        controllerData = controllerDataIt->second;
+    }
+
+    CharacterDatabase.Execute("INSERT INTO `mod_everquest_character_settings` (`guid`, `currentSecondaryClass`, `nextSecondaryClass`, `secondaryExpPool`, `dungeonMode`) VALUES ({}, {}, {}, {}, {}) ON DUPLICATE KEY UPDATE `dungeonMode` = {}",
+        player->GetGUID().GetCounter(),
+        controllerData.CurrentSecondClass,
+        controllerData.NextSecondClass,
+        controllerData.SecondaryExpPool,
+        controllerData.DungeonModeInstanced == true ? 1 : 0,
+        controllerData.DungeonModeInstanced == true ? 1 : 0);
+}
+
+void EverQuestMod::SendDungeonModeStateToPlayer(Player* player, bool showChatMessage)
+{
+    if (player == nullptr || player->GetSession() == nullptr)
+        return;
+
+    bool isInstanced = GetDungeonModeInstancedForPlayer(player);
+    if (showChatMessage == true)
+    {
+        if (isInstanced == true)
+            ChatHandler(player->GetSession()).PSendSysMessage("EQ Dungeon Mode is set to |cff4CFF00Instanced|r, so entering an EverQuest dungeon makes a private copy for you and your group.");
+        else
+            ChatHandler(player->GetSession()).PSendSysMessage("EQ Dungeon Mode is set to |cff4CFF00Shared World|r, so EverQuest dungeons are the shared world versions everyone else is in.");
+    }
+
+    std::string addonMessage = "EQDUNGEONMODE\t" + std::string(isInstanced == true ? "1" : "0");
+    WorldPacket data;
+    ChatHandler::BuildChatPacket(data, CHAT_MSG_SYSTEM, LANG_ADDON, nullptr, nullptr, addonMessage);
+    player->GetSession()->SendPacket(&data);
+}
+
 void EverQuestMod::ResendVisibleGearOfNearbyPlayersToPlayer(Player* player)
 {
     // Forcing the fields dirty rebroadcasts them to every viewer of each nearby player
@@ -7951,40 +8239,41 @@ bool EverQuestMod::DoesSavedClassDataExistForPlayer(Player* player, uint8 lookup
 void EverQuestMod::CopyCharacterDataIntoModCharacterTable(Player* player, CharacterDatabaseTransaction& transaction)
 {
     uint8 curEQClass = GetCurrentSecondEQClassForPlayer(player);
-
-    transaction->Append("DELETE FROM `mod_everquest_characters` WHERE guid = {} and eqclass = {}", player->GetGUID().GetCounter(), curEQClass);
-    QueryResult queryResult = CharacterDatabase.Query("SELECT leveltime, rest_bonus, resettalents_cost, resettalents_time FROM characters WHERE guid = {}", player->GetGUID().GetCounter());
+    uint32 resetTalentsCost = 0;
+    uint32 resetTalentsTime = 0;
+    QueryResult queryResult = CharacterDatabase.Query("SELECT resettalents_cost, resettalents_time FROM characters WHERE guid = {}", player->GetGUID().GetCounter());
     if (!queryResult)
-    {
-        LOG_ERROR("module.EverQuest", "EverQuestMod Error pulling character data for guid {}", player->GetGUID().GetCounter());
-    }
+        LOG_ERROR("module.EverQuest", "EverQuestMod Error pulling character data for guid {}, so the stored talent reset cost and timer for eqclass {} fall back to zero", player->GetGUID().GetCounter(), curEQClass);
     else
     {
         Field* fields = queryResult->Fetch();
-        auto finiteAlways = [](float f) { return std::isfinite(f) ? f : 0.0f; };
-
-        transaction->Append("INSERT IGNORE INTO mod_everquest_characters (guid, class, eqclass, `level`, xp, leveltime, rest_bonus, resettalents_cost, resettalents_time, health, power1, power2, power3, power4, power5, power6, power7, talentGroupsCount, activeTalentGroup) VALUES ({}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {})",
-            player->GetGUID().GetCounter(),
-            player->getClass(),
-            curEQClass,
-            player->GetLevel(),
-            player->GetUInt32Value(PLAYER_XP),
-            fields[0].Get<uint32>(),                // leveltime
-            finiteAlways(fields[1].Get<float>()),   // rest_bonus
-            fields[2].Get<uint32>(),                //resettalents_cost - m_resetTalentsCost,
-            fields[3].Get<uint32>(),                //resettalents_time - uint32(m_resetTalentsTime),
-            player->GetHealth(),
-            player->GetPower(Powers(0)),
-            player->GetPower(Powers(1)),
-            player->GetPower(Powers(2)),
-            player->GetPower(Powers(3)),
-            player->GetPower(Powers(4)),
-            player->GetPower(Powers(5)),
-            player->GetPower(Powers(6)),
-            player->GetSpecsCount(),
-            player->GetActiveSpec()
-        );
+        resetTalentsCost = fields[0].Get<uint32>();
+        resetTalentsTime = fields[1].Get<uint32>();
     }
+
+    auto finiteAlways = [](float f) { return std::isfinite(f) ? f : 0.0f; };
+    transaction->Append("DELETE FROM `mod_everquest_characters` WHERE guid = {} and eqclass = {}", player->GetGUID().GetCounter(), curEQClass);
+    transaction->Append("INSERT IGNORE INTO mod_everquest_characters (guid, class, eqclass, `level`, xp, leveltime, rest_bonus, resettalents_cost, resettalents_time, health, power1, power2, power3, power4, power5, power6, power7, talentGroupsCount, activeTalentGroup) VALUES ({}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {})",
+        player->GetGUID().GetCounter(),
+        player->getClass(),
+        curEQClass,
+        player->GetLevel(),
+        player->GetUInt32Value(PLAYER_XP),
+        player->GetLevelPlayedTime(),           // leveltime
+        finiteAlways(player->GetRestBonus()),   // rest_bonus
+        resetTalentsCost,
+        resetTalentsTime,
+        player->GetHealth(),
+        player->GetPower(Powers(0)),
+        player->GetPower(Powers(1)),
+        player->GetPower(Powers(2)),
+        player->GetPower(Powers(3)),
+        player->GetPower(Powers(4)),
+        player->GetPower(Powers(5)),
+        player->GetPower(Powers(6)),
+        player->GetSpecsCount(),
+        player->GetActiveSpec()
+    );
 }
 
 void EverQuestMod::MoveTalentsToModTalentsTable(Player* player, CharacterDatabaseTransaction& transaction)
@@ -8276,12 +8565,13 @@ void EverQuestMod::MoveQuestDataToModQuestTables(Player* player, CharacterDataba
     transaction->Append("DELETE FROM `character_queststatus_rewarded` WHERE guid = {}", player->GetGUID().GetCounter());
 }
 
-void EverQuestMod::UpdateCharacterFromModCharacterTable(Player* player, uint8 pullEQClassID, CharacterDatabaseTransaction& transaction)
+bool EverQuestMod::UpdateCharacterFromModCharacterTable(Player* player, uint8 pullEQClassID, CharacterDatabaseTransaction& transaction)
 {
     QueryResult queryResult = CharacterDatabase.Query("SELECT `level`, `xp`, `leveltime`, `rest_bonus`, `resettalents_cost`, `resettalents_time`, `health`, `power1`, `power2`, `power3`, `power4`, `power5`, `power6`, `power7`, `talentGroupsCount`, `activeTalentGroup` FROM mod_everquest_characters WHERE guid = {} AND eqclass = {}", player->GetGUID().GetCounter(), pullEQClassID);
     if (!queryResult)
     {
         LOG_ERROR("module.EverQuest", "EverQuestMod Error pulling character data for guid {} eqclass {}", player->GetGUID().GetCounter(), pullEQClassID);
+        return false;
     }
     else
     {
@@ -8308,6 +8598,7 @@ void EverQuestMod::UpdateCharacterFromModCharacterTable(Player* player, uint8 pu
             player->GetGUID().GetCounter()
         );
     }
+    return true;
 }
 
 void EverQuestMod::CopyModSpellTableIntoCharacterSpells(Player* player, uint8 pullEQClassID, CharacterDatabaseTransaction& transaction)
@@ -8542,8 +8833,9 @@ bool EverQuestMod::PerformClassSwitch(Player* player)
     // Existing
     else
     {
-        // Copy in the stored version for existing
-        UpdateCharacterFromModCharacterTable(player, nextSecondaryEQClass, transaction);
+        // Copy in the stored version for existing.  Nothing has been committed yet, so a failed read here can still abandon the whole transaction
+        if (UpdateCharacterFromModCharacterTable(player, nextSecondaryEQClass, transaction) == false)
+            return false;
         CopyModSpellTableIntoCharacterSpells(player, nextSecondaryEQClass, transaction);
         CopyModActionTableIntoCharacterAction(player, nextSecondaryEQClass, transaction);
         CopyModSkillTableIntoCharacterSkills(player, nextSecondaryEQClass, transaction);

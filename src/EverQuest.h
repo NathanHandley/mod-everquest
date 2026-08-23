@@ -766,6 +766,13 @@ public:
     uint32 TriggerActivateNodeID = 0;
 };
 
+class EverQuestRegisteredShip
+{
+public:
+    GameObject* ShipGameObject = nullptr;
+    uint32 MapID = 0;
+};
+
 class EverQuestCreatureInstance
 {
 public:
@@ -1148,7 +1155,7 @@ public:
     unordered_map<uint64, unordered_set<ObjectGuid>> CreaturesResolvingEQMeleeExtraAttacksByMapInstanceKey; // Map-instance keyed since creature GUIDs repeat across instance copies of a map
     unordered_map<uint32, vector<EverQuestTransportShipTrigger>> ShipTriggersByTriggeringGameObjectTemplateEntryID;
     unordered_map<uint32, int> ShipWaitNodesByGameObjectTemplateEntryID;
-    unordered_map<uint32, GameObject*> ShipGameObjectsByTemplateEntryID;
+    unordered_map<uint32, EverQuestRegisteredShip> ShipGameObjectsByTemplateEntryID;
     unordered_map<uint32, EverQuestCreatureInstance> CreatureInstancesByCreatureGUID;
     unordered_map<uint32, unordered_map<uint32, vector<EverQuestCreatureWaypoint>>> CreatureWaypointsByMapIDAndWaypointID;
     unordered_map<uint32, vector<EverQuestForageZoneItem>> ForageZoneItemsByMapID;
