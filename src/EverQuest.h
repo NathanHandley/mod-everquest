@@ -31,7 +31,9 @@
 #include <string>
 #include <list>
 #include <map>
+#include <atomic>
 #include <mutex>
+#include <set>
 #include <unordered_set>
 
 using namespace std;
@@ -46,7 +48,7 @@ class ByteBuffer;
 struct AreaTrigger;
 struct BuildValuesCachePosPointers;
 
-#define EQ_MOD_VERSION                              74
+#define EQ_MOD_VERSION                              77
 
 #define EQ_EQCLASS_NONE                             0
 #define EQ_EQCLASS_WARRIOR                          1
@@ -833,6 +835,15 @@ public:
     int32 ExpansionID = 0;
     float MaxAgroZDistance = -1.0f;
     uint32 InstanceRaidLowMapID = 0;
+    uint32 InstanceDungeonMapID = 0;
+};
+
+class EverQuestZoneTeleportDestination
+{
+public:
+    float X = 0;
+    float Y = 0;
+    float Z = 0;
 };
 
 // Where a player is (or last was) with respect to the raid instance copies of zones.  The last visited instance is remembered after leaving,
@@ -902,6 +913,8 @@ struct EverQuestPlayerControllerData
     bool ShowBardPulse = true;
     uint32 IssuedIllusionItemID = 0;
     bool HideWoWGear = false;
+    bool DungeonModeInstanced = false;
+    bool AdventurerDisqualified = false;
 };
 
 class EverQuestPlayerClassInfoItem
@@ -1057,8 +1070,6 @@ public:
     bool ConfigPlayerAddMasterTotemToShamans;
     bool ConfigPlayerAddRacialGuiseItemOnLogin;
     uint32 ConfigAchievementAdventurerLevel;
-    bool ConfigAchievementAdventurerProtectedInEQZones;
-    bool ConfigAchievementAdventurerGrantAuraOnLoginIfMissing;
     std::set<uint32> ConfigCrossClassIncludeSkillIDs;
     bool ConfigTrackingEnabled;
     float ConfigTrackingRangerYardsPerLevel;
@@ -1119,7 +1130,8 @@ public:
     unordered_map<uint64, unordered_map<uint32, vector<Creature*>>> AllLoadedCreaturesByMapInstanceKeyThenSpawnPointID;
     unordered_map<uint64, unordered_map<uint32, vector<Creature*>>> AllLoadedCreaturesByMapInstanceKeyThenSpawnGroupID;
     unordered_map<uint32, unordered_map<uint32, EverQuestCycleSpawnGroup>> CycleSpawnGroupsByMapIDThenSpawnGroupID;
-    unordered_map<uint32, int32> CycleSpawnCheckTimerInMSByMapID;
+    std::mutex CycleSpawnCheckTimerMutex;
+    unordered_map<uint64, int32> CycleSpawnCheckTimerInMSByMapInstanceKey;
     uint32 RestrictedMapCheckTimerInMS = 0;
     unordered_map<ObjectGuid, EverQuestPlayerClientVersionCheckState> PendingClientVersionChecksByPlayerGUID;
     unordered_map<ObjectGuid, deque<uint32>> PlayerCasterConcurrentBardSongs;
@@ -1143,8 +1155,10 @@ public:
     unordered_map<uint32, uint32> ForageZoneItemTotalChanceByMapID;
     unordered_map<uint32, EverQuestZoneSafePoint> ZoneSafePointByMapID;
     unordered_map<uint32, EverQuestZone> ZoneByMapID;
+    unordered_map<uint32, vector<EverQuestZoneTeleportDestination>> ZoneTeleportDestinationsByMapID;
     unordered_set<uint32> InstanceRaidLowMapIDs;
-    unordered_map<uint32, uint32> OpenWorldMapIDByInstanceRaidLowMapID;
+    unordered_set<uint32> InstanceDungeonMapIDs;
+    unordered_map<uint32, uint32> OpenWorldMapIDByInstanceMapID;
     unordered_map<ObjectGuid, EverQuestPlayerRaidLowInstanceState> RaidLowInstanceStateByPlayerGUID;
     unordered_map<uint32, EverQuestFaction> FactionsByFactionTemplateID;
     unordered_set<uint32> DefendCombatFactionTemplateIDs;
@@ -1368,6 +1382,10 @@ public:
     void LoadZoneSafePointData();
     void SendPlayerToZoneSafePoint(Player* player, bool includeGroup);
     void LoadZoneData();
+    void LoadZoneTeleportDestinationData();
+    bool IsZoneTeleportDestination(uint32 mapID, float x, float y, float z);
+    uint32 GetInstanceMapIDForZoneTeleport(Player* player, uint32 destinationMapID);
+    bool TryRerouteZoneTeleportIntoInstance(Player* player, uint32 destinationMapID, float x, float y, float z, float orientation, uint32 options);
     uint32 GetInstanceRaidLowMapIDForMap(uint32 mapID);
     uint32 GetOpenWorldMapIDForMapID(uint32 mapID);
     bool IsMapInstanceRaidLow(uint32 mapID);
@@ -1376,6 +1394,14 @@ public:
     bool HasOccupiedRaidLowInstanceForMap(ObjectGuid playerGUID, uint32 raidLowMapID);
     bool ShouldZoneLineEnterInstanceRaidLow(Player* player, uint32 raidLowMapID);
     bool TryZoneLineIntoInstanceRaidLow(Player* player, AreaTrigger const* trigger);
+    uint32 GetInstanceDungeonMapIDForMap(uint32 mapID);
+    bool IsMapInstanceDungeon(uint32 mapID);
+    bool IsRaidCreatureBlockedFromMap(uint32 creatureTemplateID, Map* map);
+    bool TryZoneLineIntoInstanceDungeon(Player* player, AreaTrigger const* trigger);
+    void SendInstanceDungeonEntryMessageToPlayer(Player* player);
+    void RestoreInstanceValidityOutsideInstances(Player* player);
+    bool TeleportPlayerOutOfInstanceForEviction(Player* player);
+    bool HandleInstanceEvictionRepop(Player* player);
     bool IsBindAllowedForMap(uint32 mapID);
     bool IsMapRestrictedByExpansion(uint32 mapID);
     bool IsMapRestrictedForPlayers(uint32 mapID);
@@ -1419,6 +1445,7 @@ public:
     void AddCreatureAsLoaded(Creature* creature);
     void RemoveCreatureAsLoaded(Creature* creature);
     vector<Creature*> GetLoadedCreaturesWithEntryID(Map* map, uint32 entryID);
+    Creature* GetNearestLoadedCreatureWithEntryID(Map* map, uint32 entryID, WorldObject* referenceObject);
     void RollLootItemsForCreature(Creature* creature);
     void RollLootGroupIntoCounts(const EverQuestCreatureLootGroup& lootGroup, unordered_map<uint32, uint32>& counts);
     void SpawnCreature(uint32 entryID, Map* map, float x, float y, float z, float orientation, bool enforceUniqueSpawn);
@@ -1463,6 +1490,10 @@ public:
     bool GetHideWoWGearForPlayer(Player* player);
     void SetHideWoWGearForPlayer(Player* player, bool hideWoWGear);
     void SaveHideWoWGearForPlayer(Player* player);
+    bool GetDungeonModeInstancedForPlayer(Player* player);
+    void SetDungeonModeInstancedForPlayer(Player* player, bool dungeonModeInstanced);
+    void SaveDungeonModeInstancedForPlayer(Player* player);
+    void SendDungeonModeStateToPlayer(Player* player, bool showChatMessage);
     void ResendVisibleGearOfNearbyPlayersToPlayer(Player* player);
     uint32 GetIssuedIllusionItemIDForPlayer(Player* player);
     void SetIssuedIllusionItemIDForPlayer(Player* player, uint32 itemID);
@@ -1495,7 +1526,7 @@ public:
     void MoveEquipToModInventoryTable(Player* player, CharacterDatabaseTransaction& transaction);
     void MoveQuestDataToModQuestTables(Player* player, CharacterDatabaseTransaction& transaction);
 
-    void UpdateCharacterFromModCharacterTable(Player* player, uint8 pullEQClassID, CharacterDatabaseTransaction& transaction);
+    bool UpdateCharacterFromModCharacterTable(Player* player, uint8 pullEQClassID, CharacterDatabaseTransaction& transaction);
     void CopyModSpellTableIntoCharacterSpells(Player* player, uint8 pullEQClassID, CharacterDatabaseTransaction& transaction);
     void CopyModActionTableIntoCharacterAction(Player* player, uint8 pullEQClassID, CharacterDatabaseTransaction& transaction);
     void CopyModSkillTableIntoCharacterSkills(Player* player, uint8 pullEQClassID, CharacterDatabaseTransaction& transaction);

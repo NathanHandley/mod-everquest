@@ -24,9 +24,44 @@
 
 #include <cctype>
 #include <iomanip>
+#include <string>
+#include <vector>
 
 using namespace Acore::ChatCommands;
 using namespace std;
+
+// Splits the command argument string on spaces.  strtok is avoided because it keeps its scan position in a process-wide static on glibc and
+// writes terminators into the buffer it is handed, which here is the argument string owned by the command dispatcher
+static std::vector<std::string> SplitCommandArgs(const char* args, size_t maxTokens)
+{
+    std::vector<std::string> tokens;
+    if (args == nullptr || maxTokens == 0)
+        return tokens;
+    std::string currentToken;
+    for (const char* cursor = args; *cursor != '\0'; ++cursor)
+    {
+        if (*cursor != ' ')
+        {
+            currentToken.push_back(*cursor);
+            continue;
+        }
+        if (currentToken.empty() == true)
+            continue;
+        tokens.push_back(currentToken);
+        currentToken.clear();
+        if (tokens.size() >= maxTokens)
+            return tokens;
+    }
+    if (currentToken.empty() == false)
+        tokens.push_back(currentToken);
+    return tokens;
+}
+
+static std::string GetFirstCommandArg(const char* args)
+{
+    std::vector<std::string> tokens = SplitCommandArgs(args, 1);
+    return tokens.empty() == true ? std::string() : tokens[0];
+}
 
 static std::string RoundVal(float value, int precision)
 {
@@ -94,6 +129,7 @@ public:
             { "eqface", HandleEQFaceCommand,                    SEC_PLAYER, Console::No },
             { "eqshowbardpulse", HandleEQShowBardPulseCommand,  SEC_PLAYER, Console::No },
             { "eqhidewowgear", HandleEQHideWoWGearCommand,      SEC_PLAYER, Console::No },
+            { "eqdungeonmode", HandleEQDungeonModeCommand,      SEC_PLAYER, Console::No },
             { "class",  classCommandTable                                               },
             { "track",  trackCommandTable                                               },
         };
@@ -150,8 +186,7 @@ public:
         uint32 faceID = 0;
         if (*args)
         {
-            char* faceToken = strtok((char*)args, " ");
-            std::string faceString = faceToken != nullptr ? faceToken : "";
+            std::string faceString = GetFirstCommandArg(args);
             if (faceString.empty() == false && faceString.size() <= 6)
             {
                 bool isAllDigits = true;
@@ -200,8 +235,7 @@ public:
         bool showBardPulse = true;
         if (*args)
         {
-            char* valueToken = strtok((char*)args, " ");
-            std::string valueString = valueToken != nullptr ? valueToken : "";
+            std::string valueString = GetFirstCommandArg(args);
             boost::algorithm::to_lower(valueString);
             if (valueString == "on")
             {
@@ -244,8 +278,7 @@ public:
         bool hideWoWGear = false;
         if (*args)
         {
-            char* valueToken = strtok((char*)args, " ");
-            std::string valueString = valueToken != nullptr ? valueToken : "";
+            std::string valueString = GetFirstCommandArg(args);
             boost::algorithm::to_lower(valueString);
             if (valueString == "on")
             {
@@ -274,6 +307,49 @@ public:
             handler->PSendSysMessage("WoW gear on other players is now |cff4CFF00hidden|r for you.");
         else
             handler->PSendSysMessage("WoW gear on other players is now |cff4CFF00shown|r for you.");
+        return true;
+    }
+
+    static bool HandleEQDungeonModeCommand(ChatHandler* handler, const char* args)
+    {
+        if (EverQuest->IsEnabled == false)
+            return true;
+
+        Player* player = handler->GetPlayer();
+
+        // Validate the passed value is either "shared" or "instanced".  "sync" is what the client addon uses to pull the current value into its menu without printing anything
+        bool isValidValue = false;
+        bool dungeonModeInstanced = false;
+        if (*args)
+        {
+            std::string valueString = GetFirstCommandArg(args);
+            boost::algorithm::to_lower(valueString);
+            if (valueString == "sync")
+            {
+                EverQuest->SendDungeonModeStateToPlayer(player, false);
+                return true;
+            }
+            if (valueString == "shared")
+            {
+                dungeonModeInstanced = false;
+                isValidValue = true;
+            }
+            else if (valueString == "instanced")
+            {
+                dungeonModeInstanced = true;
+                isValidValue = true;
+            }
+        }
+        if (isValidValue == false)
+        {
+            handler->PSendSysMessage(".eqdungeonmode 'shared' or 'instanced'");
+            handler->PSendSysMessage("When instanced, walking into a dungeon that supports it puts you into a private copy of that dungeon for you and your group, which you can release with 'Reset all instances' on your portrait menu. When shared, dungeons are the shared world versions everyone else is in.  Applies to EverQuest dungeons.  Example: '.eqdungeonmode instanced'");
+            EverQuest->SendDungeonModeStateToPlayer(player, true);
+            return true;
+        }
+
+        EverQuest->SetDungeonModeInstancedForPlayer(player, dungeonModeInstanced);
+        EverQuest->SendDungeonModeStateToPlayer(player, true);
         return true;
     }
 
@@ -307,8 +383,7 @@ public:
         }
 
         uint8 classInt = EQ_EQCLASS_NONE;
-        char* classNameToken = strtok((char*)args, " ");
-        std::string className = classNameToken != nullptr ? classNameToken : "";
+        std::string className = GetFirstCommandArg(args);
         if (className.starts_with("No") || className.starts_with("no") || className.starts_with("NO"))
             classInt = EQ_EQCLASS_NONE;
         else if (className.starts_with("Wa") || className.starts_with("wa") || className.starts_with("WA"))
@@ -396,8 +471,7 @@ public:
 
         if (!args || !*args)
             return true;
-        char* guidToken = strtok((char*)args, " ");
-        std::string guidString = guidToken != nullptr ? guidToken : "";
+        std::string guidString = GetFirstCommandArg(args);
         if (guidString.empty() == true || guidString.size() > 20)
             return true;
         for (size_t i = 0; i < guidString.size(); ++i)
@@ -432,20 +506,19 @@ public:
 
     static int ParseUnsignedArgs(const char* args, uint32* valuesOut, int maxCount)
     {
-        if (!args || !*args)
+        if (maxCount <= 0)
             return 0;
+        std::vector<std::string> tokens = SplitCommandArgs(args, static_cast<size_t>(maxCount));
         int parsedCount = 0;
-        char* token = strtok((char*)args, " ");
-        while (token != nullptr && parsedCount < maxCount)
+        for (std::string const& token : tokens)
         {
-            for (size_t i = 0; token[i] != '\0'; ++i)
+            for (size_t i = 0; i < token.size(); ++i)
             {
                 if (isdigit(static_cast<unsigned char>(token[i])) == 0)
                     return parsedCount;
             }
-            valuesOut[parsedCount] = static_cast<uint32>(strtoul(token, nullptr, 10));
+            valuesOut[parsedCount] = static_cast<uint32>(strtoul(token.c_str(), nullptr, 10));
             parsedCount++;
-            token = strtok(nullptr, " ");
         }
         return parsedCount;
     }

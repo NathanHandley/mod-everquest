@@ -303,6 +303,7 @@ public:
         if (EverQuest->IsEnabled == false)
             return;
 
+        EverQuest->RestoreInstanceValidityOutsideInstances(player);
         EverQuest->ProcessLevelCapStateForPlayer(player);
         EverQuest->UpdatePlayerIllusionGearDisplay(player, p_time);
         EverQuest->ConsumePendingTemporaryFactionRecalculation(player);
@@ -409,6 +410,14 @@ public:
 
         // Grab the kill rewards, and apply any in the list
         EverQuest->ApplyEQOnkillReputationsForPlayer(player, rewarder->GetVictim());
+    }
+
+    bool OnPlayerCanRepopAtGraveyard(Player* player) override
+    {
+        if (EverQuest->IsEnabled == false)
+            return true;
+
+        return EverQuest->HandleInstanceEvictionRepop(player);
     }
 
     void OnPlayerBeforeChooseGraveyard(Player* player, TeamId teamId, bool nearCorpse, uint32& graveyardOverride) override
@@ -584,6 +593,12 @@ public:
 
         // Pick up a character that logged out inside a raid instance
         EverQuest->UpdateRaidLowInstanceStateForPlayer(player);
+
+        // Report which dungeon mode this character is on, and prime the client UI with it
+        EverQuest->SendDungeonModeStateToPlayer(player, true);
+
+        // A character that logged out inside a private dungeon copy is still in it, and the map entry announcement could not be sent while loading
+        EverQuest->SendInstanceDungeonEntryMessageToPlayer(player);
 
         // First login behavior
         if (player->HasAtLoginFlag(AT_LOGIN_FIRST) == true)
@@ -774,7 +789,7 @@ public:
         }
     }
 
-    bool OnPlayerBeforeTeleport(Player* player, uint32 mapid, float /*x*/, float /*y*/, float /*z*/, float /*orientation*/, uint32 /*options*/, Unit* /*target*/) override
+    bool OnPlayerBeforeTeleport(Player* player, uint32 mapid, float x, float y, float z, float orientation, uint32 options, Unit* /*target*/) override
     {
         if (EverQuest->IsEnabled == false)
             return true;
@@ -794,6 +809,10 @@ public:
             }
         }
 
+        // A converted teleport into a zone that has a private copy is aimed at the open world version, so point it at the copy when the character belongs in one
+        if (EverQuest->TryRerouteZoneTeleportIntoInstance(player, mapid, x, y, z, orientation, options) == true)
+            return false;
+
         return true;
     }
 
@@ -808,6 +827,10 @@ public:
 
         // Track entering and leaving raid instances, which drives whether a zone line back in should return the player to theirs
         EverQuest->UpdateRaidLowInstanceStateForPlayer(player);
+
+        // Announce arriving in a private dungeon copy
+        if (player->GetSession() != nullptr && player->GetSession()->PlayerLoading() == false)
+            EverQuest->SendInstanceDungeonEntryMessageToPlayer(player);
 
         // Restrict non-GMs to norrath if set
         if (EverQuest->ConfigMapRestrictPlayersToNorrath == true && player->IsGameMaster() == false)

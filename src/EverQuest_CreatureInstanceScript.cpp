@@ -440,6 +440,14 @@ public:
             {
                 ActiveMovePhase = EQ_MOVE_PHASE_NONE;
                 WaypointPriorTargetWaypointIndex = WaypointCurrentTargetWaypointIndex;
+
+                // The waypoint list is reloaded on every Reset, so never index it on trust
+                if (WaypointPriorTargetWaypointIndex >= CreatureWaypoints.size())
+                {
+                    if (CreatureWaypoints.empty() == true)
+                        return;
+                    WaypointPriorTargetWaypointIndex = FindNearestWaypointIndex();
+                }
                 const EverQuestCreatureWaypoint& wp = CreatureWaypoints[WaypointPriorTargetWaypointIndex];
                 if (wp.PauseInSec > 0)
                     events.ScheduleEvent(EVENT_PAUSE_DONE, Seconds(wp.PauseInSec));
@@ -526,14 +534,19 @@ public:
             if (WaypointPriorTargetWaypointIndex >= CreatureWaypoints.size())
                 WaypointPriorTargetWaypointIndex = FindNearestWaypointIndex();
 
+            if (WaypointRandomPathFinalTargetIndex >= CreatureWaypoints.size())
+                WaypointRandomPathFinalTargetIndex = WaypointPriorTargetWaypointIndex;
             if (WaypointPriorTargetWaypointIndex == WaypointRandomPathFinalTargetIndex)
-                WaypointRandomPathFinalTargetIndex = GetUniqueRandomWaypointIndex(WaypointCurrentTargetWaypointIndex);
+                WaypointRandomPathFinalTargetIndex = GetUniqueRandomWaypointIndex(WaypointPriorTargetWaypointIndex);
 
-            // Step up or down the list to the waypoint
-            if (WaypointRandomPathFinalTargetIndex > WaypointPriorTargetWaypointIndex)
+            // Step up or down the list to the waypoint.  The roll above excludes the prior index, so a new final target is never equal to it, but stepping down from index 0 would wrap an unsigned index
+            // around into an out of bounds read, so the direction is decided defensively
+            if (WaypointRandomPathFinalTargetIndex > WaypointPriorTargetWaypointIndex || WaypointPriorTargetWaypointIndex == 0)
                 WaypointCurrentTargetWaypointIndex = WaypointPriorTargetWaypointIndex + 1;
             else
                 WaypointCurrentTargetWaypointIndex = WaypointPriorTargetWaypointIndex - 1;
+            if (WaypointCurrentTargetWaypointIndex >= CreatureWaypoints.size())
+                WaypointCurrentTargetWaypointIndex = CreatureWaypoints.size() - 1;
 
             const EverQuestCreatureWaypoint& wp = CreatureWaypoints[WaypointCurrentTargetWaypointIndex];
             if (BuildPathAndStartPointMovementToTarget(wp.X, wp.Y, wp.Z, EQ_MOVE_PHASE_TRAVELING) == false)

@@ -22,7 +22,7 @@
 
 using namespace std;
 
-// Attached by the converter (areatrigger_scripts) to every zone line whose destination zone has a raid instance copy
+// Attached by the converter (areatrigger_scripts) to every zone line whose destination zone has an instance copy
 class EverQuest_ZoneLineAreaTriggerScript : public AreaTriggerScript
 {
 public:
@@ -33,7 +33,11 @@ public:
         if (EverQuest->IsEnabled == false)
             return false;
 
-        return EverQuest->TryZoneLineIntoInstanceRaidLow(player, trigger);
+        // A raid still inside (or a corpse left behind) wins over dungeon mode, since a zone can have both kinds of instance copy
+        if (EverQuest->TryZoneLineIntoInstanceRaidLow(player, trigger) == true)
+            return true;
+
+        return EverQuest->TryZoneLineIntoInstanceDungeon(player, trigger);
     }
 };
 
