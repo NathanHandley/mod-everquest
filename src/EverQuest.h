@@ -102,6 +102,11 @@ struct BuildValuesCachePosPointers;
 #define EQ_SPELL_ID_PRIEST_RENEWED_HOPE_RANK1       57470
 #define EQ_SPELL_ID_PRIEST_RENEWED_HOPE_RANK2       57472
 #define EQ_SPELL_ID_WARLOCK_TAMED_PET_PASSIVE       18727
+#define EQ_SPELL_ID_WARLOCK_PET_SCALING_01          34947 // Stamina, attack power and spell power off the owner
+#define EQ_SPELL_ID_WARLOCK_PET_SCALING_02          34956 // Intellect, armor and fire resistance off the owner
+#define EQ_SPELL_ID_WARLOCK_PET_SCALING_03          34957 // Frost, arcane and nature resistance off the owner
+#define EQ_SPELL_ID_WARLOCK_PET_SCALING_04          34958 // Shadow resistance off the owner
+#define EQ_SPELL_ID_WARLOCK_PET_SCALING_05          61013 // Spell hit and expertise off the owner
 #define EQ_SPELL_ID_MAGE_TORMENT_THE_WEAK_RANK1     29447
 #define EQ_SPELL_ID_WARLOCK_DEATHS_EMBRACE_RANK1    47198
 #define EQ_SPELL_ID_WARLOCK_SOUL_SIPHON_RANK1       17804

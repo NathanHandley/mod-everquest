@@ -29,6 +29,25 @@ class EverQuest_PetScript : public PetScript
 public:
     EverQuest_PetScript() : PetScript("EverQuest_PetScript") {}
 
+    void OnInitStatsForLevel(Guardian* guardian, uint8 /*petlevel*/) override
+    {
+        if (EverQuest->IsEnabled == false)
+            return;
+        if (guardian == nullptr)
+            return;
+
+        // Skip non-EQ pets
+        if (EverQuest->HasPetDataForCreatureTemplateID(guardian->GetEntry()) == false)
+            return;
+
+        // Every warlock minion family learns this same set of scaling passives, so EQ pets get them too
+        guardian->AddAura(EQ_SPELL_ID_WARLOCK_PET_SCALING_01, guardian);
+        guardian->AddAura(EQ_SPELL_ID_WARLOCK_PET_SCALING_02, guardian);
+        guardian->AddAura(EQ_SPELL_ID_WARLOCK_PET_SCALING_03, guardian);
+        guardian->AddAura(EQ_SPELL_ID_WARLOCK_PET_SCALING_04, guardian);
+        guardian->AddAura(EQ_SPELL_ID_WARLOCK_PET_SCALING_05, guardian);
+    }
+
     void OnPetAddToWorld(Pet* pet) override
     {
         if (EverQuest->IsEnabled == false)

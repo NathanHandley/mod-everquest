@@ -59,6 +59,16 @@ public:
         return std::nullopt;
     }
 
+    void OnPlayerBeforeGuardianInitStatsForLevel(Player* /*player*/, Guardian* /*guardian*/, CreatureTemplate const* cinfo, PetType& petType) override
+    {
+        if (EverQuest->IsEnabled == false)
+            return;
+        if (cinfo == nullptr)
+            return;
+        if (EverQuest->HasPetDataForCreatureTemplateID(cinfo->Entry) == true)
+            petType = SUMMON_PET;
+    }
+
     bool OnPlayerHasActivePowerType(Player const* /*player*/, Powers /*power*/) override
     {
         // Enable all powers for all classes
@@ -926,8 +936,10 @@ public:
                 else
                 {
                     player->SetLevel(playerLevel - 1, true);
-                    int newExperience = player->GetUInt32Value(PLAYER_NEXT_LEVEL_XP) - (expToLose - curLevelEXP);
-                    player->SetUInt32Value(PLAYER_XP, newExperience);
+                    int newExperience = (int)player->GetUInt32Value(PLAYER_NEXT_LEVEL_XP) - (expToLose - curLevelEXP);
+                    if (newExperience < 0)
+                        newExperience = 0;
+                    player->SetUInt32Value(PLAYER_XP, (uint32)newExperience);
                     ChatHandler(player->GetSession()).PSendSysMessage("You lost|cffFF0000 {} |rexperience for releasing your spirit, which dropped your level to |cffFF0000{}|r!", expToLose, playerLevel - 1);
                 }
             }
