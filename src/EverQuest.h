@@ -76,6 +76,7 @@ struct BuildValuesCachePosPointers;
 #define EQ_DEATHKNIGHT_DEATHGATE_SPELL_ID           50977
 #define EQ_DEATHKNIGHT_RUNEFORGING_SPELL_ID         53428
 #define EQ_DEATHKNIGHT_RUNEFORGING_SKILL_ID         776
+#define EQ_DEATHKNIGHT_GLYPH_REQUIRED_LEVEL         15
 #define EQ_DEATHKNIGHT_BLOODSTRIKE_SPELL_ID         45902
 #define EQ_DEATHKNIGHT_SKILL_ID_BLOOD               770
 #define EQ_DEATHKNIGHT_SKILL_ID_FROST               771
@@ -1386,6 +1387,7 @@ public:
     const list<EverQuestAutoLearnSpell>& GetAutoLearnSpellsForClass(uint8 classID);
     void ApplyAutoLearnedClassSkillsAndSpells(Player* player);
     void GrantDeathKnightStarterAbilitiesIfNeeded(Player* player);
+    void LowerDeathKnightGlyphRequiredLevels();
     void AddHearthstoneForNewCharacter(Player* player);
     bool IsItemTemplateAMasterTotem(Player* player, ItemTemplate const* itemTemplate);
     bool IsPlayerCarryingMasterTotem(Player* player);

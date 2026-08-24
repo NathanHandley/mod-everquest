@@ -4034,6 +4034,31 @@ void EverQuestMod::GrantDeathKnightStarterAbilitiesIfNeeded(Player* player)
     player->learnSpell(EQ_DEATHKNIGHT_BLOODSTRIKE_SPELL_ID);
 }
 
+void EverQuestMod::LowerDeathKnightGlyphRequiredLevels()
+{
+    if (ConfigDeathKnightsStartLikeOtherClasses == false)
+        return;
+
+    std::vector<ItemTemplate*> const* itemTemplates = sObjectMgr->GetItemTemplateStoreFast();
+    if (itemTemplates == nullptr)
+        return;
+
+    uint32 loweredGlyphCount = 0;
+    for (ItemTemplate* itemTemplate : *itemTemplates)
+    {
+        if (itemTemplate == nullptr)
+            continue;
+        if (itemTemplate->Class != (uint32)ITEM_CLASS_GLYPH || itemTemplate->SubClass != (uint32)ITEM_SUBCLASS_GLYPH_DEATH_KNIGHT)
+            continue;
+        if (itemTemplate->RequiredLevel <= EQ_DEATHKNIGHT_GLYPH_REQUIRED_LEVEL)
+            continue;
+        itemTemplate->RequiredLevel = EQ_DEATHKNIGHT_GLYPH_REQUIRED_LEVEL;
+        ++loweredGlyphCount;
+    }
+
+    LOG_INFO("module.EverQuest", "EverQuestMod::LowerDeathKnightGlyphRequiredLevels lowered the required level of {} death knight glyphs to {}", loweredGlyphCount, (uint32)EQ_DEATHKNIGHT_GLYPH_REQUIRED_LEVEL);
+}
+
 void EverQuestMod::AddHearthstoneForNewCharacter(Player* player)
 {
     if (ConfigPlayerAddHearthstoneToNewCharacters == false)

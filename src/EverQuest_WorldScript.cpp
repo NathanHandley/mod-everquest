@@ -134,6 +134,9 @@ public:
 
         // The set of reputation-capable EQ factions validates against Faction.dbc, which also isn't loaded when the faction data loads with the config
         EverQuest->ResolveEQReputationFactions();
+
+        // Death knights that level from 1 need their glyphs to unlock alongside every other class, and the item templates aren't loaded when the config loads
+        EverQuest->LowerDeathKnightGlyphRequiredLevels();
     }
 };
 
