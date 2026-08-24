@@ -1492,7 +1492,7 @@ public:
     bool TryZoneLineIntoInstanceRaidLow(Player* player, AreaTrigger const* trigger);
     uint32 GetInstanceDungeonMapIDForMap(uint32 mapID);
     bool IsMapInstanceDungeon(uint32 mapID);
-    bool IsRaidCreatureBlockedFromMap(uint32 creatureTemplateID, Map* map);
+    bool IsCreatureBlockedFromInstanceMap(uint32 creatureTemplateID, Map* map);
     bool TryZoneLineIntoInstanceDungeon(Player* player, AreaTrigger const* trigger);
     void SendInstanceDungeonEntryMessageToPlayer(Player* player);
     void RestoreInstanceValidityOutsideInstances(Player* player);

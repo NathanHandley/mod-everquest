@@ -1764,7 +1764,7 @@ void EverQuestMod::ExecuteKillSpawnAction(Map* map, EverQuestPendingKillSpawnAct
         {
             if (action.OnlyIfNotAliveCreatureTemplateID != 0 && HasAliveCreatureWithEntryInMap(map, action.OnlyIfNotAliveCreatureTemplateID, nullptr) == true)
                 return;
-            if (IsRaidCreatureBlockedFromMap(action.TargetCreatureTemplateID, map) == true)
+            if (IsCreatureBlockedFromInstanceMap(action.TargetCreatureTemplateID, map) == true)
                 return;
             Position spawnPosition(action.PositionX, action.PositionY, action.PositionZ, action.Orientation);
             TempSummon* summonedCreature = map->SummonCreature(action.TargetCreatureTemplateID, spawnPosition);
@@ -6380,17 +6380,22 @@ bool EverQuestMod::IsMapInstanceDungeon(uint32 mapID)
     return InstanceDungeonMapIDs.find(mapID) != InstanceDungeonMapIDs.end();
 }
 
-bool EverQuestMod::IsRaidCreatureBlockedFromMap(uint32 creatureTemplateID, Map* map)
+bool EverQuestMod::IsCreatureBlockedFromInstanceMap(uint32 creatureTemplateID, Map* map)
 {
     if (map == nullptr)
         return false;
-    if (IsMapInstanceDungeon(map->GetId()) == false)
+    bool isDungeonInstanceMap = IsMapInstanceDungeon(map->GetId());
+    bool isRaidInstanceMap = IsMapInstanceRaidLow(map->GetId());
+    if (isDungeonInstanceMap == false && isRaidInstanceMap == false)
         return false;
     if (HasCreatureDataForCreatureTemplateID(creatureTemplateID) == false)
         return false;
 
     uint32 difficultyType = GetCreatureDataForCreatureTemplateID(creatureTemplateID).DifficultyType;
-    return difficultyType == EQ_CREATURE_DIFFICULTY_RAIDTRASH || difficultyType == EQ_CREATURE_DIFFICULTY_RAIDBOSS || difficultyType == EQ_CREATURE_DIFFICULTY_RAIDMINIBOSS;
+    bool isRaidCreature = (difficultyType == EQ_CREATURE_DIFFICULTY_RAIDTRASH || difficultyType == EQ_CREATURE_DIFFICULTY_RAIDBOSS || difficultyType == EQ_CREATURE_DIFFICULTY_RAIDMINIBOSS);
+    if (isRaidInstanceMap == true)
+        return isRaidCreature == false;
+    return isRaidCreature;
 }
 
 void EverQuestMod::UpdateRaidLowInstanceStateForPlayer(Player* player)
@@ -7783,8 +7788,8 @@ void EverQuestMod::SpawnCreature(uint32 entryID, Map* map, float x, float y, flo
         return;
     }
 
-    // Quest and gossip reactions can name raid creatures, which never belong in a dungeon instance
-    if (IsRaidCreatureBlockedFromMap(entryID, map) == true)
+    // Quest and gossip reactions can name creatures that don't belong in the instanced copy of the zone they were triggered in
+    if (IsCreatureBlockedFromInstanceMap(entryID, map) == true)
         return;
 
     // Cancel out if it should be a unique spawn, and the creature exists
