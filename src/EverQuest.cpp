@@ -879,6 +879,163 @@ void EverQuestMod::ResolveKillSpawnRespawnTargetSpawnPoints()
     }
 }
 
+void EverQuestMod::LoadCreaturePresenceGroupData()
+{
+    CreaturePresenceGroupsByMapID.clear();
+
+    QueryResult queryResult = WorldDatabase.Query("SELECT ID, MapID, PrimaryCreatureTemplateID, OtherCreatureTemplateID1, OtherCreatureTemplateID2, OtherCreatureTemplateID3, OtherCreatureTemplateID4, CheckIntervalMS FROM mod_everquest_creature_presence_group ORDER BY ID;");
+    if (!queryResult)
+        return;
+    do
+    {
+        Field* fields = queryResult->Fetch();
+        EverQuestCreaturePresenceGroup presenceGroup;
+        presenceGroup.ID = fields[0].Get<uint32>();
+        presenceGroup.MapID = fields[1].Get<uint32>();
+        presenceGroup.PrimaryCreatureTemplateID = fields[2].Get<uint32>();
+        for (uint32 otherIndex = 0; otherIndex < EQ_PRESENCE_GROUP_MAX_OTHER_CREATURES; otherIndex++)
+        {
+            uint32 otherCreatureTemplateID = fields[3 + otherIndex].Get<uint32>();
+            if (otherCreatureTemplateID != 0)
+                presenceGroup.OtherCreatureTemplateIDs.push_back(otherCreatureTemplateID);
+        }
+        presenceGroup.CheckIntervalMS = fields[3 + EQ_PRESENCE_GROUP_MAX_OTHER_CREATURES].Get<uint32>();
+        if (presenceGroup.OtherCreatureTemplateIDs.empty() == true || presenceGroup.CheckIntervalMS == 0)
+        {
+            LOG_ERROR("module.EverQuest", "EverQuestMod::LoadCreaturePresenceGroupData skipped presence group ID {}, since it has no other creatures or no check interval", presenceGroup.ID);
+            continue;
+        }
+        CreaturePresenceGroupsByMapID[presenceGroup.MapID].push_back(presenceGroup);
+    } while (queryResult->NextRow());
+}
+
+// Note: runs at world startup (OnStartup), since sObjectMgr has no creature spawns when the data tables load
+void EverQuestMod::ResolveCreaturePresenceGroupSpawnPoints()
+{
+    for (auto& presenceGroupPair : CreaturePresenceGroupsByMapID)
+    {
+        for (EverQuestCreaturePresenceGroup& presenceGroup : presenceGroupPair.second)
+        {
+            // The instance copies of the zone have their own spawn rows, so the primary resolves for those maps too
+            uint32 instanceRaidLowMapID = GetInstanceRaidLowMapIDForMap(presenceGroup.MapID);
+            uint32 instanceDungeonMapID = GetInstanceDungeonMapIDForMap(presenceGroup.MapID);
+            for (auto const& creatureDataPair : sObjectMgr->GetAllCreatureData())
+            {
+                CreatureData const& creatureData = creatureDataPair.second;
+                if (creatureData.mapid != presenceGroup.MapID && (instanceRaidLowMapID == 0 || creatureData.mapid != instanceRaidLowMapID) && (instanceDungeonMapID == 0 || creatureData.mapid != instanceDungeonMapID))
+                    continue;
+                if (creatureData.id != presenceGroup.PrimaryCreatureTemplateID && creatureData.id2 != presenceGroup.PrimaryCreatureTemplateID && creatureData.id3 != presenceGroup.PrimaryCreatureTemplateID)
+                    continue;
+                EverQuestCreaturePresenceSpawnPoint spawnPoint;
+                spawnPoint.SpawnID = creatureDataPair.first;
+                spawnPoint.PositionX = creatureData.posX;
+                spawnPoint.PositionY = creatureData.posY;
+                presenceGroup.PrimarySpawnPointsByMapID[creatureData.mapid].push_back(spawnPoint);
+            }
+            if (presenceGroup.PrimarySpawnPointsByMapID.find(presenceGroup.MapID) == presenceGroup.PrimarySpawnPointsByMapID.end())
+                LOG_ERROR("module.EverQuest", "EverQuestMod::ResolveCreaturePresenceGroupSpawnPoints found no spawn points for presence group ID {} with primary creature template {} on map {}", presenceGroup.ID, presenceGroup.PrimaryCreatureTemplateID, presenceGroup.MapID);
+        }
+    }
+}
+
+void EverQuestMod::SetPresenceGroupPrimaryRespawnTime(Map* map, const EverQuestCreaturePresenceGroup& presenceGroup, uint32 respawnTimeSec)
+{
+    auto spawnPointsIter = presenceGroup.PrimarySpawnPointsByMapID.find(map->GetId());
+    if (spawnPointsIter == presenceGroup.PrimarySpawnPointsByMapID.end() || spawnPointsIter->second.empty() == true)
+        return;
+    EverQuestPendingKillSpawnAction action;
+    action.ActionType = EQ_KILLSPAWN_ACTION_RESPAWNTARGET;
+    for (const EverQuestCreaturePresenceSpawnPoint& spawnPoint : spawnPointsIter->second)
+        action.RespawnTargetSpawnIDs.push_back(spawnPoint.SpawnID);
+    action.RespawnTimeSec = respawnTimeSec;
+    ExecuteKillSpawnAction(map, action);
+}
+
+bool EverQuestMod::IsPresenceGroupPrimaryGridLoaded(Map* map, const EverQuestCreaturePresenceGroup& presenceGroup)
+{
+    auto spawnPointsIter = presenceGroup.PrimarySpawnPointsByMapID.find(map->GetId());
+    if (spawnPointsIter == presenceGroup.PrimarySpawnPointsByMapID.end())
+        return false;
+    for (const EverQuestCreaturePresenceSpawnPoint& spawnPoint : spawnPointsIter->second)
+        if (map->IsGridLoaded(spawnPoint.PositionX, spawnPoint.PositionY) == true)
+            return true;
+    return false;
+}
+
+void EverQuestMod::ClearCreaturePresenceGroupStateForMap(Map* map)
+{
+    if (map == nullptr)
+        return;
+    uint64 mapInstanceKey = GetMapInstanceKey(map);
+    std::lock_guard<std::mutex> lock(CreaturePresenceGroupStateMutex);
+    PresenceGroupCheckTimerInMSByMapInstanceKeyThenGroupID.erase(mapInstanceKey);
+    SuppressedPresenceGroupIDsByMapInstanceKey.erase(mapInstanceKey);
+}
+
+void EverQuestMod::UpdateCreaturePresenceGroups(Map* map, uint32 diff)
+{
+    // The MapInstanced container of an instanceable map holds no spawns itself, only its child instances do
+    if (map->Instanceable() == true && map->GetInstanceId() == 0)
+        return;
+    auto presenceGroupMapIter = CreaturePresenceGroupsByMapID.find(GetOpenWorldMapIDForMapID(map->GetId()));
+    if (presenceGroupMapIter == CreaturePresenceGroupsByMapID.end())
+        return;
+    uint64 mapInstanceKey = GetMapInstanceKey(map);
+
+    for (const EverQuestCreaturePresenceGroup& presenceGroup : presenceGroupMapIter->second)
+    {
+        // Each instance of a map updates on its own thread, so the check timers are both per-instance and guarded
+        {
+            std::lock_guard<std::mutex> lock(CreaturePresenceGroupStateMutex);
+            int32& checkTimerInMS = PresenceGroupCheckTimerInMSByMapInstanceKeyThenGroupID[mapInstanceKey][presenceGroup.ID];
+            checkTimerInMS -= (int32)diff;
+            if (checkTimerInMS > 0)
+                continue;
+            checkTimerInMS = (int32)presenceGroup.CheckIntervalMS;
+        }
+
+        if (IsPresenceGroupPrimaryGridLoaded(map, presenceGroup) == false)
+            continue;
+
+        bool primaryIsAlive = HasAliveCreatureWithEntryInMap(map, presenceGroup.PrimaryCreatureTemplateID, nullptr);
+        bool standInIsAlive = false;
+        if (primaryIsAlive == false)
+            for (uint32 otherCreatureTemplateID : presenceGroup.OtherCreatureTemplateIDs)
+                if (HasAliveCreatureWithEntryInMap(map, otherCreatureTemplateID, nullptr) == true)
+                {
+                    standInIsAlive = true;
+                    break;
+                }
+
+        // The primary is back on its feet, so the group is free to hold it down again on the next swap
+        if (primaryIsAlive == true)
+        {
+            std::lock_guard<std::mutex> lock(CreaturePresenceGroupStateMutex);
+            SuppressedPresenceGroupIDsByMapInstanceKey[mapInstanceKey].erase(presenceGroup.ID);
+            continue;
+        }
+
+        // A stand-in took the primary's place.  Push the primary's spawn point out once, or its own respawn timer would eventually put a second member of the group in the room alongside the stand-in
+        if (standInIsAlive == true)
+        {
+            {
+                std::lock_guard<std::mutex> lock(CreaturePresenceGroupStateMutex);
+                if (SuppressedPresenceGroupIDsByMapInstanceKey[mapInstanceKey].insert(presenceGroup.ID).second == false)
+                    continue;
+            }
+            SetPresenceGroupPrimaryRespawnTime(map, presenceGroup, EQ_PRESENCE_GROUP_SUPPRESSED_RESPAWN_IN_SEC);
+            continue;
+        }
+
+        // Nothing in the group is standing, so the spot is empty.  Bring the primary back now rather than leaving the zone short an NPC until whatever respawn timer it happens to be carrying runs out
+        {
+            std::lock_guard<std::mutex> lock(CreaturePresenceGroupStateMutex);
+            SuppressedPresenceGroupIDsByMapInstanceKey[mapInstanceKey].erase(presenceGroup.ID);
+        }
+        SetPresenceGroupPrimaryRespawnTime(map, presenceGroup, 0);
+    }
+}
+
 static const uint32 VulakRequiredDragonCreatureTemplateIDs[] =
 {
     // Lord Koi'Doken is intentionally skipped
@@ -7656,24 +7813,39 @@ void EverQuestMod::TrackReactionSpawnedCreature(Creature* creature)
 
 void EverQuestMod::RefreshReactionSpawnedCreatureCount()
 {
-    // Callers hold ReactionSpawnedCreaturesMutex.  This feeds the atomic that keeps the map tick off the lock
     uint32 trackedCount = 0;
     for (auto& spawnIDsByMapInstanceKey : ReactionSpawnedCreatureSpawnIDsByMapInstanceKey)
-        trackedCount += (uint32)spawnIDsByMapInstanceKey.second.size();
-    for (auto& spawnIDsByMapInstanceKey : ReactionSpawnedCreatureSpawnIDsPendingEraseByMapInstanceKey)
         trackedCount += (uint32)spawnIDsByMapInstanceKey.second.size();
     ReactionSpawnedCreatureCount.store(trackedCount);
 }
 
-void EverQuestMod::EraseReactionSpawnedCreatureData(Map* map, ObjectGuid::LowType spawnID)
+void EverQuestMod::RetireReactionSpawnedCreature(Map* map, ObjectGuid::LowType spawnID)
 {
-    // The grid registration has to go first, or the spawn comes back the next time that grid loads
-    CreatureData const* creatureData = sObjectMgr->GetCreatureData(spawnID);
-    if (creatureData != nullptr)
-        sObjectMgr->RemoveCreatureFromGrid(spawnID, creatureData);
+    // The respawn queue belongs to this map and this runs on the map's own thread, so it can be cleared right here
     if (map != nullptr)
         map->RemoveCreatureRespawnTime(spawnID);
-    sObjectMgr->DeleteCreatureData(spawnID);
+
+    // The grid registration is shared state that every map thread reads while loading grids, so dropping it waits for the world update instead
+    std::lock_guard<std::mutex> lock(ReactionSpawnedCreaturesMutex);
+    ReactionSpawnedCreatureSpawnIDsPendingGridRemoval.push_back(spawnID);
+}
+
+void EverQuestMod::ProcessPendingReactionSpawnGridRemovals()
+{
+    vector<ObjectGuid::LowType> spawnIDsToRemove;
+    {
+        std::lock_guard<std::mutex> lock(ReactionSpawnedCreaturesMutex);
+        if (ReactionSpawnedCreatureSpawnIDsPendingGridRemoval.empty() == true)
+            return;
+        spawnIDsToRemove.swap(ReactionSpawnedCreatureSpawnIDsPendingGridRemoval);
+    }
+
+    for (ObjectGuid::LowType spawnID : spawnIDsToRemove)
+    {
+        CreatureData const* creatureData = sObjectMgr->GetCreatureData(spawnID);
+        if (creatureData != nullptr)
+            sObjectMgr->RemoveCreatureFromGrid(spawnID, creatureData);
+    }
 }
 
 void EverQuestMod::UpdateReactionSpawnedCreatures(Map* map)
@@ -7685,95 +7857,78 @@ void EverQuestMod::UpdateReactionSpawnedCreatures(Map* map)
         return;
     uint64 mapInstanceKey = GetMapInstanceKey(map);
 
-    vector<ObjectGuid::LowType> spawnIDsToErase;
+    vector<ObjectGuid::LowType> spawnIDsToRetire;
     vector<Creature*> creaturesToRemoveFromWorld;
     {
         std::lock_guard<std::mutex> lock(ReactionSpawnedCreaturesMutex);
-
-        // Anything queued on an earlier tick has had its creature object destroyed by Map::DelayedUpdate by now, so nothing is left pointing at that spawn data and it can finally be dropped
-        auto pendingEraseIter = ReactionSpawnedCreatureSpawnIDsPendingEraseByMapInstanceKey.find(mapInstanceKey);
-        if (pendingEraseIter != ReactionSpawnedCreatureSpawnIDsPendingEraseByMapInstanceKey.end())
-        {
-            spawnIDsToErase = pendingEraseIter->second;
-            ReactionSpawnedCreatureSpawnIDsPendingEraseByMapInstanceKey.erase(pendingEraseIter);
-        }
-
         auto trackedIter = ReactionSpawnedCreatureSpawnIDsByMapInstanceKey.find(mapInstanceKey);
-        if (trackedIter != ReactionSpawnedCreatureSpawnIDsByMapInstanceKey.end())
+        if (trackedIter == ReactionSpawnedCreatureSpawnIDsByMapInstanceKey.end())
+            return;
+
+        vector<ObjectGuid::LowType> stillSpawnedIDs;
+        for (ObjectGuid::LowType spawnID : trackedIter->second)
         {
-            vector<ObjectGuid::LowType> stillSpawnedIDs;
-            vector<ObjectGuid::LowType> newlyPendingEraseIDs;
-            for (ObjectGuid::LowType spawnID : trackedIter->second)
+            // A spawn point can briefly hold more than one creature, a fresh one standing next to its own corpse, so the whole range decides whether the spot is still occupied rather than the first entry
+            bool isStillStanding = false;
+            vector<Creature*> deadCreatures;
+            auto creatureBySpawnIDBounds = map->GetCreatureBySpawnIdStore().equal_range(spawnID);
+            for (auto creatureIter = creatureBySpawnIDBounds.first; creatureIter != creatureBySpawnIDBounds.second; ++creatureIter)
             {
-                Creature* spawnedCreature = nullptr;
-                auto creatureBySpawnIDBounds = map->GetCreatureBySpawnIdStore().equal_range(spawnID);
-                if (creatureBySpawnIDBounds.first != creatureBySpawnIDBounds.second)
-                    spawnedCreature = creatureBySpawnIDBounds.first->second;
+                Creature* spawnedCreature = creatureIter->second;
 
-                // Already out of the world, from a grid unload or an outright removal, so only the data is left
-                if (spawnedCreature == nullptr)
-                {
-                    newlyPendingEraseIDs.push_back(spawnID);
-                    continue;
-                }
-
-                // Still up, or a corpse players may not have finished looting, so leave it be
+                // Still up, or a corpse that players may not have finished looting, so leave it be
                 if (spawnedCreature->IsAlive() == true || spawnedCreature->getDeathState() == DeathState::Corpse)
                 {
-                    stillSpawnedIDs.push_back(spawnID);
-                    continue;
+                    isStillStanding = true;
+                    break;
                 }
-
-                // Dead with the corpse gone (or depopped by a reaction), so take it out of the world before Creature::Update reaches the respawn timer and stands it back up
-                creaturesToRemoveFromWorld.push_back(spawnedCreature);
-                newlyPendingEraseIDs.push_back(spawnID);
+                deadCreatures.push_back(spawnedCreature);
             }
-            if (stillSpawnedIDs.empty() == true)
-                ReactionSpawnedCreatureSpawnIDsByMapInstanceKey.erase(trackedIter);
-            else
-                trackedIter->second = stillSpawnedIDs;
-            if (newlyPendingEraseIDs.empty() == false)
-                ReactionSpawnedCreatureSpawnIDsPendingEraseByMapInstanceKey[mapInstanceKey] = newlyPendingEraseIDs;
+            if (isStillStanding == true)
+            {
+                stillSpawnedIDs.push_back(spawnID);
+                continue;
+            }
+            for (Creature* deadCreature : deadCreatures)
+                creaturesToRemoveFromWorld.push_back(deadCreature);
+            spawnIDsToRetire.push_back(spawnID);
         }
+        if (stillSpawnedIDs.empty() == true)
+            ReactionSpawnedCreatureSpawnIDsByMapInstanceKey.erase(trackedIter);
+        else
+            trackedIter->second = stillSpawnedIDs;
         RefreshReactionSpawnedCreatureCount();
     }
 
-    // Both of these reach into the map and the global object stores, so neither runs while holding the lock
+    // Both of these reach back into the map and the shared queue, so neither runs while holding the lock
     for (Creature* creatureToRemove : creaturesToRemoveFromWorld)
         creatureToRemove->AddObjectToRemoveList();
-    for (ObjectGuid::LowType spawnID : spawnIDsToErase)
-        EraseReactionSpawnedCreatureData(map, spawnID);
+    for (ObjectGuid::LowType spawnID : spawnIDsToRetire)
+        RetireReactionSpawnedCreature(map, spawnID);
 }
 
 void EverQuestMod::ClearReactionSpawnedCreaturesForMap(Map* map)
 {
-    // A map going away takes its creatures with it, so every spawn still tracked on it can be erased right now.
+    // A map going away takes its creatures with it, so every spawn still tracked on it can be retired right now. Skipping this would leave grid registrations behind that spawn the creature into the next copy of the map
     if (ReactionSpawnedCreatureCount.load() == 0)
         return;
     if (map == nullptr)
         return;
     uint64 mapInstanceKey = GetMapInstanceKey(map);
 
-    vector<ObjectGuid::LowType> spawnIDsToErase;
+    vector<ObjectGuid::LowType> spawnIDsToRetire;
     {
         std::lock_guard<std::mutex> lock(ReactionSpawnedCreaturesMutex);
         auto trackedIter = ReactionSpawnedCreatureSpawnIDsByMapInstanceKey.find(mapInstanceKey);
-        if (trackedIter != ReactionSpawnedCreatureSpawnIDsByMapInstanceKey.end())
-        {
-            spawnIDsToErase.insert(spawnIDsToErase.end(), trackedIter->second.begin(), trackedIter->second.end());
-            ReactionSpawnedCreatureSpawnIDsByMapInstanceKey.erase(trackedIter);
-        }
-        auto pendingEraseIter = ReactionSpawnedCreatureSpawnIDsPendingEraseByMapInstanceKey.find(mapInstanceKey);
-        if (pendingEraseIter != ReactionSpawnedCreatureSpawnIDsPendingEraseByMapInstanceKey.end())
-        {
-            spawnIDsToErase.insert(spawnIDsToErase.end(), pendingEraseIter->second.begin(), pendingEraseIter->second.end());
-            ReactionSpawnedCreatureSpawnIDsPendingEraseByMapInstanceKey.erase(pendingEraseIter);
-        }
+        if (trackedIter == ReactionSpawnedCreatureSpawnIDsByMapInstanceKey.end())
+            return;
+        spawnIDsToRetire.swap(trackedIter->second);
+        ReactionSpawnedCreatureSpawnIDsByMapInstanceKey.erase(trackedIter);
         RefreshReactionSpawnedCreatureCount();
     }
 
-    for (ObjectGuid::LowType spawnID : spawnIDsToErase)
-        EraseReactionSpawnedCreatureData(map, spawnID);
+    for (ObjectGuid::LowType spawnID : spawnIDsToRetire)
+        RetireReactionSpawnedCreature(map, spawnID);
 }
 
 void EverQuestMod::DespawnCreature(uint32 entryID, Map* map)

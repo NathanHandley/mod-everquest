@@ -35,6 +35,7 @@ public:
         EverQuest->UpdatePendingArrivalActions(map, diff);
         EverQuest->UpdateReactionSpawnedCreatures(map);
         EverQuest->UpdateCycleSpawns(map, diff);
+        EverQuest->UpdateCreaturePresenceGroups(map, diff);
     }
 
     void OnDestroyMap(Map* map) override
@@ -45,6 +46,7 @@ public:
         if (mapID < EverQuest->ConfigSystemMapDBCIDMin || mapID > EverQuest->ConfigSystemMapDBCIDMax)
             return;
         EverQuest->ClearReactionSpawnedCreaturesForMap(map);
+        EverQuest->ClearCreaturePresenceGroupStateForMap(map);
     }
 };
 

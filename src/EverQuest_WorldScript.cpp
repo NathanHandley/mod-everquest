@@ -53,6 +53,7 @@ public:
         EverQuest->LoadCreatureData();
         EverQuest->LoadCreatureSpawnPoints();
         EverQuest->LoadCreatureKillSpawnData();
+        EverQuest->LoadCreaturePresenceGroupData();
         EverQuest->LoadCreatureEmoteData();
         EverQuest->LoadCreatureMovementSoundData();
         EverQuest->LoadCreatureOnkillReputations();
@@ -90,6 +91,9 @@ public:
         EverQuest->UpdateRestrictedMapPlayerCheck(diff);
         EverQuest->UpdateClientVersionChecks(diff);
         EverQuest->ProcessPendingEquipmentStorageTransactions();
+
+        // Writing sObjectMgr's grid store has to wait for this hook, where the map threads have all been waited on
+        EverQuest->ProcessPendingReactionSpawnGridRemovals();
     }
 
     // The module writes through the asynchronous database queues and depends on those writes landing in the order they were queued (a class
@@ -116,6 +120,7 @@ public:
 
         // The creature spawn tables aren't loaded yet when the kill spawn data loads with the config so respawn target spawn points resolve here instead
         EverQuest->ResolveKillSpawnRespawnTargetSpawnPoints();
+        EverQuest->ResolveCreaturePresenceGroupSpawnPoints();
         EverQuest->ResolveVulakRequiredDragonSpawnPoints();
 
         // Saved pet display IDs can become wrong when converted content updates invalide previous display IDs, which crashes the core on pet summon

@@ -48,7 +48,7 @@ class ByteBuffer;
 struct AreaTrigger;
 struct BuildValuesCachePosPointers;
 
-#define EQ_MOD_VERSION                              77
+#define EQ_MOD_VERSION                              78
 
 #define EQ_EQCLASS_NONE                             0
 #define EQ_EQCLASS_WARRIOR                          1
@@ -201,6 +201,9 @@ struct BuildValuesCachePosPointers;
 #define EQ_KILLSPAWN_TRIGGER_COMBAT                 1
 #define EQ_KILLSPAWN_TRIGGER_EVADE                  2
 #define EQ_KILLSPAWN_TRIGGER_OOCTIMER               3   // Fires after DelayMinMS of continuous out-of-combat time
+
+#define EQ_PRESENCE_GROUP_MAX_OTHER_CREATURES       4       
+#define EQ_PRESENCE_GROUP_SUPPRESSED_RESPAWN_IN_SEC 604800  // A week, so a presence group primary held down by a stand-in only comes back when the group asks for it
 
 #define EQ_CYCLE_SPAWN_CHECK_INTERVAL_IN_MS         30000   // How often each map checks that its spawn cycles are still moving
 #define EQ_CYCLE_SPAWN_PENDING_WINDOW_IN_SEC        300     // Respawn times within this window of a cycle respawn count as the cycle already moving
@@ -430,6 +433,25 @@ public:
     uint32 TriggerMaxLevel = 0;
     uint32 RespawnTimeSec = 0;
     unordered_map<uint32, vector<ObjectGuid::LowType>> TargetSpawnIDsByMapID; // Spawn rows differ between the open world zone and its raid instance copy, so respawn targets resolve per map
+};
+
+class EverQuestCreaturePresenceSpawnPoint
+{
+public:
+    ObjectGuid::LowType SpawnID = 0;
+    float PositionX = 0;
+    float PositionY = 0;
+};
+
+class EverQuestCreaturePresenceGroup
+{
+public:
+    uint32 ID = 0;
+    uint32 MapID = 0;
+    uint32 PrimaryCreatureTemplateID = 0;
+    vector<uint32> OtherCreatureTemplateIDs;
+    uint32 CheckIntervalMS = 0;
+    unordered_map<uint32, vector<EverQuestCreaturePresenceSpawnPoint>> PrimarySpawnPointsByMapID;
 };
 
 class EverQuestPendingKillSpawnAction
@@ -1148,6 +1170,10 @@ public:
     unordered_map<uint32, EverQuestCreature> CreaturesByTemplateID;
     unordered_map<uint32, list<EverQuestCreatureOnkillReputation>> CreatureOnkillReputationsByCreatureTemplateID;
     unordered_map<uint32, vector<EverQuestCreatureKillSpawn>> CreatureKillSpawnsByTriggerCreatureTemplateID;
+    unordered_map<uint32, vector<EverQuestCreaturePresenceGroup>> CreaturePresenceGroupsByMapID;
+    std::mutex CreaturePresenceGroupStateMutex;
+    unordered_map<uint64, unordered_map<uint32, int32>> PresenceGroupCheckTimerInMSByMapInstanceKeyThenGroupID;
+    unordered_map<uint64, unordered_set<uint32>> SuppressedPresenceGroupIDsByMapInstanceKey;
     unordered_set<uint32> EvadeKillSpawnTriggerCreatureTemplateIDs;
     unordered_map<uint32, uint32> OocTimerKillSpawnDurationMSByCreatureTemplateID;
     unordered_map<uint32, vector<ObjectGuid::LowType>> VulakRequiredDragonSpawnIDsByMapID; // Keyed by map ID, since the raid instance copy of the zone has its own dragon spawn rows
@@ -1163,7 +1189,7 @@ public:
     std::atomic<uint32> ReactionWalkCreatureCount{ 0 };
     std::mutex ReactionSpawnedCreaturesMutex;
     unordered_map<uint64, vector<ObjectGuid::LowType>> ReactionSpawnedCreatureSpawnIDsByMapInstanceKey;
-    unordered_map<uint64, vector<ObjectGuid::LowType>> ReactionSpawnedCreatureSpawnIDsPendingEraseByMapInstanceKey;
+    vector<ObjectGuid::LowType> ReactionSpawnedCreatureSpawnIDsPendingGridRemoval;
     std::atomic<uint32> ReactionSpawnedCreatureCount{ 0 };
     unordered_map<uint64, vector<EverQuestTriggeredQuestKillSpawn>> TriggeredQuestKillSpawnsByMapInstanceKey;
     unordered_map<uint32, EverQuestItemTemplate> ItemTemplatesByEntryID;
@@ -1248,6 +1274,12 @@ public:
     void UpdateCycleSpawns(Map* map, uint32 diff);
     void LoadCreatureKillSpawnData();
     void ResolveKillSpawnRespawnTargetSpawnPoints();
+    void LoadCreaturePresenceGroupData();
+    void ResolveCreaturePresenceGroupSpawnPoints();
+    void UpdateCreaturePresenceGroups(Map* map, uint32 diff);
+    void ClearCreaturePresenceGroupStateForMap(Map* map);
+    void SetPresenceGroupPrimaryRespawnTime(Map* map, const EverQuestCreaturePresenceGroup& presenceGroup, uint32 respawnTimeSec);
+    bool IsPresenceGroupPrimaryGridLoaded(Map* map, const EverQuestCreaturePresenceGroup& presenceGroup);
     void LoadCreatureEmoteData();
     bool DoCreatureEmoteEvent(Creature* creature, uint8 emoteEventType, Unit* target);
     void EmitCreatureEmote(Creature* creature, const EverQuestCreatureEmote& emote, Unit* target);
@@ -1513,7 +1545,8 @@ public:
     void SpawnCreature(uint32 entryID, Map* map, float x, float y, float z, float orientation, bool enforceUniqueSpawn);
     void TrackReactionSpawnedCreature(Creature* creature);
     void RefreshReactionSpawnedCreatureCount();
-    void EraseReactionSpawnedCreatureData(Map* map, ObjectGuid::LowType spawnID);
+    void RetireReactionSpawnedCreature(Map* map, ObjectGuid::LowType spawnID);
+    void ProcessPendingReactionSpawnGridRemovals();
     void UpdateReactionSpawnedCreatures(Map* map);
     void ClearReactionSpawnedCreaturesForMap(Map* map);
     void DespawnCreature(uint32 entryID, Map* map);
