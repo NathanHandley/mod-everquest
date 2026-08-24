@@ -186,8 +186,56 @@ public:
         if (questReactions.empty() == false)
         {
             Map* map = player->GetMap();
+
+            // Rows behind a walkto do not run at turn-in, they are handed to the walk and fire when the creature arrives
+            vector<EverQuestPendingKillSpawnAction> arrivalActions;
             for (const EverQuestQuestReaction& questReaction : questReactions)
             {
+                if (questReaction.FiresOnArrival == false)
+                    continue;
+                EverQuestPendingKillSpawnAction arrivalAction;
+                arrivalAction.TargetCreatureTemplateID = questReaction.CreatureTemplateID;
+                arrivalAction.SayText = questReaction.SayText;
+                arrivalAction.ListenerGUID = player->GetGUID();
+                arrivalAction.UseMoverPositionX = questReaction.UseNpcX;
+                arrivalAction.UseMoverPositionY = questReaction.UseNpcY;
+                arrivalAction.UseMoverPositionZ = questReaction.UseNpcZ;
+                arrivalAction.UseMoverOrientation = questReaction.UseNpcOrientation;
+                arrivalAction.PositionX = questReaction.PositionX;
+                arrivalAction.PositionY = questReaction.PositionY;
+                arrivalAction.PositionZ = questReaction.PositionZ;
+                arrivalAction.Orientation = questReaction.Orientation;
+                if (questReaction.UsePlayerX == true)
+                    arrivalAction.PositionX = player->GetPositionX() + questReaction.AddedPlayerX;
+                if (questReaction.UsePlayerY == true)
+                    arrivalAction.PositionY = player->GetPositionY() + questReaction.AddedPlayerY;
+                if (questReaction.UsePlayerZ == true)
+                    arrivalAction.PositionZ = player->GetPositionZ();
+                if (questReaction.UsePlayerOrientation == true)
+                    arrivalAction.Orientation = player->GetOrientation();
+                switch (questReaction.ReactionType)
+                {
+                case EQ_QUEST_REACTION_SAY: arrivalAction.ActionType = EQ_KILLSPAWN_ACTION_SAY; break;
+                case EQ_QUEST_REACTION_EMOTE: arrivalAction.ActionType = EQ_KILLSPAWN_ACTION_EMOTE; break;
+                case EQ_QUEST_REACTION_YELL: arrivalAction.ActionType = EQ_KILLSPAWN_ACTION_YELL; break;
+                case EQ_QUEST_REACTION_ATTACKPLAYER: arrivalAction.ActionType = EQ_KILLSPAWN_ACTION_ATTACKPLAYER; break;
+                case EQ_QUEST_REACTION_DESPAWN: arrivalAction.ActionType = EQ_KILLSPAWN_ACTION_DESPAWN; break;
+                case EQ_QUEST_REACTION_SPAWN:
+                case EQ_QUEST_REACTION_SPAWNUNIQUE:
+                {
+                    arrivalAction.ActionType = EQ_KILLSPAWN_ACTION_SPAWN;
+                    if (questReaction.ReactionType == EQ_QUEST_REACTION_SPAWNUNIQUE)
+                        arrivalAction.OnlyIfNotAliveCreatureTemplateID = questReaction.CreatureTemplateID;
+                } break;
+                default: continue; // Nothing else is meaningful once the walk is over
+                }
+                arrivalActions.push_back(arrivalAction);
+            }
+
+            for (const EverQuestQuestReaction& questReaction : questReactions)
+            {
+                if (questReaction.FiresOnArrival == true)
+                    continue;
                 float x = questReaction.PositionX;
                 if (questReaction.UsePlayerX == true)
                     x = player->GetPositionX() + questReaction.AddedPlayerX;
@@ -243,6 +291,13 @@ public:
                 case EQ_QUEST_REACTION_KILLSPAWN:
                 {
                     EverQuest->TriggerQuestKillSpawn(map, questReaction);
+                } break;
+                case EQ_QUEST_REACTION_WALKTO:
+                {
+                    // The questgiver copy the player just handed in to is the one that walks
+                    Creature* walker = EverQuest->GetNearestLoadedCreatureWithEntryID(map, questReaction.QuestgiverCreatureTemplateID, player);
+                    if (walker != nullptr)
+                        EverQuest->StartReactionWalk(walker, x, y, z, orientation, questReaction.Orientation != 0 || questReaction.UsePlayerOrientation == true, questReaction.MovementIsRun, arrivalActions);
                 } break;
                 default: break; // Nothing
                 }

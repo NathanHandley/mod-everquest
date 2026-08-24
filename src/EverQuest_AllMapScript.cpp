@@ -32,7 +32,19 @@ public:
         if (mapID < EverQuest->ConfigSystemMapDBCIDMin || mapID > EverQuest->ConfigSystemMapDBCIDMax)
             return;
         EverQuest->UpdatePendingKillSpawnActions(map, diff);
+        EverQuest->UpdatePendingArrivalActions(map, diff);
+        EverQuest->UpdateReactionSpawnedCreatures(map);
         EverQuest->UpdateCycleSpawns(map, diff);
+    }
+
+    void OnDestroyMap(Map* map) override
+    {
+        if (EverQuest->IsEnabled == false)
+            return;
+        uint32 mapID = map->GetId();
+        if (mapID < EverQuest->ConfigSystemMapDBCIDMin || mapID > EverQuest->ConfigSystemMapDBCIDMax)
+            return;
+        EverQuest->ClearReactionSpawnedCreaturesForMap(map);
     }
 };
 

@@ -605,6 +605,17 @@ public:
         void UpdateAI(uint32 diff) override
         {
             events.Update(diff);
+
+            // A gossip or quest reaction walk owns this creature's movement until it arrives, so the waypoint and roaming logic has to stay out of the way or the two generators fight over the spline
+            if (EverQuest->IsCreatureInReactionWalk(me->GetGUID()) == true)
+            {
+                events.CancelEvent(EVENT_PAUSE_DONE);
+                if (!UpdateVictim())
+                    return;
+                DoMeleeAttackIfReady();
+                return;
+            }
+
             while (uint32 eventId = events.ExecuteEvent())
             {
                 if (eventId == EVENT_PAUSE_DONE)

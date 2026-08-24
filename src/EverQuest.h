@@ -182,11 +182,20 @@ struct BuildValuesCachePosPointers;
 #define EQ_QUEST_REACTION_SPAWNUNIQUE               6
 #define EQ_QUEST_REACTION_YELL                      7
 #define EQ_QUEST_REACTION_KILLSPAWN                 8
+#define EQ_QUEST_REACTION_WALKTO                    9
 
 #define EQ_KILLSPAWN_ACTION_SPAWN                   0
 #define EQ_KILLSPAWN_ACTION_DESPAWN                 1
 #define EQ_KILLSPAWN_ACTION_RESPAWNSELF             2
 #define EQ_KILLSPAWN_ACTION_RESPAWNTARGET           3
+#define EQ_KILLSPAWN_ACTION_SAY                     4
+#define EQ_KILLSPAWN_ACTION_EMOTE                   5
+#define EQ_KILLSPAWN_ACTION_YELL                    6
+#define EQ_KILLSPAWN_ACTION_ATTACKPLAYER            7
+
+#define EQ_REACTION_WALK_TIMEOUT_MS                 120000
+#define EQ_REACTION_WALK_ARRIVE_DISTANCE            5.0f
+#define EQ_REACTION_WALK_POINT_ID                   9910001
 
 #define EQ_KILLSPAWN_TRIGGER_DEATH                  0
 #define EQ_KILLSPAWN_TRIGGER_COMBAT                 1
@@ -440,6 +449,26 @@ public:
     uint32 RespawnTimeSec = 0;
     vector<ObjectGuid::LowType> RespawnTargetSpawnIDs;
     ObjectGuid KillerGUID;
+    string SayText;
+    ObjectGuid SpeakerGUID;
+    ObjectGuid ListenerGUID;
+    bool UseMoverPositionX = false;
+    bool UseMoverPositionY = false;
+    bool UseMoverPositionZ = false;
+    bool UseMoverOrientation = false;
+};
+
+class EverQuestPendingArrivalAction
+{
+public:
+    ObjectGuid MoverGUID;
+    float DestinationX = 0;
+    float DestinationY = 0;
+    float DestinationZ = 0;
+    float DestinationOrientation = 0;
+    bool HasDestinationOrientation = false;
+    uint32 ElapsedMS = 0;
+    vector<EverQuestPendingKillSpawnAction> ActionsOnArrival;
 };
 
 class EverQuestLoadedCreatureEquippedVisualItems
@@ -701,6 +730,13 @@ public:
     uint32 CreatureTemplateID = 0;
     uint32 QuestgiverCreatureTemplateID = 0;
     uint32 DelayInMS = 0;
+    string SayText;
+    bool UseNpcX = false;
+    bool UseNpcY = false;
+    bool UseNpcZ = false;
+    bool UseNpcOrientation = false;
+    bool MovementIsRun = false;
+    bool FiresOnArrival = false;
 };
 
 class EverQuestGossipReaction
@@ -728,6 +764,8 @@ public:
     float PositionZ = 0;
     float Orientation = 0;
     uint32 DelayInMS = 0;
+    bool MovementIsRun = false;
+    bool FiresOnArrival = false;
 };
 
 class EverQuestTriggeredQuestKillSpawn
@@ -1119,6 +1157,14 @@ public:
 
     std::mutex PendingKillSpawnActionsMutex;
     unordered_map<uint64, vector<EverQuestPendingKillSpawnAction>> PendingKillSpawnActionsByMapInstanceKey;
+    std::mutex PendingArrivalActionsMutex;
+    unordered_map<uint64, vector<EverQuestPendingArrivalAction>> PendingArrivalActionsByMapInstanceKey;
+    std::set<ObjectGuid> ReactionWalkCreatureGUIDs;
+    std::atomic<uint32> ReactionWalkCreatureCount{ 0 };
+    std::mutex ReactionSpawnedCreaturesMutex;
+    unordered_map<uint64, vector<ObjectGuid::LowType>> ReactionSpawnedCreatureSpawnIDsByMapInstanceKey;
+    unordered_map<uint64, vector<ObjectGuid::LowType>> ReactionSpawnedCreatureSpawnIDsPendingEraseByMapInstanceKey;
+    std::atomic<uint32> ReactionSpawnedCreatureCount{ 0 };
     unordered_map<uint64, vector<EverQuestTriggeredQuestKillSpawn>> TriggeredQuestKillSpawnsByMapInstanceKey;
     unordered_map<uint32, EverQuestItemTemplate> ItemTemplatesByEntryID;
     unordered_map<uint64, vector<EverQuestGearSwapCandidate>> GearSwapCandidatesByLookupKey;
@@ -1225,6 +1271,10 @@ public:
     void TriggerQuestKillSpawn(Map* map, const EverQuestQuestReaction& questReaction);
     void EnqueuePendingKillSpawnAction(Map* map, EverQuestPendingKillSpawnAction& action);
     void UpdatePendingKillSpawnActions(Map* map, uint32 diff);
+    bool StartReactionWalk(Creature* creature, float x, float y, float z, float orientation, bool hasOrientation, bool isRun, vector<EverQuestPendingKillSpawnAction>& actionsOnArrival);
+    void UpdatePendingArrivalActions(Map* map, uint32 diff);
+    bool IsCreatureInReactionWalk(ObjectGuid creatureGUID);
+    void SpeakReactionText(Creature* creature, uint8 actionType, const string& text, Player* listener);
     bool HasAliveCreatureWithEntryInMap(Map* map, uint32 creatureTemplateID, Creature* ignoreCreature);
     void ExecuteKillSpawnAction(Map* map, EverQuestPendingKillSpawnAction& action);
     void LoadCreatureOnkillReputations();
@@ -1461,6 +1511,11 @@ public:
     void RollLootItemsForCreature(Creature* creature);
     void RollLootGroupIntoCounts(const EverQuestCreatureLootGroup& lootGroup, unordered_map<uint32, uint32>& counts);
     void SpawnCreature(uint32 entryID, Map* map, float x, float y, float z, float orientation, bool enforceUniqueSpawn);
+    void TrackReactionSpawnedCreature(Creature* creature);
+    void RefreshReactionSpawnedCreatureCount();
+    void EraseReactionSpawnedCreatureData(Map* map, ObjectGuid::LowType spawnID);
+    void UpdateReactionSpawnedCreatures(Map* map);
+    void ClearReactionSpawnedCreaturesForMap(Map* map);
     void DespawnCreature(uint32 entryID, Map* map);
     void MakeCreatureAttackPlayer(uint32 entryID, Map* map, Player* player);
     bool IsSpellAnEQSpell(uint32 spellID);

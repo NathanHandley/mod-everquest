@@ -1854,6 +1854,174 @@ void EverQuestMod::EnqueuePendingKillSpawnAction(Map* map, EverQuestPendingKillS
     PendingKillSpawnActionsByMapInstanceKey[GetMapInstanceKey(map)].push_back(action);
 }
 
+Creature* EverQuestMod::GetNearestLoadedCreatureWithEntryID(Map* map, uint32 entryID, WorldObject* referenceObject)
+{
+    if (referenceObject == nullptr)
+        return nullptr;
+    vector<Creature*> loadedCreatures = GetLoadedCreaturesWithEntryID(map, entryID);
+    Creature* nearestCreature = nullptr;
+    float nearestDistance = 0;
+    for (Creature* creature : loadedCreatures)
+    {
+        if (creature == nullptr || creature->IsAlive() == false)
+            continue;
+        float distance = creature->GetExactDist(referenceObject);
+        if (nearestCreature == nullptr || distance < nearestDistance)
+        {
+            nearestCreature = creature;
+            nearestDistance = distance;
+        }
+    }
+    return nearestCreature;
+}
+
+void EverQuestMod::SpeakReactionText(Creature* creature, uint8 actionType, const string& text, Player* listener)
+{
+    if (creature == nullptr || text.empty() == true)
+        return;
+    string formattedText = text;
+    if (listener != nullptr)
+        formattedText = FormatGossipTextForPlayer(listener, text);
+    if (actionType == EQ_KILLSPAWN_ACTION_EMOTE)
+    {
+        // Monster emote text renders raw on the client (no speaker name), so bake the name in
+        creature->TextEmote(creature->GetName() + " " + formattedText, listener);
+    }
+    else if (actionType == EQ_KILLSPAWN_ACTION_YELL)
+        creature->Yell(formattedText, LANG_UNIVERSAL, listener);
+    else
+        creature->Say(formattedText, LANG_UNIVERSAL, listener);
+}
+
+bool EverQuestMod::IsCreatureInReactionWalk(ObjectGuid creatureGUID)
+{
+    // This runs from the per-creature AI tick, so the common case of nothing walking must not take the lock at all
+    if (ReactionWalkCreatureCount.load() == 0)
+        return false;
+    std::lock_guard<std::mutex> lock(PendingArrivalActionsMutex);
+    return ReactionWalkCreatureGUIDs.find(creatureGUID) != ReactionWalkCreatureGUIDs.end();
+}
+
+bool EverQuestMod::StartReactionWalk(Creature* creature, float x, float y, float z, float orientation, bool hasOrientation, bool isRun, vector<EverQuestPendingKillSpawnAction>& actionsOnArrival)
+{
+    if (creature == nullptr || creature->IsAlive() == false)
+        return false;
+
+    // A second walk on the same creature replaces the first, otherwise the two sets of queued actions would race
+    {
+        std::lock_guard<std::mutex> lock(PendingArrivalActionsMutex);
+        vector<EverQuestPendingArrivalAction>& watchers = PendingArrivalActionsByMapInstanceKey[GetMapInstanceKey(creature->GetMap())];
+        for (size_t i = watchers.size(); i > 0; --i)
+            if (watchers[i - 1].MoverGUID == creature->GetGUID())
+                watchers.erase(watchers.begin() + (i - 1));
+        ReactionWalkCreatureGUIDs.erase(creature->GetGUID());
+
+        EverQuestPendingArrivalAction watcher;
+        watcher.MoverGUID = creature->GetGUID();
+        watcher.DestinationX = x;
+        watcher.DestinationY = y;
+        watcher.DestinationZ = z;
+        watcher.DestinationOrientation = orientation;
+        watcher.HasDestinationOrientation = hasOrientation;
+        watcher.ActionsOnArrival = actionsOnArrival;
+        watchers.push_back(watcher);
+        ReactionWalkCreatureGUIDs.insert(creature->GetGUID());
+        ReactionWalkCreatureCount.store((uint32)ReactionWalkCreatureGUIDs.size());
+    }
+
+    // Take the creature off whatever it was doing so its normal waypoint or roaming generator does not fight the walk
+    creature->SetWalk(isRun == false);
+    creature->GetMotionMaster()->Clear();
+    creature->GetMotionMaster()->MovePoint(EQ_REACTION_WALK_POINT_ID, x, y, z);
+    return true;
+}
+
+void EverQuestMod::UpdatePendingArrivalActions(Map* map, uint32 diff)
+{
+    vector<EverQuestPendingArrivalAction> arrivedWatchers;
+    {
+        std::lock_guard<std::mutex> lock(PendingArrivalActionsMutex);
+        auto watcherIter = PendingArrivalActionsByMapInstanceKey.find(GetMapInstanceKey(map));
+        if (watcherIter == PendingArrivalActionsByMapInstanceKey.end())
+            return;
+        vector<EverQuestPendingArrivalAction>& watchers = watcherIter->second;
+        for (size_t i = watchers.size(); i > 0; --i)
+        {
+            EverQuestPendingArrivalAction& watcher = watchers[i - 1];
+            watcher.ElapsedMS += diff;
+
+            Creature* mover = map->GetCreature(watcher.MoverGUID);
+            bool moverIsGone = (mover == nullptr || mover->IsInWorld() == false || mover->IsAlive() == false);
+
+            // Arriving finishes the walk.  A creature that died, despawned, or got stuck long enough drops its queued actions on the floor rather than firing them somewhere it never reached
+            bool hasArrived = false;
+            if (moverIsGone == false)
+                hasArrived = mover->GetExactDist2d(watcher.DestinationX, watcher.DestinationY) <= EQ_REACTION_WALK_ARRIVE_DISTANCE;
+            bool hasTimedOut = watcher.ElapsedMS >= EQ_REACTION_WALK_TIMEOUT_MS;
+
+            if (moverIsGone == false && hasArrived == false && hasTimedOut == false)
+                continue;
+
+            ReactionWalkCreatureGUIDs.erase(watcher.MoverGUID);
+            ReactionWalkCreatureCount.store((uint32)ReactionWalkCreatureGUIDs.size());
+            if (hasArrived == true)
+                arrivedWatchers.push_back(watcher);
+            watchers.erase(watchers.begin() + (i - 1));
+        }
+        if (watchers.empty() == true)
+            PendingArrivalActionsByMapInstanceKey.erase(watcherIter);
+    }
+
+    for (EverQuestPendingArrivalAction& watcher : arrivedWatchers)
+    {
+        Creature* mover = map->GetCreature(watcher.MoverGUID);
+        if (mover != nullptr)
+        {
+            mover->GetMotionMaster()->Clear();
+            if (watcher.HasDestinationOrientation == true)
+                mover->SetFacingTo(watcher.DestinationOrientation);
+        }
+        for (EverQuestPendingKillSpawnAction& action : watcher.ActionsOnArrival)
+        {
+            // Anything positioned relative to the walker resolves against where it actually ended up
+            if (mover != nullptr)
+            {
+                if (action.UseMoverPositionX == true)
+                    action.PositionX = mover->GetPositionX();
+                if (action.UseMoverPositionY == true)
+                    action.PositionY = mover->GetPositionY();
+                if (action.UseMoverPositionZ == true)
+                    action.PositionZ = mover->GetPositionZ();
+                if (action.UseMoverOrientation == true)
+                    action.Orientation = mover->GetOrientation();
+            }
+            if (action.ActionType == EQ_KILLSPAWN_ACTION_SAY || action.ActionType == EQ_KILLSPAWN_ACTION_EMOTE || action.ActionType == EQ_KILLSPAWN_ACTION_YELL)
+            {
+                Creature* speaker = (action.SpeakerGUID ? map->GetCreature(action.SpeakerGUID) : mover);
+                Player* listener = (action.ListenerGUID ? ObjectAccessor::FindPlayer(action.ListenerGUID) : nullptr);
+                SpeakReactionText(speaker, action.ActionType, action.SayText, listener);
+                continue;
+            }
+            if (action.ActionType == EQ_KILLSPAWN_ACTION_ATTACKPLAYER)
+            {
+                Player* listener = (action.ListenerGUID ? ObjectAccessor::FindPlayer(action.ListenerGUID) : nullptr);
+                if (listener != nullptr)
+                    MakeCreatureAttackPlayer(action.TargetCreatureTemplateID, map, listener);
+                continue;
+            }
+            if (action.ActionType == EQ_KILLSPAWN_ACTION_DESPAWN && mover != nullptr && action.TargetCreatureTemplateID == mover->GetEntry())
+            {
+                // Only the copy that made the walk goes away, not every creature of its type in the zone
+                action.DespawnNearestToPositionOnly = true;
+                action.PositionX = mover->GetPositionX();
+                action.PositionY = mover->GetPositionY();
+                action.PositionZ = mover->GetPositionZ();
+            }
+            ExecuteKillSpawnAction(map, action);
+        }
+    }
+}
+
 void EverQuestMod::LoadCreatureOnkillReputations()
 {
     CreatureOnkillReputationsByCreatureTemplateID.clear();
@@ -3116,7 +3284,7 @@ const list<EverQuestQuestCompletionReputation>& EverQuestMod::GetQuestCompletion
 void EverQuestMod::LoadQuestReactions()
 {
     QuestReactionListByQuestTemplateID.clear();
-    QueryResult queryResult = WorldDatabase.Query("SELECT QuestTemplateID, ReactionType, UsePlayerX, UsePlayerY, UsePlayerZ, AddedPlayerX, AddedPlayerY, UsePlayerOrientation, PositionX, PositionY, PositionZ, Orientation, CreatureTemplateID, QuestgiverCreatureTemplateID, DelayInMS FROM mod_everquest_quest_reaction;");
+    QueryResult queryResult = WorldDatabase.Query("SELECT QuestTemplateID, ReactionType, UsePlayerX, UsePlayerY, UsePlayerZ, AddedPlayerX, AddedPlayerY, UsePlayerOrientation, PositionX, PositionY, PositionZ, Orientation, CreatureTemplateID, QuestgiverCreatureTemplateID, DelayInMS, SayText, UseNpcX, UseNpcY, UseNpcZ, UseNpcOrientation, MovementIsRun, FiresOnArrival FROM mod_everquest_quest_reaction ORDER BY QuestTemplateID, ID;");
     if (queryResult)
     {
         do
@@ -3139,6 +3307,13 @@ void EverQuestMod::LoadQuestReactions()
             everQuestQuestReaction.CreatureTemplateID = fields[12].Get<uint32>();
             everQuestQuestReaction.QuestgiverCreatureTemplateID = fields[13].Get<uint32>();
             everQuestQuestReaction.DelayInMS = fields[14].Get<uint32>();
+            everQuestQuestReaction.SayText = fields[15].Get<std::string>();
+            everQuestQuestReaction.UseNpcX = fields[16].Get<bool>();
+            everQuestQuestReaction.UseNpcY = fields[17].Get<bool>();
+            everQuestQuestReaction.UseNpcZ = fields[18].Get<bool>();
+            everQuestQuestReaction.UseNpcOrientation = fields[19].Get<bool>();
+            everQuestQuestReaction.MovementIsRun = fields[20].Get<bool>();
+            everQuestQuestReaction.FiresOnArrival = fields[21].Get<bool>();
             QuestReactionListByQuestTemplateID[everQuestQuestReaction.QuestTemplateID].push_back(everQuestQuestReaction);
         } while (queryResult->NextRow());
     }
@@ -3160,7 +3335,7 @@ const list<EverQuestQuestReaction>& EverQuestMod::GetQuestReactions(uint32 quest
 void EverQuestMod::LoadGossipReactions()
 {
     GossipReactionsByGossipCreatureTemplateID.clear();
-    QueryResult queryResult = WorldDatabase.Query("SELECT GossipCreatureTemplateID, NpcTextID, OptionID, OptionText, ReactionType, SayText, TargetCreatureTemplateID, UsePlayerX, UsePlayerY, UsePlayerZ, AddedPlayerX, AddedPlayerY, UsePlayerOrientation, UseNpcX, UseNpcY, UseNpcZ, UseNpcOrientation, PositionX, PositionY, PositionZ, Orientation, DelayInMS FROM mod_everquest_gossip_reaction ORDER BY GossipCreatureTemplateID, ID;");
+    QueryResult queryResult = WorldDatabase.Query("SELECT GossipCreatureTemplateID, NpcTextID, OptionID, OptionText, ReactionType, SayText, TargetCreatureTemplateID, UsePlayerX, UsePlayerY, UsePlayerZ, AddedPlayerX, AddedPlayerY, UsePlayerOrientation, UseNpcX, UseNpcY, UseNpcZ, UseNpcOrientation, PositionX, PositionY, PositionZ, Orientation, DelayInMS, MovementIsRun, FiresOnArrival FROM mod_everquest_gossip_reaction ORDER BY GossipCreatureTemplateID, ID;");
     if (queryResult)
     {
         do
@@ -3190,6 +3365,8 @@ void EverQuestMod::LoadGossipReactions()
             gossipReaction.PositionZ = fields[19].Get<float>();
             gossipReaction.Orientation = fields[20].Get<float>();
             gossipReaction.DelayInMS = fields[21].Get<uint32>();
+            gossipReaction.MovementIsRun = fields[22].Get<bool>();
+            gossipReaction.FiresOnArrival = fields[23].Get<bool>();
             GossipReactionsByGossipCreatureTemplateID[gossipReaction.GossipCreatureTemplateID].push_back(gossipReaction);
         } while (queryResult->NextRow());
     }
@@ -3245,11 +3422,59 @@ bool EverQuestMod::HandleGossipSelect(Player* player, Creature* creature, uint32
 
     Map* map = creature->GetMap();
     bool reactionMatched = false;
+
+    // Rows behind a walkto do not run now - they are handed to the walk and fire when the creature gets there
+    vector<EverQuestPendingKillSpawnAction> arrivalActions;
+    for (const EverQuestGossipReaction& gossipReaction : gossipReactionsIterator->second)
+    {
+        if (gossipReaction.OptionID != action || gossipReaction.FiresOnArrival == false)
+            continue;
+        EverQuestPendingKillSpawnAction arrivalAction;
+        arrivalAction.TargetCreatureTemplateID = gossipReaction.TargetCreatureTemplateID;
+        arrivalAction.SayText = gossipReaction.SayText;
+        arrivalAction.ListenerGUID = player->GetGUID();
+        arrivalAction.UseMoverPositionX = gossipReaction.UseNpcX;
+        arrivalAction.UseMoverPositionY = gossipReaction.UseNpcY;
+        arrivalAction.UseMoverPositionZ = gossipReaction.UseNpcZ;
+        arrivalAction.UseMoverOrientation = gossipReaction.UseNpcOrientation;
+        arrivalAction.PositionX = gossipReaction.PositionX;
+        arrivalAction.PositionY = gossipReaction.PositionY;
+        arrivalAction.PositionZ = gossipReaction.PositionZ;
+        arrivalAction.Orientation = gossipReaction.Orientation;
+        if (gossipReaction.UsePlayerX == true)
+            arrivalAction.PositionX = player->GetPositionX() + gossipReaction.AddedPlayerX;
+        if (gossipReaction.UsePlayerY == true)
+            arrivalAction.PositionY = player->GetPositionY() + gossipReaction.AddedPlayerY;
+        if (gossipReaction.UsePlayerZ == true)
+            arrivalAction.PositionZ = player->GetPositionZ();
+        if (gossipReaction.UsePlayerOrientation == true)
+            arrivalAction.Orientation = player->GetOrientation();
+        switch (gossipReaction.ReactionType)
+        {
+        case EQ_QUEST_REACTION_SAY: arrivalAction.ActionType = EQ_KILLSPAWN_ACTION_SAY; break;
+        case EQ_QUEST_REACTION_EMOTE: arrivalAction.ActionType = EQ_KILLSPAWN_ACTION_EMOTE; break;
+        case EQ_QUEST_REACTION_YELL: arrivalAction.ActionType = EQ_KILLSPAWN_ACTION_YELL; break;
+        case EQ_QUEST_REACTION_ATTACKPLAYER: arrivalAction.ActionType = EQ_KILLSPAWN_ACTION_ATTACKPLAYER; break;
+        case EQ_QUEST_REACTION_DESPAWN: arrivalAction.ActionType = EQ_KILLSPAWN_ACTION_DESPAWN; break;
+        case EQ_QUEST_REACTION_SPAWN:
+        case EQ_QUEST_REACTION_SPAWNUNIQUE:
+        {
+            arrivalAction.ActionType = EQ_KILLSPAWN_ACTION_SPAWN;
+            if (gossipReaction.ReactionType == EQ_QUEST_REACTION_SPAWNUNIQUE)
+                arrivalAction.OnlyIfNotAliveCreatureTemplateID = gossipReaction.TargetCreatureTemplateID;
+        } break;
+        default: continue; // Nothing else is meaningful once the walk is over
+        }
+        arrivalActions.push_back(arrivalAction);
+    }
+
     for (const EverQuestGossipReaction& gossipReaction : gossipReactionsIterator->second)
     {
         if (gossipReaction.OptionID != action)
             continue;
         reactionMatched = true;
+        if (gossipReaction.FiresOnArrival == true)
+            continue;
 
         float x = gossipReaction.PositionX;
         if (gossipReaction.UsePlayerX == true)
@@ -3336,6 +3561,10 @@ bool EverQuestMod::HandleGossipSelect(Player* player, Creature* creature, uint32
             }
             else
                 SpawnCreature(gossipReaction.TargetCreatureTemplateID, map, x, y, z, orientation, gossipReaction.ReactionType == EQ_QUEST_REACTION_SPAWNUNIQUE);
+        } break;
+        case EQ_QUEST_REACTION_WALKTO:
+        {
+            StartReactionWalk(creature, x, y, z, orientation, gossipReaction.Orientation != 0 || gossipReaction.UseNpcOrientation == true || gossipReaction.UsePlayerOrientation == true, gossipReaction.MovementIsRun, arrivalActions);
         } break;
         default: break; // Nothing
         }
@@ -6633,7 +6862,7 @@ void EverQuestMod::RecalculateTemporaryFactionReactionsForPlayer(Player* player)
         newForcedFactionIDs.push_back(factionID);
     }
 
-    // Clear any previously forced reactions that no longer apply
+    vector<uint32> noLongerForcedFactionIDs;
     {
         std::lock_guard<std::mutex> lock(RuntimeStateMutex);
         auto priorIter = ForcedFactionReactionIDsByPlayerGUID.find(player->GetGUID());
@@ -6651,7 +6880,7 @@ void EverQuestMod::RecalculateTemporaryFactionReactionsForPlayer(Player* player)
                     }
                 }
                 if (stillForced == false)
-                    reputationMgr.ApplyForceReaction(priorFactionID, REP_NEUTRAL, false);
+                    noLongerForcedFactionIDs.push_back(priorFactionID);
             }
         }
         if (newForcedFactionIDs.empty() == true)
@@ -6662,6 +6891,8 @@ void EverQuestMod::RecalculateTemporaryFactionReactionsForPlayer(Player* player)
         else
             ForcedFactionReactionIDsByPlayerGUID[player->GetGUID()] = newForcedFactionIDs;
     }
+    for (uint32 noLongerForcedFactionID : noLongerForcedFactionIDs)
+        reputationMgr.ApplyForceReaction(noLongerForcedFactionID, REP_NEUTRAL, false);
 
     // Push the current forced reaction set to the client so con colors and interactions update immediately
     reputationMgr.SendForceReactions();
@@ -7370,6 +7601,10 @@ void EverQuestMod::SpawnCreature(uint32 entryID, Map* map, float x, float y, flo
         return;
     }
 
+    // Quest and gossip reactions can name raid creatures, which never belong in a dungeon instance
+    if (IsRaidCreatureBlockedFromMap(entryID, map) == true)
+        return;
+
     // Cancel out if it should be a unique spawn, and the creature exists
     if (enforceUniqueSpawn == true)
     {
@@ -7402,10 +7637,143 @@ void EverQuestMod::SpawnCreature(uint32 entryID, Map* map, float x, float y, flo
     }
     sObjectMgr->AddCreatureToGrid(spawnId, sObjectMgr->GetCreatureData(spawnId));
 
-    // Remove only the database rows so the spawn doesn't persist across restarts. Creature::DeleteFromDB would also
-    // erase the in-memory CreatureData that the live creature still holds a pointer to (a use-after-free later)
+    // Remove only the database rows so the spawn doesn't persist across restarts.
     WorldDatabase.Execute("DELETE FROM `creature_addon` WHERE `guid` = {}", spawnId);
     WorldDatabase.Execute("DELETE FROM `creature` WHERE `guid` = {}", spawnId);
+
+    // In EverQuest a scripted spawn has no spawn point behind it, so it is gone for good once it dies or depops.
+    TrackReactionSpawnedCreature(creature);
+}
+
+void EverQuestMod::TrackReactionSpawnedCreature(Creature* creature)
+{
+    if (creature == nullptr || creature->GetSpawnId() == 0)
+        return;
+    std::lock_guard<std::mutex> lock(ReactionSpawnedCreaturesMutex);
+    ReactionSpawnedCreatureSpawnIDsByMapInstanceKey[GetMapInstanceKey(creature->GetMap())].push_back(creature->GetSpawnId());
+    RefreshReactionSpawnedCreatureCount();
+}
+
+void EverQuestMod::RefreshReactionSpawnedCreatureCount()
+{
+    // Callers hold ReactionSpawnedCreaturesMutex.  This feeds the atomic that keeps the map tick off the lock
+    uint32 trackedCount = 0;
+    for (auto& spawnIDsByMapInstanceKey : ReactionSpawnedCreatureSpawnIDsByMapInstanceKey)
+        trackedCount += (uint32)spawnIDsByMapInstanceKey.second.size();
+    for (auto& spawnIDsByMapInstanceKey : ReactionSpawnedCreatureSpawnIDsPendingEraseByMapInstanceKey)
+        trackedCount += (uint32)spawnIDsByMapInstanceKey.second.size();
+    ReactionSpawnedCreatureCount.store(trackedCount);
+}
+
+void EverQuestMod::EraseReactionSpawnedCreatureData(Map* map, ObjectGuid::LowType spawnID)
+{
+    // The grid registration has to go first, or the spawn comes back the next time that grid loads
+    CreatureData const* creatureData = sObjectMgr->GetCreatureData(spawnID);
+    if (creatureData != nullptr)
+        sObjectMgr->RemoveCreatureFromGrid(spawnID, creatureData);
+    if (map != nullptr)
+        map->RemoveCreatureRespawnTime(spawnID);
+    sObjectMgr->DeleteCreatureData(spawnID);
+}
+
+void EverQuestMod::UpdateReactionSpawnedCreatures(Map* map)
+{
+    // This runs on every map tick, so the common case of nothing reaction-spawned must not take the lock at all
+    if (ReactionSpawnedCreatureCount.load() == 0)
+        return;
+    if (map == nullptr)
+        return;
+    uint64 mapInstanceKey = GetMapInstanceKey(map);
+
+    vector<ObjectGuid::LowType> spawnIDsToErase;
+    vector<Creature*> creaturesToRemoveFromWorld;
+    {
+        std::lock_guard<std::mutex> lock(ReactionSpawnedCreaturesMutex);
+
+        // Anything queued on an earlier tick has had its creature object destroyed by Map::DelayedUpdate by now, so nothing is left pointing at that spawn data and it can finally be dropped
+        auto pendingEraseIter = ReactionSpawnedCreatureSpawnIDsPendingEraseByMapInstanceKey.find(mapInstanceKey);
+        if (pendingEraseIter != ReactionSpawnedCreatureSpawnIDsPendingEraseByMapInstanceKey.end())
+        {
+            spawnIDsToErase = pendingEraseIter->second;
+            ReactionSpawnedCreatureSpawnIDsPendingEraseByMapInstanceKey.erase(pendingEraseIter);
+        }
+
+        auto trackedIter = ReactionSpawnedCreatureSpawnIDsByMapInstanceKey.find(mapInstanceKey);
+        if (trackedIter != ReactionSpawnedCreatureSpawnIDsByMapInstanceKey.end())
+        {
+            vector<ObjectGuid::LowType> stillSpawnedIDs;
+            vector<ObjectGuid::LowType> newlyPendingEraseIDs;
+            for (ObjectGuid::LowType spawnID : trackedIter->second)
+            {
+                Creature* spawnedCreature = nullptr;
+                auto creatureBySpawnIDBounds = map->GetCreatureBySpawnIdStore().equal_range(spawnID);
+                if (creatureBySpawnIDBounds.first != creatureBySpawnIDBounds.second)
+                    spawnedCreature = creatureBySpawnIDBounds.first->second;
+
+                // Already out of the world, from a grid unload or an outright removal, so only the data is left
+                if (spawnedCreature == nullptr)
+                {
+                    newlyPendingEraseIDs.push_back(spawnID);
+                    continue;
+                }
+
+                // Still up, or a corpse players may not have finished looting, so leave it be
+                if (spawnedCreature->IsAlive() == true || spawnedCreature->getDeathState() == DeathState::Corpse)
+                {
+                    stillSpawnedIDs.push_back(spawnID);
+                    continue;
+                }
+
+                // Dead with the corpse gone (or depopped by a reaction), so take it out of the world before Creature::Update reaches the respawn timer and stands it back up
+                creaturesToRemoveFromWorld.push_back(spawnedCreature);
+                newlyPendingEraseIDs.push_back(spawnID);
+            }
+            if (stillSpawnedIDs.empty() == true)
+                ReactionSpawnedCreatureSpawnIDsByMapInstanceKey.erase(trackedIter);
+            else
+                trackedIter->second = stillSpawnedIDs;
+            if (newlyPendingEraseIDs.empty() == false)
+                ReactionSpawnedCreatureSpawnIDsPendingEraseByMapInstanceKey[mapInstanceKey] = newlyPendingEraseIDs;
+        }
+        RefreshReactionSpawnedCreatureCount();
+    }
+
+    // Both of these reach into the map and the global object stores, so neither runs while holding the lock
+    for (Creature* creatureToRemove : creaturesToRemoveFromWorld)
+        creatureToRemove->AddObjectToRemoveList();
+    for (ObjectGuid::LowType spawnID : spawnIDsToErase)
+        EraseReactionSpawnedCreatureData(map, spawnID);
+}
+
+void EverQuestMod::ClearReactionSpawnedCreaturesForMap(Map* map)
+{
+    // A map going away takes its creatures with it, so every spawn still tracked on it can be erased right now.
+    if (ReactionSpawnedCreatureCount.load() == 0)
+        return;
+    if (map == nullptr)
+        return;
+    uint64 mapInstanceKey = GetMapInstanceKey(map);
+
+    vector<ObjectGuid::LowType> spawnIDsToErase;
+    {
+        std::lock_guard<std::mutex> lock(ReactionSpawnedCreaturesMutex);
+        auto trackedIter = ReactionSpawnedCreatureSpawnIDsByMapInstanceKey.find(mapInstanceKey);
+        if (trackedIter != ReactionSpawnedCreatureSpawnIDsByMapInstanceKey.end())
+        {
+            spawnIDsToErase.insert(spawnIDsToErase.end(), trackedIter->second.begin(), trackedIter->second.end());
+            ReactionSpawnedCreatureSpawnIDsByMapInstanceKey.erase(trackedIter);
+        }
+        auto pendingEraseIter = ReactionSpawnedCreatureSpawnIDsPendingEraseByMapInstanceKey.find(mapInstanceKey);
+        if (pendingEraseIter != ReactionSpawnedCreatureSpawnIDsPendingEraseByMapInstanceKey.end())
+        {
+            spawnIDsToErase.insert(spawnIDsToErase.end(), pendingEraseIter->second.begin(), pendingEraseIter->second.end());
+            ReactionSpawnedCreatureSpawnIDsPendingEraseByMapInstanceKey.erase(pendingEraseIter);
+        }
+        RefreshReactionSpawnedCreatureCount();
+    }
+
+    for (ObjectGuid::LowType spawnID : spawnIDsToErase)
+        EraseReactionSpawnedCreatureData(map, spawnID);
 }
 
 void EverQuestMod::DespawnCreature(uint32 entryID, Map* map)
@@ -7531,7 +7899,14 @@ void EverQuestMod::ProcessForage(Player* player)
         ChatHandler(player->GetSession()).PSendSysMessage("This area has nothing to forage.");
         return;
     }
-    int32 roll = (int32)urand(0, ForageZoneItemTotalChanceByMapID[mapID]);
+    // Looked up rather than indexed, since operator[] on a miss would insert into a table that every map thread reads without a lock
+    auto totalChanceIter = ForageZoneItemTotalChanceByMapID.find(mapID);
+    if (totalChanceIter == ForageZoneItemTotalChanceByMapID.end())
+    {
+        ChatHandler(player->GetSession()).PSendSysMessage("This area has nothing to forage.");
+        return;
+    }
+    int32 roll = (int32)urand(0, totalChanceIter->second);
     for (const EverQuestForageZoneItem& zoneItem : forageZoneItems)
     {
         roll -= zoneItem.Chance;
