@@ -91,8 +91,7 @@ public:
         EverQuest->UpdateRestrictedMapPlayerCheck(diff);
         EverQuest->UpdateClientVersionChecks(diff);
         EverQuest->ProcessPendingEquipmentStorageTransactions();
-
-        // Writing sObjectMgr's grid store has to wait for this hook, where the map threads have all been waited on
+        EverQuest->ProcessPendingReactionSpawnCreations();
         EverQuest->ProcessPendingReactionSpawnGridRemovals();
     }
 

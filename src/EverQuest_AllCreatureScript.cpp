@@ -38,6 +38,14 @@ public:
         uint32 mapID = creature->GetMap()->GetId();
         if (mapID >= EverQuest->ConfigSystemMapDBCIDMin && mapID <= EverQuest->ConfigSystemMapDBCIDMax)
         {
+            // An instanced copy of a zone only holds part of that zone's creature list (a dungeon instance no raid creatures, a raid instance nothing but them).  The spawn rows are
+            // generated that way already, so this only catches spawns that reached the map some other way, like rows left behind by an older generation of the world database
+            if (EverQuest->IsCreatureBlockedFromInstanceMap(creature->GetEntry(), creature->GetMap()) == true)
+            {
+                creature->DespawnOrUnsummon(Milliseconds(1), Seconds(creature->GetRespawnDelay()));
+                return;
+            }
+
             // Despawn creatures that violate spawn restrictions (creature spawn limits, one creature alive per
             // spawn point, spawn group limits), with a respawn timer so the spawn re-rolls on a later cycle
             if (EverQuest->ShouldDespawnCreatureDueToSpawnRestrictions(creature) == true)

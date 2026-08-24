@@ -36,6 +36,7 @@
 #include "Timer.h"
 #include "Tokenize.h"
 #include "Map.h"
+#include "MapMgr.h"
 #include "MotionMaster.h"
 #include "MovementGenerator.h"
 #include "ObjectAccessor.h"
@@ -2155,13 +2156,13 @@ void EverQuestMod::UpdatePendingArrivalActions(Map* map, uint32 diff)
             if (action.ActionType == EQ_KILLSPAWN_ACTION_SAY || action.ActionType == EQ_KILLSPAWN_ACTION_EMOTE || action.ActionType == EQ_KILLSPAWN_ACTION_YELL)
             {
                 Creature* speaker = (action.SpeakerGUID ? map->GetCreature(action.SpeakerGUID) : mover);
-                Player* listener = (action.ListenerGUID ? ObjectAccessor::FindPlayer(action.ListenerGUID) : nullptr);
+                Player* listener = (action.ListenerGUID ? ObjectAccessor::GetPlayer(map, action.ListenerGUID) : nullptr);
                 SpeakReactionText(speaker, action.ActionType, action.SayText, listener);
                 continue;
             }
             if (action.ActionType == EQ_KILLSPAWN_ACTION_ATTACKPLAYER)
             {
-                Player* listener = (action.ListenerGUID ? ObjectAccessor::FindPlayer(action.ListenerGUID) : nullptr);
+                Player* listener = (action.ListenerGUID ? ObjectAccessor::GetPlayer(map, action.ListenerGUID) : nullptr);
                 if (listener != nullptr)
                     MakeCreatureAttackPlayer(action.TargetCreatureTemplateID, map, listener);
                 continue;
@@ -2989,10 +2990,12 @@ void EverQuestMod::RemoveCreatureFearDiminishingReturnState(Creature* creature)
     creature->CustomData.Erase(EQ_CREATURE_CUSTOMDATA_FEARDIMINISH);
 }
 
+static const uint64 EQ_HASTE_TRACKING_KEY_PLAYERS = UINT64_MAX;
+
 uint64 EverQuestMod::GetHasteTrackingKeyForUnit(Unit* unit)
 {
     if (unit->IsPlayer() == true)
-        return 0;
+        return EQ_HASTE_TRACKING_KEY_PLAYERS;
     return GetMapInstanceKey(unit->GetMap());
 }
 
@@ -7780,8 +7783,63 @@ void EverQuestMod::RollLootGroupIntoCounts(const EverQuestCreatureLootGroup& loo
     }
 }
 
+void EverQuestMod::ClearPerMapRuntimeStateForMap(Map* map)
+{
+    if (map == nullptr)
+        return;
+    uint64 mapInstanceKey = GetMapInstanceKey(map);
+
+    {
+        std::lock_guard<std::mutex> lock(PendingKillSpawnActionsMutex);
+        PendingKillSpawnActionsByMapInstanceKey.erase(mapInstanceKey);
+        TriggeredQuestKillSpawnsByMapInstanceKey.erase(mapInstanceKey);
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(PendingArrivalActionsMutex);
+        auto watcherIter = PendingArrivalActionsByMapInstanceKey.find(mapInstanceKey);
+        if (watcherIter != PendingArrivalActionsByMapInstanceKey.end())
+        {
+            // The walkers themselves are gone with the map, so their entries in the shared walk set have to go too
+            for (const EverQuestPendingArrivalAction& watcher : watcherIter->second)
+                ReactionWalkCreatureGUIDs.erase(watcher.MoverGUID);
+            PendingArrivalActionsByMapInstanceKey.erase(watcherIter);
+            ReactionWalkCreatureCount.store((uint32)ReactionWalkCreatureGUIDs.size());
+        }
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(CycleSpawnCheckTimerMutex);
+        CycleSpawnCheckTimerInMSByMapInstanceKey.erase(mapInstanceKey);
+    }
+
+    // Map::UnloadAll removes every creature ahead of this, and OnCreatureRemoveWorld clears these per creature, so anything still here means a creature left the map without the hook firing
+    {
+        std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+        size_t strandedCreatureCount = 0;
+        auto entryMapIt = AllLoadedCreaturesByMapInstanceKeyThenCreatureEntryID.find(mapInstanceKey);
+        if (entryMapIt != AllLoadedCreaturesByMapInstanceKeyThenCreatureEntryID.end())
+        {
+            for (const auto& bucket : entryMapIt->second)
+                strandedCreatureCount += bucket.second.size();
+            AllLoadedCreaturesByMapInstanceKeyThenCreatureEntryID.erase(entryMapIt);
+        }
+        AllLoadedCreaturesByMapInstanceKeyThenSpawnPointID.erase(mapInstanceKey);
+        AllLoadedCreaturesByMapInstanceKeyThenSpawnGroupID.erase(mapInstanceKey);
+        PreloadedLootItemIDsByMapInstanceKeyThenCreatureGUID.erase(mapInstanceKey);
+        PreloadedLootCountsByMapInstanceKeyThenCreatureGUID.erase(mapInstanceKey);
+        VisualEquippedItemsByMapInstanceKeyThenCreatureGUID.erase(mapInstanceKey);
+        CreaturesResolvingEQMeleeExtraAttacksByMapInstanceKey.erase(mapInstanceKey);
+        EQHasteAuraEffectsByMapInstanceKeyThenUnitGUID.erase(mapInstanceKey);
+        if (strandedCreatureCount > 0)
+            LOG_ERROR("module.EverQuest", "EverQuestMod::ClearPerMapRuntimeStateForMap dropped {} creature(s) still tracked on map {} instance {} at destruction, which means OnCreatureRemoveWorld did not fire for them", strandedCreatureCount, map->GetId(), map->GetInstanceId());
+    }
+}
+
 void EverQuestMod::SpawnCreature(uint32 entryID, Map* map, float x, float y, float z, float orientation, bool enforceUniqueSpawn)
 {
+    if (map == nullptr)
+        return;
     if (!sObjectMgr->GetCreatureTemplate(entryID))
     {
         LOG_ERROR("module.EverQuest", "EverQuestMod::SpawnCreature failure, as creature with entryID of {} did not exist in creature templates", entryID);
@@ -7792,8 +7850,36 @@ void EverQuestMod::SpawnCreature(uint32 entryID, Map* map, float x, float y, flo
     if (IsCreatureBlockedFromInstanceMap(entryID, map) == true)
         return;
 
+    EverQuestPendingReactionSpawn pendingSpawn;
+    pendingSpawn.CreatureTemplateID = entryID;
+    pendingSpawn.MapID = map->GetId();
+    pendingSpawn.InstanceID = map->GetInstanceId();
+    pendingSpawn.PositionX = x;
+    pendingSpawn.PositionY = y;
+    pendingSpawn.PositionZ = z;
+    pendingSpawn.Orientation = orientation;
+    pendingSpawn.EnforceUniqueSpawn = enforceUniqueSpawn;
+
+    std::lock_guard<std::mutex> lock(ReactionSpawnedCreaturesMutex);
+    ReactionSpawnsPendingCreation.push_back(pendingSpawn);
+}
+
+// Only ever called from the world update, where every map thread has been waited on
+void EverQuestMod::ExecutePendingReactionSpawn(const EverQuestPendingReactionSpawn& pendingSpawn)
+{
+    // The map can be gone by now (an instance torn down between the trigger and this update)
+    Map* map = sMapMgr->FindMap(pendingSpawn.MapID, pendingSpawn.InstanceID);
+    if (map == nullptr)
+        return;
+
+    uint32 entryID = pendingSpawn.CreatureTemplateID;
+    float x = pendingSpawn.PositionX;
+    float y = pendingSpawn.PositionY;
+    float z = pendingSpawn.PositionZ;
+    float orientation = pendingSpawn.Orientation;
+
     // Cancel out if it should be a unique spawn, and the creature exists
-    if (enforceUniqueSpawn == true)
+    if (pendingSpawn.EnforceUniqueSpawn == true)
     {
         vector<Creature*> loadedCreatures = GetLoadedCreaturesWithEntryID(map, entryID);
         if (loadedCreatures.size() > 0)
@@ -7803,7 +7889,7 @@ void EverQuestMod::SpawnCreature(uint32 entryID, Map* map, float x, float y, flo
     Creature* creature = new Creature();
     if (!creature->Create(map->GenerateLowGuid<HighGuid::Unit>(), map, PHASEMASK_NORMAL, entryID, 0, x, y, z, orientation)) // Players are always in phase 1
     {
-        LOG_ERROR("module.EverQuest", "EverQuestMod::SpawnCreature failure, error calling creature->Create with entryID of {}", entryID);
+        LOG_ERROR("module.EverQuest", "EverQuestMod::ExecutePendingReactionSpawn failure, error calling creature->Create with entryID of {}", entryID);
         delete creature;
         return;
     }
@@ -7818,7 +7904,7 @@ void EverQuestMod::SpawnCreature(uint32 entryID, Map* map, float x, float y, flo
     creature = new Creature();
     if (!creature->LoadCreatureFromDB(spawnId, map, true, true))
     {
-        LOG_ERROR("module.EverQuest", "EverQuestMod::SpawnCreature failure, as creature with entryID of {} could not be loaded from the database", entryID);
+        LOG_ERROR("module.EverQuest", "EverQuestMod::ExecutePendingReactionSpawn failure, as creature with entryID of {} could not be loaded from the database", entryID);
         delete creature;
         return;
     }
@@ -7830,6 +7916,21 @@ void EverQuestMod::SpawnCreature(uint32 entryID, Map* map, float x, float y, flo
 
     // In EverQuest a scripted spawn has no spawn point behind it, so it is gone for good once it dies or depops.
     TrackReactionSpawnedCreature(creature);
+}
+
+void EverQuestMod::ProcessPendingReactionSpawnCreations()
+{
+    vector<EverQuestPendingReactionSpawn> spawnsToCreate;
+    {
+        std::lock_guard<std::mutex> lock(ReactionSpawnedCreaturesMutex);
+        if (ReactionSpawnsPendingCreation.empty() == true)
+            return;
+        spawnsToCreate.swap(ReactionSpawnsPendingCreation);
+    }
+
+    // Creating reaches back into the shared trackers, so none of it runs while holding the lock
+    for (const EverQuestPendingReactionSpawn& pendingSpawn : spawnsToCreate)
+        ExecutePendingReactionSpawn(pendingSpawn);
 }
 
 void EverQuestMod::TrackReactionSpawnedCreature(Creature* creature)
@@ -7974,6 +8075,11 @@ void EverQuestMod::DespawnCreature(uint32 entryID, Map* map)
 
 void EverQuestMod::MakeCreatureAttackPlayer(uint32 entryID, Map* map, Player* player)
 {
+    // Unit::Attack writes into the victim's attacker list, so the player has to belong to the same map as the creatures.
+    // Attacking across maps would be writing to another map thread's objects, and means nothing in game anyway
+    if (map == nullptr || player == nullptr || player->FindMap() != map)
+        return;
+
     vector<Creature*> loadedCreatures = GetLoadedCreaturesWithEntryID(map, entryID);
     for (Creature* creature : loadedCreatures)
         if (creature != nullptr)

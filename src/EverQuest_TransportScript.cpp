@@ -50,20 +50,25 @@ private:
         }
     }
 
-    // Looks up a registered ship and returns it as a MotionTransport, along with the map it is registered on.  Returns nullptr if it was never
-    // registered (its map may not be loaded yet) or isn't a moving transport
-    MotionTransport* GetRegisteredShipMotionTransport(uint32 shipGameObjectTemplateEntryID, uint32& shipMapIDOut)
+    bool TryGetRegisteredShipMapID(uint32 shipGameObjectTemplateEntryID, uint32& shipMapIDOut)
+    {
+        std::lock_guard<std::mutex> lock(EverQuest->RuntimeStateMutex);
+        auto shipIt = EverQuest->ShipGameObjectsByTemplateEntryID.find(shipGameObjectTemplateEntryID);
+        if (shipIt == EverQuest->ShipGameObjectsByTemplateEntryID.end())
+            return false;
+        shipMapIDOut = shipIt->second.MapID;
+        return true;
+    }
+
+    MotionTransport* GetRegisteredShipMotionTransport(uint32 shipGameObjectTemplateEntryID, uint32 callerMapID)
     {
         GameObject* shipGameObject = nullptr;
-        shipMapIDOut = 0;
         {
             std::lock_guard<std::mutex> lock(EverQuest->RuntimeStateMutex);
             auto shipIt = EverQuest->ShipGameObjectsByTemplateEntryID.find(shipGameObjectTemplateEntryID);
-            if (shipIt != EverQuest->ShipGameObjectsByTemplateEntryID.end())
-            {
-                shipGameObject = shipIt->second.ShipGameObject;
-                shipMapIDOut = shipIt->second.MapID;
-            }
+            if (shipIt == EverQuest->ShipGameObjectsByTemplateEntryID.end() || shipIt->second.MapID != callerMapID)
+                return nullptr;
+            shipGameObject = shipIt->second.ShipGameObject;
         }
         if (shipGameObject == nullptr)
             return nullptr;
@@ -137,19 +142,21 @@ public:
             if (waypointId != shipTrigger.TriggeringNodeID)
                 continue;
 
-            // Get the triggered ship
+            // Which map the triggered ship is on decides everything else, and it is answered without touching the ship
             uint32 triggeredShipMapID = 0;
-            MotionTransport* triggeredShipMotionTransport = GetRegisteredShipMotionTransport(shipTrigger.TriggeredShipGameObjectTemplateEntryID, triggeredShipMapID);
-            if (triggeredShipMotionTransport == nullptr)
+            if (TryGetRegisteredShipMapID(shipTrigger.TriggeredShipGameObjectTemplateEntryID, triggeredShipMapID) == false)
                 continue;
 
             // A ship on another map updates on another map's thread, so respawning and restarting it from here would be writing to that map's
-            // objects from the wrong thread.  Hand it off instead, and that ship picks the start up on its own next update
             if (triggeredShipMapID != relocatingShipMapID)
             {
                 QueuePendingShipStart(shipTrigger.TriggeredShipGameObjectTemplateEntryID);
                 continue;
             }
+
+            MotionTransport* triggeredShipMotionTransport = GetRegisteredShipMotionTransport(shipTrigger.TriggeredShipGameObjectTemplateEntryID, relocatingShipMapID);
+            if (triggeredShipMotionTransport == nullptr)
+                continue;
 
             StartShip(triggeredShipMotionTransport);
         }

@@ -47,6 +47,7 @@ public:
             return;
         EverQuest->ClearReactionSpawnedCreaturesForMap(map);
         EverQuest->ClearCreaturePresenceGroupStateForMap(map);
+        EverQuest->ClearPerMapRuntimeStateForMap(map);
     }
 };
 

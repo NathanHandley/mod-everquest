@@ -494,6 +494,19 @@ public:
     vector<EverQuestPendingKillSpawnAction> ActionsOnArrival;
 };
 
+class EverQuestPendingReactionSpawn
+{
+public:
+    uint32 CreatureTemplateID = 0;
+    uint32 MapID = 0;
+    uint32 InstanceID = 0;
+    float PositionX = 0;
+    float PositionY = 0;
+    float PositionZ = 0;
+    float Orientation = 0;
+    bool EnforceUniqueSpawn = false;
+};
+
 class EverQuestLoadedCreatureEquippedVisualItems
 {
 public:
@@ -1191,6 +1204,7 @@ public:
     std::mutex ReactionSpawnedCreaturesMutex;
     unordered_map<uint64, vector<ObjectGuid::LowType>> ReactionSpawnedCreatureSpawnIDsByMapInstanceKey;
     vector<ObjectGuid::LowType> ReactionSpawnedCreatureSpawnIDsPendingGridRemoval;
+    vector<EverQuestPendingReactionSpawn> ReactionSpawnsPendingCreation;
     std::atomic<uint32> ReactionSpawnedCreatureCount{ 0 };
     unordered_map<uint64, vector<EverQuestTriggeredQuestKillSpawn>> TriggeredQuestKillSpawnsByMapInstanceKey;
     unordered_map<uint32, EverQuestItemTemplate> ItemTemplatesByEntryID;
@@ -1545,12 +1559,15 @@ public:
     void RollLootItemsForCreature(Creature* creature);
     void RollLootGroupIntoCounts(const EverQuestCreatureLootGroup& lootGroup, unordered_map<uint32, uint32>& counts);
     void SpawnCreature(uint32 entryID, Map* map, float x, float y, float z, float orientation, bool enforceUniqueSpawn);
+    void ExecutePendingReactionSpawn(const EverQuestPendingReactionSpawn& pendingSpawn);
+    void ProcessPendingReactionSpawnCreations();
     void TrackReactionSpawnedCreature(Creature* creature);
     void RefreshReactionSpawnedCreatureCount();
     void RetireReactionSpawnedCreature(Map* map, ObjectGuid::LowType spawnID);
     void ProcessPendingReactionSpawnGridRemovals();
     void UpdateReactionSpawnedCreatures(Map* map);
     void ClearReactionSpawnedCreaturesForMap(Map* map);
+    void ClearPerMapRuntimeStateForMap(Map* map);
     void DespawnCreature(uint32 entryID, Map* map);
     void MakeCreatureAttackPlayer(uint32 entryID, Map* map, Player* player);
     bool IsSpellAnEQSpell(uint32 spellID);
