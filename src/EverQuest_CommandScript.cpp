@@ -115,6 +115,12 @@ public:
             { "equipswap",   HandleSecondaryEquipSwap,          SEC_PLAYER, Console::No },
         };
 
+        static ChatCommandTable adventurerCommandTable =
+        {
+            { "info",    HandleAdventurerInfo,    SEC_GAMEMASTER, Console::No },
+            { "restore", HandleAdventurerRestore, SEC_GAMEMASTER, Console::No },
+        };
+
         static ChatCommandTable trackCommandTable =
         {
             { "list",  HandleTrackList,  SEC_PLAYER, Console::No },
@@ -132,9 +138,95 @@ public:
             { "eqdungeonmode", HandleEQDungeonModeCommand,      SEC_PLAYER, Console::No },
             { "class",  classCommandTable                                               },
             { "track",  trackCommandTable                                               },
+            { "eqadventurer", adventurerCommandTable                                    },
         };
 
         return commandTable;
+    }
+
+    static Player* GetConnectedAdventurerTarget(ChatHandler* handler, Optional<PlayerIdentifier>& target)
+    {
+        if (!target)
+            target = PlayerIdentifier::FromTargetOrSelf(handler);
+        if (!target)
+        {
+            handler->SendSysMessage("No character was named, and nothing is selected.");
+            return nullptr;
+        }
+        if (target->IsConnected() == false)
+        {
+            handler->PSendSysMessage("{} is not online. This command only works on a character that is logged in.", target->GetName());
+            return nullptr;
+        }
+        return target->GetConnectedPlayer();
+    }
+
+    static bool HandleAdventurerInfo(ChatHandler* handler, Optional<PlayerIdentifier> target)
+    {
+        if (EverQuest->IsEnabled == false)
+        {
+            handler->SendSysMessage("The EverQuest module is disabled.");
+            return true;
+        }
+
+        Player* targetPlayer = GetConnectedAdventurerTarget(handler, target);
+        if (targetPlayer == nullptr)
+            return true;
+
+        handler->PSendSysMessage("=== EverQuest Adventurer: {} ===", targetPlayer->GetName());
+        handler->PSendSysMessage("Buff currently held: {}", EverQuest->IsPlayerDisqualifiedFromAdventurer(targetPlayer) == false ? "yes" : "no");
+
+        EverQuestAdventurerLossSnapshot snapshot;
+        if (EverQuest->TryGetAdventurerLevelSnapshotForPlayerGUID(targetPlayer->GetGUID().GetCounter(), snapshot) == false)
+        {
+            handler->SendSysMessage("No recorded loss for this character, so a restore would leave its levels alone.");
+            return true;
+        }
+
+        handler->PSendSysMessage("Lost the buff at unix time {}, while playing {}.", snapshot.LossTimestamp, GetEQClassStringFromID(snapshot.LossSecondaryClass));
+        handler->SendSysMessage("Levels at the time of the loss, against the levels now:");
+
+        map<uint8, uint8> currentLevelsByEQClass = EverQuest->GetClassLevelsByClassForPlayer(targetPlayer);
+        for (uint8 eqClassID = EQ_EQCLASS_NONE; eqClassID <= EQ_EQCLASS_HIGHEST_ID; eqClassID++)
+        {
+            uint8 snapshotLevel = snapshot.LevelsByEQClass[eqClassID];
+            auto currentLevelIter = currentLevelsByEQClass.find(eqClassID);
+            uint8 currentLevel = (currentLevelIter == currentLevelsByEQClass.end()) ? 0 : currentLevelIter->second;
+            if (snapshotLevel == 0 && currentLevel == 0)
+                continue;
+            handler->PSendSysMessage("  {}: was {}, now {}{}", GetEQClassStringFromID(eqClassID), uint32(snapshotLevel), uint32(currentLevel),
+                (snapshotLevel != 0 && snapshotLevel != currentLevel) ? "  <- a restore would change this" : "");
+        }
+        return true;
+    }
+
+    static bool HandleAdventurerRestore(ChatHandler* handler, Optional<PlayerIdentifier> target)
+    {
+        Player* gmPlayer = handler->GetSession() != nullptr ? handler->GetSession()->GetPlayer() : nullptr;
+        if (gmPlayer == nullptr)
+        {
+            handler->SendSysMessage("This command has to be run by a character in the world, since the stripped items are mailed to them.");
+            return true;
+        }
+
+        Player* targetPlayer = GetConnectedAdventurerTarget(handler, target);
+        if (targetPlayer == nullptr)
+            return true;
+
+        EverQuestAdventurerRestoreReport report;
+        if (EverQuest->RestoreAdventurerForPlayer(targetPlayer, gmPlayer, report) == false)
+        {
+            handler->PSendSysMessage("EverQuest Adventurer restore failed for {}: {}", targetPlayer->GetName(), report.FailureReason);
+            return true;
+        }
+
+        handler->PSendSysMessage("Restored the EverQuest Adventurer buff on {}.", targetPlayer->GetName());
+        handler->PSendSysMessage("  Non-EverQuest items mailed to you: {} across {} mail(s).", report.ItemsMailed, report.MailsSent);
+        if (report.HadLevelSnapshot == true)
+            handler->PSendSysMessage("  Class levels reset to the recorded loss: {}.", report.ClassLevelsChanged);
+        for (std::string const& note : report.Notes)
+            handler->PSendSysMessage("  {}", note);
+        return true;
     }
 
     static bool HandleEQGPSCommand(ChatHandler* handler, Optional<PlayerIdentifier> target)

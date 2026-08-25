@@ -65,6 +65,7 @@ struct BuildValuesCachePosPointers;
 #define EQ_EQCLASS_WIZARD                           12
 #define EQ_EQCLASS_MAGICIAN                         13
 #define EQ_EQCLASS_ENCHANTER                        14
+#define EQ_EQCLASS_HIGHEST_ID                       14 // used by eqadvrestore, needed because "None" is an actual slot
 
 #define EQ_BASHKICKSTUN_BASE_CHANCE                 45
 #define EQ_BASHKICKSTUN_BASE_CHANCE_ABOVE_LEVEL_60  40
@@ -903,6 +904,35 @@ public:
     uint32 ForageType = EQ_FORAGE_TYPE_FOOD;
 };
 
+class EverQuestAdventurerLossSnapshot
+{
+public:
+    bool Exists = false;
+    uint32 LossTimestamp = 0;
+    uint8 LossSecondaryClass = EQ_EQCLASS_NONE;
+    uint8 LevelsByEQClass[EQ_EQCLASS_HIGHEST_ID + 1] = {};
+};
+
+class EverQuestAdventurerRestoreReport
+{
+public:
+    bool Succeeded = false;
+    std::string FailureReason;
+    bool HadLevelSnapshot = false;
+    uint32 ItemsMailed = 0;
+    uint32 MailsSent = 0;
+    uint32 ClassLevelsChanged = 0;
+    vector<std::string> Notes;
+};
+
+class EverQuestAdventurerStrippedItem
+{
+public:
+    Item* StrippedItem = nullptr;
+    std::string SourceDescription;
+    bool WasLiveOnPlayer = false;
+};
+
 class EverQuestZoneSafePoint
 {
 public:
@@ -1427,6 +1457,9 @@ public:
     bool IsPlayerDisqualifiedFromAdventurer(Player* player);
     bool DisqualifyPlayerFromAdventurer(Player* player);
     void SaveAdventurerDisqualifiedForPlayer(Player* player);
+    bool RestoreAdventurerForPlayer(Player* targetPlayer, Player* gmPlayer, EverQuestAdventurerRestoreReport& reportOut);
+    void CollectNonEverQuestItemsFromLiveInventory(Player* player, vector<EverQuestAdventurerStrippedItem>& strippedItems, EverQuestAdventurerRestoreReport& report);
+    void CollectNonEverQuestItemsFromClassStorage(Player* player, vector<EverQuestAdventurerStrippedItem>& strippedItems, CharacterDatabaseTransaction& transaction);
     void GrantAdventurerAchievementIfAccountEarned(Player* player);
     void ProcessAdventurerStateOnLevelChange(Player* player);
     void LoadCreatureLootData();

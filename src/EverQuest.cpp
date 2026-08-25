@@ -25,6 +25,7 @@
 #include "Formulas.h"
 #include "GameTime.h"
 #include "LootMgr.h"
+#include "Mail.h"
 #include "Pet.h"
 #include "ScriptMgr.h"
 #include "ObjectMgr.h"
@@ -4588,6 +4589,9 @@ bool EverQuestMod::DisqualifyPlayerFromAdventurer(Player* player)
     controllerData.AdventurerDisqualified = true;
     SaveAdventurerDisqualifiedForPlayer(player);
 
+    // This is the one moment the buff is lost, so the levels are recorded here for `.eqadventurer restore` to put back
+    SaveAdventurerLevelSnapshotForPlayer(player);
+
     if (player->HasAura(ConfigSystemAdventurerAuraSpellID) == true)
         player->RemoveAura(ConfigSystemAdventurerAuraSpellID);
     return true;
@@ -4611,6 +4615,383 @@ void EverQuestMod::SaveAdventurerDisqualifiedForPlayer(Player* player)
         controllerData.SecondaryExpPool,
         controllerData.AdventurerDisqualified == true ? 1 : 0,
         controllerData.AdventurerDisqualified == true ? 1 : 0);
+}
+
+// Columns are explicit for EQ classes so resolve it here
+static const char* const EQ_ADVENTURER_LOSS_LEVEL_COLUMNS[EQ_EQCLASS_HIGHEST_ID + 1] =
+{
+    "levelNone", "levelWarrior", "levelCleric", "levelPaladin", "levelRanger", "levelShadowKnight", "levelDruid", "levelMonk",
+    "levelBard", "levelRogue", "levelShaman", "levelNecromancer", "levelWizard", "levelMagician", "levelEnchanter"
+};
+
+static std::string GetEquipmentSlotNameFromSlot(uint8 equipSlot)
+{
+    switch (equipSlot)
+    {
+    case EQUIPMENT_SLOT_HEAD:       return "Head";
+    case EQUIPMENT_SLOT_NECK:       return "Neck";
+    case EQUIPMENT_SLOT_SHOULDERS:  return "Shoulders";
+    case EQUIPMENT_SLOT_BODY:       return "Shirt";
+    case EQUIPMENT_SLOT_CHEST:      return "Chest";
+    case EQUIPMENT_SLOT_WAIST:      return "Waist";
+    case EQUIPMENT_SLOT_LEGS:       return "Legs";
+    case EQUIPMENT_SLOT_FEET:       return "Feet";
+    case EQUIPMENT_SLOT_WRISTS:     return "Wrists";
+    case EQUIPMENT_SLOT_HANDS:      return "Hands";
+    case EQUIPMENT_SLOT_FINGER1:    return "Finger 1";
+    case EQUIPMENT_SLOT_FINGER2:    return "Finger 2";
+    case EQUIPMENT_SLOT_TRINKET1:   return "Trinket 1";
+    case EQUIPMENT_SLOT_TRINKET2:   return "Trinket 2";
+    case EQUIPMENT_SLOT_BACK:       return "Back";
+    case EQUIPMENT_SLOT_MAINHAND:   return "Main Hand";
+    case EQUIPMENT_SLOT_OFFHAND:    return "Off Hand";
+    case EQUIPMENT_SLOT_RANGED:     return "Ranged";
+    case EQUIPMENT_SLOT_TABARD:     return "Tabard";
+    default:                        return "Slot " + std::to_string(uint32(equipSlot));
+    }
+}
+
+void EverQuestMod::SaveAdventurerLevelSnapshotForPlayer(Player* player)
+{
+    if (player == nullptr)
+        return;
+
+    uint8 levelsByEQClass[EQ_EQCLASS_HIGHEST_ID + 1] = {};
+    map<uint8, uint8> currentLevelsByEQClass = GetClassLevelsByClassForPlayer(player);
+    for (auto const& levelPair : currentLevelsByEQClass)
+    {
+        if (levelPair.first > EQ_EQCLASS_HIGHEST_ID)
+        {
+            LOG_ERROR("module.EverQuest", "EverQuestMod SaveAdventurerLevelSnapshotForPlayer saw EQ class {} for player guid {}, which is past the highest known class {} and has no column to be stored in",
+                uint32(levelPair.first), player->GetGUID().GetCounter(), uint32(EQ_EQCLASS_HIGHEST_ID));
+            continue;
+        }
+        levelsByEQClass[levelPair.first] = levelPair.second;
+    }
+
+    CharacterDatabase.Execute("INSERT INTO `mod_everquest_character_adventurer_loss` "
+        "(`guid`, `lossTimestamp`, `lossSecondaryClass`, `levelNone`, `levelWarrior`, `levelCleric`, `levelPaladin`, `levelRanger`, `levelShadowKnight`, `levelDruid`, `levelMonk`, `levelBard`, `levelRogue`, `levelShaman`, `levelNecromancer`, `levelWizard`, `levelMagician`, `levelEnchanter`) "
+        "VALUES ({}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}) "
+        "ON DUPLICATE KEY UPDATE `lossTimestamp` = VALUES(`lossTimestamp`), `lossSecondaryClass` = VALUES(`lossSecondaryClass`), "
+        "`levelNone` = VALUES(`levelNone`), `levelWarrior` = VALUES(`levelWarrior`), `levelCleric` = VALUES(`levelCleric`), `levelPaladin` = VALUES(`levelPaladin`), "
+        "`levelRanger` = VALUES(`levelRanger`), `levelShadowKnight` = VALUES(`levelShadowKnight`), `levelDruid` = VALUES(`levelDruid`), `levelMonk` = VALUES(`levelMonk`), "
+        "`levelBard` = VALUES(`levelBard`), `levelRogue` = VALUES(`levelRogue`), `levelShaman` = VALUES(`levelShaman`), `levelNecromancer` = VALUES(`levelNecromancer`), "
+        "`levelWizard` = VALUES(`levelWizard`), `levelMagician` = VALUES(`levelMagician`), `levelEnchanter` = VALUES(`levelEnchanter`)",
+        player->GetGUID().GetCounter(),
+        uint32(GameTime::GetGameTime().count()),
+        uint32(GetCurrentSecondEQClassForPlayer(player)),
+        uint32(levelsByEQClass[EQ_EQCLASS_NONE]),
+        uint32(levelsByEQClass[EQ_EQCLASS_WARRIOR]),
+        uint32(levelsByEQClass[EQ_EQCLASS_CLERIC]),
+        uint32(levelsByEQClass[EQ_EQCLASS_PALADIN]),
+        uint32(levelsByEQClass[EQ_EQCLASS_RANGER]),
+        uint32(levelsByEQClass[EQ_EQCLASS_SHADOWKNIGHT]),
+        uint32(levelsByEQClass[EQ_EQCLASS_DRUID]),
+        uint32(levelsByEQClass[EQ_EQCLASS_MONK]),
+        uint32(levelsByEQClass[EQ_EQCLASS_BARD]),
+        uint32(levelsByEQClass[EQ_EQCLASS_ROGUE]),
+        uint32(levelsByEQClass[EQ_EQCLASS_SHAMAN]),
+        uint32(levelsByEQClass[EQ_EQCLASS_NECROMANCER]),
+        uint32(levelsByEQClass[EQ_EQCLASS_WIZARD]),
+        uint32(levelsByEQClass[EQ_EQCLASS_MAGICIAN]),
+        uint32(levelsByEQClass[EQ_EQCLASS_ENCHANTER]));
+}
+
+bool EverQuestMod::TryGetAdventurerLevelSnapshotForPlayerGUID(uint32 playerGUIDCounter, EverQuestAdventurerLossSnapshot& snapshotOut)
+{
+    std::ostringstream columnList;
+    for (uint8 eqClassID = EQ_EQCLASS_NONE; eqClassID <= EQ_EQCLASS_HIGHEST_ID; eqClassID++)
+        columnList << ", `" << EQ_ADVENTURER_LOSS_LEVEL_COLUMNS[eqClassID] << "`";
+
+    QueryResult queryResult = CharacterDatabase.Query("SELECT `lossTimestamp`, `lossSecondaryClass`{} FROM `mod_everquest_character_adventurer_loss` WHERE `guid` = {}", columnList.str(), playerGUIDCounter);
+    if (!queryResult)
+        return false;
+
+    Field* fields = queryResult->Fetch();
+    snapshotOut.Exists = true;
+    snapshotOut.LossTimestamp = fields[0].Get<uint32>();
+    snapshotOut.LossSecondaryClass = fields[1].Get<uint8>();
+    for (uint8 eqClassID = EQ_EQCLASS_NONE; eqClassID <= EQ_EQCLASS_HIGHEST_ID; eqClassID++)
+        snapshotOut.LevelsByEQClass[eqClassID] = fields[2 + eqClassID].Get<uint8>();
+    return true;
+}
+
+void EverQuestMod::CollectNonEverQuestItemsFromLiveInventory(Player* player, vector<EverQuestAdventurerStrippedItem>& strippedItems, EverQuestAdventurerRestoreReport& report)
+{
+    // Positions are recorded first, since detaching an item changes what the slots hold
+    vector<std::pair<std::pair<uint8, uint8>, std::string>> positionsToStrip;
+
+    for (uint8 equipSlot = EQUIPMENT_SLOT_START; equipSlot < EQUIPMENT_SLOT_END; equipSlot++)
+    {
+        Item* item = player->GetItemByPos(INVENTORY_SLOT_BAG_0, equipSlot);
+        if (item == nullptr || IsItemTemplateIDAnEQItemTemplateID(item->GetEntry()) == true)
+            continue;
+        positionsToStrip.push_back(std::make_pair(std::make_pair(uint8(INVENTORY_SLOT_BAG_0), equipSlot), "equipped, " + GetEquipmentSlotNameFromSlot(equipSlot) + ", as " + GetEQClassStringFromID(GetCurrentSecondEQClassForPlayer(player))));
+    }
+
+    for (uint8 backpackSlot = INVENTORY_SLOT_ITEM_START; backpackSlot < INVENTORY_SLOT_ITEM_END; backpackSlot++)
+    {
+        Item* item = player->GetItemByPos(INVENTORY_SLOT_BAG_0, backpackSlot);
+        if (item == nullptr || IsItemTemplateIDAnEQItemTemplateID(item->GetEntry()) == true)
+            continue;
+        positionsToStrip.push_back(std::make_pair(std::make_pair(uint8(INVENTORY_SLOT_BAG_0), backpackSlot), "backpack"));
+    }
+
+    for (uint8 keyringSlot = KEYRING_SLOT_START; keyringSlot < KEYRING_SLOT_END; keyringSlot++)
+    {
+        Item* item = player->GetItemByPos(INVENTORY_SLOT_BAG_0, keyringSlot);
+        if (item == nullptr || IsItemTemplateIDAnEQItemTemplateID(item->GetEntry()) == true)
+            continue;
+        positionsToStrip.push_back(std::make_pair(std::make_pair(uint8(INVENTORY_SLOT_BAG_0), keyringSlot), "keyring"));
+    }
+
+    for (uint8 bagSlot = INVENTORY_SLOT_BAG_START; bagSlot < INVENTORY_SLOT_BAG_END; bagSlot++)
+    {
+        Bag* bag = player->GetBagByPos(bagSlot);
+        if (bag == nullptr)
+            continue;
+        for (uint32 bagIndex = 0; bagIndex < bag->GetBagSize(); bagIndex++)
+        {
+            Item* item = player->GetItemByPos(bagSlot, uint8(bagIndex));
+            if (item == nullptr || IsItemTemplateIDAnEQItemTemplateID(item->GetEntry()) == true)
+                continue;
+            positionsToStrip.push_back(std::make_pair(std::make_pair(bagSlot, uint8(bagIndex)), "bag in slot " + std::to_string(uint32(bagSlot - INVENTORY_SLOT_BAG_START + 1))));
+        }
+    }
+
+    for (auto const& positionToStrip : positionsToStrip)
+    {
+        Item* item = player->GetItemByPos(positionToStrip.first.first, positionToStrip.first.second);
+        if (item == nullptr)
+            continue;
+        EverQuestAdventurerStrippedItem strippedItem;
+        strippedItem.SourceDescription = positionToStrip.second;
+        strippedItem.WasLiveOnPlayer = true;
+        player->MoveItemFromInventory(positionToStrip.first.first, positionToStrip.first.second, true);
+        strippedItem.StrippedItem = item;
+        strippedItems.push_back(strippedItem);
+    }
+
+    // Equipped bags come last, now that everything non-EverQuest inside them is gone
+    for (uint8 bagSlot = INVENTORY_SLOT_BAG_START; bagSlot < INVENTORY_SLOT_BAG_END; bagSlot++)
+    {
+        Bag* bag = player->GetBagByPos(bagSlot);
+        if (bag == nullptr || IsItemTemplateIDAnEQItemTemplateID(bag->GetEntry()) == true)
+            continue;
+
+        // Whatever EverQuest gear is still inside needs somewhere else to live before the bag can go
+        bool everyRemainingItemRelocated = true;
+        for (uint32 bagIndex = 0; bagIndex < bag->GetBagSize(); bagIndex++)
+        {
+            Item* remainingItem = player->GetItemByPos(bagSlot, uint8(bagIndex));
+            if (remainingItem == nullptr)
+                continue;
+
+            ItemPosCountVec relocationDestination;
+            if (player->CanStoreItem(NULL_BAG, NULL_SLOT, relocationDestination, remainingItem, true) != EQUIP_ERR_OK)
+            {
+                everyRemainingItemRelocated = false;
+                break;
+            }
+            player->MoveItemFromInventory(bagSlot, uint8(bagIndex), true);
+            remainingItem->SetState(ITEM_UNCHANGED);
+            player->MoveItemToInventory(relocationDestination, remainingItem, true);
+        }
+
+        if (everyRemainingItemRelocated == false)
+        {
+            report.Notes.push_back("Left the container '" + bag->GetTemplate()->Name1 + "' in bag slot " + std::to_string(uint32(bagSlot - INVENTORY_SLOT_BAG_START + 1)) + " in place, as the EverQuest items inside it had nowhere else to go.");
+            continue;
+        }
+
+        EverQuestAdventurerStrippedItem strippedItem;
+        strippedItem.SourceDescription = "equipped container, bag slot " + std::to_string(uint32(bagSlot - INVENTORY_SLOT_BAG_START + 1));
+        strippedItem.WasLiveOnPlayer = true;
+        player->MoveItemFromInventory(INVENTORY_SLOT_BAG_0, bagSlot, true);
+        strippedItem.StrippedItem = bag;
+        strippedItems.push_back(strippedItem);
+    }
+}
+
+void EverQuestMod::CollectNonEverQuestItemsFromClassStorage(Player* player, vector<EverQuestAdventurerStrippedItem>& strippedItems, CharacterDatabaseTransaction& transaction)
+{
+    QueryResult queryResult = CharacterDatabase.Query("SELECT storage.`eqclass`, storage.`slot`, storage.`item`, instance.`itemEntry` FROM `mod_everquest_character_class_inventory` storage "
+        "JOIN `item_instance` instance ON instance.`guid` = storage.`item` WHERE storage.`guid` = {}", player->GetGUID().GetCounter());
+    if (!queryResult)
+        return;
+
+    do
+    {
+        Field* fields = queryResult->Fetch();
+        uint8 eqClassID = fields[0].Get<uint8>();
+        uint8 equipSlot = fields[1].Get<uint8>();
+        uint32 itemGUIDCounter = fields[2].Get<uint32>();
+        uint32 itemEntry = fields[3].Get<uint32>();
+
+        if (IsItemTemplateIDAnEQItemTemplateID(itemEntry) == true)
+            continue;
+
+        // A stored row whose item is live on the player is the stale kind the switch-in restore leaves behind, and the live copy was already handled by the inventory sweep
+        Item* item = LoadDetachedItemForPlayer(itemGUIDCounter, player);
+        if (item == nullptr)
+        {
+            transaction->Append("DELETE FROM `mod_everquest_character_class_inventory` WHERE `item` = {}", itemGUIDCounter);
+            continue;
+        }
+
+        EverQuestAdventurerStrippedItem strippedItem;
+        strippedItem.StrippedItem = item;
+        strippedItem.WasLiveOnPlayer = false;
+        strippedItem.SourceDescription = "equipped, " + GetEquipmentSlotNameFromSlot(equipSlot) + ", stored as " + GetEQClassStringFromID(eqClassID);
+        strippedItems.push_back(strippedItem);
+
+        transaction->Append("DELETE FROM `mod_everquest_character_class_inventory` WHERE `item` = {}", itemGUIDCounter);
+    } while (queryResult->NextRow());
+}
+
+bool EverQuestMod::RestoreAdventurerForPlayer(Player* targetPlayer, Player* gmPlayer, EverQuestAdventurerRestoreReport& reportOut)
+{
+    if (IsEnabled == false)
+    {
+        reportOut.FailureReason = "The EverQuest module is disabled.";
+        return false;
+    }
+    if (targetPlayer == nullptr || gmPlayer == nullptr || targetPlayer->GetSession() == nullptr || gmPlayer->GetSession() == nullptr)
+    {
+        reportOut.FailureReason = "Both the target character and the game master have to be online.";
+        return false;
+    }
+    if (ConfigSystemAdventurerAuraSpellID == 0)
+    {
+        reportOut.FailureReason = "No EverQuest Adventurer aura spell is configured, so the buff cannot be given back.";
+        return false;
+    }
+
+    if (ConfigSystemItemTemplateIDMin == 0 || ConfigSystemItemTemplateIDMax == 0)
+    {
+        reportOut.FailureReason = "The EverQuest item template ID range is not configured, so an EverQuest item cannot be told from a WoW one.";
+        return false;
+    }
+    if (IsEquipmentStorageCommitPendingForPlayer(targetPlayer) == true)
+    {
+        reportOut.FailureReason = "That character has a secondary class equipment change still saving. Try again in a moment.";
+        return false;
+    }
+
+    uint32 targetGUIDCounter = targetPlayer->GetGUID().GetCounter();
+    CharacterDatabaseTransaction transaction = CharacterDatabase.BeginTransaction();
+    AppendCharacterRowLockAnchor(transaction, targetGUIDCounter);
+
+    vector<EverQuestAdventurerStrippedItem> strippedItems;
+    CollectNonEverQuestItemsFromLiveInventory(targetPlayer, strippedItems, reportOut);
+    CollectNonEverQuestItemsFromClassStorage(targetPlayer, strippedItems, transaction);
+
+    // Every item that came off the character is handed to the GM, in mails of at most MAX_MAIL_ITEMS
+    size_t mailedItemIndex = 0;
+    while (mailedItemIndex < strippedItems.size())
+    {
+        size_t batchEnd = std::min(mailedItemIndex + MAX_MAIL_ITEMS, strippedItems.size());
+
+        // The body has to be complete before the draft is built, so where each item came from is gathered up first
+        std::ostringstream mailBody;
+        mailBody << "Items taken from " << targetPlayer->GetName() << " by an EverQuest Adventurer restore:";
+        for (size_t batchIndex = mailedItemIndex; batchIndex < batchEnd; batchIndex++)
+        {
+            Item* item = strippedItems[batchIndex].StrippedItem;
+            mailBody << "\n" << item->GetTemplate()->Name1 << " (entry " << item->GetEntry() << ") - " << strippedItems[batchIndex].SourceDescription;
+        }
+
+        MailDraft draft("EverQuest Adventurer restore: " + targetPlayer->GetName(), mailBody.str());
+        for (size_t batchIndex = mailedItemIndex; batchIndex < batchEnd; batchIndex++)
+        {
+            // MoveItemFromInventory already cleared any refund data, and a stored item never had inventory rows to begin with
+            Item* item = strippedItems[batchIndex].StrippedItem;
+            item->DeleteFromInventoryDB(transaction);
+            if (item->GetState() == ITEM_UNCHANGED)
+                item->FSetState(ITEM_CHANGED);
+            item->SetOwnerGUID(gmPlayer->GetGUID());
+            item->SaveToDB(transaction);
+            draft.AddItem(item);
+        }
+
+        // Sent as if from the character itself, so the mail names who it came from
+        draft.SendMailTo(transaction, MailReceiver(gmPlayer), MailSender(MAIL_NORMAL, targetGUIDCounter, MAIL_STATIONERY_GM), MAIL_CHECK_MASK_COPIED, 0, 90);
+        reportOut.MailsSent++;
+        mailedItemIndex = batchEnd;
+    }
+    reportOut.ItemsMailed = uint32(strippedItems.size());
+
+    // The live inventory rows have to catch up with everything the sweep took off the character
+    targetPlayer->SaveInventoryAndGoldToDB(transaction);
+
+    // Levels come back only for a character that has a recorded loss
+    uint8 pendingActiveClassLevel = 0;
+    EverQuestAdventurerLossSnapshot snapshot;
+    if (TryGetAdventurerLevelSnapshotForPlayerGUID(targetGUIDCounter, snapshot) == true)
+    {
+        reportOut.HadLevelSnapshot = true;
+        uint8 activeSecondaryClass = GetCurrentSecondEQClassForPlayer(targetPlayer);
+        map<uint8, uint8> currentLevelsByEQClass = GetClassLevelsByClassForPlayer(targetPlayer);
+
+        // Walked by class rather than by what the character has now, so a profile that has since been dropped is reported instead of being passed over in silence
+        for (uint8 eqClassID = EQ_EQCLASS_NONE; eqClassID <= EQ_EQCLASS_HIGHEST_ID; eqClassID++)
+        {
+            // A recorded level of zero means that class had never been played at the time of the loss, so it is left alone
+            uint8 snapshotLevel = snapshot.LevelsByEQClass[eqClassID];
+            if (snapshotLevel == 0)
+                continue;
+
+            auto currentLevelIter = currentLevelsByEQClass.find(eqClassID);
+            if (currentLevelIter == currentLevelsByEQClass.end())
+            {
+                reportOut.Notes.push_back(GetEQClassStringFromID(eqClassID) + " was level " + std::to_string(uint32(snapshotLevel)) + " at the loss but has no stored profile any more, so nothing was put back for it.");
+                continue;
+            }
+            if (snapshotLevel == currentLevelIter->second)
+                continue;
+
+            if (eqClassID == activeSecondaryClass)
+            {
+                pendingActiveClassLevel = snapshotLevel;
+                continue;
+            }
+
+            // The parked profile's experience is progress into a level that is no longer the one it is on, so it starts over
+            transaction->Append("UPDATE `mod_everquest_characters` SET `level` = {}, `xp` = 0 WHERE `guid` = {} AND `eqclass` = {}", uint32(snapshotLevel), targetGUIDCounter, uint32(eqClassID));
+            reportOut.Notes.push_back(GetEQClassStringFromID(eqClassID) + " moved from level " + std::to_string(uint32(currentLevelIter->second)) + " back to level " + std::to_string(uint32(snapshotLevel)) + ".");
+            reportOut.ClassLevelsChanged++;
+        }
+    }
+    else
+        reportOut.Notes.push_back("No recorded loss for this character, so levels were left exactly as they are.");
+
+    // Committed through the equipment storage queue
+    QueuePendingEquipmentStorageTransaction(targetPlayer, GetCurrentSecondEQClassForPlayer(targetPlayer), transaction);
+
+    // The active character's level is in memory rather than in the transaction, and its own save cycle carries it to the database
+    if (pendingActiveClassLevel != 0)
+    {
+        uint8 previousLevel = targetPlayer->GetLevel();
+        targetPlayer->GiveLevel(pendingActiveClassLevel);
+        targetPlayer->InitTalentForLevel();
+        targetPlayer->SetUInt32Value(PLAYER_XP, 0);
+        reportOut.Notes.push_back(GetEQClassStringFromID(GetCurrentSecondEQClassForPlayer(targetPlayer)) + " (the active profile) moved from level " + std::to_string(uint32(previousLevel)) + " back to level " + std::to_string(uint32(pendingActiveClassLevel)) + ".");
+        reportOut.ClassLevelsChanged++;
+    }
+
+    // The buff itself
+    EverQuestPlayerControllerData& controllerData = *GetOrLoadActivePlayerClassControllerData(targetPlayer);
+    controllerData.AdventurerDisqualified = false;
+    SaveAdventurerDisqualifiedForPlayer(targetPlayer);
+    if (targetPlayer->HasAura(ConfigSystemAdventurerAuraSpellID) == false)
+        targetPlayer->CastSpell(targetPlayer, ConfigSystemAdventurerAuraSpellID, true);
+
+    LOG_INFO("module.EverQuest", "EverQuestMod restored the EverQuest Adventurer buff on player {} (guid {}) for game master {} (guid {}): {} items mailed across {} mails, {} class levels reset, level snapshot {}",
+        targetPlayer->GetName(), targetGUIDCounter, gmPlayer->GetName(), gmPlayer->GetGUID().GetCounter(),
+        reportOut.ItemsMailed, reportOut.MailsSent, reportOut.ClassLevelsChanged, reportOut.HadLevelSnapshot == true ? "found" : "not found");
+
+    reportOut.Succeeded = true;
+    return true;
 }
 
 void EverQuestMod::GrantAdventurerAchievementIfAccountEarned(Player* player)
