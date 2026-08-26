@@ -26,6 +26,34 @@ class EverQuest_IllusionSpellScript: public SpellScript
 {
     PrepareSpellScript(EverQuest_IllusionSpellScript);
 
+    SpellCastResult CheckCast()
+    {
+        if (EverQuest->IsEnabled == false)
+            return SPELL_CAST_OK;
+
+        uint32 spellID = GetSpellInfo()->Id;
+        if (EverQuest->IsSpellAnEQSpell(spellID) == false)
+            return SPELL_CAST_OK;
+        uint8 illusionObjectClass = EverQuest->GetIllusionObjectClassForSpellID(spellID);
+        if (illusionObjectClass == EQ_ILLUSION_OBJECT_CLASS_NONE)
+            return SPELL_CAST_OK;
+
+        Unit* caster = GetCaster();
+        if (caster == nullptr)
+            return SPELL_CAST_OK;
+        if (EverQuest->HasIllusionObjectInRangeForCaster(caster, spellID) == true)
+            return SPELL_CAST_OK;
+
+        if (caster->IsPlayer() == true)
+        {
+            if (illusionObjectClass == EQ_ILLUSION_OBJECT_CLASS_TREE)
+                ChatHandler(caster->ToPlayer()->GetSession()).PSendSysMessage("There are no trees here to take the form of.");
+            else
+                ChatHandler(caster->ToPlayer()->GetSession()).PSendSysMessage("There is nothing near you to take the form of.");
+        }
+        return SPELL_FAILED_DONT_REPORT;
+    }
+
     void HandleOnHit(SpellEffIndex /*effIndex*/)
     {
         if (EverQuest->IsEnabled == false)
@@ -50,6 +78,7 @@ class EverQuest_IllusionSpellScript: public SpellScript
 
     void Register() override
     {
+        OnCheckCast += SpellCheckCastFn(EverQuest_IllusionSpellScript::CheckCast);
         OnEffectHitTarget += SpellEffectFn(EverQuest_IllusionSpellScript::HandleOnHit, EFFECT_0, SPELL_EFFECT_ANY);
     }
 };

@@ -224,6 +224,10 @@ bool EverQuestMod::LoadConfigurationSystemDataFromDB()
                 ConfigSystemRaidBossRespawnVarianceInSec = (uint32)atoi(value.c_str());
             else if (key == "RaidMiniBossRespawnVarianceInSec")
                 ConfigSystemRaidMiniBossRespawnVarianceInSec = (uint32)atoi(value.c_str());
+            else if (key == "IllusionObjectMaxDistance")
+                ConfigSystemIllusionObjectMaxDistance = (float)atof(value.c_str());
+            else if (key == "IllusionObjectTreeMaxDistance")
+                ConfigSystemIllusionObjectTreeMaxDistance = (float)atof(value.c_str());
             else if (key == "ClientDataVersion")
                 ConfigSystemClientDataVersion = (uint32)atoi(value.c_str());
             else if (key == "ClientDataVersionMismatchMessage")
@@ -3324,6 +3328,7 @@ void EverQuestMod::LoadSpellData()
     SpellDataBySpellID.clear();
     BardSongTickSpellIDs.clear();
     QueryResult queryResult = WorldDatabase.Query("SELECT SpellID, AuraDurationBaseInMS, AuraDurationAddPerLevelInMS, AuraDurationMaxInMS, AuraDurationCalcMinLevel, AuraDurationCalcMaxLevel, RecourseSpellID, SpellIDCastOnMeleeAttacker, FocusBoostType, PeriodicAuraSpellID, PeriodicAuraSpellRadius, MaleFormSpellID, FemaleFormSpellID, EffectFailChancePercent, EffectFailableType, StunUsesBashKickChance, SpellIDCastOnTargetWhenStunLands, AuraStaysOnSecondaryClassSwitch, MinTargetLevel, MaxCreatureTargetLevel, ResistDiff, HasteType, ModFactionRepValue, IllusionFormAlignment, IllusionFormEQRaceID, PersistOnClassChange FROM mod_everquest_spell ORDER BY SpellID;");
+    QueryResult queryResult = WorldDatabase.Query("SELECT SpellID, AuraDurationBaseInMS, AuraDurationAddPerLevelInMS, AuraDurationMaxInMS, AuraDurationCalcMinLevel, AuraDurationCalcMaxLevel, RecourseSpellID, SpellIDCastOnMeleeAttacker, FocusBoostType, PeriodicAuraSpellID, PeriodicAuraSpellRadius, MaleFormSpellID, FemaleFormSpellID, EffectFailChancePercent, EffectFailableType, StunUsesBashKickChance, SpellIDCastOnTargetWhenStunLands, AuraStaysOnSecondaryClassSwitch, MinTargetLevel, MaxCreatureTargetLevel, ResistDiff, HasteType, ModFactionRepValue, IllusionFormAlignment, IllusionFormEQRaceID, PersistOnClassChange, IllusionObjectClass FROM mod_everquest_spell ORDER BY SpellID;");
     if (queryResult)
     {
         do
@@ -3357,6 +3362,7 @@ void EverQuestMod::LoadSpellData()
             everQuestSpell.IllusionFormAlignment = fields[23].Get<uint8>();
             everQuestSpell.IllusionFormEQRaceID = fields[24].Get<uint32>();
             everQuestSpell.PersistOnClassChange = fields[25].Get<bool>();
+            everQuestSpell.IllusionObjectClass = fields[26].Get<uint8>();
             SpellDataBySpellID[everQuestSpell.SpellID] = everQuestSpell;
             if (everQuestSpell.PeriodicAuraSpellID != 0)
                 BardSongTickSpellIDs.insert(everQuestSpell.PeriodicAuraSpellID);
@@ -3657,6 +3663,121 @@ void EverQuestMod::ClearIllusionTrackingForPlayer(ObjectGuid playerGUID)
 {
     std::lock_guard<std::mutex> lock(RuntimeStateMutex);
     PlayerIllusionStatesByPlayerGUID.erase(playerGUID);
+}
+
+void EverQuestMod::LoadIllusionObjectData()
+{
+    IllusionObjectsByMapID.clear();
+
+    QueryResult queryResult = WorldDatabase.Query("SELECT MapID, X, Y, Z, DisplayID, IsTree FROM mod_everquest_illusion_object;");
+    if (!queryResult)
+    {
+        LOG_INFO("module.EverQuest", "EverQuestMod::LoadIllusionObjectData found no mod_everquest_illusion_object rows, so object illusions will always fall back to their form model");
+        return;
+    }
+    uint32 loadedObjectCount = 0;
+    do
+    {
+        // Pull the data out
+        Field* fields = queryResult->Fetch();
+        uint32 mapID = fields[0].Get<uint32>();
+        EverQuestIllusionObject illusionObject;
+        illusionObject.X = fields[1].Get<float>();
+        illusionObject.Y = fields[2].Get<float>();
+        illusionObject.Z = fields[3].Get<float>();
+        illusionObject.DisplayID = fields[4].Get<uint32>();
+        illusionObject.IsTree = fields[5].Get<bool>();
+        IllusionObjectsByMapID[mapID].push_back(illusionObject);
+        loadedObjectCount++;
+    } while (queryResult->NextRow());
+    LOG_INFO("module.EverQuest", "EverQuestMod::LoadIllusionObjectData loaded {} illusion objects across {} maps", loadedObjectCount, (uint32)IllusionObjectsByMapID.size());
+}
+
+uint8 EverQuestMod::GetIllusionObjectClassForSpellID(uint32 spellID)
+{
+    auto spellDataItr = SpellDataBySpellID.find(spellID);
+    if (spellDataItr == SpellDataBySpellID.end())
+        return EQ_ILLUSION_OBJECT_CLASS_NONE;
+    return spellDataItr->second.IllusionObjectClass;
+}
+
+float EverQuestMod::GetIllusionObjectMaxDistanceForClass(uint8 illusionObjectClass)
+{
+    // Zero or less means the whole zone is in range
+    if (illusionObjectClass == EQ_ILLUSION_OBJECT_CLASS_TREE)
+        return ConfigSystemIllusionObjectTreeMaxDistance;
+    return ConfigSystemIllusionObjectMaxDistance;
+}
+
+bool EverQuestMod::TryGetNearestIllusionObject(uint32 mapID, float x, float y, float z, uint8 illusionObjectClass, EverQuestIllusionObject& illusionObjectOut)
+{
+    if (illusionObjectClass == EQ_ILLUSION_OBJECT_CLASS_NONE)
+        return false;
+
+    // Object rows are only generated for the open world copy of a zone, since every instance copy sits on the same geometry
+    auto illusionObjectsItr = IllusionObjectsByMapID.find(GetOpenWorldMapIDForMapID(mapID));
+    if (illusionObjectsItr == IllusionObjectsByMapID.end())
+        return false;
+
+    bool foundObject = false;
+    float maxDistance = GetIllusionObjectMaxDistanceForClass(illusionObjectClass);
+    float bestDistanceSquared = std::numeric_limits<float>::max();
+    if (maxDistance > 0.0f)
+        bestDistanceSquared = maxDistance * maxDistance;
+    for (const EverQuestIllusionObject& illusionObject : illusionObjectsItr->second)
+    {
+        if (illusionObjectClass == EQ_ILLUSION_OBJECT_CLASS_TREE && illusionObject.IsTree == false)
+            continue;
+        float deltaX = illusionObject.X - x;
+        float deltaY = illusionObject.Y - y;
+        float deltaZ = illusionObject.Z - z;
+        float distanceSquared = (deltaX * deltaX) + (deltaY * deltaY) + (deltaZ * deltaZ);
+        if (distanceSquared > bestDistanceSquared)
+            continue;
+        bestDistanceSquared = distanceSquared;
+        illusionObjectOut = illusionObject;
+        foundObject = true;
+    }
+    return foundObject;
+}
+
+bool EverQuestMod::HasIllusionObjectInRangeForCaster(Unit* caster, uint32 spellID)
+{
+    uint8 illusionObjectClass = GetIllusionObjectClassForSpellID(spellID);
+    if (illusionObjectClass == EQ_ILLUSION_OBJECT_CLASS_NONE)
+        return true;
+    if (caster == nullptr)
+        return true;
+    EverQuestIllusionObject illusionObject;
+    return TryGetNearestIllusionObject(caster->GetMapId(), caster->GetPositionX(), caster->GetPositionY(), caster->GetPositionZ(), illusionObjectClass, illusionObject);
+}
+
+void EverQuestMod::ApplyIllusionObjectDisplayOnFormAuraApply(Player* player, uint32 formSpellID)
+{
+    uint8 illusionObjectClass = GetIllusionObjectClassForSpellID(formSpellID);
+    if (illusionObjectClass == EQ_ILLUSION_OBJECT_CLASS_NONE)
+        return;
+
+    // Nothing in range leaves the form's own fallback object model in place, which the core transform already applied
+    EverQuestIllusionObject illusionObject;
+    if (TryGetNearestIllusionObject(player->GetMapId(), player->GetPositionX(), player->GetPositionY(), player->GetPositionZ(), illusionObjectClass, illusionObject) == false)
+        return;
+    player->SetDisplayId(illusionObject.DisplayID);
+}
+
+void EverQuestMod::RefreshIllusionObjectDisplayForPlayer(Player* player)
+{
+    for (auto const& appliedAuraItr : player->GetAppliedAuras())
+    {
+        AuraApplication const* appliedAurApp = appliedAuraItr.second;
+        if (appliedAurApp == nullptr || appliedAurApp->GetBase() == nullptr)
+            continue;
+        uint32 appliedSpellID = appliedAurApp->GetBase()->GetId();
+        if (GetIllusionObjectClassForSpellID(appliedSpellID) == EQ_ILLUSION_OBJECT_CLASS_NONE)
+            continue;
+        ApplyIllusionObjectDisplayOnFormAuraApply(player, appliedSpellID);
+        return;
+    }
 }
 
 bool EverQuestMod::IsSpellBlockedByMinTargetLevel(uint32 spellID, Unit* target, Unit* caster)

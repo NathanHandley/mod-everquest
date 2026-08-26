@@ -49,7 +49,7 @@ class ByteBuffer;
 struct AreaTrigger;
 struct BuildValuesCachePosPointers;
 
-#define EQ_MOD_VERSION                              78
+#define EQ_MOD_VERSION                              80
 
 #define EQ_EQCLASS_NONE                             0
 #define EQ_EQCLASS_WARRIOR                          1
@@ -142,6 +142,10 @@ struct BuildValuesCachePosPointers;
 #define EQ_SPELLDUMMYTYPE_SUCCOR                    18
 #define EQ_SPELLDUMMYTYPE_TRACK                     19
 #define EQ_SPELLDUMMYTYPE_SUMMONPC                  20
+
+#define EQ_ILLUSION_OBJECT_CLASS_NONE               0
+#define EQ_ILLUSION_OBJECT_CLASS_ANYOBJECT          1
+#define EQ_ILLUSION_OBJECT_CLASS_TREE               2
 
 #define EQ_FACTION_ALIGNMENT_NONE                   0
 #define EQ_FACTION_ALIGNMENT_NEUTRAL                1
@@ -350,6 +354,17 @@ public:
     uint8 IllusionFormAlignment = EQ_FACTION_ALIGNMENT_NONE;
     uint32 IllusionFormEQRaceID = 0;
     bool PersistOnClassChange = false;
+    uint8 IllusionObjectClass = EQ_ILLUSION_OBJECT_CLASS_NONE;
+};
+
+class EverQuestIllusionObject
+{
+public:
+    float X = 0;
+    float Y = 0;
+    float Z = 0;
+    uint32 DisplayID = 0;
+    bool IsTree = false;
 };
 
 class EverQuestCreature
@@ -1149,6 +1164,8 @@ public:
     uint32 ConfigSystemAgileFighterCombatExpertSpellID;
     uint32 ConfigSystemRaidBossRespawnVarianceInSec;
     uint32 ConfigSystemRaidMiniBossRespawnVarianceInSec = 0;
+    float ConfigSystemIllusionObjectMaxDistance = 0;
+    float ConfigSystemIllusionObjectTreeMaxDistance = 0;
     uint32 ConfigSystemClientDataVersion = 0;
     string ConfigSystemClientDataVersionMismatchMessage;
     uint32 ConfigSystemFactionGoodClassMask;
@@ -1286,6 +1303,7 @@ public:
     unordered_map<uint64, uint32> IllusionFaceDisplayIDsByLookupKey;
     uint32 IllusionMaxFaceIndex;
     unordered_set<uint32> IllusionFormSpellIDs;
+    unordered_map<uint32, vector<EverQuestIllusionObject>> IllusionObjectsByMapID;
     unordered_map<ObjectGuid, EverQuestPlayerIllusionState> PlayerIllusionStatesByPlayerGUID;
     unordered_map<uint32, list<EverQuestQuestCompletionReputation>> QuestCompletionReputationsByQuestTemplateID;
     unordered_map<uint32, list<EverQuestQuestReaction>> QuestReactionListByQuestTemplateID;
@@ -1446,6 +1464,13 @@ public:
     void RefreshIllusionGearDisplayForPlayer(Player* player);
     void UpdatePlayerIllusionGearDisplay(Player* player, uint32 diffInMS);
     void ClearIllusionTrackingForPlayer(ObjectGuid playerGUID);
+    void LoadIllusionObjectData();
+    uint8 GetIllusionObjectClassForSpellID(uint32 spellID);
+    float GetIllusionObjectMaxDistanceForClass(uint8 illusionObjectClass);
+    bool TryGetNearestIllusionObject(uint32 mapID, float x, float y, float z, uint8 illusionObjectClass, EverQuestIllusionObject& illusionObjectOut);
+    bool HasIllusionObjectInRangeForCaster(Unit* caster, uint32 spellID);
+    void ApplyIllusionObjectDisplayOnFormAuraApply(Player* player, uint32 formSpellID);
+    void RefreshIllusionObjectDisplayForPlayer(Player* player);
     bool IsSpellBlockedByMinTargetLevel(uint32 spellID, Unit* target, Unit* caster);
     bool IsSpellBlockedByMaxCreatureTargetLevel(uint32 spellID, Unit* target, Unit* caster);
     bool IsCreatureCharmBlockedByCharmLimits(uint32 spellID, Unit* target, Unit* caster);

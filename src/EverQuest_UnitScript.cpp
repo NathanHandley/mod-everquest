@@ -228,6 +228,9 @@ public:
         if (EverQuest->IsIllusionFormSpell(spellID) == true)
             EverQuest->ApplyIllusionGearDisplayOnFormAuraApply(player, spellID);
 
+        // Object based illusion forms (Minor Illusion, Illusion: Tree) copy a real object out of the zone instead of wearing the form's own fallback model
+        EverQuest->ApplyIllusionObjectDisplayOnFormAuraApply(player, spellID);
+
         // Illusion forms change how factions perceive the player
         if (EverQuest->GetSpellDataForSpellID(spellID).IllusionFormEQRaceID != 0)
             EverQuest->RecalculateTemporaryFactionReactionsForPlayer(player);
@@ -291,7 +294,10 @@ public:
 
             // Leaving a shapeshift form uncovers the illusion, so put the gear-matched illusion display back (the core has already restored the base transform model by this point)
             if (aurApp->GetBase()->GetSpellInfo() != nullptr && aurApp->GetBase()->GetSpellInfo()->HasAura(SPELL_AURA_MOD_SHAPESHIFT) == true)
+            {
                 EverQuest->RefreshIllusionGearDisplayForPlayer(unit->ToPlayer());
+                EverQuest->RefreshIllusionObjectDisplayForPlayer(unit->ToPlayer());
+            }
 
             // Dropping an illusion form restores how factions naturally perceive the player
             if (EverQuest->GetSpellDataForSpellID(aurApp->GetBase()->GetId()).IllusionFormEQRaceID != 0)
