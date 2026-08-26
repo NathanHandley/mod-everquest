@@ -47,8 +47,8 @@ public:
         if (EverQuest->IsEnabled == false)
             return std::nullopt;
 
-        // TODO: This needs to be dynamic from the server in case SK is mapped to a different class
-        if (context == CLASS_CONTEXT_PET && playerClass == CLASS_WARLOCK && player->getClass() == CLASS_DEATH_KNIGHT)
+        // Allows the pet tab to always show in the spellbook if the pet has combat abilities
+        if (context == CLASS_CONTEXT_PET && playerClass == CLASS_WARLOCK && EverQuest->DoesPlayerHaveActiveEQPet(const_cast<Player*>(player)) == true)
             return true;
 
         // Allows for non-rogues to pick pocket

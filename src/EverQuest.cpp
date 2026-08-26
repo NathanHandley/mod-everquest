@@ -3888,6 +3888,16 @@ const EverQuestPet& EverQuestMod::GetPetDataForCreatureTemplateID(uint32 creatur
     }
 }
 
+bool EverQuestMod::DoesPlayerHaveActiveEQPet(Player* player)
+{
+    if (player == nullptr)
+        return false;
+    Pet* pet = player->GetPet();
+    if (pet == nullptr)
+        return false;
+    return HasPetDataForCreatureTemplateID(pet->GetEntry());
+}
+
 void EverQuestMod::LoadCreatePlayerData()
 {
     PlayerCreateInfoByRaceIDThenClassID.clear();

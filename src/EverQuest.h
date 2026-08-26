@@ -1423,6 +1423,7 @@ public:
     void UpdatePetFidgetSilence(Creature* creature);
     bool HasPetDataForCreatureTemplateID(uint32 creatureTemplateID);
     const EverQuestPet& GetPetDataForCreatureTemplateID(uint32 creatureTemplateID);
+    bool DoesPlayerHaveActiveEQPet(Player* player);
     void FixInvalidCharacterPetModelIDs();
     void LoadCreatePlayerData();
     bool HasCreatePlayerData(uint8 raceID, uint8 classID);
