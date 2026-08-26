@@ -777,12 +777,16 @@ public:
         EverQuest->RefreshAgileFighterCombatAuraForPlayer(player);
     }
 
-    void OnPlayerResurrect(Player* player, float /*restore_percent*/, bool& /*applySickness*/) override
+    void OnPlayerResurrect(Player* player, float restore_percent, bool& applySickness) override
     {
         if (EverQuest->IsEnabled == false)
             return;
 
         EverQuest->RestoreNativeDisplayAfterCorpseIllusion(player);
+
+        // Only an accepted resurrection gives experience back, never walking to the corpse or taking the spirit healer
+        if (restore_percent <= 0.0f && applySickness == false)
+            EverQuest->RestoreDeathExpLossOnResurrectForPlayer(player);
     }
 
     void OnPlayerLogout(Player* player) override
@@ -929,69 +933,8 @@ public:
         // The corpse now exists and copied the swapped native display, so put the real native display back
         EverQuest->RestoreNativeDisplayAfterCorpseIllusion(player);
 
-        if (EverQuest->ConfigExpLossOnDeathEnabled == true)
-        {
-            // Do nothing if the level is below the minimum
-            uint8 playerLevel = player->GetLevel();
-            if (playerLevel < EverQuest->ConfigExpLossOnDeathMinLevel)
-                return;
-
-            // Also do nothing if this isn't a Norrath map and configured to skip
-            if (player->GetMap()->GetId() < EverQuest->ConfigSystemMapDBCIDMin || player->GetMap()->GetId() > EverQuest->ConfigSystemMapDBCIDMax)
-                return;
-
-            // Determine the XP span of the current level
-            uint32 levelXPSpan = player->GetUInt32Value(PLAYER_NEXT_LEVEL_XP);
-            if (levelXPSpan == 0 && playerLevel > 1)
-                levelXPSpan = sObjectMgr->GetXPForLevel(playerLevel - 1);
-
-            // Calculate how much experience to lose
-            int expToLose = (int)((float)levelXPSpan * (0.01 * EverQuest->ConfigExpLossOnDeathLossPercent));
-
-            int curLevelEXP = player->GetUInt32Value(PLAYER_XP);
-            int expLost = expToLose;
-
-            if (playerLevel >= sWorld->getIntConfig(CONFIG_MAX_PLAYER_LEVEL))
-            {
-                uint8 newLevel = playerLevel - 1;
-                uint32 belowLevelSpan = sObjectMgr->GetXPForLevel(newLevel);
-                int newExperience = (belowLevelSpan > 1 ? (int)belowLevelSpan - 1 : 0) - expToLose;
-                if (newExperience < 0)
-                    newExperience = 0;
-                player->SetLevel(newLevel, true);
-                player->SetUInt32Value(PLAYER_NEXT_LEVEL_XP, belowLevelSpan);
-                player->SetUInt32Value(PLAYER_XP, (uint32)newExperience);
-                ChatHandler(player->GetSession()).PSendSysMessage("You lost|cffFF0000 {} |rexperience for releasing your spirit, which dropped your level to |cffFF0000{}|r!", expToLose, newLevel);
-            }
-            else if (curLevelEXP > expToLose)
-            {
-                // Reduce experience within the current level
-                player->SetUInt32Value(PLAYER_XP, curLevelEXP - expToLose);
-                ChatHandler(player->GetSession()).PSendSysMessage("You lost|cffFF0000 {} |rexperience for releasing your spirit!", expToLose);
-            }
-            else
-            {
-                // Underflow, so drop level if above level 1
-                if (playerLevel == 1)
-                {
-                    player->SetUInt32Value(PLAYER_XP, 0);
-                    ChatHandler(player->GetSession()).PSendSysMessage("You lost what little experience you had for releasing your spirit!");
-                }
-                else
-                {
-                    player->SetLevel(playerLevel - 1, true);
-                    int newExperience = (int)player->GetUInt32Value(PLAYER_NEXT_LEVEL_XP) - (expToLose - curLevelEXP);
-                    if (newExperience < 0)
-                        newExperience = 0;
-                    player->SetUInt32Value(PLAYER_XP, (uint32)newExperience);
-                    ChatHandler(player->GetSession()).PSendSysMessage("You lost|cffFF0000 {} |rexperience for releasing your spirit, which dropped your level to |cffFF0000{}|r!", expToLose, playerLevel - 1);
-                }
-            }
-
-            // If set, give it back as rest exp
-            if (EverQuest->ConfigExpLossOnDeathAddLostExpToRestExp == true)
-                player->SetRestBonus(player->GetRestBonus() + expLost);
-        }
+        // Releasing the spirit is what costs experience, so a resurrection accepted before this point costs nothing
+        EverQuest->ApplyExpLossForSpiritReleaseForPlayer(player);
     }
 
     // This is done to ensure repeatable quests give EXP more than once

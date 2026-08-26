@@ -100,6 +100,7 @@ EverQuest.Death.FallbackGraveyardID = 1813
 #		If true, you will lose experience when you release your spirit on death.  Reviving before
 #        release will not cause exp loss.  Settings in this section depend on this being true.
 #       NOTE: You will only lose exp if you are in a Norrath / EverQuest map
+#       NOTE: Dying to another player (duels included) never costs experience
 #	Default: True (enabled, lose exp when you release your body after death, if in EverQuest areas)
 #
 # 	EverQuest.ExpLossOnDeath.MinLevel
@@ -115,12 +116,22 @@ EverQuest.Death.FallbackGraveyardID = 1813
 #        lose net progress as long as they don't overfill their rest experience bar
 #	Default: True (enabled, experience lost is put into rest experience)
 #
+# 	EverQuest.ExpLossOnDeath.ResurrectRestorePercent
+#		Percent of the experience lost to the most recent spirit release that is given back when a
+#        resurrection is accepted (0 - 100).  Any rest experience that was handed out for that loss
+#        is taken back in the same proportion, so the resurrection is not paid for twice.
+#       NOTE: Only the last death is ever remembered.  Dying again before being resurrected
+#        replaces it, and a second resurrection after the first has no remaining exp to give back
+#       NOTE: Walking back to your corpse or using a spirit healer does not count as a resurrection
+#	Default: 90 (90% of the experience lost to the last death is restored)
+#
 ###################################################################################################
 
 EverQuest.ExpLossOnDeath.Enabled = True
 EverQuest.ExpLossOnDeath.MinLevel = 5
 EverQuest.ExpLossOnDeath.LossPercent = 10
 EverQuest.ExpLossOnDeath.AddLostExpToRestExp = True
+EverQuest.ExpLossOnDeath.ResurrectRestorePercent = 90
 
 ###################################################################################################
 #

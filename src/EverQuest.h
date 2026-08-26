@@ -1065,6 +1065,9 @@ struct EverQuestPlayerControllerData
     bool HideWoWGear = false;
     bool DungeonModeInstanced = false;
     bool AdventurerDisqualified = false;
+    uint32 DeathExpLost = 0;                // Experience taken by spirit releases since the last resurrection, and still restorable.  Zero means nothing is pending
+    uint32 DeathExpRestGranted = 0;         // How much of that loss was handed back as rest experience, so a restore can take the same share of it away again
+    uint8 DeathExpLostSecondaryClass = 0;   // Secondary EQ class the loss belongs to, since a class switch parks the level and experience the restore would target
 };
 
 class EverQuestPlayerClassInfoItem
@@ -1168,6 +1171,7 @@ public:
     int ConfigExpLossOnDeathMinLevel;
     float ConfigExpLossOnDeathLossPercent;
     bool ConfigExpLossOnDeathAddLostExpToRestExp;
+    float ConfigExpLossOnDeathResurrectRestorePercent;
     bool ConfigAlternateGroupExperienceFormulaEnabled;
     float ConfigAlternateGroupExperienceAddPercentPerAddedMember;
     bool ConfigSpellDisableStackingOfSameDOT;
@@ -1711,6 +1715,11 @@ public:
     uint32 GetIssuedIllusionItemIDForPlayer(Player* player);
     void SetIssuedIllusionItemIDForPlayer(Player* player, uint32 itemID);
     void SaveIssuedIllusionItemIDForPlayer(Player* player);
+    bool WasLastDeathPlayerVersusPlayerForPlayer(Player* player);
+    void ApplyExpLossForSpiritReleaseForPlayer(Player* player);
+    void RestoreDeathExpLossOnResurrectForPlayer(Player* player);
+    void ClearDeathExpLossForPlayer(Player* player);
+    void SaveDeathExpLossForPlayer(Player* player);
     void HandleLevelCapOnBeforeExperienceGain(Player const* player, uint8& levelForExpGain);
     bool HandleLevelCapOnCanGiveLevel(Player* player, uint8 newLevel);
     void ProcessLevelCapStateForPlayer(Player* player);

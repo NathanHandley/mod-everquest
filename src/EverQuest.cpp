@@ -100,6 +100,7 @@ EverQuestMod::EverQuestMod() :
     ConfigExpLossOnDeathMinLevel(5),
     ConfigExpLossOnDeathLossPercent(10),
     ConfigExpLossOnDeathAddLostExpToRestExp(true),
+    ConfigExpLossOnDeathResurrectRestorePercent(90.0f),
     ConfigAlternateGroupExperienceFormulaEnabled(false),
     ConfigAlternateGroupExperienceAddPercentPerAddedMember(20.0f),
     ConfigSpellDisableStackingOfSameDOT(false),
@@ -305,6 +306,7 @@ void EverQuestMod::LoadConfigurationFile()
     ConfigExpLossOnDeathMinLevel = sConfigMgr->GetOption<uint32>("EverQuest.ExpLossOnDeath.MinLevel", 5);
     ConfigExpLossOnDeathLossPercent = sConfigMgr->GetOption<float>("EverQuest.ExpLossOnDeath.LossPercent", 10);
     ConfigExpLossOnDeathAddLostExpToRestExp = sConfigMgr->GetOption<bool>("EverQuest.ExpLossOnDeath.AddLostExpToRestExp", true);
+    ConfigExpLossOnDeathResurrectRestorePercent = sConfigMgr->GetOption<float>("EverQuest.ExpLossOnDeath.ResurrectRestorePercent", 90.0f);
 
     // Group EXP rates
     ConfigAlternateGroupExperienceFormulaEnabled = sConfigMgr->GetOption<bool>("EverQuest.AlternateGroupExperienceFormula.Enabled", false);
@@ -9833,7 +9835,7 @@ EverQuestPlayerControllerData EverQuestMod::GetPlayerControllerData(Player* play
 {
     EverQuestPlayerControllerData controllerData;
     controllerData.GUID = player->GetGUID().GetCounter();
-    QueryResult queryResult = CharacterDatabase.Query("SELECT nextSecondaryClass, currentSecondaryClass, secondaryExpPool, illusionFaceId, showBardPulse, issuedIllusionItemId, hideWoWGear, dungeonMode, adventurerDisqualified FROM mod_everquest_character_settings WHERE guid = {}", player->GetGUID().GetCounter());
+    QueryResult queryResult = CharacterDatabase.Query("SELECT nextSecondaryClass, currentSecondaryClass, secondaryExpPool, illusionFaceId, showBardPulse, issuedIllusionItemId, hideWoWGear, dungeonMode, adventurerDisqualified, deathExpLost, deathExpRestGranted, deathExpLostClass FROM mod_everquest_character_settings WHERE guid = {}", player->GetGUID().GetCounter());
     if (!queryResult || queryResult->GetRowCount() == 0)
     {
         const EverQuestClassMap classMap = GetClassMapForWOWClassID(player->getClass());
@@ -9846,6 +9848,9 @@ EverQuestPlayerControllerData EverQuestMod::GetPlayerControllerData(Player* play
         controllerData.HideWoWGear = false;
         controllerData.DungeonModeInstanced = false;
         controllerData.AdventurerDisqualified = false;
+        controllerData.DeathExpLost = 0;
+        controllerData.DeathExpRestGranted = 0;
+        controllerData.DeathExpLostSecondaryClass = 0;
     }
     else
     {
@@ -9859,6 +9864,9 @@ EverQuestPlayerControllerData EverQuestMod::GetPlayerControllerData(Player* play
         controllerData.HideWoWGear = fields[6].Get<bool>();
         controllerData.DungeonModeInstanced = fields[7].Get<bool>();
         controllerData.AdventurerDisqualified = fields[8].Get<bool>();
+        controllerData.DeathExpLost = fields[9].Get<uint32>();
+        controllerData.DeathExpRestGranted = fields[10].Get<uint32>();
+        controllerData.DeathExpLostSecondaryClass = fields[11].Get<uint8>();
     }
     return controllerData;
 }
@@ -10148,6 +10156,245 @@ void EverQuestMod::SaveIssuedIllusionItemIDForPlayer(Player* player)
         controllerData.SecondaryExpPool,
         controllerData.IssuedIllusionItemID,
         controllerData.IssuedIllusionItemID);
+}
+
+static uint64 GetCumulativeExperienceForLevelAndProgress(uint8 level, uint32 experienceIntoLevel)
+{
+    uint64 cumulativeExperience = experienceIntoLevel;
+    for (uint8 curLevel = 1; curLevel < level; ++curLevel)
+        cumulativeExperience += sObjectMgr->GetXPForLevel(curLevel);
+    return cumulativeExperience;
+}
+
+bool EverQuestMod::WasLastDeathPlayerVersusPlayerForPlayer(Player* player)
+{
+    Corpse* corpse = player->GetCorpse();
+    if (corpse == nullptr)
+        return false;
+    return corpse->GetType() == CORPSE_RESURRECTABLE_PVP;
+}
+
+void EverQuestMod::ApplyExpLossForSpiritReleaseForPlayer(Player* player)
+{
+    if (ConfigExpLossOnDeathEnabled == false)
+        return;
+
+    // Do nothing if the level is below the minimum
+    uint8 playerLevel = player->GetLevel();
+    if (playerLevel < ConfigExpLossOnDeathMinLevel)
+        return;
+
+    // Also do nothing if this isn't a Norrath map and configured to skip
+    if (player->GetMap()->GetId() < ConfigSystemMapDBCIDMin || player->GetMap()->GetId() > ConfigSystemMapDBCIDMax)
+        return;
+
+    // Falling to another player never costs experience, whether that was a duel or any other kind of player kill
+    if (WasLastDeathPlayerVersusPlayerForPlayer(player) == true)
+        return;
+
+    // Where the character stood before any of this, so what the loss really came to can be measured against it
+    uint64 cumulativeExperienceBeforeLoss = GetCumulativeExperienceForLevelAndProgress(playerLevel, player->GetUInt32Value(PLAYER_XP));
+
+    // Determine the XP span of the current level
+    uint32 levelXPSpan = player->GetUInt32Value(PLAYER_NEXT_LEVEL_XP);
+    if (levelXPSpan == 0 && playerLevel > 1)
+        levelXPSpan = sObjectMgr->GetXPForLevel(playerLevel - 1);
+
+    // Calculate how much experience to lose
+    int expToLose = (int)((float)levelXPSpan * (0.01 * ConfigExpLossOnDeathLossPercent));
+
+    int curLevelEXP = player->GetUInt32Value(PLAYER_XP);
+    int expLost = expToLose;
+
+    if (playerLevel >= sWorld->getIntConfig(CONFIG_MAX_PLAYER_LEVEL))
+    {
+        uint8 newLevel = playerLevel - 1;
+        uint32 belowLevelSpan = sObjectMgr->GetXPForLevel(newLevel);
+        int newExperience = (belowLevelSpan > 1 ? (int)belowLevelSpan - 1 : 0) - expToLose;
+        if (newExperience < 0)
+            newExperience = 0;
+        player->SetLevel(newLevel, true);
+        player->SetUInt32Value(PLAYER_NEXT_LEVEL_XP, belowLevelSpan);
+        player->SetUInt32Value(PLAYER_XP, (uint32)newExperience);
+        ChatHandler(player->GetSession()).PSendSysMessage("You lost|cffFF0000 {} |rexperience for releasing your spirit, which dropped your level to |cffFF0000{}|r!", expToLose, newLevel);
+    }
+    else if (curLevelEXP > expToLose)
+    {
+        // Reduce experience within the current level
+        player->SetUInt32Value(PLAYER_XP, curLevelEXP - expToLose);
+        ChatHandler(player->GetSession()).PSendSysMessage("You lost|cffFF0000 {} |rexperience for releasing your spirit!", expToLose);
+    }
+    else
+    {
+        // Underflow, so drop level if above level 1
+        if (playerLevel == 1)
+        {
+            player->SetUInt32Value(PLAYER_XP, 0);
+            ChatHandler(player->GetSession()).PSendSysMessage("You lost what little experience you had for releasing your spirit!");
+        }
+        else
+        {
+            player->SetLevel(playerLevel - 1, true);
+            int newExperience = (int)player->GetUInt32Value(PLAYER_NEXT_LEVEL_XP) - (expToLose - curLevelEXP);
+            if (newExperience < 0)
+                newExperience = 0;
+            player->SetUInt32Value(PLAYER_XP, (uint32)newExperience);
+            ChatHandler(player->GetSession()).PSendSysMessage("You lost|cffFF0000 {} |rexperience for releasing your spirit, which dropped your level to |cffFF0000{}|r!", expToLose, playerLevel - 1);
+        }
+    }
+
+    // If set, give it back as rest exp
+    uint32 restExperienceGranted = 0;
+    if (ConfigExpLossOnDeathAddLostExpToRestExp == true)
+    {
+        float restBonusBeforeGrant = player->GetRestBonus();
+        player->SetRestBonus(restBonusBeforeGrant + expLost);
+        float restBonusGranted = player->GetRestBonus() - restBonusBeforeGrant;
+        if (restBonusGranted > 0.0f)
+            restExperienceGranted = (uint32)restBonusGranted;
+    }
+
+    uint64 cumulativeExperienceAfterLoss = GetCumulativeExperienceForLevelAndProgress(player->GetLevel(), player->GetUInt32Value(PLAYER_XP));
+    if (cumulativeExperienceAfterLoss >= cumulativeExperienceBeforeLoss)
+        return;
+    uint32 actualExperienceLost = (uint32)(cumulativeExperienceBeforeLoss - cumulativeExperienceAfterLoss);
+
+    EverQuestPlayerControllerData& controllerData = *GetOrLoadActivePlayerClassControllerData(player);
+
+    // Only the most recent death is ever restorable
+    controllerData.DeathExpLost = actualExperienceLost;
+    controllerData.DeathExpRestGranted = restExperienceGranted;
+    controllerData.DeathExpLostSecondaryClass = controllerData.CurrentSecondClass;
+    SaveDeathExpLossForPlayer(player);
+}
+
+void EverQuestMod::RestoreDeathExpLossOnResurrectForPlayer(Player* player)
+{
+    if (ConfigExpLossOnDeathEnabled == false)
+        return;
+
+    EverQuestPlayerControllerData& controllerData = *GetOrLoadActivePlayerClassControllerData(player);
+    if (controllerData.DeathExpLost == 0)
+        return;
+    if (controllerData.DeathExpLostSecondaryClass != controllerData.CurrentSecondClass)
+    {
+        ClearDeathExpLossForPlayer(player);
+        return;
+    }
+
+    // The debt is settled by this resurrection whether or not any of it converts into experience below
+    uint32 owedExperience = controllerData.DeathExpLost;
+    uint32 grantedRestExperience = controllerData.DeathExpRestGranted;
+    ClearDeathExpLossForPlayer(player);
+
+    if (ConfigExpLossOnDeathResurrectRestorePercent <= 0.0f)
+        return;
+    float restoreFraction = ConfigExpLossOnDeathResurrectRestorePercent * 0.01f;
+    if (restoreFraction > 1.0f)
+        restoreFraction = 1.0f;
+
+    uint32 experienceToRestore = (uint32)((float)owedExperience * restoreFraction);
+    if (experienceToRestore == 0)
+        return;
+
+    // The rest experience handed out at release was a stand-in for the loss, so the restored share of it comes back off
+    uint32 restExperienceToRemove = (uint32)((float)grantedRestExperience * restoreFraction);
+    if (restExperienceToRemove > 0)
+    {
+        float newRestBonus = player->GetRestBonus() - (float)restExperienceToRemove;
+        player->SetRestBonus(newRestBonus < 0.0f ? 0.0f : newRestBonus);
+    }
+
+    // The core stops all experience at MaxPlayerLevel
+    uint8 coreMaxLevel = (uint8)sWorld->getIntConfig(CONFIG_MAX_PLAYER_LEVEL);
+    uint8 parkedCapLevel = 0;
+    if (ConfigPlayerLevelCap > 1 && (ConfigPlayerLevelCap - 1) < (uint32)coreMaxLevel)
+        parkedCapLevel = (uint8)(ConfigPlayerLevelCap - 1);
+
+    uint8 startingLevel = player->GetLevel();
+    uint8 newLevel = startingLevel;
+    uint32 newExperience = player->GetUInt32Value(PLAYER_XP);
+    uint32 remainingExperience = experienceToRestore;
+    while (remainingExperience > 0 && newLevel < coreMaxLevel)
+    {
+        uint32 levelXPSpan = sObjectMgr->GetXPForLevel(newLevel);
+        if (levelXPSpan == 0 || newExperience >= levelXPSpan)
+            break;
+
+        uint32 experienceToNextLevel = levelXPSpan - newExperience;
+        if (remainingExperience < experienceToNextLevel)
+        {
+            newExperience += remainingExperience;
+            remainingExperience = 0;
+            break;
+        }
+
+        // Sitting on the mod's level cap, so the bar refills to one point short of leveling and the rest is dropped
+        if (parkedCapLevel != 0 && newLevel >= parkedCapLevel)
+        {
+            newExperience = levelXPSpan - 1;
+            remainingExperience = 0;
+            break;
+        }
+
+        remainingExperience -= experienceToNextLevel;
+        newExperience = 0;
+        newLevel++;
+    }
+
+    // The core max level has no experience bar of its own
+    if (newLevel >= coreMaxLevel)
+        newExperience = 0;
+
+    if (newLevel != startingLevel)
+    {
+        player->SetLevel(newLevel, true);
+        player->SetUInt32Value(PLAYER_NEXT_LEVEL_XP, sObjectMgr->GetXPForLevel(newLevel));
+    }
+    player->SetUInt32Value(PLAYER_XP, newExperience);
+
+    if (player->GetSession() == nullptr)
+        return;
+    if (newLevel != startingLevel)
+        ChatHandler(player->GetSession()).PSendSysMessage("The resurrection restored|cff00FF00 {} |rexperience, returning you to level |cff00FF00{}|r!", experienceToRestore, newLevel);
+    else
+        ChatHandler(player->GetSession()).PSendSysMessage("The resurrection restored|cff00FF00 {} |rexperience!", experienceToRestore);
+}
+
+void EverQuestMod::ClearDeathExpLossForPlayer(Player* player)
+{
+    EverQuestPlayerControllerData& controllerData = *GetOrLoadActivePlayerClassControllerData(player);
+    if (controllerData.DeathExpLost == 0 && controllerData.DeathExpRestGranted == 0 && controllerData.DeathExpLostSecondaryClass == 0)
+        return;
+
+    controllerData.DeathExpLost = 0;
+    controllerData.DeathExpRestGranted = 0;
+    controllerData.DeathExpLostSecondaryClass = 0;
+    SaveDeathExpLossForPlayer(player);
+}
+
+void EverQuestMod::SaveDeathExpLossForPlayer(Player* player)
+{
+    EverQuestPlayerControllerData controllerData;
+    {
+        std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+        auto controllerDataIt = ActivePlayerClassControllerDataByGUID.find(player->GetGUID());
+        if (controllerDataIt == ActivePlayerClassControllerDataByGUID.end())
+            return;
+        controllerData = controllerDataIt->second;
+    }
+
+    CharacterDatabase.Execute("INSERT INTO `mod_everquest_character_settings` (`guid`, `currentSecondaryClass`, `nextSecondaryClass`, `secondaryExpPool`, `deathExpLost`, `deathExpRestGranted`, `deathExpLostClass`) VALUES ({}, {}, {}, {}, {}, {}, {}) ON DUPLICATE KEY UPDATE `deathExpLost` = {}, `deathExpRestGranted` = {}, `deathExpLostClass` = {}",
+        player->GetGUID().GetCounter(),
+        controllerData.CurrentSecondClass,
+        controllerData.NextSecondClass,
+        controllerData.SecondaryExpPool,
+        controllerData.DeathExpLost,
+        controllerData.DeathExpRestGranted,
+        controllerData.DeathExpLostSecondaryClass,
+        controllerData.DeathExpLost,
+        controllerData.DeathExpRestGranted,
+        controllerData.DeathExpLostSecondaryClass);
 }
 
 void EverQuestMod::HandleLevelCapOnBeforeExperienceGain(Player const* player, uint8& levelForExpGain)
