@@ -69,6 +69,31 @@ EverQuest.Map.RestrictedMapCheckIntervalInSeconds = 300
 EverQuest.Quest.GrantExpOnRepeatCompletion = True
 
 ###################################################################################################
+# Death Graveyard Settings
+#
+# 	EverQuest.Death.EnforceGraveyardDomain
+#		If true, a character that dies in an EverQuest zone can only be sent to a graveyard that is in
+#       an EverQuest zone, and a character that dies in a WoW zone can only be sent to a graveyard
+#       in a WoW zone.  This covers releasing to a graveyard, the spirit healer's ghost and corpse
+#       directions, and the out of bounds teleport.  The normal graveyard rules still pick the
+#       graveyard, and this only steps in when that pick would cross between the two worlds, which
+#       happens when an area has no usable graveyard_zone row (the core then falls back to Westfall
+#       or the Crossroads).  Every correction is written to the server log with the map and area
+#       that caused it, so the underlying graveyard_zone data can be fixed
+#	Default: True (enabled, an EverQuest death stays in Norrath and a WoW death stays in Azeroth)
+#
+# 	EverQuest.Death.FallbackGraveyardID
+#		The game_graveyard ID to use for a death in an EverQuest zone when no graveyard at all can be
+#       found in the zone died in or in the open world copy of it.  Must be a graveyard that sits
+#       on an EverQuest map, or the lowest EverQuest graveyard ID is used in its place
+#	Default: 1813 (East Commons, next to the EC tunnel)
+#
+###################################################################################################
+
+EverQuest.Death.EnforceGraveyardDomain = True
+EverQuest.Death.FallbackGraveyardID = 1813
+
+###################################################################################################
 # EXP Loss on Death Settings
 #
 # 	EverQuest.ExpLossOnDeath.Enabled

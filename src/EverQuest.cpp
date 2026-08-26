@@ -17,6 +17,7 @@
 #include "Bag.h"
 #include "Chat.h"
 #include "GameEventMgr.h"
+#include "GameGraveyard.h"
 #include "Group.h"
 #include "Creature.h"
 #include "CreatureAI.h"
@@ -40,6 +41,7 @@
 #include "MapMgr.h"
 #include "MotionMaster.h"
 #include "MovementGenerator.h"
+#include "CharacterCache.h"
 #include "ObjectAccessor.h"
 #include "Opcodes.h"
 #include "WorldPacket.h"
@@ -282,6 +284,10 @@ void EverQuestMod::LoadConfigurationFile()
     ConfigMapRestrictPlayersToNorrath = sConfigMgr->GetOption<bool>("EverQuest.Map.RestrictPlayersToNorrath", false);
     ConfigMapMaxExpansionID = sConfigMgr->GetOption<int>("EverQuest.Map.MaxExpansionID", -1);
     ConfigMapRestrictedMapCheckIntervalInSeconds = sConfigMgr->GetOption<uint32>("EverQuest.Map.RestrictedMapCheckIntervalInSeconds", 300);
+
+    // Death
+    ConfigDeathEnforceGraveyardDomain = sConfigMgr->GetOption<bool>("EverQuest.Death.EnforceGraveyardDomain", true);
+    ConfigDeathFallbackGraveyardID = sConfigMgr->GetOption<uint32>("EverQuest.Death.FallbackGraveyardID", 1813);
 
     // Client Version Check
     ConfigClientVersionCheckEnabled = sConfigMgr->GetOption<bool>("EverQuest.ClientVersionCheck.Enabled", false);
@@ -6628,6 +6634,168 @@ void EverQuestMod::LoadZoneSafePointData()
             ZoneSafePointByMapID[zoneSafePoint.MapID] = zoneSafePoint;
         } while (queryResult->NextRow());
     }
+}
+
+static thread_local bool IsResolvingGraveyardDomain = false;
+
+class EverQuestGraveyardDomainProbeGuard
+{
+public:
+    EverQuestGraveyardDomainProbeGuard() { IsResolvingGraveyardDomain = true; }
+    ~EverQuestGraveyardDomainProbeGuard() { IsResolvingGraveyardDomain = false; }
+};
+
+uint32 EverQuestMod::GetNearestEverQuestGraveyardIDForPosition(uint32 mapID, float x, float y, float z)
+{
+    if (IsMapIDAnEverQuestMap(mapID) == false)
+        return 0;
+
+    uint32 nearestGraveyardID = 0;
+    float nearestDistanceSquared = 0.0f;
+    for (auto const& graveyardIter : sGraveyard->GetGraveyardData())
+    {
+        GraveyardStruct const& graveyard = graveyardIter.second;
+        if (graveyard.Map != mapID)
+            continue;
+
+        float deltaX = graveyard.x - x;
+        float deltaY = graveyard.y - y;
+        float deltaZ = graveyard.z - z;
+        float distanceSquared = (deltaX * deltaX) + (deltaY * deltaY) + (deltaZ * deltaZ);
+
+        // The core's store is unordered, so an exact tie is settled by the lower ID to keep the same death resolving the same way
+        bool isCloser = (distanceSquared < nearestDistanceSquared) || (distanceSquared == nearestDistanceSquared && graveyard.ID < nearestGraveyardID);
+        if (nearestGraveyardID == 0 || isCloser == true)
+        {
+            nearestGraveyardID = graveyard.ID;
+            nearestDistanceSquared = distanceSquared;
+        }
+    }
+    return nearestGraveyardID;
+}
+
+uint32 EverQuestMod::GetFallbackEverQuestGraveyardID()
+{
+    // The configured catch-all is used only when it really is a graveyard inside an EverQuest zone, since sending a corpse to it is the last thing tried before giving up
+    GraveyardStruct const* configuredGraveyard = sGraveyard->GetGraveyard(ConfigDeathFallbackGraveyardID);
+    if (configuredGraveyard != nullptr && IsMapIDAnEverQuestMap(configuredGraveyard->Map) == true)
+        return ConfigDeathFallbackGraveyardID;
+
+    // Otherwise the lowest EverQuest graveyard ID stands in for it, which stays the same across server starts
+    uint32 lowestGraveyardID = 0;
+    for (auto const& graveyardIter : sGraveyard->GetGraveyardData())
+    {
+        GraveyardStruct const& graveyard = graveyardIter.second;
+        if (IsMapIDAnEverQuestMap(graveyard.Map) == false)
+            continue;
+        if (lowestGraveyardID == 0 || graveyard.ID < lowestGraveyardID)
+            lowestGraveyardID = graveyard.ID;
+    }
+    return lowestGraveyardID;
+}
+
+void EverQuestMod::ValidateGraveyardDomainConfiguration()
+{
+    if (ConfigDeathEnforceGraveyardDomain == false)
+    {
+        LOG_INFO("module.EverQuest", "EverQuestMod has EverQuest.Death.EnforceGraveyardDomain turned off, so a death in an EverQuest zone can be sent to a WoW graveyard");
+        return;
+    }
+
+    uint32 everQuestGraveyardCount = 0;
+    for (auto const& graveyardIter : sGraveyard->GetGraveyardData())
+    {
+        if (IsMapIDAnEverQuestMap(graveyardIter.second.Map) == true)
+            everQuestGraveyardCount++;
+    }
+
+    if (everQuestGraveyardCount == 0)
+    {
+        LOG_ERROR("module.EverQuest", "EverQuestMod found no graveyards on maps {} - {}, so a death in an EverQuest zone cannot be held out of a WoW graveyard. Check that the converter's game_graveyard rows were deployed", ConfigSystemMapDBCIDMin, ConfigSystemMapDBCIDMax);
+        return;
+    }
+
+    GraveyardStruct const* configuredGraveyard = sGraveyard->GetGraveyard(ConfigDeathFallbackGraveyardID);
+    if (configuredGraveyard == nullptr || IsMapIDAnEverQuestMap(configuredGraveyard->Map) == false)
+        LOG_ERROR("module.EverQuest", "EverQuestMod has EverQuest.Death.FallbackGraveyardID set to {}, which is not a graveyard inside an EverQuest zone. Graveyard {} is used in its place", ConfigDeathFallbackGraveyardID, GetFallbackEverQuestGraveyardID());
+    else
+        LOG_INFO("module.EverQuest", "EverQuestMod is holding EverQuest deaths to the {} graveyards in Norrath, with graveyard {} as the fallback", everQuestGraveyardCount, ConfigDeathFallbackGraveyardID);
+}
+
+void EverQuestMod::EnforceGraveyardDomainForDeath(Player* player, TeamId teamId, bool nearCorpse, uint32& graveyardOverride)
+{
+    if (ConfigDeathEnforceGraveyardDomain == false || player == nullptr)
+        return;
+    if (IsResolvingGraveyardDomain == true)
+        return;
+
+    // Where the death is anchored.  A corpse left behind on a different map is not a place to search from, so the player's own position stands in for it there, which is also what keeps a ghost that walked into another zone out of the corpse zone's graveyard
+    WorldLocation deathLocation = player->GetWorldLocation();
+    bool useCorpseLocation = false;
+    if (nearCorpse == true && player->HasCorpse() == true)
+    {
+        WorldLocation corpseLocation = player->GetCorpseLocation();
+        if (corpseLocation.GetMapId() == deathLocation.GetMapId())
+        {
+            deathLocation = corpseLocation;
+            useCorpseLocation = true;
+        }
+    }
+
+    // What the core lands on by itself, which is left alone unless it crossed worlds.  The returned pointer lives in the core's graveyard store, so the ID comes off it right away instead of being held on to
+    uint32 coreGraveyardID = 0;
+    uint32 coreGraveyardMapID = 0;
+    bool hasCoreGraveyard = false;
+    {
+        EverQuestGraveyardDomainProbeGuard probeGuard;
+        GraveyardStruct const* coreGraveyard = sGraveyard->GetClosestGraveyard(player, teamId, useCorpseLocation);
+        if (coreGraveyard != nullptr)
+        {
+            coreGraveyardID = coreGraveyard->ID;
+            coreGraveyardMapID = coreGraveyard->Map;
+            hasCoreGraveyard = true;
+        }
+    }
+
+    bool isEverQuestDeath = IsMapIDAnEverQuestMap(deathLocation.GetMapId());
+    if (hasCoreGraveyard == true && IsMapIDAnEverQuestMap(coreGraveyardMapID) == isEverQuestDeath)
+    {
+        graveyardOverride = coreGraveyardID;
+        return;
+    }
+
+    uint32 replacementGraveyardID = 0;
+    if (isEverQuestDeath == true)
+    {
+        // The zone died in comes first, then the open world copy of it for a death inside an instance, and the catch-all last
+        replacementGraveyardID = GetNearestEverQuestGraveyardIDForPosition(deathLocation.GetMapId(), deathLocation.GetPositionX(), deathLocation.GetPositionY(), deathLocation.GetPositionZ());
+        if (replacementGraveyardID == 0)
+        {
+            uint32 openWorldMapID = GetOpenWorldMapIDForMapID(deathLocation.GetMapId());
+            if (openWorldMapID != deathLocation.GetMapId())
+                replacementGraveyardID = GetNearestEverQuestGraveyardIDForPosition(openWorldMapID, deathLocation.GetPositionX(), deathLocation.GetPositionY(), deathLocation.GetPositionZ());
+        }
+        if (replacementGraveyardID == 0)
+            replacementGraveyardID = GetFallbackEverQuestGraveyardID();
+    }
+    else
+    {
+        // A WoW death that reached an EverQuest graveyard has broken zone links of its own, so the core's own faction default stands in
+        GraveyardStruct const* defaultGraveyard = sGraveyard->GetDefaultGraveyard(teamId);
+        if (defaultGraveyard != nullptr && IsMapIDAnEverQuestMap(defaultGraveyard->Map) == false)
+            replacementGraveyardID = defaultGraveyard->ID;
+    }
+
+    if (replacementGraveyardID == 0)
+    {
+        LOG_ERROR("module.EverQuest", "EverQuestMod could not hold the death of player {} on map {} (area {}) to a graveyard in {}, as no replacement graveyard was found, so graveyard {} is used",
+            player->GetName(), deathLocation.GetMapId(), player->GetAreaId(), isEverQuestDeath == true ? "Norrath" : "Azeroth", coreGraveyardID);
+        return;
+    }
+
+    LOG_WARN("module.EverQuest", "EverQuestMod moved the death of player {} on map {} (area {}) from graveyard {} to graveyard {}, since the first one was not in {}. Check the graveyard_zone rows for that area",
+        player->GetName(), deathLocation.GetMapId(), player->GetAreaId(), coreGraveyardID, replacementGraveyardID, isEverQuestDeath == true ? "Norrath" : "Azeroth");
+    graveyardOverride = replacementGraveyardID;
 }
 
 void EverQuestMod::LoadZoneData()

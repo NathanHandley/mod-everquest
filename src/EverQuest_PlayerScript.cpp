@@ -15,7 +15,6 @@
 //  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #include "Chat.h"
-#include "GameGraveyard.h"
 #include "Group.h"
 #include "ObjectAccessor.h"
 #include "ObjectGuid.h"
@@ -490,25 +489,7 @@ public:
         if (EverQuest->IsEnabled == false)
             return;
 
-        // Skip if there this isn't an EQ zone
-        if (player->GetMapId() < EverQuest->ConfigSystemMapDBCIDMin || player->GetMapId() > EverQuest->ConfigSystemMapDBCIDMax)
-            return;
-
-        // If the player's corpse is in a different zone than the player, then use the player zone (by setting nearcorpse to false)
-        if (nearCorpse == true && player->HasCorpse())
-        {
-            WorldLocation playerLocation = player->GetWorldLocation();
-            WorldLocation playerCorpseLocation = player->GetCorpseLocation();
-            if (playerLocation.GetMapId() != playerCorpseLocation.GetMapId())
-            {
-                GraveyardStruct const* ClosestGrave = sGraveyard->GetClosestGraveyard(player, teamId, false);
-                if (ClosestGrave != nullptr)
-                {
-                    graveyardOverride = ClosestGrave->ID;
-                    return;
-                }
-            }
-        }
+        EverQuest->EnforceGraveyardDomainForDeath(player, teamId, nearCorpse, graveyardOverride);
     }
 
     void OnPlayerSpellCast(Player* player, Spell* spell, bool /*skipCheck*/) override

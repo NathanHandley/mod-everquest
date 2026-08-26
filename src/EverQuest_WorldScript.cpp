@@ -113,6 +113,9 @@ public:
 
         WarnOnUnsupportedDatabaseWorkerThreadCounts();
 
+        // The core loads game_graveyard well after the module config does
+        EverQuest->ValidateGraveyardDomainConfiguration();
+
         // Talent alignment reads Talent.dbc, SkillLineAbility.dbc and the spell store, none of which are ready when the config loads, so it builds here instead
         if (EverQuest->ConfigSpellTalentAlignmentEnabled == true)
             EverQuestTalentAlignment->Load();

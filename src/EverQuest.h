@@ -1123,6 +1123,8 @@ public:
     bool ConfigMapRestrictPlayersToNorrath;
     int ConfigMapMaxExpansionID;
     uint32 ConfigMapRestrictedMapCheckIntervalInSeconds;
+    bool ConfigDeathEnforceGraveyardDomain = true;
+    uint32 ConfigDeathFallbackGraveyardID = 0;
     bool ConfigClientVersionCheckEnabled = false;
     uint32 ConfigClientVersionCheckGraceTimeInSeconds = 30;
     uint32 ConfigClientVersionCheckKickDelayInSeconds = 10;
@@ -1457,6 +1459,8 @@ public:
     bool IsPlayerDisqualifiedFromAdventurer(Player* player);
     bool DisqualifyPlayerFromAdventurer(Player* player);
     void SaveAdventurerDisqualifiedForPlayer(Player* player);
+    void SaveAdventurerLevelSnapshotForPlayer(Player* player);
+    bool TryGetAdventurerLevelSnapshotForPlayerGUID(uint32 playerGUIDCounter, EverQuestAdventurerLossSnapshot& snapshotOut);
     bool RestoreAdventurerForPlayer(Player* targetPlayer, Player* gmPlayer, EverQuestAdventurerRestoreReport& reportOut);
     void CollectNonEverQuestItemsFromLiveInventory(Player* player, vector<EverQuestAdventurerStrippedItem>& strippedItems, EverQuestAdventurerRestoreReport& report);
     void CollectNonEverQuestItemsFromClassStorage(Player* player, vector<EverQuestAdventurerStrippedItem>& strippedItems, CharacterDatabaseTransaction& transaction);
@@ -1524,6 +1528,10 @@ public:
     const vector<EverQuestForageZoneItem>& GetForageZoneItemsInMap(uint32 mapID);
     void LoadZoneSafePointData();
     void SendPlayerToZoneSafePoint(Player* player, bool includeGroup);
+    void ValidateGraveyardDomainConfiguration();
+    uint32 GetNearestEverQuestGraveyardIDForPosition(uint32 mapID, float x, float y, float z);
+    uint32 GetFallbackEverQuestGraveyardID();
+    void EnforceGraveyardDomainForDeath(Player* player, TeamId teamId, bool nearCorpse, uint32& graveyardOverride);
     void LoadZoneData();
     void LoadZoneTeleportDestinationData();
     bool IsZoneTeleportDestination(uint32 mapID, float x, float y, float z);
