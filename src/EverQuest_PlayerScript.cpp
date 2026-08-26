@@ -643,6 +643,10 @@ public:
         // Report which dungeon mode this character is on, and prime the client UI with it
         EverQuest->SendDungeonModeStateToPlayer(player, true);
 
+        // Pull the account's auction realm filter into memory and prime the client UI with it
+        EverQuest->LoadAuctionRealmFilterForPlayer(player);
+        EverQuest->SendAuctionRealmFilterToPlayer(player);
+
         // A character that logged out inside a private dungeon copy is still in it, and the map entry announcement could not be sent while loading
         EverQuest->SendInstanceDungeonEntryMessageToPlayer(player);
 
@@ -824,6 +828,10 @@ public:
 
         // Stop tracking the auction "Usable Items" filter state
         EverQuest->SetAuctionUsableFilterActiveForPlayer(player->GetGUID(), false);
+
+        // Drop the cached auction realm filter, it is read back from the database on the next login
+        EverQuest->ClearAuctionRealmFilterForPlayer(player);
+        EverQuest->ClearAuctionSearchScanForPlayer(player);
 
         // Class switch
         if (EverQuest->GetCurrentSecondEQClassForPlayer(player) != EverQuest->GetNextSecondEQClassForPlayer(player))

@@ -19,6 +19,7 @@
 #ifndef EVERQUEST_H
 #define EVERQUEST_H
 
+#include "AuctionHouseSearcher.h"
 #include "Common.h"
 #include "DataMap.h"
 #include "DatabaseEnv.h"
@@ -94,6 +95,9 @@ struct BuildValuesCachePosPointers;
 #define EQ_RACIAL_SKILL_ID_DRAENEI                  760
 #define EQ_HEARTHSTONE_ITEM_ID                      6948
 #define EQ_MASTER_TOTEM_ITEM_ID                     46978
+#define EQ_AUCTION_REALM_BOTH                       0
+#define EQ_AUCTION_REALM_NORRATH                    1
+#define EQ_AUCTION_REALM_AZEROTH                    2
 #define EQ_SPELL_ID_MAGE_SHATTER_RANK1              11170
 #define EQ_SPELL_ID_MAGE_SHATTER_RANK2              12982
 #define EQ_SPELL_ID_MAGE_SHATTER_RANK3              12983
@@ -690,6 +694,36 @@ public:
     uint32 IllusionTintID = 0;
 };
 
+class EverQuestAuctionRealmFilter
+{
+public:
+    string Payload;                                                 // Kept verbatim so it can be echoed back to the addon and written to the database unchanged
+    uint8 GlobalMode = EQ_AUCTION_REALM_BOTH;                       // Covers item classes the auction house has no category for at all (quest items, keys, reagents)
+    unordered_map<uint32, uint8> ModeByItemClassID;                 // Covers subclasses the auction house has no subcategory for (obsolete weapon types, bucklers)
+    unordered_map<uint64, uint8> ModeByItemClassAndSubClassKey;     // Key is (itemClassID << 32) | itemSubClassID
+    bool FiltersAnything = false;                                   
+};
+
+class EverQuestAuctionSearchScan
+{
+public:
+    bool Active = false;
+    string SearchKey;                                               // Every field of the request except which page was asked for, plus the filters, so a repeat of the same search is answered from what is already in hand
+    uint32 RequestedListFrom = 0;                                   // Row the client asked to start at, counted in kept rows rather than raw ones
+    bool ResultsReady = false;                                      // The auction house has been read and KeptEntries is the finished, sorted answer
+    bool AwaitingResponse = false;
+    uint32 StaleResponsesToDiscard = 0;                             // Answers still in flight for a search that has since been replaced
+    vector<string> KeptEntries;                                     // Rows that passed, in the order the client asked for them
+    bool ApplyEQClassFilter = false;
+    uint32 EQClassBits = 0;                                         // The player's EQ class bits
+    bool EQClassBitsKnown = false;
+    EverQuestAuctionRealmFilter RealmFilter;
+    bool ApplyRealmFilter = false;
+    AuctionHouseFaction ListFaction = AuctionHouseFaction::Alliance;
+    AuctionHouseSearchInfo SearchInfo;
+    AuctionHousePlayerInfo PlayerInfo;
+};
+
 class EverQuestGearSwapCandidate
 {
 public:
@@ -1267,6 +1301,9 @@ public:
     unordered_map<ObjectGuid, EverQuestPlayerClientVersionCheckState> PendingClientVersionChecksByPlayerGUID;
     unordered_map<ObjectGuid, deque<uint32>> PlayerCasterConcurrentBardSongs;
     unordered_set<ObjectGuid> PlayersWithAuctionUsableFilterActive;
+    unordered_map<uint32, EverQuestAuctionRealmFilter> AuctionRealmFiltersByAccountID;
+    unordered_map<ObjectGuid, EverQuestAuctionSearchScan> AuctionSearchScansByPlayerGUID;
+    std::mutex AuctionScanMutex;
     unordered_set<ObjectGuid> PlayersGainingExperience;
     unordered_set<ObjectGuid> PlayersPendingLevelCapExperiencePark;
     unordered_map<uint64, unordered_map<ObjectGuid, vector<EverQuestUnitHasteAuraEffect>>> EQHasteAuraEffectsByMapInstanceKeyThenUnitGUID; // Map-instance keyed since creature GUIDs repeat across instance copies of a map
@@ -1369,7 +1406,22 @@ public:
     void PatchVisibleGearFieldsInValuesUpdate(Player* wearingPlayer, ByteBuffer& valuesUpdateBuf, BuildValuesCachePosPointers& posPointers);
     void SetAuctionUsableFilterActiveForPlayer(ObjectGuid playerGUID, bool active);
     bool IsAuctionUsableFilterActiveForPlayer(ObjectGuid playerGUID);
-    bool BuildEQClassFilteredAuctionListPacket(Player* player, WorldPacket const& packet, WorldPacket& filteredPacket);
+    void LoadAuctionRealmFilterForPlayer(Player* player);
+    void ClearAuctionRealmFilterForPlayer(Player* player);
+    bool TryGetActiveAuctionRealmFilterForPlayer(Player* player, EverQuestAuctionRealmFilter& filter);
+    bool SetAuctionRealmFilterForPlayer(Player* player, const string& payload);
+    void SendAuctionRealmFilterToPlayer(Player* player);
+    bool IsItemAllowedByAuctionRealmFilter(const EverQuestAuctionRealmFilter& filter, uint32 itemTemplateID);
+    bool BuildFilteredAuctionListPacket(Player* player, WorldPacket const& packet, bool applyEQClassFilter, const EverQuestAuctionRealmFilter* realmFilter, WorldPacket& filteredPacket);
+    bool TryGetEQClassFilterBitsForPlayer(Player* player, uint32& eqClassBits);
+    bool IsItemEQClassAllowedForClassBits(uint32 itemTemplateID, uint32 eqClassBits, bool eqClassBitsKnown);
+    bool IsSendingOwnAuctionResult();
+    bool TakeOverAuctionListRequest(WorldSession* session, WorldPacket const& packet);
+    bool ConsumeAuctionListResultForScan(WorldSession* session, WorldPacket const& packet);
+    void ClearAuctionSearchScanForPlayer(Player* player);
+    void QueueFullAuctionScan(EverQuestAuctionSearchScan& scan);
+    void BuildAuctionScanResultPacket(EverQuestAuctionSearchScan& scan, WorldPacket& resultPacket);
+    void SendAuctionScanResultPacket(WorldSession* session, WorldPacket& resultPacket);
     bool IsWornEffectSpell(uint32 spellID);
     void LoadSpellData();
     const EverQuestSpell& GetSpellDataForSpellID(uint32 spellID);

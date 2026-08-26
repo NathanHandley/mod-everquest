@@ -49,19 +49,31 @@ static uint32 ExtractSpellIDFromSpellStartOrGoPacket(WorldPacket const& packet)
     }
 }
 
-// Returns false when a replacement packet with EQ-class-unusable auctions removed was sent in place of the original
 static bool HandleAuctionListResultPacketSend(WorldSession* session, WorldPacket const& packet)
 {
     if (EverQuest->IsEnabled == false)
         return true;
+
+    // The mod is putting its own already filtered answer on the wire, which arrives back here on the way out
+    if (EverQuest->IsSendingOwnAuctionResult() == true)
+        return true;
+
     Player* player = session->GetPlayer();
     if (player == nullptr)
         return true;
-    if (EverQuest->IsAuctionUsableFilterActiveForPlayer(player->GetGUID()) == false)
+
+    // A browse the mod took over is answered a page at a time out of its own scan rather than from this packet
+    if (EverQuest->ConsumeAuctionListResultForScan(session, packet) == true)
+        return false;
+
+    bool applyEQClassFilter = EverQuest->IsAuctionUsableFilterActiveForPlayer(player->GetGUID());
+    EverQuestAuctionRealmFilter realmFilter;
+    bool applyRealmFilter = EverQuest->TryGetActiveAuctionRealmFilterForPlayer(player, realmFilter);
+    if (applyEQClassFilter == false && applyRealmFilter == false)
         return true;
 
     WorldPacket filteredPacket;
-    if (EverQuest->BuildEQClassFilteredAuctionListPacket(player, packet, filteredPacket) == false)
+    if (EverQuest->BuildFilteredAuctionListPacket(player, packet, applyEQClassFilter, applyRealmFilter == true ? &realmFilter : nullptr, filteredPacket) == false)
         return true;
     session->SendPacket(&filteredPacket);
     return false;
@@ -72,7 +84,7 @@ class EverQuest_ServerScript : public ServerScript
 public:
     EverQuest_ServerScript() : ServerScript("EverQuest_ServerScript", { SERVERHOOK_CAN_PACKET_SEND, SERVERHOOK_CAN_PACKET_RECEIVE }) { }
 
-    // Watches auction search results to learn whether a player's "Usable Items" checkbox is set
+    // Watches auction search requests to learn whether a player's "Usable Items" checkbox is set
     bool CanPacketReceive(WorldSession* session, WorldPacket const& packet) override
     {
         if (packet.GetOpcode() != CMSG_AUCTION_LIST_ITEMS)
@@ -104,6 +116,10 @@ public:
         catch (ByteBufferException const&)
         {
         }
+
+        // A filter that can empty a whole page has to be applied while the search is being paged
+        if (EverQuest->TakeOverAuctionListRequest(session, packet) == true)
+            return false;
         return true;
     }
 

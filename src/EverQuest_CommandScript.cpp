@@ -136,6 +136,7 @@ public:
             { "eqshowbardpulse", HandleEQShowBardPulseCommand,  SEC_PLAYER, Console::No },
             { "eqhidewowgear", HandleEQHideWoWGearCommand,      SEC_PLAYER, Console::No },
             { "eqdungeonmode", HandleEQDungeonModeCommand,      SEC_PLAYER, Console::No },
+            { "eqauctionfilter", HandleEQAuctionFilterCommand,  SEC_PLAYER, Console::No },
             { "class",  classCommandTable                                               },
             { "track",  trackCommandTable                                               },
             { "eqadventurer", adventurerCommandTable                                    },
@@ -442,6 +443,38 @@ public:
 
         EverQuest->SetDungeonModeInstancedForPlayer(player, dungeonModeInstanced);
         EverQuest->SendDungeonModeStateToPlayer(player, true);
+        return true;
+    }
+
+    // Used by the EQ_AuctionFilter addon
+    static bool HandleEQAuctionFilterCommand(ChatHandler* handler, const char* args)
+    {
+        if (EverQuest->IsEnabled == false)
+            return true;
+
+        Player* player = handler->GetPlayer();
+        if (player == nullptr)
+            return true;
+
+        std::vector<std::string> tokens = SplitCommandArgs(args, 2);
+        if (tokens.empty() == false)
+        {
+            std::string subCommand = tokens[0];
+            boost::algorithm::to_lower(subCommand);
+            if (subCommand == "sync")
+            {
+                EverQuest->SendAuctionRealmFilterToPlayer(player);
+                return true;
+            }
+            if (subCommand == "set" && tokens.size() > 1)
+            {
+                if (EverQuest->SetAuctionRealmFilterForPlayer(player, tokens[1]) == true)
+                    EverQuest->SendAuctionRealmFilterToPlayer(player);
+                return true;
+            }
+        }
+
+        handler->PSendSysMessage("Auction results can be limited to Norrath (EverQuest) or Azeroth (World of Warcraft) items per auction house category, using the |cff4CFF00Realm Filter|r button on the auction house window.");
         return true;
     }
 

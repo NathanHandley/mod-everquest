@@ -2450,6 +2450,34 @@ bool EverQuestMod::IsItemEQClassAllowedForPlayer(Player* player, uint32 itemTemp
     return false;
 }
 
+bool EverQuestMod::TryGetEQClassFilterBitsForPlayer(Player* player, uint32& eqClassBits)
+{
+    eqClassBits = 0;
+    if (player == nullptr)
+        return false;
+    const EverQuestClassMap classMap = GetClassMapForWOWClassID(player->getClass());
+    if (classMap.EQClassIDBase == 0)
+        return false;
+    eqClassBits = 1u << (classMap.EQClassIDBase - 1);
+    uint8 secondEQClass = GetCurrentSecondEQClassForPlayer(player);
+    if (secondEQClass != EQ_EQCLASS_NONE)
+        eqClassBits |= 1u << (secondEQClass - 1);
+    return true;
+}
+
+bool EverQuestMod::IsItemEQClassAllowedForClassBits(uint32 itemTemplateID, uint32 eqClassBits, bool eqClassBitsKnown)
+{
+    unordered_map<uint32, EverQuestItemTemplate>::const_iterator itemTemplateItr = ItemTemplatesByEntryID.find(itemTemplateID);
+    if (itemTemplateItr == ItemTemplatesByEntryID.end())
+        return true;
+    uint32 allowedEQClassMask = itemTemplateItr->second.AllowedEQClassMask;
+    if (allowedEQClassMask == 0)
+        return true;
+    if (eqClassBitsKnown == false)
+        return true;
+    return (allowedEQClassMask & eqClassBits) != 0;
+}
+
 void EverQuestMod::SetAuctionUsableFilterActiveForPlayer(ObjectGuid playerGUID, bool active)
 {
     std::lock_guard<std::mutex> lock(RuntimeStateMutex);
@@ -2465,12 +2493,775 @@ bool EverQuestMod::IsAuctionUsableFilterActiveForPlayer(ObjectGuid playerGUID)
     return PlayersWithAuctionUsableFilterActive.find(playerGUID) != PlayersWithAuctionUsableFilterActive.end();
 }
 
-// This is such an obscene hack...
-bool EverQuestMod::BuildEQClassFilteredAuctionListPacket(Player* player, WorldPacket const& packet, WorldPacket& filteredPacket)
+class EverQuestAuctionCategory
 {
-    // Fixed byte size of one auction entry as written by SearchableAuctionEntry::BuildAuctionInfo (auction ID, item, entry ID, inspected enchants, random property, suffix factor, stack count, spell charges, flags, owner guid,
-    // start bid, min outbid, buyout, time left, bidder guid, current bid)
-    static const size_t auctionEntrySizeInBytes = 4 + 4 + (MAX_INSPECTED_ENCHANTMENT_SLOT * 12) + 4 + 4 + 4 + 4 + 4 + 8 + 4 + 4 + 4 + 4 + 8 + 4;
+public:
+    uint32 ItemClassID = 0;
+    uint32 SubClassCount = 0;
+    uint32 SubClassIDs[17] = { 0 };
+};
+
+static const uint32 AuctionCategoryCount = 12;
+static const EverQuestAuctionCategory AuctionCategories[AuctionCategoryCount] =
+{
+    {  2, 17, {  0,  1,  2,  3,  4,  5,  6,  7,  8, 10, 13, 14, 15, 16, 18, 19, 20 } },  // Weapon
+    {  4, 10, {  0,  1,  2,  3,  4,  6,  7,  8,  9, 10 } },                              // Armor
+    {  1,  9, {  0,  1,  2,  3,  4,  5,  6,  7,  8 } },                                  // Container
+    {  0,  8, {  5,  1,  2,  3,  7,  6,  4,  8 } },                                      // Consumable
+    { 16, 10, {  1,  2,  3,  4,  5,  6,  7,  8,  9, 11 } },                              // Glyph
+    {  7, 15, { 10,  5,  6,  7,  8,  9, 12,  4,  1,  3,  2, 13, 11, 14, 15 } },          // Trade Goods
+    {  6,  2, {  2,  3 } },                                                              // Projectile
+    { 11,  2, {  2,  3 } },                                                              // Quiver
+    {  9, 12, {  0,  1,  2,  3,  4,  5,  6,  7,  8,  9, 10, 11 } },                      // Recipe
+    {  3,  9, {  0,  1,  2,  3,  4,  5,  6,  7,  8 } },                                  // Gem
+    { 15,  6, {  0,  1,  2,  3,  4,  5 } },                                              // Miscellaneous
+    { 12,  0, { } },                                                                     // Quest (no subcategories)
+};
+
+static size_t GetAuctionRealmFilterPayloadLength()
+{
+    // One character for the global fallback, then per category one character for the category itself followed by one for each of its subcategories
+    size_t payloadLength = 1;
+    for (uint32 categoryIndex = 0; categoryIndex < AuctionCategoryCount; ++categoryIndex)
+        payloadLength += 1 + AuctionCategories[categoryIndex].SubClassCount;
+    return payloadLength;
+}
+
+static bool TryParseAuctionRealmFilterPayload(const string& payload, EverQuestAuctionRealmFilter& filter)
+{
+    if (payload.size() != GetAuctionRealmFilterPayloadLength())
+        return false;
+    for (size_t characterIndex = 0; characterIndex < payload.size(); ++characterIndex)
+        if (payload[characterIndex] < '0' || payload[characterIndex] > '2')
+            return false;
+
+    EverQuestAuctionRealmFilter parsedFilter;
+    parsedFilter.Payload = payload;
+    parsedFilter.GlobalMode = static_cast<uint8>(payload[0] - '0');
+    parsedFilter.FiltersAnything = (parsedFilter.GlobalMode != EQ_AUCTION_REALM_BOTH);
+
+    size_t readPosition = 1;
+    for (uint32 categoryIndex = 0; categoryIndex < AuctionCategoryCount; ++categoryIndex)
+    {
+        const EverQuestAuctionCategory& category = AuctionCategories[categoryIndex];
+        uint8 categoryMode = static_cast<uint8>(payload[readPosition] - '0');
+        readPosition++;
+        parsedFilter.ModeByItemClassID[category.ItemClassID] = categoryMode;
+        if (categoryMode != EQ_AUCTION_REALM_BOTH)
+            parsedFilter.FiltersAnything = true;
+        for (uint32 subClassIndex = 0; subClassIndex < category.SubClassCount; ++subClassIndex)
+        {
+            uint8 subClassMode = static_cast<uint8>(payload[readPosition] - '0');
+            readPosition++;
+            parsedFilter.ModeByItemClassAndSubClassKey[(static_cast<uint64>(category.ItemClassID) << 32) | static_cast<uint64>(category.SubClassIDs[subClassIndex])] = subClassMode;
+            if (subClassMode != EQ_AUCTION_REALM_BOTH)
+                parsedFilter.FiltersAnything = true;
+        }
+    }
+
+    filter = parsedFilter;
+    return true;
+}
+
+static uint8 GetAuctionRealmModeForItemClassAndSubClass(const EverQuestAuctionRealmFilter& filter, uint32 itemClassID, uint32 itemSubClassID)
+{
+    unordered_map<uint64, uint8>::const_iterator subClassItr = filter.ModeByItemClassAndSubClassKey.find((static_cast<uint64>(itemClassID) << 32) | static_cast<uint64>(itemSubClassID));
+    if (subClassItr != filter.ModeByItemClassAndSubClassKey.end())
+        return subClassItr->second;
+    unordered_map<uint32, uint8>::const_iterator classItr = filter.ModeByItemClassID.find(itemClassID);
+    if (classItr != filter.ModeByItemClassID.end())
+        return classItr->second;
+    return filter.GlobalMode;
+}
+
+void EverQuestMod::LoadAuctionRealmFilterForPlayer(Player* player)
+{
+    if (player == nullptr || player->GetSession() == nullptr)
+        return;
+    uint32 accountID = player->GetSession()->GetAccountId();
+
+    EverQuestAuctionRealmFilter filter;
+    QueryResult queryResult = CharacterDatabase.Query("SELECT auctionRealmFilter FROM mod_everquest_account_settings WHERE accountid = {}", accountID);
+    if (queryResult)
+    {
+        string payload = (*queryResult)[0].Get<string>();
+        if (payload.empty() == false && TryParseAuctionRealmFilterPayload(payload, filter) == false)
+        {
+            LOG_WARN("module.EverQuest", "EverQuestMod::LoadAuctionRealmFilterForPlayer could not read the stored auction realm filter for account {}, so it was cleared", accountID);
+            CharacterDatabase.Execute("UPDATE mod_everquest_account_settings SET auctionRealmFilter = '' WHERE accountid = {}", accountID);
+        }
+    }
+
+    std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+    AuctionRealmFiltersByAccountID[accountID] = filter;
+}
+
+void EverQuestMod::ClearAuctionRealmFilterForPlayer(Player* player)
+{
+    if (player == nullptr || player->GetSession() == nullptr)
+        return;
+    std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+    AuctionRealmFiltersByAccountID.erase(player->GetSession()->GetAccountId());
+}
+
+bool EverQuestMod::TryGetActiveAuctionRealmFilterForPlayer(Player* player, EverQuestAuctionRealmFilter& filter)
+{
+    if (player == nullptr || player->GetSession() == nullptr)
+        return false;
+    if (ConfigSystemItemTemplateIDMax == 0)
+        return false;
+    std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+    unordered_map<uint32, EverQuestAuctionRealmFilter>::const_iterator filterItr = AuctionRealmFiltersByAccountID.find(player->GetSession()->GetAccountId());
+    if (filterItr == AuctionRealmFiltersByAccountID.end() || filterItr->second.FiltersAnything == false)
+        return false;
+    filter = filterItr->second;
+    return true;
+}
+
+bool EverQuestMod::SetAuctionRealmFilterForPlayer(Player* player, const string& payload)
+{
+    if (player == nullptr || player->GetSession() == nullptr)
+        return false;
+    EverQuestAuctionRealmFilter filter;
+    if (TryParseAuctionRealmFilterPayload(payload, filter) == false)
+        return false;
+
+    uint32 accountID = player->GetSession()->GetAccountId();
+    {
+        std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+        AuctionRealmFiltersByAccountID[accountID] = filter;
+    }
+
+    // The payload is already known to hold nothing but '0', '1' and '2' characters, so it goes into the statement as-is
+    CharacterDatabase.Execute("INSERT INTO `mod_everquest_account_settings` (`accountid`, `auctionRealmFilter`) VALUES ({}, '{}') ON DUPLICATE KEY UPDATE `auctionRealmFilter` = '{}'",
+        accountID, payload, payload);
+    return true;
+}
+
+void EverQuestMod::SendAuctionRealmFilterToPlayer(Player* player)
+{
+    if (player == nullptr || player->GetSession() == nullptr)
+        return;
+
+    string payload;
+    {
+        std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+        unordered_map<uint32, EverQuestAuctionRealmFilter>::const_iterator filterItr = AuctionRealmFiltersByAccountID.find(player->GetSession()->GetAccountId());
+        if (filterItr != AuctionRealmFiltersByAccountID.end())
+            payload = filterItr->second.Payload;
+    }
+
+    // An account that never set anything gets the all "both" payload, which is what the addon shows by default anyway
+    if (payload.empty() == true)
+        payload = string(GetAuctionRealmFilterPayloadLength(), '0');
+
+    std::string addonMessage = "EQAHFILTER\t" + payload;
+    WorldPacket data;
+    ChatHandler::BuildChatPacket(data, CHAT_MSG_SYSTEM, LANG_ADDON, nullptr, nullptr, addonMessage);
+    player->GetSession()->SendPacket(&data);
+}
+
+bool EverQuestMod::IsItemAllowedByAuctionRealmFilter(const EverQuestAuctionRealmFilter& filter, uint32 itemTemplateID)
+{
+    ItemTemplate const* itemTemplate = sObjectMgr->GetItemTemplate(itemTemplateID);
+    if (itemTemplate == nullptr)
+        return true;
+
+    uint8 mode = GetAuctionRealmModeForItemClassAndSubClass(filter, itemTemplate->Class, itemTemplate->SubClass);
+    if (mode == EQ_AUCTION_REALM_BOTH)
+        return true;
+    bool isNorrathItem = IsItemTemplateIDAnEQItemTemplateID(itemTemplateID);
+    if (mode == EQ_AUCTION_REALM_NORRATH)
+        return isNorrathItem;
+    return isNorrathItem == false;
+}
+
+// This is such an obscene hack...
+// Fixed byte size of one auction entry as written by SearchableAuctionEntry::BuildAuctionInfo (auction ID, item, entry ID, inspected enchants, random property, suffix factor, stack count, spell charges, flags, owner guid,
+static const size_t AuctionEntrySizeInBytes = 4 + 4 + (MAX_INSPECTED_ENCHANTMENT_SLOT * 12) + 4 + 4 + 4 + 4 + 4 + 8 + 4 + 4 + 4 + 4 + 8 + 4;
+static thread_local bool SendingOwnAuctionResult = false;
+
+bool EverQuestMod::IsSendingOwnAuctionResult()
+{
+    return SendingOwnAuctionResult;
+}
+
+class EverQuestOwnAuctionResultSendMarker
+{
+public:
+    EverQuestOwnAuctionResultSendMarker() { SendingOwnAuctionResult = true; }
+    ~EverQuestOwnAuctionResultSendMarker() { SendingOwnAuctionResult = false; }
+};
+
+class EverQuestAuctionScanRow
+{
+public:
+    string EntryData;
+    uint32 ItemTemplateID = 0;
+    int32 RandomPropertyID = 0;
+    uint32 StackCount = 0;
+    ObjectGuid OwnerGUID;
+    uint32 StartBid = 0;
+    uint32 Buyout = 0;
+    uint32 TimeLeftInMS = 0;
+    uint64 BidderGUIDCounter = 0;
+    uint32 Bid = 0;
+    ItemTemplate const* ItemTemplateData = nullptr;
+    wstring ItemName;                                       // Lower case and with the random suffix, only built when something needs it
+    string OwnerName;                                       // Only looked up when the sort asks for it
+};
+
+// Identifies a search by everything except which page of it was asked for
+static string BuildAuctionSearchKey(const AuctionHouseSearchInfo& searchInfo, AuctionHouseFaction listFaction, bool applyEQClassFilter, const EverQuestAuctionRealmFilter& realmFilter, bool applyRealmFilter)
+{
+    string searchKey;
+    searchKey += (applyEQClassFilter ? "e|" : "-|");
+    searchKey += (applyRealmFilter ? realmFilter.Payload : "") + "|";
+    searchKey += std::to_string(static_cast<uint32>(listFaction)) + "|";
+    searchKey += std::to_string(static_cast<uint32>(searchInfo.levelmin)) + "|";
+    searchKey += std::to_string(static_cast<uint32>(searchInfo.levelmax)) + "|";
+    searchKey += std::to_string(searchInfo.usable ? 1 : 0) + "|";
+    searchKey += std::to_string(searchInfo.inventoryType) + "|";
+    searchKey += std::to_string(searchInfo.itemClass) + "|";
+    searchKey += std::to_string(searchInfo.itemSubClass) + "|";
+    searchKey += std::to_string(searchInfo.quality) + "|";
+    for (uint32 sortIndex = 0; sortIndex < searchInfo.sorting.size(); ++sortIndex)
+        searchKey += std::to_string(static_cast<uint32>(searchInfo.sorting[sortIndex].sortOrder)) + (searchInfo.sorting[sortIndex].isDesc ? "d," : "a,");
+    searchKey += "|";
+    for (size_t nameIndex = 0; nameIndex < searchInfo.wsearchedname.size(); ++nameIndex)
+        searchKey += std::to_string(static_cast<uint32>(searchInfo.wsearchedname[nameIndex])) + ".";
+    return searchKey;
+}
+
+static void BuildAuctionScanRowItemName(EverQuestAuctionScanRow& row, int localeIndex, int dbcLocaleIndex)
+{
+    if (row.ItemTemplateData == nullptr || row.ItemTemplateData->Name1.empty() == true)
+        return;
+
+    string itemName = row.ItemTemplateData->Name1;
+    ItemLocale const* itemLocale = sObjectMgr->GetItemLocale(row.ItemTemplateData->ItemId);
+    if (dbcLocaleIndex >= LOCALE_enUS && itemLocale != nullptr)
+        ObjectMgr::GetLocaleString(itemLocale->Name, localeIndex, itemName);
+
+    if (row.RandomPropertyID != 0)
+    {
+        std::array<char const*, 16> const* suffix = nullptr;
+        if (row.RandomPropertyID < 0)
+        {
+            ItemRandomSuffixEntry const* randomSuffixEntry = sItemRandomSuffixStore.LookupEntry(-row.RandomPropertyID);
+            if (randomSuffixEntry != nullptr)
+                suffix = &randomSuffixEntry->Name;
+        }
+        else
+        {
+            ItemRandomPropertiesEntry const* randomPropertiesEntry = sItemRandomPropertiesStore.LookupEntry(row.RandomPropertyID);
+            if (randomPropertiesEntry != nullptr)
+                suffix = &randomPropertiesEntry->Name;
+        }
+        if (suffix != nullptr)
+        {
+            itemName += ' ';
+            itemName += (*suffix)[dbcLocaleIndex >= 0 ? dbcLocaleIndex : LOCALE_enUS];
+        }
+    }
+
+    if (Utf8toWStr(itemName, row.ItemName) == false)
+        return;
+    wstrToLower(row.ItemName);
+}
+
+// Mirrors SearchableAuctionEntry::CompareAuctionEntry
+static int CompareAuctionScanRows(uint32 column, const EverQuestAuctionScanRow& firstRow, const EverQuestAuctionScanRow& secondRow)
+{
+    switch (column)
+    {
+    case AUCTION_SORT_MINLEVEL:
+    {
+        if (firstRow.ItemTemplateData->RequiredLevel > secondRow.ItemTemplateData->RequiredLevel)
+            return -1;
+        else if (firstRow.ItemTemplateData->RequiredLevel < secondRow.ItemTemplateData->RequiredLevel)
+            return +1;
+        break;
+    }
+    case AUCTION_SORT_RARITY:
+    {
+        if (firstRow.ItemTemplateData->Quality < secondRow.ItemTemplateData->Quality)
+            return -1;
+        else if (firstRow.ItemTemplateData->Quality > secondRow.ItemTemplateData->Quality)
+            return +1;
+        break;
+    }
+    case AUCTION_SORT_BUYOUT:
+    {
+        if (firstRow.Buyout != secondRow.Buyout)
+        {
+            if (firstRow.Buyout < secondRow.Buyout)
+                return -1;
+            else if (firstRow.Buyout > secondRow.Buyout)
+                return +1;
+        }
+        else
+        {
+            if (firstRow.Bid < secondRow.Bid)
+                return -1;
+            else if (firstRow.Bid > secondRow.Bid)
+                return +1;
+        }
+        break;
+    }
+    case AUCTION_SORT_TIMELEFT:
+    {
+        // The packet carries how long is left rather than when it ends, which sorts the same way
+        if (firstRow.TimeLeftInMS < secondRow.TimeLeftInMS)
+            return -1;
+        else if (firstRow.TimeLeftInMS > secondRow.TimeLeftInMS)
+            return +1;
+        break;
+    }
+    case AUCTION_SORT_UNK4:
+    {
+        if (firstRow.BidderGUIDCounter < secondRow.BidderGUIDCounter)
+            return -1;
+        else if (firstRow.BidderGUIDCounter > secondRow.BidderGUIDCounter)
+            return +1;
+        break;
+    }
+    case AUCTION_SORT_ITEM:
+    {
+        int comparison = firstRow.ItemName.compare(secondRow.ItemName);
+        if (comparison > 0)
+            return -1;
+        else if (comparison < 0)
+            return +1;
+        break;
+    }
+    case AUCTION_SORT_MINBIDBUY:
+    {
+        if (firstRow.Buyout != secondRow.Buyout)
+        {
+            if (firstRow.Buyout > secondRow.Buyout)
+                return -1;
+            else if (firstRow.Buyout < secondRow.Buyout)
+                return +1;
+        }
+        else
+        {
+            if (firstRow.Bid < secondRow.Bid)
+                return -1;
+            else if (firstRow.Bid > secondRow.Bid)
+                return +1;
+        }
+        break;
+    }
+    case AUCTION_SORT_OWNER:
+    {
+        int comparison = firstRow.OwnerName.compare(secondRow.OwnerName);
+        if (comparison > 0)
+            return -1;
+        else if (comparison < 0)
+            return +1;
+        break;
+    }
+    case AUCTION_SORT_BID:
+    {
+        uint32 firstBid = firstRow.Bid != 0 ? firstRow.Bid : firstRow.StartBid;
+        uint32 secondBid = secondRow.Bid != 0 ? secondRow.Bid : secondRow.StartBid;
+        if (firstBid > secondBid)
+            return -1;
+        else if (firstBid < secondBid)
+            return +1;
+        break;
+    }
+    case AUCTION_SORT_STACK:
+    {
+        if (firstRow.StackCount < secondRow.StackCount)
+            return -1;
+        else if (firstRow.StackCount > secondRow.StackCount)
+            return +1;
+        break;
+    }
+    case AUCTION_SORT_BUYOUT_2:
+    {
+        if (firstRow.Buyout < secondRow.Buyout)
+            return -1;
+        else if (firstRow.Buyout > secondRow.Buyout)
+            return +1;
+        break;
+    }
+    default:
+        break;
+    }
+    return 0;
+}
+
+// Mirrors AuctionSorter
+class EverQuestAuctionScanRowSorter
+{
+public:
+    EverQuestAuctionScanRowSorter(const AuctionSortOrderVector* sorting) : Sorting(sorting) { }
+
+    bool operator()(const EverQuestAuctionScanRow& firstRow, const EverQuestAuctionScanRow& secondRow) const
+    {
+        for (uint32 sortIndex = 0; sortIndex < Sorting->size(); ++sortIndex)
+        {
+            int comparison = CompareAuctionScanRows(static_cast<uint32>((*Sorting)[sortIndex].sortOrder), firstRow, secondRow);
+            if (comparison == 0)
+                continue;
+            return (comparison < 0) == (*Sorting)[sortIndex].isDesc;
+        }
+        return false;
+    }
+
+private:
+    const AuctionSortOrderVector* Sorting;
+};
+
+// Mirrors AuctionHouseWorkerThread::BuildListAuctionItems
+static bool DoesAuctionScanRowPassSearch(const EverQuestAuctionScanRow& row, const AuctionHouseSearchInfo& searchInfo, const AuctionHousePlayerInfo& playerInfo)
+{
+    ItemTemplate const* proto = row.ItemTemplateData;
+    if (searchInfo.itemClass != 0xffffffff && proto->Class != searchInfo.itemClass)
+        return false;
+    if (searchInfo.itemSubClass != 0xffffffff && proto->SubClass != searchInfo.itemSubClass)
+        return false;
+    if (searchInfo.inventoryType != 0xffffffff && proto->InventoryType != searchInfo.inventoryType)
+    {
+        // Robes are counted as chests
+        if (searchInfo.inventoryType != INVTYPE_CHEST || proto->InventoryType != INVTYPE_ROBE)
+            return false;
+    }
+    if (searchInfo.quality != 0xffffffff && proto->Quality < searchInfo.quality)
+        return false;
+    if (searchInfo.levelmin != 0x00 && (proto->RequiredLevel < searchInfo.levelmin || (searchInfo.levelmax != 0x00 && proto->RequiredLevel > searchInfo.levelmax)))
+        return false;
+    if (searchInfo.usable != 0x00 && playerInfo.usablePlayerInfo.has_value() == true && playerInfo.usablePlayerInfo.value().PlayerCanUseItem(proto) == false)
+        return false;
+
+    // Matches a suffix ("of the Monkey") or any part of the name, same as the core search
+    if (searchInfo.wsearchedname.empty() == false && row.ItemName.find(searchInfo.wsearchedname) == wstring::npos)
+        return false;
+    return true;
+}
+
+void EverQuestMod::QueueFullAuctionScan(EverQuestAuctionSearchScan& scan)
+{
+    AuctionHouseSearchInfo scanSearchInfo = scan.SearchInfo;
+    scanSearchInfo.listfrom = 0;
+    scanSearchInfo.getAll = true;
+    scanSearchInfo.sorting.clear();
+    AuctionHousePlayerInfo scanPlayerInfo = scan.PlayerInfo;
+    scan.AwaitingResponse = true;
+    sAuctionMgr->GetAuctionHouseSearcher()->QueueSearchRequest(new AuctionSearchListRequest(scan.ListFaction, std::move(scanSearchInfo), std::move(scanPlayerInfo)));
+}
+
+void EverQuestMod::BuildAuctionScanResultPacket(EverQuestAuctionSearchScan& scan, WorldPacket& resultPacket)
+{
+    uint32 keptEntryCount = static_cast<uint32>(scan.KeptEntries.size());
+    uint32 sentEntryCount = 0;
+    ByteBuffer sentEntryData;
+    for (uint32 entryIndex = scan.RequestedListFrom; entryIndex < keptEntryCount && sentEntryCount < MAX_AUCTIONS_PER_PAGE; ++entryIndex)
+    {
+        sentEntryData.append(reinterpret_cast<const uint8*>(scan.KeptEntries[entryIndex].data()), scan.KeptEntries[entryIndex].size());
+        sentEntryCount++;
+    }
+
+    resultPacket.Initialize(SMSG_AUCTION_LIST_RESULT, 4 + sentEntryData.size() + 4 + 4);
+    resultPacket << uint32(sentEntryCount);
+    if (sentEntryData.size() > 0)
+        resultPacket.append(sentEntryData);
+    resultPacket << uint32(keptEntryCount);
+    resultPacket << uint32(AUCTION_SEARCH_DELAY);
+}
+
+// Must be called with the scan lock let go of
+void EverQuestMod::SendAuctionScanResultPacket(WorldSession* session, WorldPacket& resultPacket)
+{
+    EverQuestOwnAuctionResultSendMarker sendMarker;
+    session->SendPacket(&resultPacket);
+}
+
+void EverQuestMod::ClearAuctionSearchScanForPlayer(Player* player)
+{
+    if (player == nullptr)
+        return;
+    std::lock_guard<std::mutex> lock(AuctionScanMutex);
+    AuctionSearchScansByPlayerGUID.erase(player->GetGUID());
+}
+
+bool EverQuestMod::TakeOverAuctionListRequest(WorldSession* session, WorldPacket const& packet)
+{
+    Player* player = session->GetPlayer();
+    if (player == nullptr)
+        return false;
+
+    // Read the same way WorldSession::HandleAuctionListItems reads it
+    WorldPacket packetCopy(packet);
+    packetCopy.rpos(0);
+    ObjectGuid auctioneerGUID;
+    uint32 listFrom = 0;
+    string searchedName;
+    uint8 levelMin = 0, levelMax = 0, usable = 0, getAll = 0, sortOrderCount = 0;
+    uint32 auctionSlotID = 0, auctionMainCategory = 0, auctionSubCategory = 0, quality = 0;
+    AuctionSortOrderVector sortOrder;
+    try
+    {
+        packetCopy >> auctioneerGUID;
+        packetCopy >> listFrom;
+        packetCopy >> searchedName;
+        packetCopy >> levelMin >> levelMax;
+        packetCopy >> auctionSlotID >> auctionMainCategory >> auctionSubCategory;
+        packetCopy >> quality >> usable;
+        packetCopy >> getAll;
+        packetCopy >> sortOrderCount;
+        if (sortOrderCount > AUCTION_SORT_MAX)
+            return false;
+        for (uint8 sortIndex = 0; sortIndex < sortOrderCount; ++sortIndex)
+        {
+            uint8 sortMode = 0;
+            uint8 isDesc = 0;
+            packetCopy >> sortMode;
+            packetCopy >> isDesc;
+            AuctionSortInfo sortInfo;
+            sortInfo.isDesc = (isDesc == 1);
+            sortInfo.sortOrder = static_cast<AuctionSortOrder>(sortMode);
+            sortOrder.push_back(sortInfo);
+        }
+    }
+    catch (ByteBufferException const&)
+    {
+        return false;
+    }
+
+    // The client asking to read the whole auction house itself is left to the core handler and the plain per page filter
+    if (getAll != 0)
+        return false;
+
+    bool applyEQClassFilter = IsAuctionUsableFilterActiveForPlayer(player->GetGUID());
+    EverQuestAuctionRealmFilter realmFilter;
+    bool applyRealmFilter = TryGetActiveAuctionRealmFilterForPlayer(player, realmFilter);
+    if (applyEQClassFilter == false && applyRealmFilter == false)
+    {
+        ClearAuctionSearchScanForPlayer(player);
+        return false;
+    }
+
+    std::wstring searchedNameWide;
+    if (Utf8toWStr(searchedName, searchedNameWide) == false)
+        return false;
+    wstrToLower(searchedNameWide);
+
+    Creature* creature = player->GetNPCIfCanInteractWith(auctioneerGUID, UNIT_NPC_FLAG_AUCTIONEER);
+    if (creature == nullptr)
+        return false;
+    AuctionHouseEntry const* auctionHouseEntry = AuctionHouseMgr::GetAuctionHouseEntryFromFactionTemplate(creature->GetFaction());
+    if (auctionHouseEntry == nullptr)
+        return false;
+
+    if (player->HasUnitState(UNIT_STATE_DIED))
+        player->RemoveAurasByType(SPELL_AURA_FEIGN_DEATH);
+
+    AuctionHouseSearchInfo searchInfo;
+    searchInfo.wsearchedname = searchedNameWide;
+    searchInfo.listfrom = 0;
+    searchInfo.levelmin = levelMin;
+    searchInfo.levelmax = levelMax;
+    searchInfo.usable = usable != 0;
+    searchInfo.inventoryType = auctionSlotID;
+    searchInfo.itemClass = auctionMainCategory;
+    searchInfo.itemSubClass = auctionSubCategory;
+    searchInfo.quality = quality;
+    searchInfo.getAll = false;
+    searchInfo.sorting = sortOrder;
+
+    AuctionHousePlayerInfo playerInfo;
+    playerInfo.playerGuid = player->GetGUID();
+    playerInfo.faction = player->GetFaction();
+    playerInfo.loc_idx = session->GetSessionDbLocaleIndex();
+    playerInfo.locdbc_idx = session->GetSessionDbcLocale();
+    if (usable != 0)
+    {
+        AuctionHouseUsablePlayerInfo usablePlayerInfo;
+        usablePlayerInfo.classMask = player->getClassMask();
+        usablePlayerInfo.raceMask = player->getRaceMask();
+        usablePlayerInfo.level = player->GetLevel();
+        SkillStatusMap const& skillMap = player->GetSkillStatusMap();
+        for (auto const& skillPair : skillMap)
+            usablePlayerInfo.skills.insert(std::make_pair(skillPair.first, player->GetSkillValue(skillPair.first)));
+        PlayerSpellMap const& spellMap = player->GetSpellMap();
+        for (auto const& spellPair : spellMap)
+            if (spellPair.second->State != PLAYERSPELL_REMOVED && spellPair.second->IsInSpec(player->GetActiveSpec()))
+                usablePlayerInfo.spells.insert(spellPair.first);
+        playerInfo.usablePlayerInfo = std::move(usablePlayerInfo);
+    }
+
+    AuctionHouseFaction listFaction = AuctionHouseMgr::GetAuctionHouseFactionFromHouseId(AuctionHouseId(auctionHouseEntry->houseId));
+    string searchKey = BuildAuctionSearchKey(searchInfo, listFaction, applyEQClassFilter, realmFilter, applyRealmFilter);
+
+    std::unique_lock<std::mutex> scanLock(AuctionScanMutex);
+    EverQuestAuctionSearchScan& scan = AuctionSearchScansByPlayerGUID[player->GetGUID()];
+    if (scan.Active == false || scan.SearchKey != searchKey)
+    {
+        // An answer still owed to the search being replaced would otherwise be read as an answer to this one
+        uint32 staleResponsesToDiscard = scan.StaleResponsesToDiscard;
+        if (scan.AwaitingResponse == true)
+            staleResponsesToDiscard++;
+        scan = EverQuestAuctionSearchScan();
+        scan.StaleResponsesToDiscard = staleResponsesToDiscard;
+        scan.SearchKey = searchKey;
+        scan.ListFaction = listFaction;
+        scan.SearchInfo = searchInfo;
+        scan.PlayerInfo = playerInfo;
+        scan.ApplyEQClassFilter = applyEQClassFilter;
+        scan.EQClassBitsKnown = TryGetEQClassFilterBitsForPlayer(player, scan.EQClassBits);
+        scan.ApplyRealmFilter = applyRealmFilter;
+        scan.RealmFilter = realmFilter;
+    }
+    scan.Active = true;
+    scan.RequestedListFrom = listFrom;
+
+    // Paging through a search already read is answered straight from the rows in hand
+    WorldPacket resultPacket;
+    bool hasResultToSend = false;
+    if (scan.ResultsReady == true)
+    {
+        BuildAuctionScanResultPacket(scan, resultPacket);
+        hasResultToSend = true;
+    }
+    else if (scan.AwaitingResponse == false)
+        QueueFullAuctionScan(scan);
+    scanLock.unlock();
+
+    if (hasResultToSend == true)
+        SendAuctionScanResultPacket(session, resultPacket);
+    return true;
+}
+
+bool EverQuestMod::ConsumeAuctionListResultForScan(WorldSession* session, WorldPacket const& packet)
+{
+    Player* player = session->GetPlayer();
+    if (player == nullptr)
+        return false;
+
+    std::unique_lock<std::mutex> scanLock(AuctionScanMutex);
+    unordered_map<ObjectGuid, EverQuestAuctionSearchScan>::iterator scanItr = AuctionSearchScansByPlayerGUID.find(player->GetGUID());
+    if (scanItr == AuctionSearchScansByPlayerGUID.end())
+        return false;
+    EverQuestAuctionSearchScan& scan = scanItr->second;
+    if (scan.StaleResponsesToDiscard > 0)
+    {
+        scan.StaleResponsesToDiscard--;
+        return true;
+    }
+    if (scan.Active == false || scan.AwaitingResponse == false)
+        return false;
+    scan.AwaitingResponse = false;
+
+    // Names cost more to build than everything else here put together, so they are only built when the search or the sort actually reads them
+    bool needsItemNames = scan.SearchInfo.wsearchedname.empty() == false;
+    bool needsOwnerNames = false;
+    for (uint32 sortIndex = 0; sortIndex < scan.SearchInfo.sorting.size(); ++sortIndex)
+    {
+        if (scan.SearchInfo.sorting[sortIndex].sortOrder == AUCTION_SORT_ITEM)
+            needsItemNames = true;
+        if (scan.SearchInfo.sorting[sortIndex].sortOrder == AUCTION_SORT_OWNER)
+            needsOwnerNames = true;
+    }
+
+    vector<EverQuestAuctionScanRow> keptRows;
+    WorldPacket packetCopy(packet);
+    packetCopy.rpos(0);
+    try
+    {
+        uint32 entryCount = 0;
+        packetCopy >> entryCount;
+
+        // Anything not shaped like the searcher output is not an answer this scan can use
+        if (packetCopy.size() != 4 + (entryCount * AuctionEntrySizeInBytes) + 4 + 4)
+        {
+            scan.Active = false;
+            return false;
+        }
+
+        keptRows.reserve(entryCount / 4);
+        for (uint32 entryIndex = 0; entryIndex < entryCount; ++entryIndex)
+        {
+            size_t entryStartPos = packetCopy.rpos();
+            EverQuestAuctionScanRow row;
+            uint32 auctionID = 0;
+            uint32 unusedValue = 0;
+            ObjectGuid bidderGUID;
+            packetCopy >> auctionID;
+            packetCopy >> row.ItemTemplateID;
+            for (uint8 enchantSlot = 0; enchantSlot < MAX_INSPECTED_ENCHANTMENT_SLOT; ++enchantSlot)
+                packetCopy >> unusedValue >> unusedValue >> unusedValue;
+            packetCopy >> row.RandomPropertyID;
+            packetCopy >> unusedValue;                      // Suffix factor
+            packetCopy >> row.StackCount;
+            packetCopy >> unusedValue;                      // Spell charges
+            packetCopy >> unusedValue;                      // Flags
+            packetCopy >> row.OwnerGUID;
+            packetCopy >> row.StartBid;
+            packetCopy >> unusedValue;                      // Minimum outbid
+            packetCopy >> row.Buyout;
+            packetCopy >> row.TimeLeftInMS;
+            packetCopy >> bidderGUID;
+            packetCopy >> row.Bid;
+            row.BidderGUIDCounter = bidderGUID.GetCounter();
+
+            row.ItemTemplateData = sObjectMgr->GetItemTemplate(row.ItemTemplateID);
+            if (row.ItemTemplateData == nullptr)
+                continue;
+            if (scan.ApplyEQClassFilter == true && IsItemEQClassAllowedForClassBits(row.ItemTemplateID, scan.EQClassBits, scan.EQClassBitsKnown) == false)
+                continue;
+            if (scan.ApplyRealmFilter == true && IsItemAllowedByAuctionRealmFilter(scan.RealmFilter, row.ItemTemplateID) == false)
+                continue;
+            if (needsItemNames == true)
+                BuildAuctionScanRowItemName(row, scan.PlayerInfo.loc_idx, scan.PlayerInfo.locdbc_idx);
+            if (DoesAuctionScanRowPassSearch(row, scan.SearchInfo, scan.PlayerInfo) == false)
+                continue;
+            if (needsOwnerNames == true)
+                sCharacterCache->GetCharacterNameByGuid(row.OwnerGUID, row.OwnerName);
+
+            row.EntryData = string(reinterpret_cast<const char*>(packetCopy.contents()) + entryStartPos, AuctionEntrySizeInBytes);
+            keptRows.push_back(std::move(row));
+        }
+    }
+    catch (ByteBufferException const&)
+    {
+        scan.Active = false;
+        return false;
+    }
+
+    if (scan.SearchInfo.sorting.empty() == false)
+    {
+        EverQuestAuctionScanRowSorter sorter(&scan.SearchInfo.sorting);
+        std::sort(keptRows.begin(), keptRows.end(), sorter);
+    }
+
+    scan.KeptEntries.clear();
+    scan.KeptEntries.reserve(keptRows.size());
+    for (uint32 rowIndex = 0; rowIndex < keptRows.size(); ++rowIndex)
+        scan.KeptEntries.push_back(std::move(keptRows[rowIndex].EntryData));
+    scan.ResultsReady = true;
+
+    WorldPacket resultPacket;
+    BuildAuctionScanResultPacket(scan, resultPacket);
+    scanLock.unlock();
+
+    SendAuctionScanResultPacket(session, resultPacket);
+    return true;
+}
+
+// Used for a "get all" scan
+bool EverQuestMod::BuildFilteredAuctionListPacket(Player* player, WorldPacket const& packet, bool applyEQClassFilter, const EverQuestAuctionRealmFilter* realmFilter, WorldPacket& filteredPacket)
+{
+    static const size_t auctionEntrySizeInBytes = AuctionEntrySizeInBytes;
+
+    // Worked out once rather than per row: the per player form of this test takes a lock and can go to the database, and a "get all" answer can run to tens of thousands of rows
+    uint32 eqClassBits = 0;
+    bool eqClassBitsKnown = false;
+    if (applyEQClassFilter == true)
+        eqClassBitsKnown = TryGetEQClassFilterBitsForPlayer(player, eqClassBits);
 
     WorldPacket packetCopy(packet);
     packetCopy.rpos(0);
@@ -2493,7 +3284,12 @@ bool EverQuestMod::BuildEQClassFilteredAuctionListPacket(Player* player, WorldPa
             packetCopy >> auctionID;
             packetCopy >> itemTemplateID;
             packetCopy.rpos(entryStartPos + auctionEntrySizeInBytes);
-            if (IsItemEQClassAllowedForPlayer(player, itemTemplateID) == true)
+            bool keepEntry = true;
+            if (applyEQClassFilter == true && IsItemEQClassAllowedForClassBits(itemTemplateID, eqClassBits, eqClassBitsKnown) == false)
+                keepEntry = false;
+            if (keepEntry == true && realmFilter != nullptr && IsItemAllowedByAuctionRealmFilter(*realmFilter, itemTemplateID) == false)
+                keepEntry = false;
+            if (keepEntry == true)
             {
                 keptEntryData.append(packetCopy.contents() + entryStartPos, auctionEntrySizeInBytes);
                 keptEntryCount++;
