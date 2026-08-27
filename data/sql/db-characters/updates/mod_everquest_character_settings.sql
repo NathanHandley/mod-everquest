@@ -1,4 +1,4 @@
-CREATE TABLE IF NOT EXISTS `mod_everquest_character_settings` (
+﻿CREATE TABLE IF NOT EXISTS `mod_everquest_character_settings` (
 	`guid` INT(10) UNSIGNED NOT NULL DEFAULT '0',
 	`currentSecondaryClass` TINYINT(3) UNSIGNED NOT NULL DEFAULT '0',
 	`nextSecondaryClass` TINYINT(3) UNSIGNED NOT NULL DEFAULT '0',
@@ -12,6 +12,7 @@ CREATE TABLE IF NOT EXISTS `mod_everquest_character_settings` (
 	`lastgatePosY` FLOAT NULL DEFAULT NULL,
 	`lastgatePosZ` FLOAT NULL DEFAULT NULL,
 	`lastgateOrientation` FLOAT NULL DEFAULT NULL,
+	`lastgateInstanceId` INT(10) UNSIGNED NULL DEFAULT NULL,
 	`homebindMapId` SMALLINT(5) UNSIGNED NULL DEFAULT NULL,
 	`homebindZoneId` SMALLINT(5) UNSIGNED NULL DEFAULT NULL,
 	`homebindPosX` FLOAT NULL DEFAULT NULL,

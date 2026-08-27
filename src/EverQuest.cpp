@@ -225,6 +225,10 @@ bool EverQuestMod::LoadConfigurationSystemDataFromDB()
                 ConfigSystemRaidBossRespawnVarianceInSec = (uint32)atoi(value.c_str());
             else if (key == "RaidMiniBossRespawnVarianceInSec")
                 ConfigSystemRaidMiniBossRespawnVarianceInSec = (uint32)atoi(value.c_str());
+            else if (key == "CompleteHealExhaustionSpellID")
+                ConfigSystemCompleteHealExhaustionSpellID = (uint32)atoi(value.c_str());
+            else if (key == "CompleteHealExhaustionManaCostPercentPerStack")
+                ConfigSystemCompleteHealExhaustionManaCostPercentPerStack = (uint32)atoi(value.c_str());
             else if (key == "IllusionObjectMaxDistance")
                 ConfigSystemIllusionObjectMaxDistance = (float)atof(value.c_str());
             else if (key == "IllusionObjectTreeMaxDistance")

@@ -1176,6 +1176,8 @@ public:
     uint32 ConfigSystemAgileFighterCombatExpertSpellID;
     uint32 ConfigSystemRaidBossRespawnVarianceInSec;
     uint32 ConfigSystemRaidMiniBossRespawnVarianceInSec = 0;
+    uint32 ConfigSystemCompleteHealExhaustionSpellID = 0;
+    uint32 ConfigSystemCompleteHealExhaustionManaCostPercentPerStack = 0;
     float ConfigSystemIllusionObjectMaxDistance = 0;
     float ConfigSystemIllusionObjectTreeMaxDistance = 0;
     uint32 ConfigSystemClientDataVersion = 0;
