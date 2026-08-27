@@ -527,6 +527,18 @@ public:
     bool EnforceUniqueSpawn = false;
 };
 
+class EverQuestPendingGateReturn
+{
+public:
+    ObjectGuid PlayerGUID;
+    uint32 MapID = 0;
+    uint32 InstanceID = 0;
+    float PositionX = 0;
+    float PositionY = 0;
+    float PositionZ = 0;
+    float Orientation = 0;
+};
+
 class EverQuestLoadedCreatureEquippedVisualItems
 {
 public:
@@ -1292,6 +1304,8 @@ public:
     unordered_map<uint64, vector<ObjectGuid::LowType>> ReactionSpawnedCreatureSpawnIDsByMapInstanceKey;
     vector<ObjectGuid::LowType> ReactionSpawnedCreatureSpawnIDsPendingGridRemoval;
     vector<EverQuestPendingReactionSpawn> ReactionSpawnsPendingCreation;
+    std::mutex PendingGateReturnsMutex;
+    vector<EverQuestPendingGateReturn> PendingGateReturns;
     std::atomic<uint32> ReactionSpawnedCreatureCount{ 0 };
     unordered_map<uint64, vector<EverQuestTriggeredQuestKillSpawn>> TriggeredQuestKillSpawnsByMapInstanceKey;
     unordered_map<uint32, EverQuestItemTemplate> ItemTemplatesByEntryID;
@@ -1669,6 +1683,12 @@ public:
 
     void StorePositionAsLastGate(Player* player);
     void SendPlayerToLastGate(Player* player);
+    void QueuePendingGateReturn(Player* player, uint32 mapID, uint32 instanceID, float x, float y, float z, float orientation);
+    void ClearPendingGateReturnForPlayer(ObjectGuid playerGUID);
+    void ProcessPendingGateReturns();
+    void ExecuteGateReturn(const EverQuestPendingGateReturn& pendingGateReturn);
+    bool IsGateReturnInstanceStillAvailableForPlayer(Player* player, uint32 mapID, uint32 instanceID);
+    void SendPlayerToGateReturnFallback(Player* player, uint32 mapID, float x, float y, float z, float orientation);
     bool TryGetEQBindHomePosition(Player* player, uint32& mapIDOut, float& xOut, float& yOut, float& zOut);
     void SendPlayerToEQBindHome(Player* player);
     void SetNewBindHome(Player* player);

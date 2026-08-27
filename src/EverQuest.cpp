@@ -18,6 +18,7 @@
 #include "Chat.h"
 #include "GameEventMgr.h"
 #include "GameGraveyard.h"
+#include "InstanceSaveMgr.h"
 #include "Group.h"
 #include "Creature.h"
 #include "CreatureAI.h"
@@ -8904,15 +8905,21 @@ void EverQuestMod::StorePositionAsLastGate(Player* player)
     int zoneID = player->GetAreaId();
     uint32 guidCounter = player->GetGUID().GetCounter();
 
+    // Gates inside instances can only be returned to while the copy still exists (open world map will be zero here)
+    uint32 instanceID = player->GetMap()->GetInstanceId();
+
     // Upsert only the last-gate columns so the class-controller and home-bind data sharing this row is preserved
-    CharacterDatabase.Execute("INSERT INTO `mod_everquest_character_settings` (`guid`, `lastgateMapId`, `lastgateZoneId`, `lastgatePosX`, `lastgatePosY`, `lastgatePosZ`, `lastgateOrientation`) VALUES ({}, {}, {}, {}, {}, {}, {}) "
-        "ON DUPLICATE KEY UPDATE `lastgateMapId` = {}, `lastgateZoneId` = {}, `lastgatePosX` = {}, `lastgatePosY` = {}, `lastgatePosZ` = {}, `lastgateOrientation` = {}",
-        guidCounter, mapID, zoneID, playerX, playerY, playerZ, playerOrientation,
-        mapID, zoneID, playerX, playerY, playerZ, playerOrientation);
+    CharacterDatabase.Execute("INSERT INTO `mod_everquest_character_settings` (`guid`, `lastgateMapId`, `lastgateZoneId`, `lastgatePosX`, `lastgatePosY`, `lastgatePosZ`, `lastgateOrientation`, `lastgateInstanceId`) VALUES ({}, {}, {}, {}, {}, {}, {}, {}) "
+        "ON DUPLICATE KEY UPDATE `lastgateMapId` = {}, `lastgateZoneId` = {}, `lastgatePosX` = {}, `lastgatePosY` = {}, `lastgatePosZ` = {}, `lastgateOrientation` = {}, `lastgateInstanceId` = {}",
+        guidCounter, mapID, zoneID, playerX, playerY, playerZ, playerOrientation, instanceID,
+        mapID, zoneID, playerX, playerY, playerZ, playerOrientation, instanceID);
 }
 
 void EverQuestMod::SendPlayerToLastGate(Player* player)
 {
+    if (player == nullptr || player->GetSession() == nullptr)
+        return;
+
     // Fail if in combat
     if (player->IsInCombat() == true)
     {
@@ -8921,7 +8928,7 @@ void EverQuestMod::SendPlayerToLastGate(Player* player)
     }
 
     // Pull the last gate position
-    QueryResult queryResult = CharacterDatabase.Query("SELECT lastgateMapId, lastgateZoneId, lastgatePosX, lastgatePosY, lastgatePosZ, lastgateOrientation FROM mod_everquest_character_settings WHERE guid = {} AND lastgateMapId IS NOT NULL", player->GetGUID().GetCounter());
+    QueryResult queryResult = CharacterDatabase.Query("SELECT lastgateMapId, lastgateZoneId, lastgatePosX, lastgatePosY, lastgatePosZ, lastgateOrientation, lastgateInstanceId FROM mod_everquest_character_settings WHERE guid = {} AND lastgateMapId IS NOT NULL", player->GetGUID().GetCounter());
     if (!queryResult || queryResult->GetRowCount() == 0)
     {
         ChatHandler(player->GetSession()).PSendSysMessage("No tethered gate could be found. Spell failed.");
@@ -8937,8 +8944,141 @@ void EverQuestMod::SendPlayerToLastGate(Player* player)
     float posZ = fields[4].Get<float>();
     float orientation = fields[5].Get<float>();
 
+    // A row written before the gate remembered its instance has a null here, which reads back as zero and is treated as a copy that is gone
+    uint32 instanceId = fields[6].Get<uint32>();
+
+    MapEntry const* mapEntry = sMapStore.LookupEntry(mapId);
+    if (mapEntry == nullptr)
+    {
+        ChatHandler(player->GetSession()).PSendSysMessage("No tethered gate could be found. Spell failed.");
+        return;
+    }
+
+    // Returning to an instance needs to be queued because of map threading
+    if (mapEntry->Instanceable() == true)
+    {
+        QueuePendingGateReturn(player, mapId, instanceId, posX, posY, posZ, orientation);
+        return;
+    }
+
     // Teleport the player
     player->TeleportTo({ mapId, {posX, posY, posZ, orientation} });
+}
+
+void EverQuestMod::QueuePendingGateReturn(Player* player, uint32 mapID, uint32 instanceID, float x, float y, float z, float orientation)
+{
+    EverQuestPendingGateReturn pendingGateReturn;
+    pendingGateReturn.PlayerGUID = player->GetGUID();
+    pendingGateReturn.MapID = mapID;
+    pendingGateReturn.InstanceID = instanceID;
+    pendingGateReturn.PositionX = x;
+    pendingGateReturn.PositionY = y;
+    pendingGateReturn.PositionZ = z;
+    pendingGateReturn.Orientation = orientation;
+
+    std::lock_guard<std::mutex> lock(PendingGateReturnsMutex);
+
+    // Nothing stops the tether aura being cancelled more than once before the world update runs, and that must not queue a second teleport
+    for (EverQuestPendingGateReturn& existingGateReturn : PendingGateReturns)
+    {
+        if (existingGateReturn.PlayerGUID == pendingGateReturn.PlayerGUID)
+        {
+            existingGateReturn = pendingGateReturn;
+            return;
+        }
+    }
+    PendingGateReturns.push_back(pendingGateReturn);
+}
+
+void EverQuestMod::ClearPendingGateReturnForPlayer(ObjectGuid playerGUID)
+{
+    std::lock_guard<std::mutex> lock(PendingGateReturnsMutex);
+    for (auto pendingGateReturnIter = PendingGateReturns.begin(); pendingGateReturnIter != PendingGateReturns.end(); ++pendingGateReturnIter)
+    {
+        if (pendingGateReturnIter->PlayerGUID == playerGUID)
+        {
+            PendingGateReturns.erase(pendingGateReturnIter);
+            return;
+        }
+    }
+}
+
+void EverQuestMod::ProcessPendingGateReturns()
+{
+    vector<EverQuestPendingGateReturn> gateReturnsToExecute;
+    {
+        std::lock_guard<std::mutex> lock(PendingGateReturnsMutex);
+        if (PendingGateReturns.empty() == true)
+            return;
+        gateReturnsToExecute.swap(PendingGateReturns);
+    }
+
+    // Teleporting reaches back into the maps and the instance bindings, so none of it runs while holding the lock
+    for (const EverQuestPendingGateReturn& pendingGateReturn : gateReturnsToExecute)
+        ExecuteGateReturn(pendingGateReturn);
+}
+
+void EverQuestMod::ExecuteGateReturn(const EverQuestPendingGateReturn& pendingGateReturn)
+{
+    // The character can log out, or be part way through another teleport, between cancelling the tether and this update
+    Player* player = ObjectAccessor::FindConnectedPlayer(pendingGateReturn.PlayerGUID);
+    if (player == nullptr || player->IsInWorld() == false || player->GetSession() == nullptr)
+        return;
+
+    if (IsGateReturnInstanceStillAvailableForPlayer(player, pendingGateReturn.MapID, pendingGateReturn.InstanceID) == false)
+    {
+        SendPlayerToGateReturnFallback(player, pendingGateReturn.MapID, pendingGateReturn.PositionX, pendingGateReturn.PositionY, pendingGateReturn.PositionZ, pendingGateReturn.Orientation);
+        return;
+    }
+
+    player->TeleportTo({ pendingGateReturn.MapID, { pendingGateReturn.PositionX, pendingGateReturn.PositionY, pendingGateReturn.PositionZ, pendingGateReturn.Orientation } });
+}
+
+bool EverQuestMod::IsGateReturnInstanceStillAvailableForPlayer(Player* player, uint32 mapID, uint32 instanceID)
+{
+    // A gate stored before the instance was tracked, or one taken on a map that turned out not to be instanced, has no copy to go back to
+    if (instanceID == 0)
+        return false;
+
+    MapEntry const* mapEntry = sMapStore.LookupEntry(mapID);
+    if (mapEntry == nullptr)
+        return false;
+
+    // Battlegrounds and arenas are placed by battleground ID rather than by an instance binding, and a gate tether has no meaning inside one
+    if (mapEntry->IsBattlegroundOrArena() == true)
+        return false;
+
+    // Standing in the zone already makes this a same-map teleport, which stays inside the current copy no matter what the binding says.  Without this check a
+    // character could gate at a boss, take a fresh copy of the zone, walk in the front door and then cancel the tether to skip straight back to the boss
+    if (player->GetMapId() == mapID)
+        return player->GetInstanceId() == instanceID;
+
+    // This is the same lookup MapInstanced::CreateInstanceForPlayer performs to decide which copy of the map to place the character in
+    return sInstanceSaveMgr->PlayerGetDestinationInstanceId(player, mapID, player->GetDifficulty(mapEntry->IsRaid())) == instanceID;
+}
+
+void EverQuestMod::SendPlayerToGateReturnFallback(Player* player, uint32 mapID, float x, float y, float z, float orientation)
+{
+    // An EverQuest dungeon or raid instance is a clone of an open world zone, so the shared version of that zone is where the tether lands instead and the position held onto is a valid one over there
+    uint32 openWorldMapID = GetOpenWorldMapIDForMapID(mapID);
+    if (openWorldMapID != mapID)
+    {
+        ChatHandler(player->GetSession()).PSendSysMessage("The private copy of the zone you gated from is gone, so your tether pulled you into the shared version of it.");
+        player->TeleportTo({ openWorldMapID, { x, y, z, orientation } });
+        return;
+    }
+
+    // A stock WoW instance has no shared version to fall back on, so the tether reaches no further than the normal way in
+    AreaTriggerTeleport const* entranceTeleport = sObjectMgr->GetMapEntranceTrigger(mapID);
+    if (entranceTeleport != nullptr && entranceTeleport->target_mapId == mapID)
+    {
+        ChatHandler(player->GetSession()).PSendSysMessage("The instance you gated from has been reset, so your tether pulled you to its entrance.");
+        player->TeleportTo(entranceTeleport->target_mapId, entranceTeleport->target_X, entranceTeleport->target_Y, entranceTeleport->target_Z, entranceTeleport->target_Orientation);
+        return;
+    }
+
+    // Nothing safe to aim at, so the tether fails outright rather than dropping the character somewhere unknown
+    ChatHandler(player->GetSession()).PSendSysMessage("Your gate tether broke, as the instance it was anchored to no longer exists.");
 }
 
 // Reads the EverQuest bind point, returning false when the player has never bound in Norrath
@@ -9008,7 +9148,7 @@ void EverQuestMod::DeletePlayerBindHome(ObjectGuid guid)
     // Clear only the home-bind and last-gate columns. The class-controller data sharing this row is left intact
     CharacterDatabase.Execute("UPDATE `mod_everquest_character_settings` SET "
         "`homebindMapId` = NULL, `homebindZoneId` = NULL, `homebindPosX` = NULL, `homebindPosY` = NULL, `homebindPosZ` = NULL, "
-        "`lastgateMapId` = NULL, `lastgateZoneId` = NULL, `lastgatePosX` = NULL, `lastgatePosY` = NULL, `lastgatePosZ` = NULL, `lastgateOrientation` = NULL "
+        "`lastgateMapId` = NULL, `lastgateZoneId` = NULL, `lastgatePosX` = NULL, `lastgatePosY` = NULL, `lastgatePosZ` = NULL, `lastgateOrientation` = NULL, `lastgateInstanceId` = NULL "
         "WHERE guid = {}", guid.GetCounter());
 }
 

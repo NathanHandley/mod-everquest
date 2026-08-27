@@ -799,6 +799,9 @@ public:
         // Stop counting the character as being inside a raid instance
         EverQuest->ClearRaidLowInstanceStateForPlayer(player->GetGUID());
 
+        // A gate tether cancelled on the very tick the character logged out has nothing left to teleport
+        EverQuest->ClearPendingGateReturnForPlayer(player->GetGUID());
+
         // Don't leave a swapped native display behind (it is not saved, but the tracking entry must not linger)
         EverQuest->RestoreNativeDisplayAfterCorpseIllusion(player);
 

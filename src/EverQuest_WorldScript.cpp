@@ -92,6 +92,7 @@ public:
         EverQuest->UpdateRestrictedMapPlayerCheck(diff);
         EverQuest->UpdateClientVersionChecks(diff);
         EverQuest->ProcessPendingEquipmentStorageTransactions();
+        EverQuest->ProcessPendingGateReturns();
         EverQuest->ProcessPendingReactionSpawnCreations();
         EverQuest->ProcessPendingReactionSpawnGridRemovals();
     }
