@@ -1287,7 +1287,9 @@ public:
     unordered_set<uint32> CrossClassExemptSpellIDs;
     unordered_set<uint32> RacialSpellIDs;
     unordered_set<uint32> DeathKnightSpellIDs;
+    unordered_map<uint32, uint8> DeathKnightSpellMinLevelBySpellID;
     bool CrossClassExemptSpellIDsBuilt;
+    std::mutex CrossClassExemptSpellIDsMutex;
 
     // Guards the runtime state containers (the trackers keyed by creature/player GUID below). Maps update on parallel
     // worker threads, so any insert/erase/find on these must hold this lock. Never hold it across engine calls
@@ -1806,11 +1808,12 @@ public:
     bool DoesSavedClassDataExistForPlayer(Player* player, uint8 lookupClass);
     void CopyCharacterDataIntoModCharacterTable(Player* player, CharacterDatabaseTransaction& transaction);
     void MoveTalentsToModTalentsTable(Player* player, CharacterDatabaseTransaction& transaction);
-    void MoveClassSpellsToModSpellsTable(Player* player, CharacterDatabaseTransaction& transaction);
+    void MoveClassSpellsToModSpellsTable(Player* player, CharacterDatabaseTransaction& transaction, uint8 nextClassLevel);
     void EnsureCrossClassExemptSpellIDsBuilt();
     bool IsRacialSkillID(uint32 skillID);
     bool IsDeathKnightSkillID(uint32 skillID);
-    bool IsSpellExemptFromClassMove(uint32 spellID);
+    void BuildDeathKnightSpellMinLevels(const unordered_set<uint32>& autoGrantedSpellIDs);
+    bool IsSpellExemptFromClassMove(uint32 spellID, uint8 nextClassLevel);
     bool IsSkillExemptFromClassMove(uint32 skillID);
     void MoveClassSkillsToModSkillsTable(Player* player, CharacterDatabaseTransaction& transaction);
     void ReplaceModClassActionCopy(Player* player, CharacterDatabaseTransaction& transaction);

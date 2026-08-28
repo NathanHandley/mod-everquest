@@ -440,11 +440,15 @@ void EverQuestMod::LoadConfigurationFile()
     // Cross-Class values
     ConfigCrossClassIncludeSkillIDs = GetSetFromConfigString("EverQuest.CrossClass.IncludeSkillIDs");
 
-    // The cross-class exempt spell cache derives from the skill list above, and is built alongside the racial and death knight spell caches
-    CrossClassExemptSpellIDs.clear();
-    RacialSpellIDs.clear();
-    DeathKnightSpellIDs.clear();
-    CrossClassExemptSpellIDsBuilt = false;
+    // The cross-class exempt spell cache derives from the skill list above, and is built alongside the racial and death knight spell caches.  A live ".reload config" lands here on the world thread while a map thread could be reading them
+    {
+        std::lock_guard<std::mutex> lock(CrossClassExemptSpellIDsMutex);
+        CrossClassExemptSpellIDs.clear();
+        RacialSpellIDs.clear();
+        DeathKnightSpellIDs.clear();
+        DeathKnightSpellMinLevelBySpellID.clear();
+        CrossClassExemptSpellIDsBuilt = false;
+    }
 }
 
 void EverQuestMod::LoadCreatureData()
@@ -3339,7 +3343,6 @@ void EverQuestMod::LoadSpellData()
 {
     SpellDataBySpellID.clear();
     BardSongTickSpellIDs.clear();
-    QueryResult queryResult = WorldDatabase.Query("SELECT SpellID, AuraDurationBaseInMS, AuraDurationAddPerLevelInMS, AuraDurationMaxInMS, AuraDurationCalcMinLevel, AuraDurationCalcMaxLevel, RecourseSpellID, SpellIDCastOnMeleeAttacker, FocusBoostType, PeriodicAuraSpellID, PeriodicAuraSpellRadius, MaleFormSpellID, FemaleFormSpellID, EffectFailChancePercent, EffectFailableType, StunUsesBashKickChance, SpellIDCastOnTargetWhenStunLands, AuraStaysOnSecondaryClassSwitch, MinTargetLevel, MaxCreatureTargetLevel, ResistDiff, HasteType, ModFactionRepValue, IllusionFormAlignment, IllusionFormEQRaceID, PersistOnClassChange FROM mod_everquest_spell ORDER BY SpellID;");
     QueryResult queryResult = WorldDatabase.Query("SELECT SpellID, AuraDurationBaseInMS, AuraDurationAddPerLevelInMS, AuraDurationMaxInMS, AuraDurationCalcMinLevel, AuraDurationCalcMaxLevel, RecourseSpellID, SpellIDCastOnMeleeAttacker, FocusBoostType, PeriodicAuraSpellID, PeriodicAuraSpellRadius, MaleFormSpellID, FemaleFormSpellID, EffectFailChancePercent, EffectFailableType, StunUsesBashKickChance, SpellIDCastOnTargetWhenStunLands, AuraStaysOnSecondaryClassSwitch, MinTargetLevel, MaxCreatureTargetLevel, ResistDiff, HasteType, ModFactionRepValue, IllusionFormAlignment, IllusionFormEQRaceID, PersistOnClassChange, IllusionObjectClass FROM mod_everquest_spell ORDER BY SpellID;");
     if (queryResult)
     {
@@ -11050,11 +11053,12 @@ bool EverQuestMod::IsRacialSkillID(uint32 skillID)
 
 void EverQuestMod::EnsureCrossClassExemptSpellIDsBuilt()
 {
+    std::lock_guard<std::mutex> lock(CrossClassExemptSpellIDsMutex);
     if (CrossClassExemptSpellIDsBuilt == true)
         return;
-    CrossClassExemptSpellIDsBuilt = true;
 
     // Cache every spell that is tied to a cross-class skill, a racial skill line, or a death knight skill line, so that they don't wipe on secondary class switch
+    unordered_set<uint32> deathKnightAutoGrantedSpellIDs;
     for (SkillLineAbilityEntry const* skillLineAbility : sSkillLineAbilityStore)
     {
         if (skillLineAbility == nullptr)
@@ -11064,7 +11068,75 @@ void EverQuestMod::EnsureCrossClassExemptSpellIDsBuilt()
         if (IsRacialSkillID(skillLineAbility->SkillLine) == true)
             RacialSpellIDs.insert(skillLineAbility->Spell);
         if (IsDeathKnightSkillID(skillLineAbility->SkillLine) == true)
+        {
             DeathKnightSpellIDs.insert(skillLineAbility->Spell);
+            if (skillLineAbility->AcquireMethod != 0)
+                deathKnightAutoGrantedSpellIDs.insert(skillLineAbility->Spell);
+        }
+    }
+
+    BuildDeathKnightSpellMinLevels(deathKnightAutoGrantedSpellIDs);
+    CrossClassExemptSpellIDsBuilt = true;
+}
+
+void EverQuestMod::BuildDeathKnightSpellMinLevels(const unordered_set<uint32>& autoGrantedSpellIDs)
+{
+    DeathKnightSpellMinLevelBySpellID.clear();
+
+    // Pull the trainer ladder levels, taking the lowest when a spell is sold by more than one trainer
+    unordered_map<uint32, uint32> trainerMinLevelBySpellID;
+    QueryResult trainerSpellQueryResult = WorldDatabase.Query("SELECT SpellId, ReqLevel FROM trainer_spell");
+    if (!trainerSpellQueryResult)
+        LOG_ERROR("module.EverQuest", "EverQuestMod could not read trainer_spell, so death knight ability levels fall back to what Spell.dbc reports");
+    else
+    {
+        do
+        {
+            Field* fields = trainerSpellQueryResult->Fetch();
+            uint32 trainerSpellID = fields[0].Get<uint32>();
+            uint32 trainerReqLevel = fields[1].Get<uint8>();
+            if (DeathKnightSpellIDs.find(trainerSpellID) == DeathKnightSpellIDs.end())
+                continue;
+            auto trainerMinLevelItr = trainerMinLevelBySpellID.find(trainerSpellID);
+            if (trainerMinLevelItr == trainerMinLevelBySpellID.end() || trainerReqLevel < trainerMinLevelItr->second)
+                trainerMinLevelBySpellID[trainerSpellID] = trainerReqLevel;
+        } while (trainerSpellQueryResult->NextRow());
+    }
+
+    for (uint32 deathKnightSpellID : DeathKnightSpellIDs)
+    {
+        // A level of zero means the ability always follows the character
+        if (autoGrantedSpellIDs.find(deathKnightSpellID) != autoGrantedSpellIDs.end())
+        {
+            DeathKnightSpellMinLevelBySpellID[deathKnightSpellID] = 0;
+            continue;
+        }
+
+        // A talent ability is paid for with talent points, and talent points already reset on a class switch, so it can never be allowed to outlive them no matter what level the destination class is
+        if (GetTalentSpellCost(deathKnightSpellID) > 0)
+        {
+            DeathKnightSpellMinLevelBySpellID[deathKnightSpellID] = std::numeric_limits<uint8>::max();
+            continue;
+        }
+
+        uint32 minimumLevel = 0;
+        auto trainerMinLevelItr = trainerMinLevelBySpellID.find(deathKnightSpellID);
+        if (trainerMinLevelItr != trainerMinLevelBySpellID.end())
+            minimumLevel = trainerMinLevelItr->second;
+
+        // Spell.dbc is only a floor under the trainer level, since the low level death knight rebalance deliberately zeroes BaseLevel and SpellLevel on every ability it rescales
+        SpellInfo const* spellInfo = sSpellMgr->GetSpellInfo(deathKnightSpellID);
+        if (spellInfo != nullptr)
+        {
+            if (spellInfo->BaseLevel > minimumLevel)
+                minimumLevel = spellInfo->BaseLevel;
+            if (spellInfo->SpellLevel > minimumLevel)
+                minimumLevel = spellInfo->SpellLevel;
+        }
+
+        if (minimumLevel > (uint32)std::numeric_limits<uint8>::max())
+            minimumLevel = std::numeric_limits<uint8>::max();
+        DeathKnightSpellMinLevelBySpellID[deathKnightSpellID] = (uint8)minimumLevel;
     }
 }
 
@@ -11083,13 +11155,14 @@ bool EverQuestMod::IsDeathKnightSkillID(uint32 skillID)
     }
 }
 
-bool EverQuestMod::IsSpellExemptFromClassMove(uint32 spellID)
+bool EverQuestMod::IsSpellExemptFromClassMove(uint32 spellID, uint8 nextClassLevel)
 {
-    // Death Knight abilities belong to the fixed WoW class rather than the active EQ secondary class, so persist across switches
+    // Death Knight abilities belong to the fixed WoW class rather than the active EQ secondary class, so they persist across switches
     if (spellID == EQ_DEATHKNIGHT_DEATHGATE_SPELL_ID || spellID == EQ_DEATHKNIGHT_RUNEFORGING_SPELL_ID)
         return true;
-    if (DeathKnightSpellIDs.find(spellID) != DeathKnightSpellIDs.end())
-        return true;
+    auto deathKnightSpellMinLevelItr = DeathKnightSpellMinLevelBySpellID.find(spellID);
+    if (deathKnightSpellMinLevelItr != DeathKnightSpellMinLevelBySpellID.end())
+        return deathKnightSpellMinLevelItr->second <= nextClassLevel;
 
     // Racial abilities are a property of the character's race, so they follow the character and not the active secondary class
     if (RacialSpellIDs.find(spellID) != RacialSpellIDs.end())
@@ -11133,7 +11206,7 @@ bool EverQuestMod::IsSpellExemptFromClassMove(uint32 spellID)
     return false;
 }
 
-void EverQuestMod::MoveClassSpellsToModSpellsTable(Player* player, CharacterDatabaseTransaction& transaction)
+void EverQuestMod::MoveClassSpellsToModSpellsTable(Player* player, CharacterDatabaseTransaction& transaction, uint8 nextClassLevel)
 {
     uint8 curEQClass = GetCurrentSecondEQClassForPlayer(player);
 
@@ -11144,9 +11217,10 @@ void EverQuestMod::MoveClassSpellsToModSpellsTable(Player* player, CharacterData
     transaction->Append("DELETE FROM `mod_everquest_character_class_spell` WHERE guid = {} and eqclass = {}", player->GetGUID().GetCounter(), curEQClass);
 
     // Move class spells (including EverQuest spells) from the character table into the mod table
+    std::lock_guard<std::mutex> lock(CrossClassExemptSpellIDsMutex);
     for (auto& curSpell : player->GetSpellMap())
     {
-        if (IsSpellExemptFromClassMove(curSpell.first) == true)
+        if (IsSpellExemptFromClassMove(curSpell.first, nextClassLevel) == true)
             continue;
 
         // Special consideration for WoW rogues when it comes to lockpicking
@@ -11532,6 +11606,21 @@ bool EverQuestMod::PerformClassSwitch(Player* player)
     uint8 nextSecondaryEQClass = GetNextSecondEQClassForPlayer(player);
     bool isNew = !DoesSavedClassDataExistForPlayer(player, nextSecondaryEQClass);
 
+    // A brand new secondary class starts at the configured start level, and one that has been played before comes back at the
+    // level it was parked at.  Anything that carries across the switch has to be measured against that level, and not against
+    // the level of the class being left behind
+    uint32 startLevel = player->getClass() != CLASS_DEATH_KNIGHT
+        ? sWorld->getIntConfig(CONFIG_START_PLAYER_LEVEL)
+        : sWorld->getIntConfig(CONFIG_START_HEROIC_PLAYER_LEVEL);
+    uint8 nextClassLevel = (uint8)startLevel;
+    if (isNew == false)
+    {
+        map<uint8, uint8> levelsByEQClass = GetClassLevelsByClassForPlayer(player);
+        auto nextClassLevelItr = levelsByEQClass.find(nextSecondaryEQClass);
+        if (nextClassLevelItr != levelsByEQClass.end())
+            nextClassLevel = nextClassLevelItr->second;
+    }
+
     // Set up the transaction
     CharacterDatabaseTransaction transaction = CharacterDatabase.BeginTransaction();
     AppendCharacterRowLockAnchor(transaction, player->GetGUID().GetCounter());
@@ -11539,7 +11628,7 @@ bool EverQuestMod::PerformClassSwitch(Player* player)
     // Perform moves into the mod tables to reflect this character's class
     CopyCharacterDataIntoModCharacterTable(player, transaction);
     MoveTalentsToModTalentsTable(player, transaction);
-    MoveClassSpellsToModSpellsTable(player, transaction);
+    MoveClassSpellsToModSpellsTable(player, transaction, nextClassLevel);
     MoveClassSkillsToModSkillsTable(player, transaction);
     ReplaceModClassActionCopy(player, transaction);
     MoveGlyphsToModGlyhpsTable(player, transaction);
@@ -11555,11 +11644,6 @@ bool EverQuestMod::PerformClassSwitch(Player* player)
     // New
     if (isNew)
     {
-        // For start level
-        uint32 startLevel = nextSecondaryEQClass != CLASS_DEATH_KNIGHT
-            ? sWorld->getIntConfig(CONFIG_START_PLAYER_LEVEL)
-            : sWorld->getIntConfig(CONFIG_START_HEROIC_PLAYER_LEVEL);
-
         // For health and mana
         PlayerClassLevelInfo classInfo;
         sObjectMgr->GetPlayerClassLevelInfo(player->getClass(), startLevel, &classInfo);
