@@ -195,6 +195,8 @@ struct BuildValuesCachePosPointers;
 #define EQ_QUEST_REACTION_YELL                      7
 #define EQ_QUEST_REACTION_KILLSPAWN                 8
 #define EQ_QUEST_REACTION_WALKTO                    9
+#define EQ_QUEST_REACTION_WALKGRID                  11
+#define EQ_QUEST_REACTION_SPAWNOBJECT               12
 
 #define EQ_KILLSPAWN_ACTION_SPAWN                   0
 #define EQ_KILLSPAWN_ACTION_DESPAWN                 1
@@ -204,8 +206,14 @@ struct BuildValuesCachePosPointers;
 #define EQ_KILLSPAWN_ACTION_EMOTE                   5
 #define EQ_KILLSPAWN_ACTION_YELL                    6
 #define EQ_KILLSPAWN_ACTION_ATTACKPLAYER            7
+#define EQ_KILLSPAWN_ACTION_WALKPATH                8
+#define EQ_KILLSPAWN_ACTION_SPAWNOBJECT             9
 
 #define EQ_REACTION_WALK_TIMEOUT_MS                 120000
+#define EQ_REACTION_WALK_MAX_TIMEOUT_MS             900000
+#define EQ_REACTION_WALK_PATH_JOIN_DISTANCE         40.0f
+#define EQ_REACTION_WALK_HOME_DISTANCE              10.0f
+#define EQ_REACTION_OBJECT_DEFAULT_LIFETIME_SEC     1800
 #define EQ_REACTION_WALK_ARRIVE_DISTANCE            5.0f
 #define EQ_REACTION_WALK_POINT_ID                   9910001
 
@@ -494,6 +502,10 @@ public:
     uint32 RespawnTimeSec = 0;
     vector<ObjectGuid::LowType> RespawnTargetSpawnIDs;
     ObjectGuid KillerGUID;
+    ObjectGuid MoverGUID;
+    uint32 PathListID = 0;
+    uint32 GameObjectEntryID = 0;
+    uint32 GameObjectLifetimeSec = 0;
     string SayText;
     ObjectGuid SpeakerGUID;
     ObjectGuid ListenerGUID;
@@ -513,6 +525,9 @@ public:
     float DestinationOrientation = 0;
     bool HasDestinationOrientation = false;
     uint32 ElapsedMS = 0;
+    uint32 TimeoutMS = EQ_REACTION_WALK_TIMEOUT_MS;
+    uint32 SavedNpcFlags = 0;
+    bool HasSavedNpcFlags = false;
     vector<EverQuestPendingKillSpawnAction> ActionsOnArrival;
 };
 
@@ -830,6 +845,9 @@ public:
     uint32 CreatureTemplateID = 0;
     uint32 QuestgiverCreatureTemplateID = 0;
     uint32 DelayInMS = 0;
+    uint32 PathListID = 0;
+    uint32 GameObjectEntryID = 0;
+    uint32 GameObjectLifetimeSec = 0;
     string SayText;
     bool UseNpcX = false;
     bool UseNpcY = false;
@@ -864,6 +882,14 @@ public:
     float PositionZ = 0;
     float Orientation = 0;
     uint32 DelayInMS = 0;
+    uint32 PathListID = 0;
+    uint32 GameObjectEntryID = 0;
+    uint32 GameObjectLifetimeSec = 0;
+    uint32 RequiredQuestID = 0;
+    float RequiredNearX = 0;
+    float RequiredNearY = 0;
+    float RequiredNearZ = 0;
+    float RequiredNearDistance = 0;
     bool MovementIsRun = false;
     bool FiresOnArrival = false;
 };
@@ -1442,6 +1468,9 @@ public:
     void EnqueuePendingKillSpawnAction(Map* map, EverQuestPendingKillSpawnAction& action);
     void UpdatePendingKillSpawnActions(Map* map, uint32 diff);
     bool StartReactionWalk(Creature* creature, float x, float y, float z, float orientation, bool hasOrientation, bool isRun, vector<EverQuestPendingKillSpawnAction>& actionsOnArrival);
+    bool StartReactionGridWalk(Creature* creature, uint32 pathListID, vector<EverQuestPendingKillSpawnAction>& actionsOnArrival);
+    void SpawnReactionGameObject(Creature* summoner, uint32 gameObjectEntryID, float x, float y, float z, uint32 lifetimeSec);
+    bool DoesPlayerMeetGossipRequirements(Player* player, Creature* creature, const EverQuestGossipReaction& gossipReaction);
     void UpdatePendingArrivalActions(Map* map, uint32 diff);
     bool IsCreatureInReactionWalk(ObjectGuid creatureGUID);
     void SpeakReactionText(Creature* creature, uint8 actionType, const string& text, Player* listener);

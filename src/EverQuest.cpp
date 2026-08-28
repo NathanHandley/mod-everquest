@@ -1856,6 +1856,24 @@ void EverQuestMod::ExecuteKillSpawnAction(Map* map, EverQuestPendingKillSpawnAct
                 }
             }
         } break;
+        case EQ_KILLSPAWN_ACTION_SPAWNOBJECT:
+        {
+            SpawnReactionGameObject(map->GetCreature(action.MoverGUID), action.GameObjectEntryID,
+                action.PositionX, action.PositionY, action.PositionZ, action.GameObjectLifetimeSec);
+        } break;
+        case EQ_KILLSPAWN_ACTION_WALKPATH:
+        {
+            Creature* walker = map->GetCreature(action.MoverGUID);
+            if (walker == nullptr)
+                return;
+            const vector<EverQuestCreatureWaypoint>& pathNodes = GetWaypoints(0, action.PathListID);
+            if (pathNodes.empty() == true)
+                return;
+            if (walker->GetExactDist2d(pathNodes[0].X, pathNodes[0].Y) > EQ_REACTION_WALK_PATH_JOIN_DISTANCE)
+                return;
+            vector<EverQuestPendingKillSpawnAction> noArrivalActions;
+            StartReactionGridWalk(walker, action.PathListID, noArrivalActions);
+        } break;
         case EQ_KILLSPAWN_ACTION_RESPAWNSELF:
         {
             // Copy out the respawning since respawn goes back to engine code and doesn't handle threading well
@@ -2094,13 +2112,19 @@ bool EverQuestMod::StartReactionWalk(Creature* creature, float x, float y, float
     if (creature == nullptr || creature->IsAlive() == false)
         return false;
 
-    // A second walk on the same creature replaces the first, otherwise the two sets of queued actions would race
+    // Talking to a creature makes the core pause its movement before any script gets a say, so a creature on a reaction walk is made non-interactable for the trip and gets its flags back when it arrives
+    uint32 savedNpcFlags = (uint32)creature->GetCreatureTemplate()->npcflag;
     {
         std::lock_guard<std::mutex> lock(PendingArrivalActionsMutex);
         vector<EverQuestPendingArrivalAction>& watchers = PendingArrivalActionsByMapInstanceKey[GetMapInstanceKey(creature->GetMap())];
         for (size_t i = watchers.size(); i > 0; --i)
             if (watchers[i - 1].MoverGUID == creature->GetGUID())
+            {
+                // A walk that replaces another inherits the flags the first one put aside, never the blanked ones
+                if (watchers[i - 1].HasSavedNpcFlags == true)
+                    savedNpcFlags = watchers[i - 1].SavedNpcFlags;
                 watchers.erase(watchers.begin() + (i - 1));
+            }
         ReactionWalkCreatureGUIDs.erase(creature->GetGUID());
 
         EverQuestPendingArrivalAction watcher;
@@ -2110,11 +2134,14 @@ bool EverQuestMod::StartReactionWalk(Creature* creature, float x, float y, float
         watcher.DestinationZ = z;
         watcher.DestinationOrientation = orientation;
         watcher.HasDestinationOrientation = hasOrientation;
+        watcher.SavedNpcFlags = savedNpcFlags;
+        watcher.HasSavedNpcFlags = true;
         watcher.ActionsOnArrival = actionsOnArrival;
         watchers.push_back(watcher);
         ReactionWalkCreatureGUIDs.insert(creature->GetGUID());
         ReactionWalkCreatureCount.store((uint32)ReactionWalkCreatureGUIDs.size());
     }
+    creature->ReplaceAllNpcFlags(UNIT_NPC_FLAG_NONE);
 
     // Take the creature off whatever it was doing so its normal waypoint or roaming generator does not fight the walk
     creature->SetWalk(isRun == false);
@@ -2123,9 +2150,122 @@ bool EverQuestMod::StartReactionWalk(Creature* creature, float x, float y, float
     return true;
 }
 
+void EverQuestMod::SpawnReactionGameObject(Creature* summoner, uint32 gameObjectEntryID, float x, float y, float z, uint32 lifetimeSec)
+{
+    if (summoner == nullptr || gameObjectEntryID == 0)
+        return;
+    if (lifetimeSec == 0)
+        lifetimeSec = EQ_REACTION_OBJECT_DEFAULT_LIFETIME_SEC;
+    summoner->SummonGameObject(gameObjectEntryID, x, y, z, 0, 0, 0, 0, 0, lifetimeSec, true, GO_SUMMON_TIMED_DESPAWN);
+}
+
+bool EverQuestMod::StartReactionGridWalk(Creature* creature, uint32 pathListID, vector<EverQuestPendingKillSpawnAction>& actionsOnArrival)
+{
+    if (creature == nullptr || creature->IsAlive() == false)
+        return false;
+
+    // Reaction path lists live under map 0, since every instance copy of a zone walks the same nodes
+    const vector<EverQuestCreatureWaypoint>& pathNodes = GetWaypoints(0, pathListID);
+    if (pathNodes.size() < 2)
+    {
+        LOG_ERROR("module", "EverQuest: reaction path list {} holds no nodes, so creature {} has nowhere to walk", pathListID, creature->GetEntry());
+        return false;
+    }
+
+    size_t startIndex = 0;
+    float nearestDistanceSquared = -1.0f;
+    for (size_t i = 0; i < pathNodes.size(); i++)
+    {
+        float nodeDeltaX = pathNodes[i].X - creature->GetPositionX();
+        float nodeDeltaY = pathNodes[i].Y - creature->GetPositionY();
+        float nodeDistanceSquared = (nodeDeltaX * nodeDeltaX) + (nodeDeltaY * nodeDeltaY);
+        if (nearestDistanceSquared < 0.0f || nodeDistanceSquared < nearestDistanceSquared)
+        {
+            nearestDistanceSquared = nodeDistanceSquared;
+            startIndex = i;
+        }
+    }
+    if (nearestDistanceSquared > (EQ_REACTION_WALK_PATH_JOIN_DISTANCE * EQ_REACTION_WALK_PATH_JOIN_DISTANCE))
+        startIndex = 0;
+    if (startIndex + 1 >= pathNodes.size())
+        startIndex = 0;
+
+    Movement::PointsArray pathPoints;
+    float travelDistance = 0.0f;
+    float priorX = creature->GetPositionX();
+    float priorY = creature->GetPositionY();
+    float priorZ = creature->GetPositionZ();
+    for (size_t i = startIndex; i < pathNodes.size(); i++)
+    {
+        const EverQuestCreatureWaypoint& pathNode = pathNodes[i];
+        if (pathPoints.empty() == false && pathNode.X == priorX && pathNode.Y == priorY && pathNode.Z == priorZ)
+            continue;
+        pathPoints.push_back(G3D::Vector3(pathNode.X, pathNode.Y, pathNode.Z));
+        float deltaX = pathNode.X - priorX;
+        float deltaY = pathNode.Y - priorY;
+        float deltaZ = pathNode.Z - priorZ;
+        travelDistance += std::sqrt((deltaX * deltaX) + (deltaY * deltaY) + (deltaZ * deltaZ));
+        priorX = pathNode.X;
+        priorY = pathNode.Y;
+        priorZ = pathNode.Z;
+    }
+    if (pathPoints.size() < 2)
+    {
+        LOG_ERROR("module", "EverQuest: reaction path list {} left creature {} with nothing to walk", pathListID, creature->GetEntry());
+        return false;
+    }
+
+    float walkSpeed = creature->GetSpeed(MOVE_WALK);
+    if (walkSpeed < 0.1f)
+        walkSpeed = 0.1f;
+    uint32 timeoutMS = EQ_REACTION_WALK_TIMEOUT_MS + static_cast<uint32>((travelDistance / walkSpeed) * 2000.0f);
+    if (timeoutMS > EQ_REACTION_WALK_MAX_TIMEOUT_MS)
+        timeoutMS = EQ_REACTION_WALK_MAX_TIMEOUT_MS;
+
+    const EverQuestCreatureWaypoint& finalNode = pathNodes[pathNodes.size() - 1];
+
+    // Talking to a creature makes the core pause its movement before any script gets a say, so a creature on a reaction walk is made non-interactable for the trip and gets its flags back when it arrives
+    uint32 savedNpcFlags = (uint32)creature->GetCreatureTemplate()->npcflag;
+    {
+        // A second walk on the same creature replaces the first, otherwise the two sets of queued actions would race
+        std::lock_guard<std::mutex> lock(PendingArrivalActionsMutex);
+        vector<EverQuestPendingArrivalAction>& watchers = PendingArrivalActionsByMapInstanceKey[GetMapInstanceKey(creature->GetMap())];
+        for (size_t i = watchers.size(); i > 0; --i)
+            if (watchers[i - 1].MoverGUID == creature->GetGUID())
+            {
+                // A walk that replaces another inherits the flags the first one put aside, never the blanked ones
+                if (watchers[i - 1].HasSavedNpcFlags == true)
+                    savedNpcFlags = watchers[i - 1].SavedNpcFlags;
+                watchers.erase(watchers.begin() + (i - 1));
+            }
+        ReactionWalkCreatureGUIDs.erase(creature->GetGUID());
+
+        EverQuestPendingArrivalAction watcher;
+        watcher.MoverGUID = creature->GetGUID();
+        watcher.DestinationX = finalNode.X;
+        watcher.DestinationY = finalNode.Y;
+        watcher.DestinationZ = finalNode.Z;
+        watcher.TimeoutMS = timeoutMS;
+        watcher.SavedNpcFlags = savedNpcFlags;
+        watcher.HasSavedNpcFlags = true;
+        watcher.ActionsOnArrival = actionsOnArrival;
+        watchers.push_back(watcher);
+        ReactionWalkCreatureGUIDs.insert(creature->GetGUID());
+        ReactionWalkCreatureCount.store((uint32)ReactionWalkCreatureGUIDs.size());
+    }
+    creature->ReplaceAllNpcFlags(UNIT_NPC_FLAG_NONE);
+
+    // Take the creature off whatever it was doing so its normal waypoint or roaming generator does not fight the walk
+    creature->SetWalk(true);
+    creature->GetMotionMaster()->Clear();
+    creature->GetMotionMaster()->MoveSplinePath(&pathPoints, FORCED_MOVEMENT_WALK);
+    return true;
+}
+
 void EverQuestMod::UpdatePendingArrivalActions(Map* map, uint32 diff)
 {
     vector<EverQuestPendingArrivalAction> arrivedWatchers;
+    vector<pair<ObjectGuid, uint32>> npcFlagRestores;
     {
         std::lock_guard<std::mutex> lock(PendingArrivalActionsMutex);
         auto watcherIter = PendingArrivalActionsByMapInstanceKey.find(GetMapInstanceKey(map));
@@ -2144,19 +2284,36 @@ void EverQuestMod::UpdatePendingArrivalActions(Map* map, uint32 diff)
             bool hasArrived = false;
             if (moverIsGone == false)
                 hasArrived = mover->GetExactDist2d(watcher.DestinationX, watcher.DestinationY) <= EQ_REACTION_WALK_ARRIVE_DISTANCE;
-            bool hasTimedOut = watcher.ElapsedMS >= EQ_REACTION_WALK_TIMEOUT_MS;
+            bool hasTimedOut = watcher.ElapsedMS >= watcher.TimeoutMS;
 
             if (moverIsGone == false && hasArrived == false && hasTimedOut == false)
                 continue;
 
             ReactionWalkCreatureGUIDs.erase(watcher.MoverGUID);
             ReactionWalkCreatureCount.store((uint32)ReactionWalkCreatureGUIDs.size());
+            if (watcher.HasSavedNpcFlags == true)
+                npcFlagRestores.push_back(std::make_pair(watcher.MoverGUID, watcher.SavedNpcFlags));
             if (hasArrived == true)
                 arrivedWatchers.push_back(watcher);
             watchers.erase(watchers.begin() + (i - 1));
         }
         if (watchers.empty() == true)
             PendingArrivalActionsByMapInstanceKey.erase(watcherIter);
+    }
+
+    // The walk is over either way, so the creature can be talked to again before anything it has to say fires
+    for (size_t i = 0; i < npcFlagRestores.size(); i++)
+    {
+        Creature* restoredCreature = map->GetCreature(npcFlagRestores[i].first);
+        if (restoredCreature == nullptr)
+            continue;
+        uint32 restoredNpcFlags = npcFlagRestores[i].second;
+
+        // A creature that walked somewhere as part of a sequence must not offer the quest that started it again until it is home, or the player can hand in a second time and send it walking from the wrong place
+        if (restoredCreature->GetExactDist2d(restoredCreature->GetHomePosition().GetPositionX(),
+            restoredCreature->GetHomePosition().GetPositionY()) > EQ_REACTION_WALK_HOME_DISTANCE)
+            restoredNpcFlags = restoredNpcFlags & ~((uint32)UNIT_NPC_FLAG_QUESTGIVER);
+        restoredCreature->ReplaceAllNpcFlags((NPCFlags)restoredNpcFlags);
     }
 
     for (EverQuestPendingArrivalAction& watcher : arrivedWatchers)
@@ -2204,7 +2361,13 @@ void EverQuestMod::UpdatePendingArrivalActions(Map* map, uint32 diff)
                 action.PositionY = mover->GetPositionY();
                 action.PositionZ = mover->GetPositionZ();
             }
-            ExecuteKillSpawnAction(map, action);
+            if (action.MoverGUID == ObjectGuid::Empty)
+                action.MoverGUID = watcher.MoverGUID;
+            // An arrival action with a delay waits its turn in the pending queue, which is how EQ's pause at the end of a leg becomes the gap before the creature heads back
+            if (action.RemainingMS > 0)
+                EnqueuePendingKillSpawnAction(map, action);
+            else
+                ExecuteKillSpawnAction(map, action);
         }
     }
 }
@@ -4385,7 +4548,7 @@ const list<EverQuestQuestCompletionReputation>& EverQuestMod::GetQuestCompletion
 void EverQuestMod::LoadQuestReactions()
 {
     QuestReactionListByQuestTemplateID.clear();
-    QueryResult queryResult = WorldDatabase.Query("SELECT QuestTemplateID, ReactionType, UsePlayerX, UsePlayerY, UsePlayerZ, AddedPlayerX, AddedPlayerY, UsePlayerOrientation, PositionX, PositionY, PositionZ, Orientation, CreatureTemplateID, QuestgiverCreatureTemplateID, DelayInMS, SayText, UseNpcX, UseNpcY, UseNpcZ, UseNpcOrientation, MovementIsRun, FiresOnArrival FROM mod_everquest_quest_reaction ORDER BY QuestTemplateID, ID;");
+    QueryResult queryResult = WorldDatabase.Query("SELECT QuestTemplateID, ReactionType, UsePlayerX, UsePlayerY, UsePlayerZ, AddedPlayerX, AddedPlayerY, UsePlayerOrientation, PositionX, PositionY, PositionZ, Orientation, CreatureTemplateID, QuestgiverCreatureTemplateID, DelayInMS, SayText, UseNpcX, UseNpcY, UseNpcZ, UseNpcOrientation, MovementIsRun, FiresOnArrival, PathListID, GameObjectEntryID, GameObjectLifetimeSec FROM mod_everquest_quest_reaction ORDER BY QuestTemplateID, ID;");
     if (queryResult)
     {
         do
@@ -4415,6 +4578,9 @@ void EverQuestMod::LoadQuestReactions()
             everQuestQuestReaction.UseNpcOrientation = fields[19].Get<bool>();
             everQuestQuestReaction.MovementIsRun = fields[20].Get<bool>();
             everQuestQuestReaction.FiresOnArrival = fields[21].Get<bool>();
+            everQuestQuestReaction.PathListID = fields[22].Get<uint32>();
+            everQuestQuestReaction.GameObjectEntryID = fields[23].Get<uint32>();
+            everQuestQuestReaction.GameObjectLifetimeSec = fields[24].Get<uint32>();
             QuestReactionListByQuestTemplateID[everQuestQuestReaction.QuestTemplateID].push_back(everQuestQuestReaction);
         } while (queryResult->NextRow());
     }
@@ -4436,7 +4602,7 @@ const list<EverQuestQuestReaction>& EverQuestMod::GetQuestReactions(uint32 quest
 void EverQuestMod::LoadGossipReactions()
 {
     GossipReactionsByGossipCreatureTemplateID.clear();
-    QueryResult queryResult = WorldDatabase.Query("SELECT GossipCreatureTemplateID, NpcTextID, OptionID, OptionText, ReactionType, SayText, TargetCreatureTemplateID, UsePlayerX, UsePlayerY, UsePlayerZ, AddedPlayerX, AddedPlayerY, UsePlayerOrientation, UseNpcX, UseNpcY, UseNpcZ, UseNpcOrientation, PositionX, PositionY, PositionZ, Orientation, DelayInMS, MovementIsRun, FiresOnArrival FROM mod_everquest_gossip_reaction ORDER BY GossipCreatureTemplateID, ID;");
+    QueryResult queryResult = WorldDatabase.Query("SELECT GossipCreatureTemplateID, NpcTextID, OptionID, OptionText, ReactionType, SayText, TargetCreatureTemplateID, UsePlayerX, UsePlayerY, UsePlayerZ, AddedPlayerX, AddedPlayerY, UsePlayerOrientation, UseNpcX, UseNpcY, UseNpcZ, UseNpcOrientation, PositionX, PositionY, PositionZ, Orientation, DelayInMS, MovementIsRun, FiresOnArrival, PathListID, GameObjectEntryID, GameObjectLifetimeSec, RequiredQuestID, RequiredNearX, RequiredNearY, RequiredNearZ, RequiredNearDistance FROM mod_everquest_gossip_reaction ORDER BY GossipCreatureTemplateID, ID;");
     if (queryResult)
     {
         do
@@ -4468,9 +4634,36 @@ void EverQuestMod::LoadGossipReactions()
             gossipReaction.DelayInMS = fields[21].Get<uint32>();
             gossipReaction.MovementIsRun = fields[22].Get<bool>();
             gossipReaction.FiresOnArrival = fields[23].Get<bool>();
+            gossipReaction.PathListID = fields[24].Get<uint32>();
+            gossipReaction.GameObjectEntryID = fields[25].Get<uint32>();
+            gossipReaction.GameObjectLifetimeSec = fields[26].Get<uint32>();
+            gossipReaction.RequiredQuestID = fields[27].Get<uint32>();
+            gossipReaction.RequiredNearX = fields[28].Get<float>();
+            gossipReaction.RequiredNearY = fields[29].Get<float>();
+            gossipReaction.RequiredNearZ = fields[30].Get<float>();
+            gossipReaction.RequiredNearDistance = fields[31].Get<float>();
             GossipReactionsByGossipCreatureTemplateID[gossipReaction.GossipCreatureTemplateID].push_back(gossipReaction);
         } while (queryResult->NextRow());
     }
+}
+
+bool EverQuestMod::DoesPlayerMeetGossipRequirements(Player* player, Creature* creature, const EverQuestGossipReaction& gossipReaction)
+{
+    if (gossipReaction.RequiredQuestID != 0)
+    {
+        if (player == nullptr)
+            return false;
+        if (player->GetQuestRewardStatus(gossipReaction.RequiredQuestID) == false)
+            return false;
+    }
+    if (gossipReaction.RequiredNearDistance > 0)
+    {
+        if (creature == nullptr)
+            return false;
+        if (creature->GetExactDist2d(gossipReaction.RequiredNearX, gossipReaction.RequiredNearY) > gossipReaction.RequiredNearDistance)
+            return false;
+    }
+    return true;
 }
 
 bool EverQuestMod::HandleGossipHello(Player* player, Creature* creature)
@@ -4482,7 +4675,20 @@ bool EverQuestMod::HandleGossipHello(Player* player, Creature* creature)
     bool firedHailedEmote = DoCreatureEmoteEvent(creature, EQ_CREATURE_EMOTE_EVENT_HAILED, player);
 
     unordered_map<uint32, vector<EverQuestGossipReaction>>::const_iterator gossipReactionsIterator = GossipReactionsByGossipCreatureTemplateID.find(creature->GetEntry());
-    if (gossipReactionsIterator == GossipReactionsByGossipCreatureTemplateID.end())
+    bool hasAnyAvailableOption = false;
+    set<uint32> blockedOptionIDs;
+    if (gossipReactionsIterator != GossipReactionsByGossipCreatureTemplateID.end())
+    {
+        // An option whose requirements are not met is not on the menu at all
+        for (const EverQuestGossipReaction& gossipReaction : gossipReactionsIterator->second)
+            if (DoesPlayerMeetGossipRequirements(player, creature, gossipReaction) == false)
+                blockedOptionIDs.insert(gossipReaction.OptionID);
+        for (const EverQuestGossipReaction& gossipReaction : gossipReactionsIterator->second)
+            if (blockedOptionIDs.find(gossipReaction.OptionID) == blockedOptionIDs.end())
+                hasAnyAvailableOption = true;
+    }
+
+    if (hasAnyAvailableOption == false)
     {
         // Creatures that only exist as gossip targets for a hailed emote shouldn't open an empty gossip window, but any creature with a real role should fall through to its normal handling
         if (firedHailedEmote == true && creature->IsQuestGiver() == false && creature->IsVendor() == false && creature->IsTrainer() == false
@@ -4504,6 +4710,8 @@ bool EverQuestMod::HandleGossipHello(Player* player, Creature* creature)
     for (const EverQuestGossipReaction& gossipReaction : gossipReactionsIterator->second)
     {
         npcTextID = gossipReaction.NpcTextID;
+        if (blockedOptionIDs.find(gossipReaction.OptionID) != blockedOptionIDs.end())
+            continue;
         if (addedOptionIDs.find(gossipReaction.OptionID) != addedOptionIDs.end())
             continue;
         addedOptionIDs.insert(gossipReaction.OptionID);
@@ -4521,6 +4729,18 @@ bool EverQuestMod::HandleGossipSelect(Player* player, Creature* creature, uint32
     if (gossipReactionsIterator == GossipReactionsByGossipCreatureTemplateID.end())
         return false;
 
+    // The menu the player is looking at can be stale by the time they click, so the requirements are checked again
+    for (const EverQuestGossipReaction& gossipReaction : gossipReactionsIterator->second)
+    {
+        if (gossipReaction.OptionID != action)
+            continue;
+        if (DoesPlayerMeetGossipRequirements(player, creature, gossipReaction) == false)
+        {
+            CloseGossipMenuFor(player);
+            return true;
+        }
+    }
+
     Map* map = creature->GetMap();
     bool reactionMatched = false;
 
@@ -4532,6 +4752,10 @@ bool EverQuestMod::HandleGossipSelect(Player* player, Creature* creature, uint32
             continue;
         EverQuestPendingKillSpawnAction arrivalAction;
         arrivalAction.TargetCreatureTemplateID = gossipReaction.TargetCreatureTemplateID;
+        arrivalAction.RemainingMS = (int32)gossipReaction.DelayInMS;
+        arrivalAction.PathListID = gossipReaction.PathListID;
+        arrivalAction.GameObjectEntryID = gossipReaction.GameObjectEntryID;
+        arrivalAction.GameObjectLifetimeSec = gossipReaction.GameObjectLifetimeSec;
         arrivalAction.SayText = gossipReaction.SayText;
         arrivalAction.ListenerGUID = player->GetGUID();
         arrivalAction.UseMoverPositionX = gossipReaction.UseNpcX;
@@ -4564,6 +4788,8 @@ bool EverQuestMod::HandleGossipSelect(Player* player, Creature* creature, uint32
             if (gossipReaction.ReactionType == EQ_QUEST_REACTION_SPAWNUNIQUE)
                 arrivalAction.OnlyIfNotAliveCreatureTemplateID = gossipReaction.TargetCreatureTemplateID;
         } break;
+        case EQ_QUEST_REACTION_WALKGRID: arrivalAction.ActionType = EQ_KILLSPAWN_ACTION_WALKPATH; break;
+        case EQ_QUEST_REACTION_SPAWNOBJECT: arrivalAction.ActionType = EQ_KILLSPAWN_ACTION_SPAWNOBJECT; break;
         default: continue; // Nothing else is meaningful once the walk is over
         }
         arrivalActions.push_back(arrivalAction);
@@ -4666,6 +4892,14 @@ bool EverQuestMod::HandleGossipSelect(Player* player, Creature* creature, uint32
         case EQ_QUEST_REACTION_WALKTO:
         {
             StartReactionWalk(creature, x, y, z, orientation, gossipReaction.Orientation != 0 || gossipReaction.UseNpcOrientation == true || gossipReaction.UsePlayerOrientation == true, gossipReaction.MovementIsRun, arrivalActions);
+        } break;
+        case EQ_QUEST_REACTION_SPAWNOBJECT:
+        {
+            SpawnReactionGameObject(creature, gossipReaction.GameObjectEntryID, x, y, z, gossipReaction.GameObjectLifetimeSec);
+        } break;
+        case EQ_QUEST_REACTION_WALKGRID:
+        {
+            StartReactionGridWalk(creature, gossipReaction.PathListID, arrivalActions);
         } break;
         default: break; // Nothing
         }

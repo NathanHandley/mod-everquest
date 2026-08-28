@@ -208,6 +208,10 @@ public:
                     continue;
                 EverQuestPendingKillSpawnAction arrivalAction;
                 arrivalAction.TargetCreatureTemplateID = questReaction.CreatureTemplateID;
+                arrivalAction.RemainingMS = (int32)questReaction.DelayInMS;
+                arrivalAction.PathListID = questReaction.PathListID;
+                arrivalAction.GameObjectEntryID = questReaction.GameObjectEntryID;
+                arrivalAction.GameObjectLifetimeSec = questReaction.GameObjectLifetimeSec;
                 arrivalAction.SayText = questReaction.SayText;
                 arrivalAction.ListenerGUID = player->GetGUID();
                 arrivalAction.UseMoverPositionX = questReaction.UseNpcX;
@@ -240,6 +244,8 @@ public:
                     if (questReaction.ReactionType == EQ_QUEST_REACTION_SPAWNUNIQUE)
                         arrivalAction.OnlyIfNotAliveCreatureTemplateID = questReaction.CreatureTemplateID;
                 } break;
+                case EQ_QUEST_REACTION_WALKGRID: arrivalAction.ActionType = EQ_KILLSPAWN_ACTION_WALKPATH; break;
+                case EQ_QUEST_REACTION_SPAWNOBJECT: arrivalAction.ActionType = EQ_KILLSPAWN_ACTION_SPAWNOBJECT; break;
                 default: continue; // Nothing else is meaningful once the walk is over
                 }
                 arrivalActions.push_back(arrivalAction);
@@ -311,6 +317,17 @@ public:
                     Creature* walker = EverQuest->GetNearestLoadedCreatureWithEntryID(map, questReaction.QuestgiverCreatureTemplateID, player);
                     if (walker != nullptr)
                         EverQuest->StartReactionWalk(walker, x, y, z, orientation, questReaction.Orientation != 0 || questReaction.UsePlayerOrientation == true, questReaction.MovementIsRun, arrivalActions);
+                } break;
+                case EQ_QUEST_REACTION_SPAWNOBJECT:
+                {
+                    Creature* dropper = EverQuest->GetNearestLoadedCreatureWithEntryID(map, questReaction.QuestgiverCreatureTemplateID, player);
+                    EverQuest->SpawnReactionGameObject(dropper, questReaction.GameObjectEntryID, x, y, z, questReaction.GameObjectLifetimeSec);
+                } break;
+                case EQ_QUEST_REACTION_WALKGRID:
+                {
+                    Creature* gridWalker = EverQuest->GetNearestLoadedCreatureWithEntryID(map, questReaction.QuestgiverCreatureTemplateID, player);
+                    if (gridWalker != nullptr)
+                        EverQuest->StartReactionGridWalk(gridWalker, questReaction.PathListID, arrivalActions);
                 } break;
                 default: break; // Nothing
                 }
