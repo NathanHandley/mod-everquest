@@ -112,6 +112,7 @@ EverQuestMod::EverQuestMod() :
     ConfigSpellBardFearDiminishingReturnsEnabled(true),
     ConfigSpellBardFearDiminishingReturnsResetTimeInMS(15000),
     ConfigCombatSkillsDisableBashKickStunOnPlayers(false),
+    ConfigCombatSkillsDisabledBashKickStunInterruptsPlayerCast(true),
     ConfigEvadeEnabled(true),
     ConfigEvadeUnreachableSeconds(10.0f),
     ConfigEvadeUnstickStallSeconds(3.0f),
@@ -7346,6 +7347,28 @@ bool EverQuestMod::RollBashKickStunLands(Unit* attacker, Unit* defender)
         stunChance = EQ_BASHKICKSTUN_MIN_CHANCE;
 
     return ((int)urand(0, 99) < stunChance);
+}
+
+bool EverQuestMod::ShouldSuppressBashKickStunOnDefender(uint32 spellID, Unit* defender)
+{
+    if (defender == nullptr)
+        return false;
+    if (ConfigCombatSkillsDisableBashKickStunOnPlayers == false)
+        return false;
+    if (defender->IsPlayer() == false)
+        return false;
+    if (spellID < ConfigSystemSpellDBCIDMin || spellID > ConfigSystemSpellDBCIDMax)
+        return false;
+    if (IsSpellAnEQSpell(spellID) == false)
+        return false;
+    return GetSpellDataForSpellID(spellID).StunUsesBashKickChance;
+}
+
+bool EverQuestMod::ShouldStripBashKickStunBeforeItLands(uint32 spellID, Unit* defender)
+{
+    if (ConfigCombatSkillsDisabledBashKickStunInterruptsPlayerCast == true)
+        return false;
+    return ShouldSuppressBashKickStunOnDefender(spellID, defender);
 }
 
 void EverQuestMod::ClearVisualEquippedItemsForCreatureGUID(Map* map, ObjectGuid creatureGUID)

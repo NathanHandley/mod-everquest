@@ -241,6 +241,20 @@ EverQuest.CombatSkills.DisableBashKickStunOnPlayers = False
 
 ###################################################################################################
 #
+# 	EverQuest.CombatSkills.DisabledBashKickStunInterruptsPlayerCast
+#		Only matters when DisableBashKickStunOnPlayers is true.  If true, a Bash/Kick/Slam whose stun
+#		was suppressed still interrupts whatever the player was casting.  If false, the stun is kept
+#		off the spell entirely so the player's cast survives the hit.
+#		Either way the player is given the stun forbearance debuff, which makes the attacker refuse
+#		that target again until it expires.
+#	Default: True (a suppressed stun still interrupts the player's cast)
+#
+###################################################################################################
+
+EverQuest.CombatSkills.DisabledBashKickStunInterruptsPlayerCast = True
+
+###################################################################################################
+#
 # 	EverQuest.CombatSkills.RangedAttackEnabled
 #		If true, creatures that have the EQ "ranged attack" special ability, or that roll both a bow
 #		and an arrow in their loot, will shoot targets that are out of melee reach (mirrors TAKP)

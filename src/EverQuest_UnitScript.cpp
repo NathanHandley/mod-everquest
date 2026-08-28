@@ -49,7 +49,7 @@ public:
         if (curSpell.StunUsesBashKickChance == false)
             return false;
 
-        if (EverQuest->ConfigCombatSkillsDisableBashKickStunOnPlayers == true && defender->IsPlayer() == true)
+        if (EverQuest->ShouldSuppressBashKickStunOnDefender(spellID, defender) == true)
         {
             defender->RemoveAura(aura);
             return true;
@@ -494,12 +494,27 @@ public:
         return deathsEmbraceEffect->GetAmount();
     }
 
+    void TryApplyBashKickStunForbearanceOnSuppressedStun(Unit* defender, Unit* attacker, SpellInfo const* spellInfo)
+    {
+        if (EverQuest->ShouldSuppressBashKickStunOnDefender(spellInfo->Id, defender) == false)
+            return;
+        uint32 forbearanceSpellID = EverQuest->GetSpellDataForSpellID(spellInfo->Id).SpellIDCastOnTargetWhenStunLands;
+        if (forbearanceSpellID == 0)
+            return;
+        attacker->CastSpell(defender, forbearanceSpellID, true);
+    }
+
     // Only fires for direct spell damage, periodic runs through ModifyPeriodicDamageAurasTick above
     void ModifySpellDamageTaken(Unit* target, Unit* attacker, int32& damage, SpellInfo const* spellInfo) override
     {
-        if (EverQuest->IsEnabled == false || EverQuest->ConfigSpellTalentAlignmentEnabled == false)
+        if (EverQuest->IsEnabled == false)
             return;
         if (target == nullptr || attacker == nullptr || spellInfo == nullptr)
+            return;
+
+        TryApplyBashKickStunForbearanceOnSuppressedStun(target, attacker, spellInfo);
+
+        if (EverQuest->ConfigSpellTalentAlignmentEnabled == false)
             return;
         if (damage <= 0)
             return;

@@ -1213,6 +1213,7 @@ public:
     bool ConfigSpellBardFearDiminishingReturnsEnabled;
     uint32 ConfigSpellBardFearDiminishingReturnsResetTimeInMS;
     bool ConfigCombatSkillsDisableBashKickStunOnPlayers;
+    bool ConfigCombatSkillsDisabledBashKickStunInterruptsPlayerCast;
     bool ConfigCombatSkillsRangedAttackEnabled;
     float ConfigCombatSkillsRangedAttackDefaultMinRange;
     float ConfigCombatSkillsRangedAttackDefaultMaxRange;
@@ -1718,6 +1719,8 @@ public:
     bool IsSpellAnEQSpell(uint32 spellID);
     bool IsSpellAnEQBardSong(uint32 spellID);
     bool RollBashKickStunLands(Unit* attacker, Unit* defender);
+    bool ShouldSuppressBashKickStunOnDefender(uint32 spellID, Unit* defender);
+    bool ShouldStripBashKickStunBeforeItLands(uint32 spellID, Unit* defender);
     uint32 CalculateSpellFocusBoostValue(Unit* caster, uint32 spellID);
     void ProcessForage(Player* player);
     bool IsSummonPlayerSpellBlockedByTarget(uint32 spellID, Unit* target, Unit* caster);

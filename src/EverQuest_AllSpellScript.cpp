@@ -94,6 +94,27 @@ public:
             res = SPELL_FAILED_HIGHLEVEL;
     }
 
+    void OnScaleAuraUnitAdd(Spell* spell, Unit* target, uint32 /*effectMask*/, bool /*checkIfValid*/, bool /*implicit*/, uint8 /*auraScaleMask*/, TargetInfo& targetInfo) override
+    {
+        if (EverQuest->IsEnabled == false)
+            return;
+        if (spell == nullptr || target == nullptr)
+            return;
+        SpellInfo const* spellInfo = spell->GetSpellInfo();
+        if (spellInfo == nullptr)
+            return;
+        if (EverQuest->ShouldStripBashKickStunBeforeItLands(spellInfo->Id, target) == false)
+            return;
+
+        uint8 stunEffectMask = 0;
+        for (uint8 i = 0; i < MAX_SPELL_EFFECTS; ++i)
+            if (spellInfo->Effects[i].Effect == SPELL_EFFECT_APPLY_AURA && spellInfo->Effects[i].ApplyAuraName == SPELL_AURA_MOD_STUN)
+                stunEffectMask |= (uint8)(1 << i);
+        if (stunEffectMask == 0)
+            return;
+        targetInfo.effectMask = targetInfo.effectMask & (uint8)(~stunEffectMask);
+    }
+
     void OnSpellPrepare(Spell* /*spell*/, Unit* caster, SpellInfo const* spellInfo) override
     {
         uint32 failChancePercent = GetEffectFailChance(caster, spellInfo);
