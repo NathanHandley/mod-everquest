@@ -254,6 +254,9 @@ public:
         if (EverQuest->IsEnabled == false)
             return;
 
+        // Give back the swing time the core just reset away.  This runs before the EverQuest spell checks below, since WoW spells can be configured for it too
+        EverQuest->RestoreSwingTimersAfterSpellCast(caster, spell);
+
         // Verify it's an EQ spell that is mapped
         if (spellInfo == nullptr)
             return;

@@ -32,6 +32,7 @@
 #include "ScriptMgr.h"
 #include "ObjectMgr.h"
 #include "ReputationMgr.h"
+#include "Spell.h"
 #include "SpellAuraDefines.h"
 #include "SpellAuraEffects.h"
 #include "SpellAuras.h"
@@ -111,6 +112,8 @@ EverQuestMod::EverQuestMod() :
     ConfigSpellHasteCapPercent(100.0f),
     ConfigSpellBardFearDiminishingReturnsEnabled(true),
     ConfigSpellBardFearDiminishingReturnsResetTimeInMS(15000),
+    ConfigSpellNoSwingTimerResetForEQSpells(true),
+    ConfigSpellNoSwingTimerResetForWoWSpells(false),
     ConfigCombatSkillsDisableBashKickStunOnPlayers(false),
     ConfigCombatSkillsDisabledBashKickStunInterruptsPlayerCast(true),
     ConfigEvadeEnabled(true),
@@ -330,9 +333,12 @@ void EverQuestMod::LoadConfigurationFile()
     ConfigSpellHasteCapPercent = sConfigMgr->GetOption<float>("EverQuest.Spells.HasteCapPercent", 100.0f);
     ConfigSpellBardFearDiminishingReturnsEnabled = sConfigMgr->GetOption<bool>("EverQuest.Spells.BardFearDiminishingReturnsEnabled", true);
     ConfigSpellBardFearDiminishingReturnsResetTimeInMS = sConfigMgr->GetOption<uint32>("EverQuest.Spells.BardFearDiminishingReturnsResetTimeInMS", 15000);
+    ConfigSpellNoSwingTimerResetForEQSpells = sConfigMgr->GetOption<bool>("EverQuest.Spells.NoSwingTimerResetForEQSpells", true);
+    ConfigSpellNoSwingTimerResetForWoWSpells = sConfigMgr->GetOption<bool>("EverQuest.Spells.NoSwingTimerResetForWoWSpells", false);
 
     // Combat Skills
     ConfigCombatSkillsDisableBashKickStunOnPlayers = sConfigMgr->GetOption<bool>("EverQuest.CombatSkills.DisableBashKickStunOnPlayers", false);
+    ConfigCombatSkillsDisabledBashKickStunInterruptsPlayerCast = sConfigMgr->GetOption<bool>("EverQuest.CombatSkills.DisabledBashKickStunInterruptsPlayerCast", true);
     ConfigCombatSkillsRangedAttackEnabled = sConfigMgr->GetOption<bool>("EverQuest.CombatSkills.RangedAttackEnabled", true);
     ConfigCombatSkillsRangedAttackDefaultMinRange = sConfigMgr->GetOption<float>("EverQuest.CombatSkills.RangedAttackDefaultMinRange", 25.0f);
     ConfigCombatSkillsRangedAttackDefaultMaxRange = sConfigMgr->GetOption<float>("EverQuest.CombatSkills.RangedAttackDefaultMaxRange", 250.0f);
@@ -4806,7 +4812,7 @@ void EverQuestMod::RemoveStaleSavedPetSpells()
         uint32 creatureTemplateID = fields[2].Get<uint32>();
 
         // Only converted EQ spells are in scope.  Anything else reached the pet through a WOW system this can't model, pet talents especially, and must be left alone
-        if (spellID < EQ_SPELL_ID_CONVERTED_LOW || spellID > EQ_SPELL_ID_CONVERTED_HIGH)
+        if (spellID < ConfigSystemSpellDBCIDMin || spellID > ConfigSystemSpellDBCIDMax)
             continue;
         if (CanPetCreatureTemplateTeachSpell(creatureTemplateID, spellID) == true)
             continue;
@@ -9826,6 +9832,103 @@ bool EverQuestMod::IsSpellAnEQSpell(uint32 spellID)
         return true;
     else
         return false;
+}
+
+static thread_local EverQuestPendingSwingTimerRestore PendingSwingTimerRestore;
+
+bool EverQuestMod::ShouldSpellPreserveSwingTimers(uint32 spellID)
+{
+    if (spellID >= ConfigSystemSpellDBCIDMin && spellID <= ConfigSystemSpellDBCIDMax)
+        return ConfigSpellNoSwingTimerResetForEQSpells;
+    else
+        return ConfigSpellNoSwingTimerResetForWoWSpells;
+}
+
+float EverQuestMod::GetFullSwingTimeInMS(Unit* unit, uint8 attackType)
+{
+    if (unit == nullptr)
+        return 0.0f;
+
+    // This is the same value resetAttackTimer writes into the swing timer, since GetAttackTime divides the base attack time by the same attack speed modifier that resetAttackTimer multiplies it back by
+    return unit->GetFloatValue(static_cast<uint16>(UNIT_FIELD_BASEATTACKTIME) + attackType);
+}
+
+float EverQuestMod::GetSwingTimerRemainingPercent(Unit* unit, uint8 attackType)
+{
+    float fullSwingTimeInMS = GetFullSwingTimeInMS(unit, attackType);
+    if (fullSwingTimeInMS <= 0.0f)
+        return -1.0f;
+
+    int32 remainingTimeInMS = unit->getAttackTimer(static_cast<WeaponAttackType>(attackType));
+    if (remainingTimeInMS < 0)
+        remainingTimeInMS = 0;
+
+    float remainingPercent = static_cast<float>(remainingTimeInMS) / fullSwingTimeInMS;
+    if (remainingPercent > 1.0f)
+        remainingPercent = 1.0f;
+    return remainingPercent;
+}
+
+void EverQuestMod::StashSwingTimersBeforeSpellCast(Player* player, Spell* spell)
+{
+    // Triggered casts never reset the swing timer in the core, so there is nothing to stash or give back for them.
+    if (spell != nullptr && spell->IsTriggered() == true)
+        return;
+
+    // Clear first on every non-triggered player cast.  A cast that bails out between here and the reset then cannot leave a stale entry sitting on this thread waiting to be matched against some later spell
+    PendingSwingTimerRestore.IsActive = false;
+    PendingSwingTimerRestore.SpellToken = nullptr;
+    PendingSwingTimerRestore.CasterGUID.Clear();
+
+    if (IsEnabled == false)
+        return;
+    if (player == nullptr || spell == nullptr)
+        return;
+    SpellInfo const* spellInfo = spell->GetSpellInfo();
+    if (spellInfo == nullptr)
+        return;
+    if (ShouldSpellPreserveSwingTimers(spellInfo->Id) == false)
+        return;
+
+    for (uint8 attackType = BASE_ATTACK; attackType < MAX_ATTACK; ++attackType)
+        PendingSwingTimerRestore.RemainingPercentByAttackType[attackType] = GetSwingTimerRemainingPercent(player, attackType);
+
+    PendingSwingTimerRestore.SpellToken = static_cast<const void*>(spell);
+    PendingSwingTimerRestore.CasterGUID = player->GetGUID();
+    PendingSwingTimerRestore.IsActive = true;
+}
+
+void EverQuestMod::RestoreSwingTimersAfterSpellCast(Unit* caster, Spell* spell)
+{
+    if (PendingSwingTimerRestore.IsActive == false)
+        return;
+    if (spell == nullptr || static_cast<const void*>(spell) != PendingSwingTimerRestore.SpellToken)
+        return;
+
+    // Consume the snapshot no matter what happens below, so it can never be applied twice
+    PendingSwingTimerRestore.IsActive = false;
+    PendingSwingTimerRestore.SpellToken = nullptr;
+
+    if (caster == nullptr || caster->IsPlayer() == false)
+        return;
+    if (caster->GetGUID() != PendingSwingTimerRestore.CasterGUID)
+        return;
+
+    for (uint8 attackType = BASE_ATTACK; attackType < MAX_ATTACK; ++attackType)
+    {
+        float remainingPercent = PendingSwingTimerRestore.RemainingPercentByAttackType[attackType];
+        if (remainingPercent < 0.0f)
+            continue;
+        float fullSwingTimeInMS = GetFullSwingTimeInMS(caster, attackType);
+        if (fullSwingTimeInMS <= 0.0f)
+            continue;
+
+        int32 restoredTimeInMS = static_cast<int32>(fullSwingTimeInMS * remainingPercent);
+
+        // Only ever hand swing time back, never take any away, so anything the spell itself legitimately did to the timer is left alone
+        if (restoredTimeInMS < caster->getAttackTimer(static_cast<WeaponAttackType>(attackType)))
+            caster->setAttackTimer(static_cast<WeaponAttackType>(attackType), restoredTimeInMS);
+    }
 }
 
 bool EverQuestMod::IsSpellAnEQBardSong(uint32 spellID)

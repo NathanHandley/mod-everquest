@@ -513,6 +513,10 @@ public:
 
         if (spell == nullptr)
             return;
+
+        // Remember how much of the auto attack swings were left before the core resets them at the end of this same cast.  This has to happen ahead of the EverQuest spell ID range check below, since WoW spells can be configured for it too
+        EverQuest->StashSwingTimersBeforeSpellCast(player, spell);
+
         if (spell->m_spellInfo->Id < EverQuest->ConfigSystemSpellDBCIDMin || spell->m_spellInfo->Id > EverQuest->ConfigSystemSpellDBCIDMax)
             return;
 

@@ -231,6 +231,30 @@ EverQuest.Spells.BardFearDiminishingReturnsResetTimeInMS = 15000
 
 ###################################################################################################
 #
+# 	EverQuest.Spells.NoSwingTimerResetForEQSpells
+#		If true, casting an EverQuest spell no longer restarts the caster's auto attack swing
+#		timers.  Auto attacks still do not swing during a cast, but the swing timer keeps
+#		counting down through it, so a swing that came due mid cast fires the moment the cast
+#		ends instead of starting over from a full weapon swing.  Applies to instant spells as
+#		well as ones with a cast time, and to channels (which the core resets at channel start).
+#		Player casters only - creatures still reset their own swing when they cast.
+#		NOTE: "EverQuest spell" means any spell inside the spell DBC ID range in this config,
+#		which is everything the converter generates
+#	Default: True (EverQuest spells leave the swing timer alone)
+#
+# 	EverQuest.Spells.NoSwingTimerResetForWoWSpells
+#		The same behavior for stock WoW spells, meaning any spell outside the spell DBC ID range
+#		in this config.  Off by default, since WoW class abilities are balanced around resetting
+#		the swing timer.
+#	Default: False (WoW spells reset the swing timer as they normally would)
+#
+###################################################################################################
+
+EverQuest.Spells.NoSwingTimerResetForEQSpells = True
+EverQuest.Spells.NoSwingTimerResetForWoWSpells = False
+
+###################################################################################################
+#
 # 	EverQuest.CombatSkills.DisableBashKickStunOnPlayers
 #		If true, the stun part of Bash/Kick/Slam combat skills will never land on player targets.
 #	Default: False (players can be stunned by these combat skills)

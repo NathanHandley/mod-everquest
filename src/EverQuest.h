@@ -36,6 +36,7 @@
 #include <mutex>
 #include <set>
 #include <unordered_set>
+#include <limits>
 
 using namespace std;
 
@@ -43,6 +44,7 @@ static uint32 ConfigMaxSkillIDCheck = 1000;         // The highest level of skil
 
 class Unit;
 class Aura;
+class Spell;
 class AuraApplication;
 class WorldPacket;
 class ByteBuffer;
@@ -1133,6 +1135,15 @@ public:
     uint32 EQClassIDEligibleSecondMask;
 };
 
+class EverQuestPendingSwingTimerRestore
+{
+public:
+    bool IsActive = false;
+    const void* SpellToken = nullptr;   // Only ever compared, never dereferenced
+    ObjectGuid CasterGUID;
+    float RemainingPercentByAttackType[MAX_ATTACK] = { -1.0f, -1.0f, -1.0f };
+};
+
 class EverQuestMod
 {
 private:
@@ -1212,6 +1223,8 @@ public:
     float ConfigSpellHasteCapPercent;
     bool ConfigSpellBardFearDiminishingReturnsEnabled;
     uint32 ConfigSpellBardFearDiminishingReturnsResetTimeInMS;
+    bool ConfigSpellNoSwingTimerResetForEQSpells;
+    bool ConfigSpellNoSwingTimerResetForWoWSpells;
     bool ConfigCombatSkillsDisableBashKickStunOnPlayers;
     bool ConfigCombatSkillsDisabledBashKickStunInterruptsPlayerCast;
     bool ConfigCombatSkillsRangedAttackEnabled;
@@ -1720,6 +1733,11 @@ public:
     void DespawnCreature(uint32 entryID, Map* map);
     void MakeCreatureAttackPlayer(uint32 entryID, Map* map, Player* player);
     bool IsSpellAnEQSpell(uint32 spellID);
+    bool ShouldSpellPreserveSwingTimers(uint32 spellID);
+    void StashSwingTimersBeforeSpellCast(Player* player, Spell* spell);
+    void RestoreSwingTimersAfterSpellCast(Unit* caster, Spell* spell);
+    float GetFullSwingTimeInMS(Unit* unit, uint8 attackType);
+    float GetSwingTimerRemainingPercent(Unit* unit, uint8 attackType);
     bool IsSpellAnEQBardSong(uint32 spellID);
     bool RollBashKickStunLands(Unit* attacker, Unit* defender);
     bool ShouldSuppressBashKickStunOnDefender(uint32 spellID, Unit* defender);
