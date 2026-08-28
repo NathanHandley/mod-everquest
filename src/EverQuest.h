@@ -1522,7 +1522,10 @@ public:
     bool HasPetDataForCreatureTemplateID(uint32 creatureTemplateID);
     const EverQuestPet& GetPetDataForCreatureTemplateID(uint32 creatureTemplateID);
     bool DoesPlayerHaveActiveEQPet(Player* player);
+    uint32 GetActiveEQPetCreatureTypeForPlayer(Player* player);
     void FixInvalidCharacterPetModelIDs();
+    void RemoveStaleSavedPetSpells();
+    bool CanPetCreatureTemplateTeachSpell(uint32 creatureTemplateID, uint32 spellID);
     void LoadCreatePlayerData();
     bool HasCreatePlayerData(uint8 raceID, uint8 classID);
     const EverQuestPlayerCreateInfo& GetPlayerCreateInfo(uint8 raceID, uint8 classID);

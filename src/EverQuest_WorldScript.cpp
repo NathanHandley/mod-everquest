@@ -130,6 +130,9 @@ public:
         // Saved pet display IDs can become wrong when converted content updates invalide previous display IDs, which crashes the core on pet summon
         EverQuest->FixInvalidCharacterPetModelIDs();
 
+        // Saved pets hold onto spells they were taught under older converted content, which the core never unlearns on its own
+        EverQuest->RemoveStaleSavedPetSpells();
+
         // The silent pet displays validate against CreatureDisplayInfo.dbc, which isn't loaded when the pet silent display data loads with the config
         EverQuest->RemoveInvalidPetSilentDisplays();
 

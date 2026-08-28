@@ -47,9 +47,23 @@ public:
         if (EverQuest->IsEnabled == false)
             return std::nullopt;
 
-        // Allows the pet tab to always show in the spellbook if the pet has combat abilities
-        if (context == CLASS_CONTEXT_PET && playerClass == CLASS_WARLOCK && EverQuest->DoesPlayerHaveActiveEQPet(const_cast<Player*>(player)) == true)
-            return true;
+        // Pet::IsPermanentPetFor only counts a summoned pet as permanent when its creature type matches the owner's class (warlock pairs with demon, death knight pairs with undead)
+        // and that permanence is what keeps the pet spellbook tab, the owner's pet auras and the saved pet number working.  EQ pet spells reach every wow class, and EQ pets are
+        // demons except for the undead skeleton line, so report whichever of those two classes matches the pet that is out.
+        if (context == CLASS_CONTEXT_PET)
+        {
+            uint32 activeEQPetCreatureType = EverQuest->GetActiveEQPetCreatureTypeForPlayer(const_cast<Player*>(player));
+            if (activeEQPetCreatureType == CREATURE_TYPE_UNDEAD)
+            {
+                // Claiming warlock here would make Pet::IsPermanentPetFor demand a demon and drop the pet to non-permanent
+                if (playerClass == CLASS_DEATH_KNIGHT)
+                    return true;
+                if (playerClass == CLASS_WARLOCK)
+                    return false;
+            }
+            else if (activeEQPetCreatureType != 0 && playerClass == CLASS_WARLOCK)
+                return true;
+        }
 
         // Allows for non-rogues to pick pocket
         if (context == CLASS_CONTEXT_ABILITY && playerClass == CLASS_ROGUE && EverQuest->DoesPlayerHaveEQClassOfWOWClass(const_cast<Player*>(player), CLASS_ROGUE) == true)

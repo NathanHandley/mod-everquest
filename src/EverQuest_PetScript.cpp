@@ -17,6 +17,7 @@
 #include "Configuration/Config.h"
 #include "ObjectMgr.h"
 #include "Pet.h"
+#include "Player.h"
 #include "ScriptMgr.h"
 #include "SpellMgr.h"
 
@@ -68,6 +69,12 @@ public:
             pet->SetName(sObjectMgr->GeneratePetName(pet->GetCreatureTemplate()->Entry));
         if (pet->GetCharmInfo() != nullptr && pet->GetCharmInfo()->GetPetNumber() != 0)
             pet->SetUInt32Value(UNIT_FIELD_PETNUMBER, pet->GetCharmInfo()->GetPetNumber());
+
+        // Pet::AddToWorld only records the summoning spell when the owner reports as a warlock, and an owner holding an undead EQ pet deliberately does not (see EverQuest_PlayerScript::OnPlayerIsClass)
+        // Without this the pet is not resummoned after a temporary unsummon, so record it here for every EQ pet instead
+        Player* petOwner = pet->GetOwner();
+        if (petOwner != nullptr && pet->getPetType() == SUMMON_PET)
+            petOwner->SetLastPetSpell(pet->GetUInt32Value(UNIT_CREATED_BY_SPELL));
 
         // Pet equipment
         if (petData.MainhandItemTemplateID != 0)

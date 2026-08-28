@@ -4792,6 +4792,74 @@ void EverQuestMod::FixInvalidCharacterPetModelIDs()
     } while (queryResult->NextRow());
 }
 
+void EverQuestMod::RemoveStaleSavedPetSpells()
+{
+    QueryResult queryResult = CharacterDatabase.Query("SELECT pet_spell.guid, pet_spell.spell, character_pet.entry FROM pet_spell INNER JOIN character_pet ON character_pet.id = pet_spell.guid");
+    if (!queryResult)
+        return;
+    uint32 removedPetSpellCount = 0;
+    do
+    {
+        Field* fields = queryResult->Fetch();
+        uint32 petNumber = fields[0].Get<uint32>();
+        uint32 spellID = fields[1].Get<uint32>();
+        uint32 creatureTemplateID = fields[2].Get<uint32>();
+
+        // Only converted EQ spells are in scope.  Anything else reached the pet through a WOW system this can't model, pet talents especially, and must be left alone
+        if (spellID < EQ_SPELL_ID_CONVERTED_LOW || spellID > EQ_SPELL_ID_CONVERTED_HIGH)
+            continue;
+        if (CanPetCreatureTemplateTeachSpell(creatureTemplateID, spellID) == true)
+            continue;
+
+        CharacterDatabase.DirectExecute("DELETE FROM pet_spell WHERE guid = {} AND spell = {}", petNumber, spellID);
+        ++removedPetSpellCount;
+    } while (queryResult->NextRow());
+    if (removedPetSpellCount > 0)
+        LOG_INFO("module.EverQuest", "EverQuestMod::RemoveStaleSavedPetSpells removed {} saved pet spell(s) that the pet's creature can no longer teach", removedPetSpellCount);
+}
+
+bool EverQuestMod::CanPetCreatureTemplateTeachSpell(uint32 creatureTemplateID, uint32 spellID)
+{
+    CreatureTemplate const* creatureTemplate = sObjectMgr->GetCreatureTemplate(creatureTemplateID);
+    if (creatureTemplate == nullptr)
+        return true; // Without a creature template the pet can't be summoned at all, so leave its saved rows alone
+
+    // creature_template_spell.  The core only reads the first MAX_CREATURE_SPELL_DATA_SLOT of these into a pet's default spells, but a spell in any slot was put there deliberately and shouldn't be called stale
+    for (uint8 spellIndex = 0; spellIndex < MAX_CREATURE_SPELLS; ++spellIndex)
+        if (creatureTemplate->spells[spellIndex] == spellID)
+            return true;
+
+    // CreatureSpellData.dbc, for the pets that carry a PetSpellDataId instead
+    if (creatureTemplate->PetSpellDataId != 0)
+    {
+        PetDefaultSpellsEntry const* petDefaultSpells = sSpellMgr->GetPetDefaultSpellsEntry(-int32(creatureTemplate->PetSpellDataId));
+        if (petDefaultSpells != nullptr)
+            for (uint8 spellIndex = 0; spellIndex < MAX_CREATURE_SPELL_DATA_SLOT; ++spellIndex)
+                if (petDefaultSpells->spellid[spellIndex] == spellID)
+                    return true;
+    }
+
+    if (creatureTemplate->family == 0)
+        return false;
+
+    // Creature family level-up spells, which is how the EQ pet Taunt and Area Taunt ranks reach a pet
+    PetLevelupSpellSet const* petLevelupSpells = sSpellMgr->GetPetLevelupSpellList(creatureTemplate->family);
+    if (petLevelupSpells != nullptr)
+        for (PetLevelupSpellSet::const_iterator petLevelupSpell = petLevelupSpells->begin(); petLevelupSpell != petLevelupSpells->end(); ++petLevelupSpell)
+            if (petLevelupSpell->second == spellID)
+                return true;
+
+    // Creature family passives
+    CreatureFamilyEntry const* creatureFamily = sCreatureFamilyStore.LookupEntry(creatureTemplate->family);
+    if (creatureFamily == nullptr)
+        return false;
+    PetFamilySpellsStore::const_iterator petFamilySpells = sPetFamilySpellsStore.find(creatureFamily->ID);
+    if (petFamilySpells != sPetFamilySpellsStore.end() && petFamilySpells->second.find(spellID) != petFamilySpells->second.end())
+        return true;
+
+    return false;
+}
+
 bool EverQuestMod::HasPetDataForCreatureTemplateID(uint32 creatureTemplateID)
 {
     if (PetDataByCreatureTemplateID.find(creatureTemplateID) != PetDataByCreatureTemplateID.end())
@@ -4821,6 +4889,21 @@ bool EverQuestMod::DoesPlayerHaveActiveEQPet(Player* player)
     if (pet == nullptr)
         return false;
     return HasPetDataForCreatureTemplateID(pet->GetEntry());
+}
+
+uint32 EverQuestMod::GetActiveEQPetCreatureTypeForPlayer(Player* player)
+{
+    if (player == nullptr)
+        return 0;
+    Pet* pet = player->GetPet();
+    if (pet == nullptr)
+        return 0;
+    if (HasPetDataForCreatureTemplateID(pet->GetEntry()) == false)
+        return 0;
+    CreatureTemplate const* creatureTemplate = pet->GetCreatureTemplate();
+    if (creatureTemplate == nullptr)
+        return 0;
+    return creatureTemplate->type;
 }
 
 void EverQuestMod::LoadCreatePlayerData()
