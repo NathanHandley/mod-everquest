@@ -12188,6 +12188,36 @@ bool EverQuestMod::IsItemEQClassAllowedForPlayerSecondaryClass(Player* player, u
     return (allowedEQClassMask & secondEQClassBit) != 0;
 }
 
+uint8 EverQuestMod::GetLevelForPlayerSecondaryEQClass(Player* player, uint8 eqClassID)
+{
+    // The active class carries its level on the player itself, and every other class has it parked in the mod character table
+    if (eqClassID == GetCurrentSecondEQClassForPlayer(player))
+        return player->GetLevel();
+
+    QueryResult queryResult = CharacterDatabase.Query("SELECT `level` FROM mod_everquest_characters WHERE guid = {} AND eqclass = {}", player->GetGUID().GetCounter(), eqClassID);
+    if (queryResult)
+        return queryResult->Fetch()[0].Get<uint8>();
+
+    // A class that has never been played starts at the configured start level, matching what PerformClassSwitch does for a new class
+    uint32 startLevel = player->getClass() != CLASS_DEATH_KNIGHT
+        ? sWorld->getIntConfig(CONFIG_START_PLAYER_LEVEL)
+        : sWorld->getIntConfig(CONFIG_START_HEROIC_PLAYER_LEVEL);
+    return uint8(startLevel);
+}
+
+bool EverQuestMod::IsItemRequiredLevelMetByPlayerSecondaryClass(Player* player, uint8 eqClassID, ItemTemplate const* itemTemplate, uint8& classLevelOut)
+{
+    classLevelOut = GetLevelForPlayerSecondaryEQClass(player, eqClassID);
+    if (itemTemplate == nullptr)
+        return true;
+    return uint32(classLevelOut) >= itemTemplate->RequiredLevel;
+}
+
+static std::string GetSecondaryClassRequiredLevelErrorText(uint8 eqClassID, uint8 classLevel, uint32 requiredLevel, const std::string& itemDescription)
+{
+    return itemDescription + " requires level " + std::to_string(requiredLevel) + ", and your " + GetEQClassStringFromID(eqClassID) + " is level " + std::to_string(uint32(classLevel)) + ".";
+}
+
 void EverQuestMod::AppendCharacterRowLockAnchor(CharacterDatabaseTransaction& transaction, uint32 playerGUIDCounter)
 {
     transaction->Append("UPDATE characters SET online = online WHERE guid = {}", playerGUIDCounter);
@@ -12319,6 +12349,12 @@ bool EverQuestMod::EquipItemIntoSecondaryClassStorage(Player* player, uint8 eqCl
     if (IsItemEQClassAllowedForPlayerSecondaryClass(player, eqClassID, item->GetEntry()) == false)
     {
         errorTextOut = "That item cannot be used by a " + GetEQClassStringFromID(eqClassID) + ".";
+        return false;
+    }
+    uint8 secondaryClassLevel = 0;
+    if (IsItemRequiredLevelMetByPlayerSecondaryClass(player, eqClassID, itemTemplate, secondaryClassLevel) == false)
+    {
+        errorTextOut = GetSecondaryClassRequiredLevelErrorText(eqClassID, secondaryClassLevel, itemTemplate->RequiredLevel, "That item");
         return false;
     }
 
@@ -12654,6 +12690,13 @@ bool EverQuestMod::SwapSecondaryClassStorageItemWithLiveEquipment(Player* player
         {
             delete storedItem;
             errorTextOut = "Your equipped item cannot be used by a " + GetEQClassStringFromID(eqClassID) + ".";
+            return false;
+        }
+        uint8 secondaryClassLevel = 0;
+        if (IsItemRequiredLevelMetByPlayerSecondaryClass(player, eqClassID, liveItemTemplate, secondaryClassLevel) == false)
+        {
+            delete storedItem;
+            errorTextOut = GetSecondaryClassRequiredLevelErrorText(eqClassID, secondaryClassLevel, liveItemTemplate->RequiredLevel, "Your equipped item");
             return false;
         }
         // A two-hander entering storage main hand demands an empty stored off hand (the type check above already forces storageEquipSlot to be the main hand for a two-hander)
