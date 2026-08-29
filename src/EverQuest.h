@@ -51,7 +51,7 @@ class ByteBuffer;
 struct AreaTrigger;
 struct BuildValuesCachePosPointers;
 
-#define EQ_MOD_VERSION                              81
+#define EQ_MOD_VERSION                              82
 
 #define EQ_EQCLASS_NONE                             0
 #define EQ_EQCLASS_WARRIOR                          1
@@ -405,6 +405,7 @@ public:
     uint32 WildRampageDamagePct = 0;
     uint32 AttackRoundTimeInMS = 0;
     uint32 DifficultyType = EQ_CREATURE_DIFFICULTY_NORMAL;
+    bool GossipIsOnlyFromHailText = false;
 };
 
 class EverQuestCreatureSpawnPoint
@@ -1120,6 +1121,7 @@ struct EverQuestPlayerControllerData
     uint32 IssuedIllusionItemID = 0;
     bool HideWoWGear = false;
     bool DungeonModeInstanced = false;
+    bool HailWindowOnRightClick = false;
     bool AdventurerDisqualified = false;
     uint32 DeathExpLost = 0;                // Experience taken by spirit releases since the last resurrection, and still restorable.  Zero means nothing is pending
     uint32 DeathExpRestGranted = 0;         // How much of that loss was handed back as rest experience, so a restore can take the same share of it away again
@@ -1824,6 +1826,12 @@ public:
     bool GetDungeonModeInstancedForPlayer(Player* player);
     void SetDungeonModeInstancedForPlayer(Player* player, bool dungeonModeInstanced);
     void SaveDungeonModeInstancedForPlayer(Player* player);
+    bool GetHailWindowOnRightClickForPlayer(Player* player);
+    void SetHailWindowOnRightClickForPlayer(Player* player, bool hailWindowOnRightClick);
+    void SaveHailWindowOnRightClickForPlayer(Player* player);
+    bool TryGetHailWindowOnRightClickForPlayer(Player* player, bool& hailWindowOnRightClick);
+    bool IsCreatureGossipOnlyFromHailText(uint32 creatureTemplateID);
+    void ResendNpcFlagsOfNearbyCreaturesToPlayer(Player* player);
     void SendDungeonModeStateToPlayer(Player* player, bool showChatMessage);
     void ResendVisibleGearOfNearbyPlayersToPlayer(Player* player);
     uint32 GetIssuedIllusionItemIDForPlayer(Player* player);

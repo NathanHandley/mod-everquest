@@ -667,13 +667,43 @@ public:
     // synchronously build another player's values update (that is already the mutex's documented no-engine-calls rule). The lookups copy their values out under the
     // lock and never fall back to a database load, so nothing here can stall a map thread on a query or read a record another thread is retiring. The empty() check
     // keeps the common case (health/power ticks, which carry no visible item fields) off the mutex entirely
+    // A creature whose gossip flag exists only because it has hail text is switched back to a plain mob for viewers who would rather right click attacked it.  The flag stays on server side, so a viewer who wants the window still gets
+    // one - the client is simply told there is nothing to talk to
+    void PatchHailTextGossipFlagInValuesUpdate(Unit const* unit, ByteBuffer& valuesUpdateBuf, BuildValuesCachePosPointers& posPointers, Player* target)
+    {
+        if (posPointers.UnitNPCFlagsPos < 0)
+            return;
+        Creature const* creature = unit->ToCreature();
+        if (creature == nullptr)
+            return;
+        uint32 npcFlags = valuesUpdateBuf.read<uint32>(uint32(posPointers.UnitNPCFlagsPos));
+        if ((npcFlags & UNIT_NPC_FLAG_GOSSIP) == 0)
+            return;
+        if (EverQuest->IsCreatureGossipOnlyFromHailText(creature->GetEntry()) == false)
+            return;
+
+        // A viewer with no cached settings yet (still logging in) gets the default, which is right click to attack
+        bool hailWindowOnRightClick = false;
+        EverQuest->TryGetHailWindowOnRightClickForPlayer(target, hailWindowOnRightClick);
+        if (hailWindowOnRightClick == true)
+            return;
+        valuesUpdateBuf.put(uint32(posPointers.UnitNPCFlagsPos), uint32(npcFlags & ~UNIT_NPC_FLAG_GOSSIP));
+    }
+
     void OnPatchValuesUpdate(Unit const* unit, ByteBuffer& valuesUpdateBuf, BuildValuesCachePosPointers& posPointers, Player* target) override
     {
         if (EverQuest->IsEnabled == false)
             return;
+        if (target == nullptr || unit == nullptr || unit == target)
+            return;
+        if (unit->IsCreature() == true)
+        {
+            PatchHailTextGossipFlagInValuesUpdate(unit, valuesUpdateBuf, posPointers, target);
+            return;
+        }
         if (posPointers.other.empty() == true)
             return;
-        if (target == nullptr || unit == target || unit->IsPlayer() == false)
+        if (unit->IsPlayer() == false)
             return;
 
         // A viewer with no cached settings yet (still logging in) sees gear untouched rather than blocking the map thread on a load

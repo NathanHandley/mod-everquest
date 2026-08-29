@@ -454,7 +454,7 @@ void EverQuestMod::LoadConfigurationFile()
 void EverQuestMod::LoadCreatureData()
 {
     CreaturesByTemplateID.clear();
-    QueryResult queryResult = WorldDatabase.Query("SELECT CreatureTemplateID, CanShowHeldLootItems, CanShowHeldLootShields, SpawnLimit, RangedAttackEnabled, RangedAttackMinRange, RangedAttackMaxRange, RangedAttackDamageModPct, AgroSocialDistanceMod, EnrageEnabled, EnrageHPPct, EnrageDurationInMS, EnrageCooldownInMS, FlurryEnabled, FlurryChancePct, RampageEnabled, RampageChancePct, RampageRange, RampageDamagePct, WildRampageEnabled, WildRampageChancePct, WildRampageMaxTargets, WildRampageDamagePct, AttackRoundTimeInMS, DifficultyType FROM mod_everquest_creature ORDER BY CreatureTemplateID;");
+    QueryResult queryResult = WorldDatabase.Query("SELECT CreatureTemplateID, CanShowHeldLootItems, CanShowHeldLootShields, SpawnLimit, RangedAttackEnabled, RangedAttackMinRange, RangedAttackMaxRange, RangedAttackDamageModPct, AgroSocialDistanceMod, EnrageEnabled, EnrageHPPct, EnrageDurationInMS, EnrageCooldownInMS, FlurryEnabled, FlurryChancePct, RampageEnabled, RampageChancePct, RampageRange, RampageDamagePct, WildRampageEnabled, WildRampageChancePct, WildRampageMaxTargets, WildRampageDamagePct, AttackRoundTimeInMS, DifficultyType, GossipIsOnlyFromHailText FROM mod_everquest_creature ORDER BY CreatureTemplateID;");
     if (queryResult)
     {
         do
@@ -487,6 +487,7 @@ void EverQuestMod::LoadCreatureData()
             everQuestCreature.WildRampageDamagePct = fields[22].Get<uint32>();
             everQuestCreature.AttackRoundTimeInMS = fields[23].Get<uint32>();
             everQuestCreature.DifficultyType = fields[24].Get<uint32>();
+            everQuestCreature.GossipIsOnlyFromHailText = fields[25].Get<bool>();
             CreaturesByTemplateID[everQuestCreature.CreatureTemplateID] = everQuestCreature;
         } while (queryResult->NextRow());
     }
@@ -4740,8 +4741,9 @@ bool EverQuestMod::HandleGossipHello(Player* player, Creature* creature)
 
     if (hasAnyAvailableOption == false)
     {
-        // Creatures that only exist as gossip targets for a hailed emote shouldn't open an empty gossip window, but any creature with a real role should fall through to its normal handling
-        if (firedHailedEmote == true && creature->IsQuestGiver() == false && creature->IsVendor() == false && creature->IsTrainer() == false
+        // Creatures that only exist as gossip targets for a hailed emote shouldn't open an empty gossip window, but any creature with a real role
+        // (or with a hail response of its own to show, which is a gossip menu on the template) should fall through to its normal handling
+        if (firedHailedEmote == true && creature->GetCreatureTemplate()->GossipMenuId == 0 && creature->IsQuestGiver() == false && creature->IsVendor() == false && creature->IsTrainer() == false
             && creature->HasNpcFlag(UNIT_NPC_FLAG_BANKER) == false && creature->HasNpcFlag(UNIT_NPC_FLAG_STABLEMASTER) == false && creature->HasNpcFlag(UNIT_NPC_FLAG_INNKEEPER) == false)
         {
             CloseGossipMenuFor(player);
@@ -10452,6 +10454,10 @@ bool EverQuestMod::IsSummonPlayerSpellBlockedByRequiredKey(SpellInfo const* spel
         targetPlayer = ObjectAccessor::FindPlayer(caster->ToPlayer()->GetTarget());
     if (targetPlayer == nullptr || targetPlayer == caster)
         return false;
+
+    // A target on another map belongs to another map thread, so its inventory cannot be read from here.  The teleport gate in OnPlayerBeforeTeleport runs the same key check on the target's own thread and still turns them away
+    if (targetPlayer->FindMap() != caster->FindMap())
+        return false;
     if (DoesPlayerHaveRequiredKeyForMap(targetPlayer, caster->GetMapId()) == true)
         return false;
 
@@ -10679,7 +10685,7 @@ EverQuestPlayerControllerData EverQuestMod::GetPlayerControllerData(Player* play
 {
     EverQuestPlayerControllerData controllerData;
     controllerData.GUID = player->GetGUID().GetCounter();
-    QueryResult queryResult = CharacterDatabase.Query("SELECT nextSecondaryClass, currentSecondaryClass, secondaryExpPool, illusionFaceId, showBardPulse, issuedIllusionItemId, hideWoWGear, dungeonMode, adventurerDisqualified, deathExpLost, deathExpRestGranted, deathExpLostClass FROM mod_everquest_character_settings WHERE guid = {}", player->GetGUID().GetCounter());
+    QueryResult queryResult = CharacterDatabase.Query("SELECT nextSecondaryClass, currentSecondaryClass, secondaryExpPool, illusionFaceId, showBardPulse, issuedIllusionItemId, hideWoWGear, dungeonMode, adventurerDisqualified, deathExpLost, deathExpRestGranted, deathExpLostClass, hailWindowOnRightClick FROM mod_everquest_character_settings WHERE guid = {}", player->GetGUID().GetCounter());
     if (!queryResult || queryResult->GetRowCount() == 0)
     {
         const EverQuestClassMap classMap = GetClassMapForWOWClassID(player->getClass());
@@ -10691,6 +10697,7 @@ EverQuestPlayerControllerData EverQuestMod::GetPlayerControllerData(Player* play
         controllerData.IssuedIllusionItemID = 0;
         controllerData.HideWoWGear = false;
         controllerData.DungeonModeInstanced = false;
+        controllerData.HailWindowOnRightClick = false;
         controllerData.AdventurerDisqualified = false;
         controllerData.DeathExpLost = 0;
         controllerData.DeathExpRestGranted = 0;
@@ -10711,6 +10718,7 @@ EverQuestPlayerControllerData EverQuestMod::GetPlayerControllerData(Player* play
         controllerData.DeathExpLost = fields[9].Get<uint32>();
         controllerData.DeathExpRestGranted = fields[10].Get<uint32>();
         controllerData.DeathExpLostSecondaryClass = fields[11].Get<uint8>();
+        controllerData.HailWindowOnRightClick = fields[12].Get<bool>();
     }
     return controllerData;
 }
@@ -10946,6 +10954,76 @@ void EverQuestMod::SendDungeonModeStateToPlayer(Player* player, bool showChatMes
     WorldPacket data;
     ChatHandler::BuildChatPacket(data, CHAT_MSG_SYSTEM, LANG_ADDON, nullptr, nullptr, addonMessage);
     player->GetSession()->SendPacket(&data);
+}
+
+bool EverQuestMod::GetHailWindowOnRightClickForPlayer(Player* player)
+{
+    return GetOrLoadActivePlayerClassControllerData(player)->HailWindowOnRightClick;
+}
+
+void EverQuestMod::SetHailWindowOnRightClickForPlayer(Player* player, bool hailWindowOnRightClick)
+{
+    GetOrLoadActivePlayerClassControllerData(player)->HailWindowOnRightClick = hailWindowOnRightClick;
+    SaveHailWindowOnRightClickForPlayer(player);
+}
+
+void EverQuestMod::SaveHailWindowOnRightClickForPlayer(Player* player)
+{
+    EverQuestPlayerControllerData controllerData;
+    {
+        std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+        auto controllerDataIt = ActivePlayerClassControllerDataByGUID.find(player->GetGUID());
+        if (controllerDataIt == ActivePlayerClassControllerDataByGUID.end())
+            return;
+        controllerData = controllerDataIt->second;
+    }
+
+    CharacterDatabase.Execute("INSERT INTO `mod_everquest_character_settings` (`guid`, `currentSecondaryClass`, `nextSecondaryClass`, `secondaryExpPool`, `hailWindowOnRightClick`) VALUES ({}, {}, {}, {}, {}) ON DUPLICATE KEY UPDATE `hailWindowOnRightClick` = {}",
+        player->GetGUID().GetCounter(),
+        controllerData.CurrentSecondClass,
+        controllerData.NextSecondClass,
+        controllerData.SecondaryExpPool,
+        controllerData.HailWindowOnRightClick == true ? 1 : 0,
+        controllerData.HailWindowOnRightClick == true ? 1 : 0);
+}
+
+bool EverQuestMod::TryGetHailWindowOnRightClickForPlayer(Player* player, bool& hailWindowOnRightClick)
+{
+    std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+    auto controllerDataIt = ActivePlayerClassControllerDataByGUID.find(player->GetGUID());
+    if (controllerDataIt == ActivePlayerClassControllerDataByGUID.end())
+        return false;
+    hailWindowOnRightClick = controllerDataIt->second.HailWindowOnRightClick;
+    return true;
+}
+
+bool EverQuestMod::IsCreatureGossipOnlyFromHailText(uint32 creatureTemplateID)
+{
+    unordered_map<uint32, EverQuestCreature>::const_iterator creatureIterator = CreaturesByTemplateID.find(creatureTemplateID);
+    if (creatureIterator == CreaturesByTemplateID.end())
+        return false;
+    return creatureIterator->second.GossipIsOnlyFromHailText;
+}
+
+void EverQuestMod::ResendNpcFlagsOfNearbyCreaturesToPlayer(Player* player)
+{
+    // Forcing the field dirty rebroadcasts it to every viewer of each nearby creature
+    Map* map = player->FindMap();
+    if (map == nullptr)
+        return;
+    float visibilityRange = map->GetVisibilityRange();
+    std::list<Creature*> nearbyCreatures;
+    Acore::AnyUnitInObjectRangeCheck check(player, visibilityRange);
+    Acore::CreatureListSearcher<Acore::AnyUnitInObjectRangeCheck> searcher(player, nearbyCreatures, check);
+    Cell::VisitObjects(player, searcher, visibilityRange);
+    for (Creature* nearbyCreature : nearbyCreatures)
+    {
+        if (nearbyCreature == nullptr)
+            continue;
+        if (IsCreatureGossipOnlyFromHailText(nearbyCreature->GetEntry()) == false)
+            continue;
+        nearbyCreature->ForceValuesUpdateAtIndex(UNIT_NPC_FLAGS);
+    }
 }
 
 void EverQuestMod::ResendVisibleGearOfNearbyPlayersToPlayer(Player* player)

@@ -134,6 +134,7 @@ public:
             { "eqshowbardpulse", HandleEQShowBardPulseCommand,  SEC_PLAYER, Console::No },
             { "eqhidewowgear", HandleEQHideWoWGearCommand,      SEC_PLAYER, Console::No },
             { "eqdungeonmode", HandleEQDungeonModeCommand,      SEC_PLAYER, Console::No },
+            { "eqhailwindow", HandleEQHailWindowCommand,        SEC_PLAYER, Console::No },
             { "eqauctionfilter", HandleEQAuctionFilterCommand,  SEC_PLAYER, Console::No },
             { "class",  classCommandTable                                               },
             { "track",  trackCommandTable                                               },
@@ -398,6 +399,52 @@ public:
             handler->PSendSysMessage("WoW gear on other players is now |cff4CFF00hidden|r for you.");
         else
             handler->PSendSysMessage("WoW gear on other players is now |cff4CFF00shown|r for you.");
+        return true;
+    }
+
+    static bool HandleEQHailWindowCommand(ChatHandler* handler, const char* args)
+    {
+        if (EverQuest->IsEnabled == false)
+            return true;
+
+        Player* player = handler->GetPlayer();
+        if (player == nullptr)
+            return true;
+
+        // Validate the passed value is either "on" or "off"
+        bool isValidValue = false;
+        bool hailWindowOnRightClick = false;
+        if (*args)
+        {
+            std::string valueString = GetFirstCommandArg(args);
+            boost::algorithm::to_lower(valueString);
+            if (valueString == "on")
+            {
+                hailWindowOnRightClick = true;
+                isValidValue = true;
+            }
+            else if (valueString == "off")
+            {
+                hailWindowOnRightClick = false;
+                isValidValue = true;
+            }
+        }
+        if (isValidValue == false)
+        {
+            string currentStateString = EverQuest->GetHailWindowOnRightClickForPlayer(player) == true ? "on" : "off";
+            handler->PSendSysMessage(".eqhailwindow 'on' or 'off'");
+            handler->PSendSysMessage("Many EverQuest creatures answer a hail with a line of text and nothing else. When on, right clicking one of those opens its reply in a window, the way talking to any other NPC does. When off, they behave like ordinary creatures and right clicking attacks them instead. Creatures that also sell, train, bank or hand out quests are unaffected either way. Example: '.eqhailwindow on'");
+            handler->PSendSysMessage("Opening hail replies on right click is currently |cff4CFF00{}|r for you.", currentStateString);
+            return true;
+        }
+
+        // Store the setting, then re-send nearby creatures' flags so the change takes hold without needing to re-enter view range
+        EverQuest->SetHailWindowOnRightClickForPlayer(player, hailWindowOnRightClick);
+        EverQuest->ResendNpcFlagsOfNearbyCreaturesToPlayer(player);
+        if (hailWindowOnRightClick == true)
+            handler->PSendSysMessage("Right clicking a creature that only answers hails now |cff4CFF00opens its reply|r.");
+        else
+            handler->PSendSysMessage("Right clicking a creature that only answers hails now |cff4CFF00attacks it|r.");
         return true;
     }
 
