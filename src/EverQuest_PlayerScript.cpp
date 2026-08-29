@@ -905,6 +905,14 @@ public:
             }
         }
 
+        // A zone that takes a key turns away anyone arriving without it, no matter how they got sent (raid coordinator, summon, zone line)
+        if (player != nullptr && mapid != player->GetMapId() && EverQuest->DoesPlayerHaveRequiredKeyForMap(player, mapid) == false)
+        {
+            ChatHandler(player->GetSession()).PSendSysMessage("You cannot enter {} without {}.", EverQuest->GetZoneNameForMap(mapid),
+                EverQuest->GetRequiredKeyItemName(EverQuest->GetRequiredKeyItemIDForMap(mapid)));
+            return false;
+        }
+
         // A converted teleport into a zone that has a private copy is aimed at the open world version, so point it at the copy when the character belongs in one
         if (EverQuest->TryRerouteZoneTeleportIntoInstance(player, mapid, x, y, z, orientation, options) == true)
             return false;

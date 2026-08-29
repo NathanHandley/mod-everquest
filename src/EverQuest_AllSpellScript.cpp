@@ -85,6 +85,31 @@ public:
             return;
         }
 
+        // A zone that takes a key refuses anyone summoned in without one, and the caster is the one who needs to hear why
+        std::string requiredKeyDeniedMessage;
+        if (EverQuest->IsSummonPlayerSpellBlockedByRequiredKey(spell->GetSpellInfo(), target, spell->GetCaster(), requiredKeyDeniedMessage) == true)
+        {
+            if (spell->GetCaster()->IsPlayer() == true)
+                ChatHandler(spell->GetCaster()->ToPlayer()->GetSession()).PSendSysMessage(requiredKeyDeniedMessage);
+            res = SPELL_FAILED_DONT_REPORT;
+            return;
+        }
+
+        // Levitation on top of an object illusion form crashes the client, so it is refused while the form is up
+        Unit* levitationTarget = (target != nullptr) ? target : spell->GetCaster();
+        if (EverQuest->IsLevitationBlockedByIllusionObjectForm(spell->GetSpellInfo(), levitationTarget) == true)
+        {
+            if (spell->GetCaster()->IsPlayer() == true)
+            {
+                if (levitationTarget == spell->GetCaster())
+                    ChatHandler(spell->GetCaster()->ToPlayer()->GetSession()).PSendSysMessage("You cannot levitate while in the form of an object.");
+                else
+                    ChatHandler(spell->GetCaster()->ToPlayer()->GetSession()).PSendSysMessage("Your target cannot levitate while in the form of an object.");
+            }
+            res = SPELL_FAILED_DONT_REPORT;
+            return;
+        }
+
         // Enforce buff restriction up front to avoid mana/cooldown triggers
         if (target == nullptr)
             return;
@@ -103,6 +128,24 @@ public:
         SpellInfo const* spellInfo = spell->GetSpellInfo();
         if (spellInfo == nullptr)
             return;
+
+        // An object illusion form and levitation crash the client the instant they overlap, so neither is ever allowed to land together
+        if (EverQuest->IsLevitationBlockedByIllusionObjectForm(spellInfo, target) == true)
+        {
+            uint8 levitationEffectMask = 0;
+            for (uint8 i = 0; i < MAX_SPELL_EFFECTS; ++i)
+            {
+                if (spellInfo->Effects[i].Effect != SPELL_EFFECT_APPLY_AURA)
+                    continue;
+                if (spellInfo->Effects[i].ApplyAuraName == SPELL_AURA_HOVER || spellInfo->Effects[i].ApplyAuraName == SPELL_AURA_FEATHER_FALL
+                    || spellInfo->Effects[i].ApplyAuraName == SPELL_AURA_WATER_WALK)
+                    levitationEffectMask |= (uint8)(1 << i);
+            }
+            targetInfo.effectMask = targetInfo.effectMask & (uint8)(~levitationEffectMask);
+        }
+        if (EverQuest->IsIllusionObjectFormBlockedByLevitation(spellInfo->Id, target) == true)
+            targetInfo.effectMask = 0;
+
         if (EverQuest->ShouldStripBashKickStunBeforeItLands(spellInfo->Id, target) == false)
             return;
 

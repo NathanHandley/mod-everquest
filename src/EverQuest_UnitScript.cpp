@@ -224,6 +224,13 @@ public:
         Player* player = unit->ToPlayer();
         uint32 spellID = aura->GetId();
 
+        // Last line of defense against a levitating object model, which crashes the client.  
+        if (EverQuest->IsLevitationBlockedByIllusionObjectForm(aura->GetSpellInfo(), player) == true || EverQuest->IsIllusionObjectFormBlockedByLevitation(spellID, player) == true)
+        {
+            player->RemoveAura(aura);
+            return;
+        }
+
         // The core transform has already set the illusion model by now, so swap in the gear-matched version
         if (EverQuest->IsIllusionFormSpell(spellID) == true)
             EverQuest->ApplyIllusionGearDisplayOnFormAuraApply(player, spellID);

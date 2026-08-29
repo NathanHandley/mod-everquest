@@ -41,6 +41,21 @@ class EverQuest_IllusionSpellScript: public SpellScript
         Unit* caster = GetCaster();
         if (caster == nullptr)
             return SPELL_CAST_OK;
+
+        // A levitating object model crashes the client, so the form is refused outright rather than stripping the levitation
+        Unit* formTarget = (GetExplTargetUnit() != nullptr) ? GetExplTargetUnit() : caster;
+        if (EverQuest->IsUnitLevitating(formTarget) == true)
+        {
+            if (caster->IsPlayer() == true)
+            {
+                if (formTarget == caster)
+                    ChatHandler(caster->ToPlayer()->GetSession()).PSendSysMessage("You cannot take the form of an object while levitating.");
+                else
+                    ChatHandler(caster->ToPlayer()->GetSession()).PSendSysMessage("Your target cannot take the form of an object while levitating.");
+            }
+            return SPELL_FAILED_DONT_REPORT;
+        }
+
         if (EverQuest->HasIllusionObjectInRangeForCaster(caster, spellID) == true)
             return SPELL_CAST_OK;
 

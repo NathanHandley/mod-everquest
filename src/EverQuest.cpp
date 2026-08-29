@@ -3958,6 +3958,56 @@ void EverQuestMod::RefreshIllusionObjectDisplayForPlayer(Player* player)
     }
 }
 
+bool EverQuestMod::IsUnitInIllusionObjectForm(Unit* unit)
+{
+    if (unit == nullptr)
+        return false;
+    for (auto const& appliedAuraItr : unit->GetAppliedAuras())
+    {
+        AuraApplication const* appliedAurApp = appliedAuraItr.second;
+        if (appliedAurApp == nullptr || appliedAurApp->GetBase() == nullptr)
+            continue;
+        if (GetIllusionObjectClassForSpellID(appliedAurApp->GetBase()->GetId()) != EQ_ILLUSION_OBJECT_CLASS_NONE)
+            return true;
+    }
+    return false;
+}
+
+bool EverQuestMod::IsUnitLevitating(Unit* unit)
+{
+    if (unit == nullptr)
+        return false;
+    if (unit->HasAuraType(SPELL_AURA_HOVER) == true)
+        return true;
+    return unit->HasAuraType(SPELL_AURA_FEATHER_FALL);
+}
+
+bool EverQuestMod::DoesSpellApplyLevitation(SpellInfo const* spellInfo)
+{
+    // EQ levitation lands as hover plus feather fall
+    if (spellInfo == nullptr)
+        return false;
+    if (spellInfo->HasAura(SPELL_AURA_HOVER) == true)
+        return true;
+    return spellInfo->HasAura(SPELL_AURA_FEATHER_FALL);
+}
+
+bool EverQuestMod::IsLevitationBlockedByIllusionObjectForm(SpellInfo const* spellInfo, Unit* target)
+{
+    // A levitating object model crashes the client, so levitation and an object illusion form can never be up at the same time
+    if (DoesSpellApplyLevitation(spellInfo) == false)
+        return false;
+    return IsUnitInIllusionObjectForm(target);
+}
+
+bool EverQuestMod::IsIllusionObjectFormBlockedByLevitation(uint32 spellID, Unit* target)
+{
+    // The two can never overlap even for an instant, so a levitating target simply does not get the form
+    if (GetIllusionObjectClassForSpellID(spellID) == EQ_ILLUSION_OBJECT_CLASS_NONE)
+        return false;
+    return IsUnitLevitating(target);
+}
+
 bool EverQuestMod::IsSpellBlockedByMinTargetLevel(uint32 spellID, Unit* target, Unit* caster)
 {
     if (ConfigSpellBuffLevelRestrictionsEnabled == false)
@@ -8088,7 +8138,7 @@ void EverQuestMod::LoadZoneData()
     InstanceDungeonMapIDs.clear();
     OpenWorldMapIDByInstanceMapID.clear();
 
-    QueryResult queryResult = WorldDatabase.Query("SELECT MapID, AllowBind, ExpansionID, MaxAgroZDistance, InstanceRaidLowMapID, InstanceDungeonMapID FROM mod_everquest_zone;");
+    QueryResult queryResult = WorldDatabase.Query("SELECT MapID, AllowBind, ExpansionID, MaxAgroZDistance, InstanceRaidLowMapID, InstanceDungeonMapID, RequiredKeyItemID FROM mod_everquest_zone;");
     if (queryResult)
     {
         do
@@ -8101,6 +8151,7 @@ void EverQuestMod::LoadZoneData()
             zone.MaxAgroZDistance = fields[3].Get<float>();
             zone.InstanceRaidLowMapID = fields[4].Get<uint32>();
             zone.InstanceDungeonMapID = fields[5].Get<uint32>();
+            zone.RequiredKeyItemID = fields[6].Get<uint32>();
             ZoneByMapID[zone.MapID] = zone;
             if (zone.InstanceRaidLowMapID != 0)
             {
@@ -8170,6 +8221,45 @@ bool EverQuestMod::IsBindAllowedForMap(uint32 mapID)
     if (zoneIt == ZoneByMapID.end())
         return false;
     return zoneIt->second.AllowBind;
+}
+
+uint32 EverQuestMod::GetRequiredKeyItemIDForMap(uint32 mapID)
+{
+    auto zoneIt = ZoneByMapID.find(mapID);
+    if (zoneIt == ZoneByMapID.end())
+        return 0;
+    return zoneIt->second.RequiredKeyItemID;
+}
+
+bool EverQuestMod::DoesPlayerHaveRequiredKeyForMap(Player* player, uint32 mapID)
+{
+    uint32 requiredKeyItemID = GetRequiredKeyItemIDForMap(mapID);
+    if (requiredKeyItemID == 0)
+        return true;
+    if (player == nullptr)
+        return false;
+    if (player->IsGameMaster() == true)
+        return true;
+
+    // The key must be carried, so what sits in the bank is no help
+    return player->HasItemCount(requiredKeyItemID, 1, false);
+}
+
+std::string EverQuestMod::GetRequiredKeyItemName(uint32 requiredKeyItemID)
+{
+    ItemTemplate const* itemTemplate = sObjectMgr->GetItemTemplate(requiredKeyItemID);
+    if (itemTemplate == nullptr)
+        return "a key you do not have";
+    return itemTemplate->Name1;
+}
+
+std::string EverQuestMod::GetZoneNameForMap(uint32 mapID)
+{
+    // An instance copy's own map name carries a suffix, so the zone's plain name comes off the open world version
+    MapEntry const* mapEntry = sMapStore.LookupEntry(GetOpenWorldMapIDForMapID(mapID));
+    if (mapEntry == nullptr)
+        return "that place";
+    return mapEntry->name[sWorld->GetDefaultDbcLocale()];
 }
 
 float EverQuestMod::GetMaxAgroZDistanceForMap(uint32 mapID)
@@ -10325,6 +10415,49 @@ bool EverQuestMod::IsSummonPlayerSpellBlockedByTarget(uint32 spellID, Unit* targ
 
     Player* targetPlayer = ResolveSummonPlayerTarget(caster->ToPlayer(), target);
     return targetPlayer == nullptr || targetPlayer == caster;
+}
+
+bool EverQuestMod::IsSummonPlayerSpell(SpellInfo const* spellInfo)
+{
+    if (spellInfo == nullptr)
+        return false;
+
+    // Converted EQ summons (Call of the Hero and friends) run through the mod's own dummy effect
+    if (spellInfo->Id >= ConfigSystemSpellDBCIDMin && spellInfo->Id <= ConfigSystemSpellDBCIDMax && spellInfo->Effects[EFFECT_0].Effect == SPELL_EFFECT_DUMMY && spellInfo->Effects[EFFECT_0].MiscValue == EQ_SPELLDUMMYTYPE_SUMMONPC)
+        return true;
+
+    // WoW's own summons (Ritual of Summoning) use the core effect
+    for (uint8 effectIndex = EFFECT_0; effectIndex < MAX_SPELL_EFFECTS; effectIndex++)
+        if (spellInfo->Effects[effectIndex].Effect == SPELL_EFFECT_SUMMON_PLAYER)
+            return true;
+    return false;
+}
+
+bool EverQuestMod::IsSummonPlayerSpellBlockedByRequiredKey(SpellInfo const* spellInfo, Unit* target, Unit* caster, std::string& outDeniedMessage)
+{
+    outDeniedMessage.clear();
+    if (caster == nullptr || caster->IsPlayer() == false)
+        return false;
+    if (IsSummonPlayerSpell(spellInfo) == false)
+        return false;
+
+    // A summon lands where the caster stands, so the caster's zone is what the target needs the key for
+    uint32 requiredKeyItemID = GetRequiredKeyItemIDForMap(caster->GetMapId());
+    if (requiredKeyItemID == 0)
+        return false;
+
+    // The core resolves a summon's victim off the caster's selection rather than the spell targets, so both are consulted
+    Player* targetPlayer = (target != nullptr && target != caster) ? target->ToPlayer() : nullptr;
+    if (targetPlayer == nullptr)
+        targetPlayer = ObjectAccessor::FindPlayer(caster->ToPlayer()->GetTarget());
+    if (targetPlayer == nullptr || targetPlayer == caster)
+        return false;
+    if (DoesPlayerHaveRequiredKeyForMap(targetPlayer, caster->GetMapId()) == true)
+        return false;
+
+    outDeniedMessage = Acore::StringFormat("{} cannot be brought into {}, as they do not carry {}.", targetPlayer->GetName(),
+        GetZoneNameForMap(caster->GetMapId()), GetRequiredKeyItemName(requiredKeyItemID));
+    return true;
 }
 
 Player* EverQuestMod::ResolveSummonPlayerTarget(Player* caster, Unit* target)

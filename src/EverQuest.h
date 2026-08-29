@@ -51,7 +51,7 @@ class ByteBuffer;
 struct AreaTrigger;
 struct BuildValuesCachePosPointers;
 
-#define EQ_MOD_VERSION                              80
+#define EQ_MOD_VERSION                              81
 
 #define EQ_EQCLASS_NONE                             0
 #define EQ_EQCLASS_WARRIOR                          1
@@ -1041,6 +1041,7 @@ public:
     float MaxAgroZDistance = -1.0f;
     uint32 InstanceRaidLowMapID = 0;
     uint32 InstanceDungeonMapID = 0;
+    uint32 RequiredKeyItemID = 0;
 };
 
 class EverQuestZoneTeleportDestination
@@ -1532,6 +1533,11 @@ public:
     bool HasIllusionObjectInRangeForCaster(Unit* caster, uint32 spellID);
     void ApplyIllusionObjectDisplayOnFormAuraApply(Player* player, uint32 formSpellID);
     void RefreshIllusionObjectDisplayForPlayer(Player* player);
+    bool IsUnitInIllusionObjectForm(Unit* unit);
+    bool IsUnitLevitating(Unit* unit);
+    bool DoesSpellApplyLevitation(SpellInfo const* spellInfo);
+    bool IsLevitationBlockedByIllusionObjectForm(SpellInfo const* spellInfo, Unit* target);
+    bool IsIllusionObjectFormBlockedByLevitation(uint32 spellID, Unit* target);
     bool IsSpellBlockedByMinTargetLevel(uint32 spellID, Unit* target, Unit* caster);
     bool IsSpellBlockedByMaxCreatureTargetLevel(uint32 spellID, Unit* target, Unit* caster);
     bool IsCreatureCharmBlockedByCharmLimits(uint32 spellID, Unit* target, Unit* caster);
@@ -1700,6 +1706,10 @@ public:
     bool TeleportPlayerOutOfInstanceForEviction(Player* player);
     bool HandleInstanceEvictionRepop(Player* player);
     bool IsBindAllowedForMap(uint32 mapID);
+    uint32 GetRequiredKeyItemIDForMap(uint32 mapID);
+    bool DoesPlayerHaveRequiredKeyForMap(Player* player, uint32 mapID);
+    std::string GetRequiredKeyItemName(uint32 requiredKeyItemID);
+    std::string GetZoneNameForMap(uint32 mapID);
     bool IsMapRestrictedByExpansion(uint32 mapID);
     bool IsMapRestrictedForPlayers(uint32 mapID);
     bool RelocatePlayerOutOfRestrictedMap(Player* player);
@@ -1776,6 +1786,8 @@ public:
     uint32 CalculateSpellFocusBoostValue(Unit* caster, uint32 spellID);
     void ProcessForage(Player* player);
     bool IsSummonPlayerSpellBlockedByTarget(uint32 spellID, Unit* target, Unit* caster);
+    bool IsSummonPlayerSpell(SpellInfo const* spellInfo);
+    bool IsSummonPlayerSpellBlockedByRequiredKey(SpellInfo const* spellInfo, Unit* target, Unit* caster, std::string& outDeniedMessage);
     void ProcessSummonPlayerToCaster(Player* caster, Unit* target);
     Player* ResolveSummonPlayerTarget(Player* caster, Unit* target);
     void SendSummonRequestToPlayer(Player* targetPlayer, ObjectGuid summonerGUID, uint32 summonerZoneID, uint32 mapID, float x, float y, float z);
