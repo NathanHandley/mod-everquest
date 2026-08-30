@@ -51,9 +51,10 @@ class ByteBuffer;
 struct AreaTrigger;
 struct BuildValuesCachePosPointers;
 
-#define EQ_MOD_VERSION                              82
-#define EQ_MOD_VERSION                              83
 #define EQ_MOD_VERSION                              84
+
+// Color of the "your spell was dispelled" chat line, as 0xRRGGBB, for characters that never picked one
+#define EQ_DISPEL_MESSAGE_DEFAULT_COLOR             0xFFAA00
 
 #define EQ_EQCLASS_NONE                             0
 #define EQ_EQCLASS_WARRIOR                          1
@@ -1126,6 +1127,8 @@ struct EverQuestPlayerControllerData
     bool HideWoWGear = false;
     bool DungeonModeInstanced = false;
     bool HailWindowOnRightClick = false;
+    bool ShowDispelMessage = false;
+    uint32 DispelMessageColor = EQ_DISPEL_MESSAGE_DEFAULT_COLOR;
     bool AdventurerDisqualified = false;
     uint32 DeathExpLost = 0;                // Experience taken by spirit releases since the last resurrection, and still restorable.  Zero means nothing is pending
     uint32 DeathExpRestGranted = 0;         // How much of that loss was handed back as rest experience, so a restore can take the same share of it away again
@@ -1841,6 +1844,16 @@ public:
     void SetHailWindowOnRightClickForPlayer(Player* player, bool hailWindowOnRightClick);
     void SaveHailWindowOnRightClickForPlayer(Player* player);
     bool TryGetHailWindowOnRightClickForPlayer(Player* player, bool& hailWindowOnRightClick);
+    bool GetShowDispelMessageForPlayer(Player* player);
+    void SetShowDispelMessageForPlayer(Player* player, bool showDispelMessage);
+    void SaveShowDispelMessageForPlayer(Player* player);
+    uint32 GetDispelMessageColorForPlayer(Player* player);
+    void SetDispelMessageColorForPlayer(Player* player, uint32 dispelMessageColor);
+    void SaveDispelMessageColorForPlayer(Player* player);
+    bool TryGetDispelMessageSettingsForPlayer(Player* player, bool& showDispelMessage, uint32& dispelMessageColor);
+    void NotifyPlayerOfDispelledAura(Player* player, AuraApplication* auraApplication);
+    bool IsAuraASpentAbsorb(Aura* aura);
+    void SendPlayerOptionsToPlayer(Player* player);
     bool IsCreatureGossipOnlyFromHailText(uint32 creatureTemplateID);
     void ResendNpcFlagsOfNearbyCreaturesToPlayer(Player* player);
     void SendDungeonModeStateToPlayer(Player* player, bool showChatMessage);

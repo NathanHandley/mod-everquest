@@ -682,6 +682,9 @@ public:
         EverQuest->LoadAuctionRealmFilterForPlayer(player);
         EverQuest->SendAuctionRealmFilterToPlayer(player);
 
+        // Set the in game options page with what this character is actually set to
+        EverQuest->SendPlayerOptionsToPlayer(player);
+
         // A character that logged out inside a private dungeon copy is still in it, and the map entry announcement could not be sent while loading
         EverQuest->SendInstanceDungeonEntryMessageToPlayer(player);
 

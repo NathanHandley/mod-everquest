@@ -299,6 +299,10 @@ public:
 
             EverQuest->HandleIllusionFormAuraRemove(unit->ToPlayer(), aurApp->GetBase()->GetId());
 
+            // Tell the player which spell a dispel just took off of them, if they asked to be told
+            if (mode == AURA_REMOVE_BY_ENEMY_SPELL)
+                EverQuest->NotifyPlayerOfDispelledAura(unit->ToPlayer(), aurApp);
+
             // Leaving a shapeshift form uncovers the illusion, so put the gear-matched illusion display back (the core has already restored the base transform model by this point)
             if (aurApp->GetBase()->GetSpellInfo() != nullptr && aurApp->GetBase()->GetSpellInfo()->HasAura(SPELL_AURA_MOD_SHAPESHIFT) == true)
             {
@@ -563,34 +567,6 @@ public:
 
         // Rampage and wild rampage swings can carry a damage percent modifier
         EverQuest->ApplyCreatureCombatAbilityDamageMod(attacker, damage);
-
-        if (damage <= 0)
-            return;
-
-        // Check auras for any melee attacker behavior. Snapshot the spell IDs first, since the casts can mutate
-        // the target's aura map (procs, charge consumption) and invalidate the iterator mid-loop
-        vector<uint32> spellIDsToCastOnAttacker;
-        Unit::AuraApplicationMap& auraMap = target->GetAppliedAuras();
-        for (Unit::AuraApplicationMap::iterator iter = auraMap.begin(); iter != auraMap.end(); ++iter)
-        {
-            AuraApplication* aurApp = iter->second;
-            if (aurApp == nullptr)
-                continue;
-            Aura* aura = aurApp->GetBase();
-            if (aura == nullptr)
-                continue;
-            uint32 spellID = aura->GetId();
-            if (spellID < EverQuest->ConfigSystemSpellDBCIDMin || spellID > EverQuest->ConfigSystemSpellDBCIDMax)
-                continue;
-            if (EverQuest->IsSpellAnEQSpell(spellID) == false)
-                continue;
-            const EverQuestSpell& curSpell = EverQuest->GetSpellDataForSpellID(spellID);
-            if (curSpell.SpellIDCastOnMeleeAttacker == 0)
-                continue;
-            spellIDsToCastOnAttacker.push_back(curSpell.SpellIDCastOnMeleeAttacker);
-        }
-        for (uint32 spellIDToCastOnAttacker : spellIDsToCastOnAttacker)
-            attacker->CastSpell(attacker, spellIDToCastOnAttacker);
     }
 
     void OnBeforeRollMeleeOutcomeAgainst(Unit const* attacker, Unit const* victim, WeaponAttackType attType,

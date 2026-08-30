@@ -10775,6 +10775,8 @@ EverQuestPlayerControllerData EverQuestMod::GetPlayerControllerData(Player* play
         controllerData.HideWoWGear = false;
         controllerData.DungeonModeInstanced = false;
         controllerData.HailWindowOnRightClick = false;
+        controllerData.ShowDispelMessage = false;
+        controllerData.DispelMessageColor = EQ_DISPEL_MESSAGE_DEFAULT_COLOR;
         controllerData.AdventurerDisqualified = false;
         controllerData.DeathExpLost = 0;
         controllerData.DeathExpRestGranted = 0;
@@ -10797,6 +10799,8 @@ EverQuestPlayerControllerData EverQuestMod::GetPlayerControllerData(Player* play
         controllerData.DeathExpRestGranted = fields[10].Get<uint32>();
         controllerData.DeathExpLostSecondaryClass = fields[11].Get<uint8>();
         controllerData.HailWindowOnRightClick = fields[12].Get<bool>();
+        controllerData.ShowDispelMessage = fields[13].Get<bool>();
+        controllerData.DispelMessageColor = fields[14].Get<uint32>() & 0xFFFFFF;
         controllerData.PendingStartItemEQClass = fields[15].Get<uint8>();
     }
     return controllerData;
@@ -11074,6 +11078,162 @@ bool EverQuestMod::TryGetHailWindowOnRightClickForPlayer(Player* player, bool& h
         return false;
     hailWindowOnRightClick = controllerDataIt->second.HailWindowOnRightClick;
     return true;
+}
+
+bool EverQuestMod::GetShowDispelMessageForPlayer(Player* player)
+{
+    return GetOrLoadActivePlayerClassControllerData(player)->ShowDispelMessage;
+}
+
+void EverQuestMod::SetShowDispelMessageForPlayer(Player* player, bool showDispelMessage)
+{
+    GetOrLoadActivePlayerClassControllerData(player)->ShowDispelMessage = showDispelMessage;
+    SaveShowDispelMessageForPlayer(player);
+}
+
+void EverQuestMod::SaveShowDispelMessageForPlayer(Player* player)
+{
+    EverQuestPlayerControllerData controllerData;
+    {
+        std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+        auto controllerDataIt = ActivePlayerClassControllerDataByGUID.find(player->GetGUID());
+        if (controllerDataIt == ActivePlayerClassControllerDataByGUID.end())
+            return;
+        controllerData = controllerDataIt->second;
+    }
+
+    CharacterDatabase.Execute("INSERT INTO `mod_everquest_character_settings` (`guid`, `currentSecondaryClass`, `nextSecondaryClass`, `secondaryExpPool`, `showDispelMessage`) VALUES ({}, {}, {}, {}, {}) ON DUPLICATE KEY UPDATE `showDispelMessage` = {}",
+        player->GetGUID().GetCounter(),
+        controllerData.CurrentSecondClass,
+        controllerData.NextSecondClass,
+        controllerData.SecondaryExpPool,
+        controllerData.ShowDispelMessage == true ? 1 : 0,
+        controllerData.ShowDispelMessage == true ? 1 : 0);
+}
+
+uint32 EverQuestMod::GetDispelMessageColorForPlayer(Player* player)
+{
+    return GetOrLoadActivePlayerClassControllerData(player)->DispelMessageColor;
+}
+
+void EverQuestMod::SetDispelMessageColorForPlayer(Player* player, uint32 dispelMessageColor)
+{
+    GetOrLoadActivePlayerClassControllerData(player)->DispelMessageColor = dispelMessageColor & 0xFFFFFF;
+    SaveDispelMessageColorForPlayer(player);
+}
+
+void EverQuestMod::SaveDispelMessageColorForPlayer(Player* player)
+{
+    EverQuestPlayerControllerData controllerData;
+    {
+        std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+        auto controllerDataIt = ActivePlayerClassControllerDataByGUID.find(player->GetGUID());
+        if (controllerDataIt == ActivePlayerClassControllerDataByGUID.end())
+            return;
+        controllerData = controllerDataIt->second;
+    }
+
+    CharacterDatabase.Execute("INSERT INTO `mod_everquest_character_settings` (`guid`, `currentSecondaryClass`, `nextSecondaryClass`, `secondaryExpPool`, `dispelMessageColor`) VALUES ({}, {}, {}, {}, {}) ON DUPLICATE KEY UPDATE `dispelMessageColor` = {}",
+        player->GetGUID().GetCounter(),
+        controllerData.CurrentSecondClass,
+        controllerData.NextSecondClass,
+        controllerData.SecondaryExpPool,
+        controllerData.DispelMessageColor,
+        controllerData.DispelMessageColor);
+}
+
+bool EverQuestMod::TryGetDispelMessageSettingsForPlayer(Player* player, bool& showDispelMessage, uint32& dispelMessageColor)
+{
+    std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+    auto controllerDataIt = ActivePlayerClassControllerDataByGUID.find(player->GetGUID());
+    if (controllerDataIt == ActivePlayerClassControllerDataByGUID.end())
+        return false;
+    showDispelMessage = controllerDataIt->second.ShowDispelMessage;
+    dispelMessageColor = controllerDataIt->second.DispelMessageColor;
+    return true;
+}
+
+void EverQuestMod::NotifyPlayerOfDispelledAura(Player* player, AuraApplication* auraApplication)
+{
+    if (player == nullptr || player->GetSession() == nullptr || auraApplication == nullptr)
+        return;
+
+    Aura* aura = auraApplication->GetBase();
+    if (aura == nullptr)
+        return;
+    const SpellInfo* spellInfo = aura->GetSpellInfo();
+    if (spellInfo == nullptr)
+        return;
+
+    // An absorb shield that soaked its last point is removed with the same reason code as a dispel, so skip a spent shield
+    if (IsAuraASpentAbsorb(aura) == true)
+        return;
+
+    bool showDispelMessage = false;
+    uint32 dispelMessageColor = EQ_DISPEL_MESSAGE_DEFAULT_COLOR;
+    if (TryGetDispelMessageSettingsForPlayer(player, showDispelMessage, dispelMessageColor) == false)
+        return;
+    if (showDispelMessage == false)
+        return;
+
+    uint8 localeIndex = static_cast<uint8>(player->GetSession()->GetSessionDbcLocale());
+    const char* spellName = spellInfo->SpellName[localeIndex];
+    if (spellName == nullptr || spellName[0] == '\0')
+        spellName = spellInfo->SpellName[0];
+    if (spellName == nullptr || spellName[0] == '\0')
+        return;
+
+    // A buff being taken and a debuff being cleansed are both dispels, but they do not read the same way
+    if (auraApplication->IsPositive() == true)
+        ChatHandler(player->GetSession()).PSendSysMessage("|cff{:06X}Your {} was dispelled.|r", dispelMessageColor & 0xFFFFFF, spellName);
+    else
+        ChatHandler(player->GetSession()).PSendSysMessage("|cff{:06X}{} was dispelled from you.|r", dispelMessageColor & 0xFFFFFF, spellName);
+}
+
+bool EverQuestMod::IsAuraASpentAbsorb(Aura* aura)
+{
+    bool hasAbsorbEffect = false;
+    for (uint8 effectIndex = 0; effectIndex < MAX_SPELL_EFFECTS; ++effectIndex)
+    {
+        AuraEffect* auraEffect = aura->GetEffect(effectIndex);
+        if (auraEffect == nullptr)
+            continue;
+        uint32 auraType = auraEffect->GetAuraType();
+        if (auraType != SPELL_AURA_SCHOOL_ABSORB && auraType != SPELL_AURA_MANA_SHIELD && auraType != SPELL_AURA_SCHOOL_HEAL_ABSORB)
+            continue;
+        hasAbsorbEffect = true;
+        if (auraEffect->GetAmount() > 0)
+            return false;
+    }
+    return hasAbsorbEffect;
+}
+
+void EverQuestMod::SendPlayerOptionsToPlayer(Player* player)
+{
+    if (player == nullptr || player->GetSession() == nullptr)
+        return;
+
+    EverQuestPlayerControllerData controllerData;
+    {
+        GetOrLoadActivePlayerClassControllerData(player);
+        std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+        auto controllerDataIt = ActivePlayerClassControllerDataByGUID.find(player->GetGUID());
+        if (controllerDataIt == ActivePlayerClassControllerDataByGUID.end())
+            return;
+        controllerData = controllerDataIt->second;
+    }
+
+    std::string addonMessage = fmt::format("EQOPTIONS\t{}\t{}\t{}\t{}\t{}\t{}\t{:06X}",
+        controllerData.IllusionFaceID,
+        IllusionMaxFaceIndex,
+        controllerData.ShowBardPulse == true ? 1 : 0,
+        controllerData.HideWoWGear == true ? 1 : 0,
+        controllerData.HailWindowOnRightClick == true ? 1 : 0,
+        controllerData.ShowDispelMessage == true ? 1 : 0,
+        controllerData.DispelMessageColor & 0xFFFFFF);
+    WorldPacket data;
+    ChatHandler::BuildChatPacket(data, CHAT_MSG_SYSTEM, LANG_ADDON, nullptr, nullptr, addonMessage);
+    player->GetSession()->SendPacket(&data);
 }
 
 bool EverQuestMod::IsCreatureGossipOnlyFromHailText(uint32 creatureTemplateID)

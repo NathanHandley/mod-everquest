@@ -135,6 +135,8 @@ public:
             { "eqhidewowgear", HandleEQHideWoWGearCommand,      SEC_PLAYER, Console::No },
             { "eqdungeonmode", HandleEQDungeonModeCommand,      SEC_PLAYER, Console::No },
             { "eqhailwindow", HandleEQHailWindowCommand,        SEC_PLAYER, Console::No },
+            { "eqdispelmessage", HandleEQDispelMessageCommand,  SEC_PLAYER, Console::No },
+            { "eqoptions", HandleEQOptionsCommand,              SEC_PLAYER, Console::No },
             { "eqauctionfilter", HandleEQAuctionFilterCommand,  SEC_PLAYER, Console::No },
             { "class",  classCommandTable                                               },
             { "track",  trackCommandTable                                               },
@@ -308,6 +310,7 @@ public:
 
         // Store the setting
         EverQuest->SetIllusionFaceIDForPlayer(player, faceID);
+        EverQuest->SendPlayerOptionsToPlayer(player);
         handler->PSendSysMessage("Your illusion face is now |cff4CFF00{}|r.", faceID);
 
         // If an illusion form is active, update the shown model right away
@@ -351,6 +354,7 @@ public:
 
         // Store the setting, which the packet filter picks up on the next pulse
         EverQuest->SetShowBardPulseForPlayer(player, showBardPulse);
+        EverQuest->SendPlayerOptionsToPlayer(player);
         if (showBardPulse == true)
             handler->PSendSysMessage("Bard song pulse graphics are now |cff4CFF00shown|r for you.");
         else
@@ -394,6 +398,7 @@ public:
 
         // Store the setting, then re-send nearby players' visible gear so the change shows without needing to re-enter view range
         EverQuest->SetHideWoWGearForPlayer(player, hideWoWGear);
+        EverQuest->SendPlayerOptionsToPlayer(player);
         EverQuest->ResendVisibleGearOfNearbyPlayersToPlayer(player);
         if (hideWoWGear == true)
             handler->PSendSysMessage("WoW gear on other players is now |cff4CFF00hidden|r for you.");
@@ -440,11 +445,188 @@ public:
 
         // Store the setting, then re-send nearby creatures' flags so the change takes hold without needing to re-enter view range
         EverQuest->SetHailWindowOnRightClickForPlayer(player, hailWindowOnRightClick);
+        EverQuest->SendPlayerOptionsToPlayer(player);
         EverQuest->ResendNpcFlagsOfNearbyCreaturesToPlayer(player);
         if (hailWindowOnRightClick == true)
             handler->PSendSysMessage("Right clicking a creature that only answers hails now |cff4CFF00opens its reply|r.");
         else
             handler->PSendSysMessage("Right clicking a creature that only answers hails now |cff4CFF00attacks it|r.");
+        return true;
+    }
+
+    // Named colors the dispel message accepts, so a raw hex value is never the only way to pick one
+    struct EverQuestNamedChatColor
+    {
+        const char* Name;
+        uint32 Color;
+    };
+
+    static const EverQuestNamedChatColor* GetNamedChatColors(size_t& colorCount)
+    {
+        static const EverQuestNamedChatColor namedColors[] =
+        {
+            { "white",  0xFFFFFF },
+            { "red",    0xFF4040 },
+            { "orange", 0xFFAA00 },
+            { "yellow", 0xFFFF00 },
+            { "green",  0x4CFF00 },
+            { "cyan",   0x00FFFF },
+            { "blue",   0x4080FF },
+            { "purple", 0xC080FF },
+            { "pink",   0xFF80C0 },
+            { "grey",   0xA0A0A0 },
+        };
+        colorCount = sizeof(namedColors) / sizeof(namedColors[0]);
+        return namedColors;
+    }
+
+    // Accepts a name from the list above, or a six digit RRGGBB hex value with an optional leading '#'
+    static bool TryParseChatColor(const std::string& colorString, uint32& color)
+    {
+        std::string workingString = colorString;
+        boost::algorithm::to_lower(workingString);
+
+        size_t colorCount = 0;
+        const EverQuestNamedChatColor* namedColors = GetNamedChatColors(colorCount);
+        for (size_t i = 0; i < colorCount; ++i)
+        {
+            if (workingString == namedColors[i].Name)
+            {
+                color = namedColors[i].Color;
+                return true;
+            }
+        }
+
+        if (workingString.empty() == false && workingString[0] == '#')
+            workingString.erase(0, 1);
+        if (workingString.size() != 6)
+            return false;
+        uint32 parsedColor = 0;
+        for (size_t i = 0; i < workingString.size(); ++i)
+        {
+            char curChar = workingString[i];
+            uint32 digitValue;
+            if (curChar >= '0' && curChar <= '9')
+                digitValue = static_cast<uint32>(curChar - '0');
+            else if (curChar >= 'a' && curChar <= 'f')
+                digitValue = static_cast<uint32>(curChar - 'a') + 10;
+            else
+                return false;
+            parsedColor = (parsedColor << 4) | digitValue;
+        }
+        color = parsedColor;
+        return true;
+    }
+
+    static std::string GetNamedChatColorListText()
+    {
+        size_t colorCount = 0;
+        const EverQuestNamedChatColor* namedColors = GetNamedChatColors(colorCount);
+        std::string listText;
+        for (size_t i = 0; i < colorCount; ++i)
+        {
+            if (i > 0)
+                listText += ", ";
+            listText += fmt::format("|cff{:06X}{}|r", namedColors[i].Color, namedColors[i].Name);
+        }
+        return listText;
+    }
+
+    static bool HandleEQDispelMessageCommand(ChatHandler* handler, const char* args)
+    {
+        if (EverQuest->IsEnabled == false)
+            return true;
+
+        Player* player = handler->GetPlayer();
+        if (player == nullptr)
+            return true;
+
+        std::vector<std::string> tokens = SplitCommandArgs(args, 2);
+        std::string valueString = tokens.empty() == true ? std::string() : tokens[0];
+        boost::algorithm::to_lower(valueString);
+
+        // "sync" prints nothing, it only pushes the current values back for the options page
+        if (valueString == "sync")
+        {
+            EverQuest->SendPlayerOptionsToPlayer(player);
+            return true;
+        }
+
+        if (valueString == "color")
+        {
+            uint32 color = 0;
+            if (tokens.size() < 2 || TryParseChatColor(tokens[1], color) == false)
+            {
+                handler->PSendSysMessage(".eqdispelmessage color 'name' or 'RRGGBB'");
+                handler->PSendSysMessage("Sets the color of the dispel message. Example: '.eqdispelmessage color FF4040' or '.eqdispelmessage color red'");
+                handler->PSendSysMessage("Named colors: {}", GetNamedChatColorListText());
+                handler->PSendSysMessage("The dispel message is currently |cff{:06X}this color|r.", EverQuest->GetDispelMessageColorForPlayer(player));
+                return true;
+            }
+
+            EverQuest->SetDispelMessageColorForPlayer(player, color);
+            EverQuest->SendPlayerOptionsToPlayer(player);
+            handler->PSendSysMessage("The dispel message is now |cff{:06X}this color|r.", color & 0xFFFFFF);
+            return true;
+        }
+
+        // Validate the passed value is either "on" or "off"
+        bool isValidValue = false;
+        bool showDispelMessage = false;
+        if (valueString == "on")
+        {
+            showDispelMessage = true;
+            isValidValue = true;
+        }
+        else if (valueString == "off")
+        {
+            showDispelMessage = false;
+            isValidValue = true;
+        }
+        if (isValidValue == false)
+        {
+            string currentStateString = EverQuest->GetShowDispelMessageForPlayer(player) == true ? "on" : "off";
+            handler->PSendSysMessage(".eqdispelmessage 'on' or 'off', or .eqdispelmessage color 'name' or 'RRGGBB'");
+            handler->PSendSysMessage("When on, a chat line names each of your spells that a dispel strips off of you. Example: '.eqdispelmessage on'");
+            handler->PSendSysMessage("Dispel messages are currently |cff4CFF00{}|r for you, in |cff{:06X}this color|r.", currentStateString, EverQuest->GetDispelMessageColorForPlayer(player));
+            return true;
+        }
+
+        // Store the setting, which the aura removal hook reads the next time something is dispelled
+        EverQuest->SetShowDispelMessageForPlayer(player, showDispelMessage);
+        EverQuest->SendPlayerOptionsToPlayer(player);
+        if (showDispelMessage == true)
+            handler->PSendSysMessage("Dispel messages are now |cff4CFF00on|r for you.");
+        else
+            handler->PSendSysMessage("Dispel messages are now |cff4CFF00off|r for you.");
+        return true;
+    }
+
+    // Backs the in game options page.  "sync" pushes the current values to it, and no argument prints the same values as text
+    static bool HandleEQOptionsCommand(ChatHandler* handler, const char* args)
+    {
+        if (EverQuest->IsEnabled == false)
+            return true;
+
+        Player* player = handler->GetPlayer();
+        if (player == nullptr)
+            return true;
+
+        std::string valueString = GetFirstCommandArg(args);
+        boost::algorithm::to_lower(valueString);
+        if (valueString == "sync")
+        {
+            EverQuest->SendPlayerOptionsToPlayer(player);
+            return true;
+        }
+
+        handler->PSendSysMessage("=== EverQuest Options ===");
+        handler->PSendSysMessage("Illusion face (.eqface): |cff4CFF00{}|r (0 - {})", EverQuest->GetIllusionFaceIDForPlayer(player), EverQuest->IllusionMaxFaceIndex);
+        handler->PSendSysMessage("Bard song pulse graphics (.eqshowbardpulse): |cff4CFF00{}|r", EverQuest->GetShowBardPulseForPlayer(player) == true ? "shown" : "hidden");
+        handler->PSendSysMessage("Hide WoW gear on other players (.eqhidewowgear): |cff4CFF00{}|r", EverQuest->GetHideWoWGearForPlayer(player) == true ? "on" : "off");
+        handler->PSendSysMessage("Open hail replies on right click (.eqhailwindow): |cff4CFF00{}|r", EverQuest->GetHailWindowOnRightClickForPlayer(player) == true ? "on" : "off");
+        handler->PSendSysMessage("Dispel messages (.eqdispelmessage): |cff4CFF00{}|r, in |cff{:06X}this color|r", EverQuest->GetShowDispelMessageForPlayer(player) == true ? "on" : "off", EverQuest->GetDispelMessageColorForPlayer(player));
+        handler->PSendSysMessage("These can also be set in the Interface Options window, under the EverQuest category.");
         return true;
     }
 
