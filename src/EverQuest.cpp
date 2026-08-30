@@ -11165,6 +11165,10 @@ void EverQuestMod::NotifyPlayerOfDispelledAura(Player* player, AuraApplication* 
     if (spellInfo == nullptr)
         return;
 
+    // Don't give messages for the hidden chain "split" auras
+    if (spellInfo->HasAttribute(SPELL_ATTR0_DO_NOT_DISPLAY) == true)
+        return;
+
     // An absorb shield that soaked its last point is removed with the same reason code as a dispel, so skip a spent shield
     if (IsAuraASpentAbsorb(aura) == true)
         return;
