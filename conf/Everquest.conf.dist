@@ -651,6 +651,19 @@ EverQuest.Player.AddRacialGuiseItemOnLogin = True
 
 ###################################################################################################
 #
+# 	EverQuest.Player.AddClassStartItems
+#		If true, an EQ class gets start items (the first spell scrolls for the caster classes) the
+#       first time a character takes that class on, both for the primary and secondary classes given
+#       at character creation and for a secondary class switched into later.  If the player has no
+#       bag space then it is reattempted the next time they log in
+#	Default: True
+#
+###################################################################################################
+
+EverQuest.Player.AddClassStartItems = True
+
+###################################################################################################
+#
 # 	EverQuest.Achievement.AdventurerLevel
 #		Level a character must reach without ever having taken part in non-Everquest content to
 #		earn the matching feat of strength for their account.  The "Everquest Adventurer" aura is

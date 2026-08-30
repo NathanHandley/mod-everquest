@@ -52,6 +52,7 @@ struct AreaTrigger;
 struct BuildValuesCachePosPointers;
 
 #define EQ_MOD_VERSION                              82
+#define EQ_MOD_VERSION                              83
 
 #define EQ_EQCLASS_NONE                             0
 #define EQ_EQCLASS_WARRIOR                          1
@@ -1126,6 +1127,7 @@ struct EverQuestPlayerControllerData
     uint32 DeathExpLost = 0;                // Experience taken by spirit releases since the last resurrection, and still restorable.  Zero means nothing is pending
     uint32 DeathExpRestGranted = 0;         // How much of that loss was handed back as rest experience, so a restore can take the same share of it away again
     uint8 DeathExpLostSecondaryClass = 0;   // Secondary EQ class the loss belongs to, since a class switch parks the level and experience the restore would target
+    uint8 PendingStartItemEQClass = 0;      // Secondary EQ class that was just switched into for the first time and is still owed its start items, since the switch runs at logout
 };
 
 class EverQuestPlayerClassInfoItem
@@ -1299,6 +1301,7 @@ public:
     bool ConfigPlayerAddHearthstoneToNewCharacters;
     bool ConfigPlayerAddMasterTotemToShamans;
     bool ConfigPlayerAddRacialGuiseItemOnLogin;
+    bool ConfigPlayerAddClassStartItems;
     uint32 ConfigAchievementAdventurerLevel;
     std::set<uint32> ConfigCrossClassIncludeSkillIDs;
     bool ConfigTrackingEnabled;
@@ -1373,6 +1376,7 @@ public:
     unordered_map<uint8, unordered_map<uint8, EverQuestPlayerCreateInfo>> PlayerCreateInfoByRaceIDThenClassID;
     unordered_map<uint8, list<uint32>> PlayerAutoLearnSkillsByEQClassID;
     unordered_map<uint8, list<EverQuestAutoLearnSpell>> PlayerAutoLearnSpellsByClassID;
+    unordered_map<uint8, vector<uint32>> PlayerClassStartItemWOWIDsByEQClassID;
     unordered_map<uint64, unordered_map<int, vector<Creature*>>> AllLoadedCreaturesByMapInstanceKeyThenCreatureEntryID;
     unordered_map<uint32, EverQuestCreatureSpawnPoint> CreatureSpawnPointsByCreatureGUID;
     unordered_map<uint64, unordered_map<uint32, vector<Creature*>>> AllLoadedCreaturesByMapInstanceKeyThenSpawnPointID;
@@ -1585,6 +1589,10 @@ public:
     const list<uint32>& GetAutoLearnSkillsForClass(uint8 classID);
     void LoadAutoLearnSpellsData();
     const list<EverQuestAutoLearnSpell>& GetAutoLearnSpellsForClass(uint8 classID);
+    void LoadPlayerClassStartItemData();
+    bool GrantClassStartItemsForPlayer(Player* player, uint8 eqClassID);
+    void GrantPendingClassStartItemsForPlayer(Player* player);
+    void SetPendingStartItemEQClassForPlayer(Player* player, uint8 eqClassID);
     void ApplyAutoLearnedClassSkillsAndSpells(Player* player);
     void GrantDeathKnightStarterAbilitiesIfNeeded(Player* player);
     void LowerDeathKnightGlyphRequiredLevels();

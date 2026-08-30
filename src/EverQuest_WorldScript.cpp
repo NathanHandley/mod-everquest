@@ -75,6 +75,7 @@ public:
         EverQuest->LoadCreatureWaypointData();
         EverQuest->LoadAutoLearnSkillsData();
         EverQuest->LoadAutoLearnSpellsData();
+        EverQuest->LoadPlayerClassStartItemData();
         EverQuest->LoadForageData();
         EverQuest->LoadZoneSafePointData();
         EverQuest->LoadZoneData();

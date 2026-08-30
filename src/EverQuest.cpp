@@ -136,6 +136,7 @@ EverQuestMod::EverQuestMod() :
     ConfigPlayerAddHearthstoneToNewCharacters(true),
     ConfigPlayerAddMasterTotemToShamans(true),
     ConfigPlayerAddRacialGuiseItemOnLogin(true),
+    ConfigPlayerAddClassStartItems(true),
     ConfigAchievementAdventurerLevel(50),
     ConfigTrackingEnabled(true),
     ConfigTrackingRangerYardsPerLevel(20.0f),
@@ -414,6 +415,7 @@ void EverQuestMod::LoadConfigurationFile()
 
     // Player Racial Guise Item
     ConfigPlayerAddRacialGuiseItemOnLogin = sConfigMgr->GetOption<bool>("EverQuest.Player.AddRacialGuiseItemOnLogin", true);
+    ConfigPlayerAddClassStartItems = sConfigMgr->GetOption<bool>("EverQuest.Player.AddClassStartItems", true);
 
     // Achievements
     ConfigAchievementAdventurerLevel = sConfigMgr->GetOption<uint32>("EverQuest.Achievement.AdventurerLevel", 50);
@@ -5286,6 +5288,81 @@ const list<EverQuestAutoLearnSpell>& EverQuestMod::GetAutoLearnSpellsForClass(ui
         static const list<EverQuestAutoLearnSpell> returnEmpty;
         return returnEmpty;
     }
+}
+
+void EverQuestMod::LoadPlayerClassStartItemData()
+{
+    PlayerClassStartItemWOWIDsByEQClassID.clear();
+    QueryResult queryResult = WorldDatabase.Query("SELECT eqclass, itemid FROM mod_everquest_playerclassstartitems;");
+    if (queryResult)
+    {
+        do
+        {
+            Field* fields = queryResult->Fetch();
+            uint8 eqClassID = fields[0].Get<uint8>();
+            uint32 itemID = fields[1].Get<uint32>();
+            PlayerClassStartItemWOWIDsByEQClassID[eqClassID].push_back(itemID);
+        } while (queryResult->NextRow());
+    }
+}
+
+bool EverQuestMod::GrantClassStartItemsForPlayer(Player* player, uint8 eqClassID)
+{
+    if (ConfigPlayerAddClassStartItems == false)
+        return true;
+    if (player == nullptr || eqClassID == EQ_EQCLASS_NONE)
+        return true;
+    auto startItemsItr = PlayerClassStartItemWOWIDsByEQClassID.find(eqClassID);
+    if (startItemsItr == PlayerClassStartItemWOWIDsByEQClassID.end())
+        return true;
+
+    bool grantedEverything = true;
+    for (uint32 startItemID : startItemsItr->second)
+    {
+        // A player already holding the item does not need another copy
+        if (player->HasItemCount(startItemID, 1, true) == true)
+            continue;
+
+        ItemPosCountVec destPosition;
+        InventoryResult invResult = player->CanStoreNewItem(NULL_BAG, NULL_SLOT, destPosition, startItemID, 1);
+        if (invResult != EQUIP_ERR_OK || player->StoreNewItem(destPosition, startItemID, true) == nullptr)
+            grantedEverything = false;
+    }
+    return grantedEverything;
+}
+
+void EverQuestMod::SetPendingStartItemEQClassForPlayer(Player* player, uint8 eqClassID)
+{
+    GetOrLoadActivePlayerClassControllerData(player)->PendingStartItemEQClass = eqClassID;
+
+    EverQuestPlayerControllerData controllerData;
+    {
+        std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+        auto controllerDataIt = ActivePlayerClassControllerDataByGUID.find(player->GetGUID());
+        if (controllerDataIt == ActivePlayerClassControllerDataByGUID.end())
+            return;
+        controllerData = controllerDataIt->second;
+    }
+
+    CharacterDatabase.Execute("INSERT INTO `mod_everquest_character_settings` (`guid`, `currentSecondaryClass`, `nextSecondaryClass`, `secondaryExpPool`, `pendingStartItemEQClass`) VALUES ({}, {}, {}, {}, {}) ON DUPLICATE KEY UPDATE `pendingStartItemEQClass` = {}",
+        player->GetGUID().GetCounter(),
+        controllerData.CurrentSecondClass,
+        controllerData.NextSecondClass,
+        controllerData.SecondaryExpPool,
+        eqClassID,
+        eqClassID);
+}
+
+void EverQuestMod::GrantPendingClassStartItemsForPlayer(Player* player)
+{
+    uint8 pendingEQClassID = GetOrLoadActivePlayerClassControllerData(player)->PendingStartItemEQClass;
+    if (pendingEQClassID == EQ_EQCLASS_NONE)
+        return;
+
+    // Only clear the pending class once the items were provided
+    if (GrantClassStartItemsForPlayer(player, pendingEQClassID) == false)
+        return;
+    SetPendingStartItemEQClassForPlayer(player, EQ_EQCLASS_NONE);
 }
 
 void EverQuestMod::ApplyAutoLearnedClassSkillsAndSpells(Player* player)
@@ -10685,7 +10762,7 @@ EverQuestPlayerControllerData EverQuestMod::GetPlayerControllerData(Player* play
 {
     EverQuestPlayerControllerData controllerData;
     controllerData.GUID = player->GetGUID().GetCounter();
-    QueryResult queryResult = CharacterDatabase.Query("SELECT nextSecondaryClass, currentSecondaryClass, secondaryExpPool, illusionFaceId, showBardPulse, issuedIllusionItemId, hideWoWGear, dungeonMode, adventurerDisqualified, deathExpLost, deathExpRestGranted, deathExpLostClass, hailWindowOnRightClick FROM mod_everquest_character_settings WHERE guid = {}", player->GetGUID().GetCounter());
+    QueryResult queryResult = CharacterDatabase.Query("SELECT nextSecondaryClass, currentSecondaryClass, secondaryExpPool, illusionFaceId, showBardPulse, issuedIllusionItemId, hideWoWGear, dungeonMode, adventurerDisqualified, deathExpLost, deathExpRestGranted, deathExpLostClass, hailWindowOnRightClick, showDispelMessage, dispelMessageColor, pendingStartItemEQClass FROM mod_everquest_character_settings WHERE guid = {}", player->GetGUID().GetCounter());
     if (!queryResult || queryResult->GetRowCount() == 0)
     {
         const EverQuestClassMap classMap = GetClassMapForWOWClassID(player->getClass());
@@ -10702,6 +10779,7 @@ EverQuestPlayerControllerData EverQuestMod::GetPlayerControllerData(Player* play
         controllerData.DeathExpLost = 0;
         controllerData.DeathExpRestGranted = 0;
         controllerData.DeathExpLostSecondaryClass = 0;
+        controllerData.PendingStartItemEQClass = EQ_EQCLASS_NONE;
     }
     else
     {
@@ -10719,6 +10797,7 @@ EverQuestPlayerControllerData EverQuestMod::GetPlayerControllerData(Player* play
         controllerData.DeathExpRestGranted = fields[10].Get<uint32>();
         controllerData.DeathExpLostSecondaryClass = fields[11].Get<uint8>();
         controllerData.HailWindowOnRightClick = fields[12].Get<bool>();
+        controllerData.PendingStartItemEQClass = fields[15].Get<uint8>();
     }
     return controllerData;
 }
@@ -12128,6 +12207,13 @@ bool EverQuestMod::PerformClassSwitch(Player* player)
     // Update current class
     UpdatePlayerControllerForClassChange(player, nextSecondaryEQClass, transaction);
     GetOrLoadActivePlayerClassControllerData(player)->CurrentSecondClass = nextSecondaryEQClass;
+
+    // A class taken on for the first time is owed its start items, but this runs at logout where nothing can reach the character's bags
+    if (isNew == true && PlayerClassStartItemWOWIDsByEQClassID.find(nextSecondaryEQClass) != PlayerClassStartItemWOWIDsByEQClassID.end())
+    {
+        GetOrLoadActivePlayerClassControllerData(player)->PendingStartItemEQClass = nextSecondaryEQClass;
+        transaction->Append("UPDATE `mod_everquest_character_settings` SET `pendingStartItemEQClass` = {} WHERE `guid` = {}", nextSecondaryEQClass, player->GetGUID().GetCounter());
+    }
 
     // Commit the transaction
     CharacterDatabase.CommitTransaction(transaction);

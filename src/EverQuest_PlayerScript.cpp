@@ -718,6 +718,10 @@ public:
 
             // Give a hearthstone if configured to do so, since the EQ start items don't include one
             EverQuest->AddHearthstoneForNewCharacter(player);
+
+            // Give start items for both of the EQ classes the character begins with
+            EverQuest->GrantClassStartItemsForPlayer(player, EverQuest->GetClassMapForWOWClassID(player->getClass()).EQClassIDBase);
+            EverQuest->GrantClassStartItemsForPlayer(player, EverQuest->GetCurrentSecondEQClassForPlayer(player));
         }
 
         // Give players the ability to see invis vs undead
@@ -756,6 +760,9 @@ public:
 
         // Shamans need a master totem in order to cast their totem spells, so hand one out if they aren't carrying one
         EverQuest->AddMasterTotemForShaman(player);
+
+        // A secondary class taken on for the first time has its start items waiting from the class switch, which ran at logout
+        EverQuest->GrantPendingClassStartItemsForPlayer(player);
 
         // Hand out the character's racial guise item if they have never received one
         EverQuest->AddRacialGuiseItemForPlayer(player);
