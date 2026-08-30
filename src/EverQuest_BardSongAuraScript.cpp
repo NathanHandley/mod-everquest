@@ -232,7 +232,10 @@ class EverQuest_BardSongAuraScript: public AuraScript
         // Cast the spell
         for (Unit* target : validTargets)
         {
-            target->RemoveAurasDueToSpell(effectSpellID);
+            // Allow proper refresh behavior, even across two bards
+            Aura* existingAura = target->GetOwnedAura(effectSpellID);
+            if (existingAura != nullptr && existingAura->GetCasterGUID() != caster->GetGUID() && existingAura->GetCaster() == nullptr)
+                target->RemoveAurasDueToSpell(effectSpellID);
             caster->CastSpell(target, effectSpellID, true);
         }
     }
