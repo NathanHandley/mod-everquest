@@ -53,6 +53,7 @@ struct BuildValuesCachePosPointers;
 
 #define EQ_MOD_VERSION                              82
 #define EQ_MOD_VERSION                              83
+#define EQ_MOD_VERSION                              84
 
 #define EQ_EQCLASS_NONE                             0
 #define EQ_EQCLASS_WARRIOR                          1
@@ -145,6 +146,8 @@ struct BuildValuesCachePosPointers;
 #define EQ_SPELLDUMMYTYPE_SUCCOR                    18
 #define EQ_SPELLDUMMYTYPE_TRACK                     19
 #define EQ_SPELLDUMMYTYPE_SUMMONPC                  20
+#define EQ_SPELLDUMMYTYPE_REMOVEDAMAGESHIELD        21
+#define EQ_SPELLDUMMYTYPE_HEALMELEEATTACKERS        22
 
 #define EQ_ILLUSION_OBJECT_CLASS_NONE               0
 #define EQ_ILLUSION_OBJECT_CLASS_ANYOBJECT          1
