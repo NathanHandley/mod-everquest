@@ -1553,6 +1553,7 @@ public:
     bool IsSpellBlockedByMinTargetLevel(uint32 spellID, Unit* target, Unit* caster);
     bool IsSpellBlockedByMaxCreatureTargetLevel(uint32 spellID, Unit* target, Unit* caster);
     bool IsCreatureCharmBlockedByCharmLimits(uint32 spellID, Unit* target, Unit* caster);
+    uint8 GetCharmProtectedDispelEffectMaskForTarget(SpellInfo const* spellInfo, Unit* target);
     bool ApplyBardSongFearDiminishingReturnsOnAuraApply(Unit* target, Aura* aura);
     void RemoveCreatureFearDiminishingReturnState(Creature* creature);
     uint64 GetHasteTrackingKeyForUnit(Unit* unit);

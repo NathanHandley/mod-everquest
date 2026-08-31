@@ -4086,6 +4086,56 @@ bool EverQuestMod::IsCreatureCharmBlockedByCharmLimits(uint32 spellID, Unit* tar
     return true;
 }
 
+uint8 EverQuestMod::GetCharmProtectedDispelEffectMaskForTarget(SpellInfo const* spellInfo, Unit* target)
+{
+    if (spellInfo == nullptr || target == nullptr)
+        return 0;
+    Creature* creature = target->ToCreature();
+    if (creature == nullptr || creature->IsCharmed() == false)
+        return 0;
+    Unit* charmer = creature->GetCharmer();
+    if (charmer == nullptr || charmer->IsCharmedOwnedByPlayerOrPlayer() == false)
+        return 0;
+
+    // Gather what the charms holding this creature could be removed by
+    uint64 charmMechanicMask = 0;
+    uint32 charmDispelMask = 0;
+    Unit::AuraEffectList const& charmAuraEffects = creature->GetAuraEffectsByType(SPELL_AURA_MOD_CHARM);
+    for (Unit::AuraEffectList::const_iterator charmAuraEffectIter = charmAuraEffects.begin(); charmAuraEffectIter != charmAuraEffects.end(); ++charmAuraEffectIter)
+    {
+        SpellInfo const* charmSpellInfo = (*charmAuraEffectIter)->GetSpellInfo();
+        if (charmSpellInfo == nullptr)
+            continue;
+        charmMechanicMask |= charmSpellInfo->GetAllEffectsMechanicMask();
+        if (charmSpellInfo->Dispel != DISPEL_NONE)
+            charmDispelMask |= charmSpellInfo->GetDispelMask();
+    }
+    if (charmMechanicMask == 0 && charmDispelMask == 0)
+        return 0;
+
+    uint8 blockedEffectMask = 0;
+    for (uint8 i = 0; i < MAX_SPELL_EFFECTS; ++i)
+    {
+        int32 effectMiscValue = spellInfo->Effects[i].MiscValue;
+        if (spellInfo->Effects[i].Effect == SPELL_EFFECT_DISPEL_MECHANIC)
+        {
+            // Matches how the core picks auras for a mechanic dispel, off the full mechanic mask of the aura's spell
+            if (effectMiscValue < 0 || effectMiscValue >= MAX_MECHANIC)
+                continue;
+            if ((charmMechanicMask & (1ULL << effectMiscValue)) != 0)
+                blockedEffectMask |= (uint8)(1 << i);
+        }
+        else if (spellInfo->Effects[i].Effect == SPELL_EFFECT_DISPEL)
+        {
+            if (effectMiscValue <= DISPEL_NONE || effectMiscValue >= DISPEL_MAX)
+                continue;
+            if ((SpellInfo::GetDispelMask((DispelType)effectMiscValue) & charmDispelMask) != 0)
+                blockedEffectMask |= (uint8)(1 << i);
+        }
+    }
+    return blockedEffectMask;
+}
+
 bool EverQuestMod::ApplyBardSongFearDiminishingReturnsOnAuraApply(Unit* target, Aura* aura)
 {
     // Diminishing returns will be 100% / 50% / 25% / immune chain for creature targets here, and returns true when shouldn't fear at all

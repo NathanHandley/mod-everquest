@@ -146,6 +146,11 @@ public:
         if (EverQuest->IsIllusionObjectFormBlockedByLevitation(spellInfo->Id, target) == true)
             targetInfo.effectMask = 0;
 
+        // A charm a player put on a creature is never stripped by an ally dispel sweeping over it (Tremor Totem and the like)
+        uint8 charmProtectedEffectMask = EverQuest->GetCharmProtectedDispelEffectMaskForTarget(spellInfo, target);
+        if (charmProtectedEffectMask != 0)
+            targetInfo.effectMask = targetInfo.effectMask & (uint8)(~charmProtectedEffectMask);
+
         if (EverQuest->ShouldStripBashKickStunBeforeItLands(spellInfo->Id, target) == false)
             return;
 
