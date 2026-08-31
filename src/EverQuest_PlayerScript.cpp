@@ -731,6 +731,9 @@ public:
         if (EverQuest->ConfigSystemInvisVsUndeadDetectSpellID != 0 && player->HasAura(EverQuest->ConfigSystemInvisVsUndeadDetectSpellID) == false)
             player->CastSpell(player, EverQuest->ConfigSystemInvisVsUndeadDetectSpellID, true);
 
+        // Catch any level that was reached without Player::GiveLevel, which is the only thing that updates the criteria behind the "Level 10" through "Level 60" achievements
+        player->UpdateAchievementCriteria(ACHIEVEMENT_CRITERIA_TYPE_REACH_LEVEL);
+
         // Grant the legacy account feat of strength if the account is old enough
         EverQuest->GrantLegacyAchievementIfEligible(player);
 
@@ -832,6 +835,8 @@ public:
         // Only an accepted resurrection gives experience back, never walking to the corpse or taking the spirit healer
         if (restore_percent <= 0.0f && applySickness == false)
             EverQuest->RestoreDeathExpLossOnResurrectForPlayer(player);
+        else
+            EverQuest->ClearDeathExpLossForPlayer(player);
     }
 
     void OnPlayerLogout(Player* player) override
@@ -846,6 +851,9 @@ public:
 
         // A gate tether cancelled on the very tick the character logged out has nothing left to teleport
         EverQuest->ClearPendingGateReturnForPlayer(player->GetGUID());
+
+        // Whether the last death was a player kill is only needed between that death and the spirit release that follows it
+        EverQuest->ClearDeathKillerKindForPlayer(player->GetGUID());
 
         // Don't leave a swapped native display behind (it is not saved, but the tracking entry must not linger)
         EverQuest->RestoreNativeDisplayAfterCorpseIllusion(player);

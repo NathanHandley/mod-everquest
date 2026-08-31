@@ -127,6 +127,14 @@ public:
             return;
         if (unit == nullptr)
             return;
+
+        // The killer is only knowable here, and the corpse flag the core leaves behind cannot tell a real player kill from a self inflicted one, so record which it was before the experience loss at spirit release has to decide
+        if (Player* deadPlayer = unit->ToPlayer())
+        {
+            EverQuest->RecordDeathKillerKindForPlayer(deadPlayer, killer);
+            return;
+        }
+
         Creature* creature = unit->ToCreature();
         if (creature == nullptr)
             return;

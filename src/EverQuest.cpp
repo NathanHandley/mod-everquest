@@ -26,6 +26,7 @@
 #include "DBCStores.h"
 #include "Formulas.h"
 #include "GameTime.h"
+#include "Guild.h"
 #include "LootMgr.h"
 #include "Mail.h"
 #include "Pet.h"
@@ -11381,12 +11382,86 @@ static uint64 GetCumulativeExperienceForLevelAndProgress(uint8 level, uint32 exp
     return cumulativeExperience;
 }
 
+void EverQuestMod::RecordDeathKillerKindForPlayer(Player* player, Unit* killer)
+{
+    bool killedByAnotherPlayer = false;
+    if (killer != nullptr && killer != player)
+    {
+        Player* killerPlayer = killer->GetCharmerOrOwnerPlayerOrPlayerItself();
+        if (killerPlayer != nullptr && killerPlayer != player)
+            killedByAnotherPlayer = true;
+    }
+
+    std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+    if (killedByAnotherPlayer == true)
+        PlayersLastDeathWasNotPlayerKill.erase(player->GetGUID());
+    else
+        PlayersLastDeathWasNotPlayerKill.insert(player->GetGUID());
+}
+
+void EverQuestMod::ClearDeathKillerKindForPlayer(ObjectGuid playerGUID)
+{
+    std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+    PlayersLastDeathWasNotPlayerKill.erase(playerGUID);
+}
+
 bool EverQuestMod::WasLastDeathPlayerVersusPlayerForPlayer(Player* player)
 {
+    // A recorded self inflicted or creature death overrides the corpse flag, which the core sets for both
+    {
+        std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+        if (PlayersLastDeathWasNotPlayerKill.find(player->GetGUID()) != PlayersLastDeathWasNotPlayerKill.end())
+            return false;
+    }
+
     Corpse* corpse = player->GetCorpse();
     if (corpse == nullptr)
         return false;
     return corpse->GetType() == CORPSE_RESURRECTABLE_PVP;
+}
+
+void EverQuestMod::LowerPlayerLevelWithFullRefreshForPlayer(Player* player, uint8 newLevel)
+{
+    uint8 oldLevel = player->GetLevel();
+    if (newLevel == 0 || newLevel >= oldLevel)
+        return;
+
+    PlayerLevelInfo levelInfo;
+    sObjectMgr->GetPlayerLevelInfo(player->getRace(true), player->getClass(), newLevel, &levelInfo);
+
+    PlayerClassLevelInfo classLevelInfo;
+    sObjectMgr->GetPlayerClassLevelInfo(player->getClass(), newLevel, &classLevelInfo);
+
+    player->SetUInt32Value(PLAYER_NEXT_LEVEL_XP, sObjectMgr->GetXPForLevel(newLevel));
+
+    player->_ApplyAllLevelScaleItemMods(false);
+    player->SetLevel(newLevel, true);
+    player->UpdateSkillsForLevel();
+
+    for (uint8 statIndex = STAT_STRENGTH; statIndex < MAX_STATS; ++statIndex)
+        player->SetCreateStat(Stats(statIndex), levelInfo.stats[statIndex]);
+
+    player->SetCreateHealth(classLevelInfo.basehealth);
+    player->SetCreateMana(classLevelInfo.basemana);
+
+    // A character carrying more talent points than the lower level allows is reset by this, which the core would do at the next login anyway, so it happens now while the message explaining the lost level is still on screen
+    player->InitTalentForLevel();
+    player->InitTaxiNodesForLevel();
+    player->InitGlyphsForLevel();
+
+    // Unit::SetMaxHealth and Unit::SetMaxPower pull current health and mana down with them, so no clamping is needed
+    player->UpdateAllStats();
+
+    if (sWorld->getBoolConfig(CONFIG_ALWAYS_MAXSKILL) == true)
+        player->UpdateSkillsToMaxSkillsForLevel();
+
+    player->_ApplyAllLevelScaleItemMods(true);
+
+    if (Pet* pet = player->GetPet())
+        pet->SynchronizeLevelWithOwner();
+
+    if (Guild* guild = player->GetGuild())
+        guild->UpdateMemberData(player, GUILD_MEMBER_DATA_LEVEL, newLevel);
 }
 
 void EverQuestMod::ApplyExpLossForSpiritReleaseForPlayer(Player* player)
@@ -11397,15 +11472,24 @@ void EverQuestMod::ApplyExpLossForSpiritReleaseForPlayer(Player* player)
     // Do nothing if the level is below the minimum
     uint8 playerLevel = player->GetLevel();
     if (playerLevel < ConfigExpLossOnDeathMinLevel)
+    {
+        ClearDeathExpLossForPlayer(player);
         return;
+    }
 
     // Also do nothing if this isn't a Norrath map and configured to skip
     if (player->GetMap()->GetId() < ConfigSystemMapDBCIDMin || player->GetMap()->GetId() > ConfigSystemMapDBCIDMax)
+    {
+        ClearDeathExpLossForPlayer(player);
         return;
+    }
 
     // Falling to another player never costs experience, whether that was a duel or any other kind of player kill
     if (WasLastDeathPlayerVersusPlayerForPlayer(player) == true)
+    {
+        ClearDeathExpLossForPlayer(player);
         return;
+    }
 
     // Where the character stood before any of this, so what the loss really came to can be measured against it
     uint64 cumulativeExperienceBeforeLoss = GetCumulativeExperienceForLevelAndProgress(playerLevel, player->GetUInt32Value(PLAYER_XP));
@@ -11428,8 +11512,7 @@ void EverQuestMod::ApplyExpLossForSpiritReleaseForPlayer(Player* player)
         int newExperience = (belowLevelSpan > 1 ? (int)belowLevelSpan - 1 : 0) - expToLose;
         if (newExperience < 0)
             newExperience = 0;
-        player->SetLevel(newLevel, true);
-        player->SetUInt32Value(PLAYER_NEXT_LEVEL_XP, belowLevelSpan);
+        LowerPlayerLevelWithFullRefreshForPlayer(player, newLevel);
         player->SetUInt32Value(PLAYER_XP, (uint32)newExperience);
         ChatHandler(player->GetSession()).PSendSysMessage("You lost|cffFF0000 {} |rexperience for releasing your spirit, which dropped your level to |cffFF0000{}|r!", expToLose, newLevel);
     }
@@ -11449,7 +11532,8 @@ void EverQuestMod::ApplyExpLossForSpiritReleaseForPlayer(Player* player)
         }
         else
         {
-            player->SetLevel(playerLevel - 1, true);
+            // The refresh resets PLAYER_NEXT_LEVEL_XP to the span of the level being dropped to, which is the span the leftover loss has to be taken out of
+            LowerPlayerLevelWithFullRefreshForPlayer(player, playerLevel - 1);
             int newExperience = (int)player->GetUInt32Value(PLAYER_NEXT_LEVEL_XP) - (expToLose - curLevelEXP);
             if (newExperience < 0)
                 newExperience = 0;
@@ -11562,10 +11646,7 @@ void EverQuestMod::RestoreDeathExpLossOnResurrectForPlayer(Player* player)
         newExperience = 0;
 
     if (newLevel != startingLevel)
-    {
-        player->SetLevel(newLevel, true);
-        player->SetUInt32Value(PLAYER_NEXT_LEVEL_XP, sObjectMgr->GetXPForLevel(newLevel));
-    }
+        player->GiveLevel(newLevel);
     player->SetUInt32Value(PLAYER_XP, newExperience);
 
     if (player->GetSession() == nullptr)

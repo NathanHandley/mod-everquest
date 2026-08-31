@@ -1398,6 +1398,7 @@ public:
     unordered_map<ObjectGuid, EverQuestAuctionSearchScan> AuctionSearchScansByPlayerGUID;
     std::mutex AuctionScanMutex;
     unordered_set<ObjectGuid> PlayersGainingExperience;
+    unordered_set<ObjectGuid> PlayersLastDeathWasNotPlayerKill;
     unordered_set<ObjectGuid> PlayersPendingLevelCapExperiencePark;
     unordered_map<uint64, unordered_map<ObjectGuid, vector<EverQuestUnitHasteAuraEffect>>> EQHasteAuraEffectsByMapInstanceKeyThenUnitGUID; // Map-instance keyed since creature GUIDs repeat across instance copies of a map
     unordered_map<ObjectGuid, uint32> BearFormShieldArmorShiftAmountByPlayerGUID;
@@ -1862,7 +1863,10 @@ public:
     uint32 GetIssuedIllusionItemIDForPlayer(Player* player);
     void SetIssuedIllusionItemIDForPlayer(Player* player, uint32 itemID);
     void SaveIssuedIllusionItemIDForPlayer(Player* player);
+    void RecordDeathKillerKindForPlayer(Player* player, Unit* killer);
+    void ClearDeathKillerKindForPlayer(ObjectGuid playerGUID);
     bool WasLastDeathPlayerVersusPlayerForPlayer(Player* player);
+    void LowerPlayerLevelWithFullRefreshForPlayer(Player* player, uint8 newLevel);
     void ApplyExpLossForSpiritReleaseForPlayer(Player* player);
     void RestoreDeathExpLossOnResurrectForPlayer(Player* player);
     void ClearDeathExpLossForPlayer(Player* player);
