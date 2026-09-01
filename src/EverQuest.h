@@ -60,6 +60,8 @@ struct BuildValuesCachePosPointers;
 #define EQ_MENTORSHIP_ROLE_APPRENTICE               2
 #define EQ_MENTORSHIP_ROLE_ANCHOR                   3 // The 'other half' of the mentorship (the unchanged / tethered person)
 #define EQ_MENTORSHIP_RECHECK_INTERVAL_IN_MS        1000
+#define EQ_MENTORSHIP_BANK_SAVE_INTERVAL_IN_MS      30000
+
 #define EQ_EQCLASS_NONE                             0
 #define EQ_EQCLASS_WARRIOR                          1
 #define EQ_EQCLASS_CLERIC                           2
@@ -1082,6 +1084,7 @@ struct EverQuestZoneWideKillReward
     uint8 MaxLevel = 0;
     uint8 MaxLevelIncludingTethered = 0;
     Player* MaxNotGrayMember = nullptr;
+    uint8 GainReferenceLevel = 0;
     uint8 MaxNotGrayMemberLevel = 0;
     bool IsFullXP = false;
     uint32 BaseExperience = 0;
@@ -1181,6 +1184,8 @@ struct EverQuestMentorshipRequest
 {
     ObjectGuid RequesterGUID;
     string RequesterName = "";
+    uint8 RequesterRole = EQ_MENTORSHIP_ROLE_NONE;
+    time_t ExpiresAtUnixTime = 0;
 };
 
 class EverQuestPlayerClassInfoItem
@@ -1266,6 +1271,8 @@ public:
     uint32 ConfigSystemItemTemplateIDMax;
     uint32 ConfigSystemAdventurerAchievementID;
     uint32 ConfigSystemAdventurerAuraSpellID;
+    uint32 ConfigSystemMentorshipMentorAuraSpellID;
+    uint32 ConfigSystemMentorshipApprenticeAuraSpellID;
     uint32 ConfigSystemAgileFighterSpellID;
     uint32 ConfigSystemAgileFighterCombatMasterSpellID;
     uint32 ConfigSystemAgileFighterCombatExpertSpellID;
@@ -1301,6 +1308,8 @@ public:
     bool ConfigAlternateGroupExperienceFormulaEnabled;
     float ConfigAlternateGroupExperienceAddPercentPerAddedMember;
     bool ConfigMentorshipEnabled;
+    uint32 ConfigMentorshipMinLevelGap;
+    uint32 ConfigMentorshipRequestTimeoutInSec;
     bool ConfigSpellDisableStackingOfSameDOT;
     bool ConfigSpellBuffLevelRestrictionsEnabled;
     bool ConfigSpellCrowdControlLevelRestrictionsEnabled;
@@ -1449,6 +1458,8 @@ public:
     unordered_set<ObjectGuid> PlayersLastDeathWasNotPlayerKill;
     unordered_set<ObjectGuid> PlayersPendingLevelCapExperiencePark;
     unordered_map<ObjectGuid, EverQuestMentorshipState> MentorshipStatesByPlayerGUID;
+    unordered_map<ObjectGuid, EverQuestMentorshipRequest> MentorshipRequestsByTargetGUID;
+    std::atomic<uint32> MentorshipStateCount{ 0 };
     unordered_map<uint64, unordered_map<ObjectGuid, vector<EverQuestUnitHasteAuraEffect>>> EQHasteAuraEffectsByMapInstanceKeyThenUnitGUID; // Map-instance keyed since creature GUIDs repeat across instance copies of a map
     unordered_map<ObjectGuid, uint32> BearFormShieldArmorShiftAmountByPlayerGUID;
     unordered_map<ObjectGuid, uint32> AgileFighterRefreshTimerMSByPlayerGUID;
@@ -1670,6 +1681,8 @@ public:
     float GetZoneWideGroupExperienceRate(Player* player, const EverQuestZoneWideKillReward& reward);
     bool IsAlternateGroupExperienceFormulaActive(uint32 aliveMemberCount);
     float GetAlternateGroupExperienceRate(uint8 memberLevel, uint32 aliveMemberCount, uint32 aliveSumLevel);
+    static float GetRetailGroupExperienceRate(uint8 memberLevel, uint32 aliveMemberCount, uint32 aliveSumLevel, bool isRaid);
+    float GetGroupExperienceCorrectionForKill(Player* killer, Unit* victim);
     float GetGroupExperienceRateForMember(Player* member, const EverQuestZoneWideKillReward& reward);
     void ApplyEQOnkillReputationsForPlayer(Player* player, Unit* victim);
     void GrantZoneWideGroupRewardsForKill(Player* killer, Unit* victim, const EverQuestZoneWideKillReward& reward);
@@ -1922,6 +1935,8 @@ public:
     void RestoreDeathExpLossOnResurrectForPlayer(Player* player);
     void ClearDeathExpLossForPlayer(Player* player);
     void SaveDeathExpLossForPlayer(Player* player);
+    bool IsPlayerReportingLevelCap(Player const* player);
+    static uint8 GetGroupExperienceLevelForPlayer(Player const* player);
     void HandleLevelCapOnBeforeExperienceGain(Player const* player, uint8& levelForExpGain);
     bool HandleLevelCapOnCanGiveLevel(Player* player, uint8 newLevel);
     void ProcessLevelCapStateForPlayer(Player* player);
@@ -1958,12 +1973,13 @@ public:
     void ApplyMentorshipAuraForPlayer(Player* player, uint8 role);
     void RemoveMentorshipAurasFromPlayer(Player* player);
     void AwardBankedMentorshipProgressToPlayer(Player* player, float bankedProgress);
+    void SaveMentorshipStateForPlayer(Player* player, uint8 role, uint8 realLevel, uint32 realExperience, float bankedProgress);
+
     void SendExpPoolAddonMessageToPlayer(Player* player, uint32 gainedExp);
     void SetInitialEQClassesForPlayer(Player* player);
     void SetInitialCreatePositionForPlayer(Player* player);
     EverQuestPlayerControllerData GetPlayerControllerData(Player* player);
     EverQuestPlayerControllerData* GetOrLoadActivePlayerClassControllerData(Player* player);
-
     std::map<std::string, EverQuestPlayerClassInfoItem> GetPlayerClassInfoByClassNameForPlayer(Player* player);
     std::map<uint8, uint8> GetClassLevelsByClassForPlayer(Player* player);
 
