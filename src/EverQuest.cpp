@@ -9240,7 +9240,16 @@ void EverQuestMod::RecalculateTemporaryFactionReactionsForPlayer(Player* player)
             adjustedRankValue = (int32)REP_EXALTED;
         else if (adjustedRankValue < (int32)REP_HATED)
             adjustedRankValue = (int32)REP_HATED;
-        if ((ReputationRank)adjustedRankValue == naturalRank)
+
+        // Forced reaction replaces the reputation path, so make sure At War always allow attacking
+        if (reputationMgr.IsAtWar(factionEntry) == true)
+        {
+            if (adjustedRankValue > (int32)REP_NEUTRAL)
+                adjustedRankValue = (int32)REP_NEUTRAL;
+            if (naturalRankValue > (int32)REP_NEUTRAL)
+                naturalRankValue = (int32)REP_NEUTRAL;
+        }
+        if (adjustedRankValue == naturalRankValue)
             continue;
         reputationMgr.ApplyForceReaction(factionID, (ReputationRank)adjustedRankValue, true);
         newForcedFactionIDs.push_back(factionID);

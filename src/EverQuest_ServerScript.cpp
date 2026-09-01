@@ -79,14 +79,26 @@ static bool HandleAuctionListResultPacketSend(WorldSession* session, WorldPacket
     return false;
 }
 
+static bool HandleSetFactionAtWarPacketReceive(WorldSession* session)
+{
+    if (EverQuest->IsEnabled == false)
+        return true;
+    Player* player = session->GetPlayer();
+    if (player == nullptr)
+        return true;
+    EverQuest->QueueTemporaryFactionRecalculationForPlayer(player->GetGUID());
+    return true;
+}
+
 class EverQuest_ServerScript : public ServerScript
 {
 public:
     EverQuest_ServerScript() : ServerScript("EverQuest_ServerScript", { SERVERHOOK_CAN_PACKET_SEND, SERVERHOOK_CAN_PACKET_RECEIVE }) { }
 
-    // Watches auction search requests to learn whether a player's "Usable Items" checkbox is set
     bool CanPacketReceive(WorldSession* session, WorldPacket const& packet) override
     {
+        if (packet.GetOpcode() == CMSG_SET_FACTION_ATWAR)
+            return HandleSetFactionAtWarPacketReceive(session);
         if (packet.GetOpcode() != CMSG_AUCTION_LIST_ITEMS)
             return true;
         if (EverQuest->IsEnabled == false)

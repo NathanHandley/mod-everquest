@@ -51,7 +51,7 @@ class ByteBuffer;
 struct AreaTrigger;
 struct BuildValuesCachePosPointers;
 
-#define EQ_MOD_VERSION                              84
+#define EQ_MOD_VERSION                              85
 
 #define EQ_DISPEL_MESSAGE_DEFAULT_COLOR             0xFFAA00
 
