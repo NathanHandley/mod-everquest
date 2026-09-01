@@ -88,6 +88,8 @@ EverQuestMod::EverQuestMod() :
     ConfigSystemItemTemplateIDMax(0),
     ConfigSystemAdventurerAchievementID(0),
     ConfigSystemAdventurerAuraSpellID(0),
+    ConfigSystemMentorshipMentorAuraSpellID(0),
+    ConfigSystemMentorshipApprenticeAuraSpellID(0),
     ConfigSystemAgileFighterSpellID(0),
     ConfigSystemAgileFighterCombatMasterSpellID(0),
     ConfigSystemAgileFighterCombatExpertSpellID(0),
@@ -134,6 +136,9 @@ EverQuestMod::EverQuestMod() :
     ConfigSecondaryExpPoolGainPercent(25.0f),
     ConfigSecondaryExpPoolMaxPooled(1000000),
     ConfigPlayerLevelCap(0),
+    ConfigMentorshipEnabled(true),
+    ConfigMentorshipMinLevelGap(3),
+    ConfigMentorshipRequestTimeoutInSec(30),
     ConfigPlayerAddHearthstoneToNewCharacters(true),
     ConfigPlayerAddMasterTotemToShamans(true),
     ConfigPlayerAddRacialGuiseItemOnLogin(true),
@@ -221,6 +226,10 @@ bool EverQuestMod::LoadConfigurationSystemDataFromDB()
                 ConfigSystemAdventurerAchievementID = (uint32)atoi(value.c_str());
             else if (key == "AdventurerAuraSpellID")
                 ConfigSystemAdventurerAuraSpellID = (uint32)atoi(value.c_str());
+            else if (key == "MentorshipMentorAuraSpellID")
+                ConfigSystemMentorshipMentorAuraSpellID = (uint32)atoi(value.c_str());
+            else if (key == "MentorshipApprenticeAuraSpellID")
+                ConfigSystemMentorshipApprenticeAuraSpellID = (uint32)atoi(value.c_str());
             else if (key == "AgileFighterSpellID")
                 ConfigSystemAgileFighterSpellID = (uint32)atoi(value.c_str());
             else if (key == "AgileFighterCombatMasterSpellID")
@@ -404,6 +413,11 @@ void EverQuestMod::LoadConfigurationFile()
 
     // Player Level Cap
     ConfigPlayerLevelCap = sConfigMgr->GetOption<uint32>("EverQuest.Player.LevelCap", 0);
+
+    // Mentorship
+    ConfigMentorshipEnabled = sConfigMgr->GetOption<bool>("EverQuest.Mentorship.Enabled", true);
+    ConfigMentorshipMinLevelGap = sConfigMgr->GetOption<uint32>("EverQuest.Mentorship.MinLevelGap", 3);
+    ConfigMentorshipRequestTimeoutInSec = sConfigMgr->GetOption<uint32>("EverQuest.Mentorship.RequestTimeoutInSeconds", 30);
 
     // Player Armor
     ConfigPlayerShieldArmorIgnoresBearFormMultiplier = sConfigMgr->GetOption<bool>("EverQuest.Player.ShieldArmorIgnoresBearFormMultiplier", true);
@@ -5420,6 +5434,10 @@ void EverQuestMod::ApplyAutoLearnedClassSkillsAndSpells(Player* player)
 {
     const EverQuestClassMap classMap = GetClassMapForWOWClassID(player->getClass());
     uint8 secondClassID = GetCurrentSecondEQClassForPlayer(player);
+
+    // Spells learned here are permanent, so they are measured against the level the character actually earned rather than one borrowed from a mentorship
+    uint8 autoLearnLevel = GetEarnedLevelForPlayer(player);
+
     vector<uint8> autoLearnEQClassIDs;
     autoLearnEQClassIDs.push_back(classMap.EQClassIDBase);
     if (secondClassID != EQ_EQCLASS_NONE && secondClassID != classMap.EQClassIDBase)
@@ -5435,7 +5453,7 @@ void EverQuestMod::ApplyAutoLearnedClassSkillsAndSpells(Player* player)
             if (autoLearnSpell.RaceID != 0 && autoLearnSpell.RaceID != player->getRace())
                 continue;
             // Only learn once the player has reached the spell's required level
-            if (player->GetLevel() < autoLearnSpell.Level)
+            if (autoLearnLevel < autoLearnSpell.Level)
                 continue;
             if (player->HasSpell(autoLearnSpell.SpellID) == false)
             {
@@ -5718,7 +5736,16 @@ void EverQuestMod::BuildZoneWideKillReward(Group* group, Player* killer, Unit* v
         if (member != killer && IsInZoneWideGroupRewardRange(member, victim) == false)
             continue;
 
-        uint8 memberLevel = GetPlayerLevelForExperienceGain(member);
+        uint8 memberLevel = GetGroupExperienceLevelForPlayer(member);
+
+        // The power leveling guard applied when this reward is handed out measures against every member the core would have counted, so a tethered one still raises this even though it is invisible to everything else
+        if (member->IsAlive() == true && outReward.MaxLevelIncludingTethered < memberLevel)
+            outReward.MaxLevelIncludingTethered = memberLevel;
+
+        // A mentor or an apprentice earns nothing from the kill, so counting them would only take experience away from the members that do
+        if (IsPlayerExcludedFromGroupExperienceShare(member) == true)
+            continue;
+
         if (member->IsAlive() == true)
         {
             outReward.AliveMemberCount++;
@@ -5726,11 +5753,17 @@ void EverQuestMod::BuildZoneWideKillReward(Group* group, Player* killer, Unit* v
             if (outReward.MaxLevel < memberLevel)
                 outReward.MaxLevel = memberLevel;
 
+            // Reward is based on highest one the victim is not gray too
             uint32 grayLevel = Acore::XP::GetGrayLevel(memberLevel);
-            if (victim->GetLevel() > grayLevel && (outReward.MaxNotGrayMember == nullptr || outReward.MaxNotGrayMemberLevel < memberLevel))
+            if (victim->GetLevel() > grayLevel)
             {
-                outReward.MaxNotGrayMember = member;
-                outReward.MaxNotGrayMemberLevel = memberLevel;
+                if (outReward.MaxNotGrayMemberLevel < memberLevel)
+                    outReward.MaxNotGrayMemberLevel = memberLevel;
+                if (IsPlayerReportingLevelCap(member) == false && (outReward.MaxNotGrayMember == nullptr || outReward.GainReferenceLevel < memberLevel))
+                {
+                    outReward.MaxNotGrayMember = member;
+                    outReward.GainReferenceLevel = memberLevel;
+                }
             }
         }
     }
@@ -5739,12 +5772,21 @@ void EverQuestMod::BuildZoneWideKillReward(Group* group, Player* killer, Unit* v
     if (outReward.MaxLevel == 0 || outReward.AliveSumLevel == 0)
         return;
 
-    outReward.IsFullXP = outReward.MaxNotGrayMember != nullptr && (outReward.MaxLevel == outReward.MaxNotGrayMemberLevel);
+    // Control for max level
+    outReward.IsFullXP = outReward.MaxNotGrayMember != nullptr && victim->GetLevel() > Acore::XP::GetGrayLevel(outReward.MaxLevel);
 
     // Base experience comes from the highest level member the victim is not gray to, matching KillRewarder::_InitXP
     if (outReward.MaxNotGrayMember != nullptr)
     {
         outReward.BaseExperience = Acore::XP::Gain(outReward.MaxNotGrayMember, victim, false);
+        if (outReward.GainReferenceLevel != outReward.MaxNotGrayMemberLevel && outReward.BaseExperience > 0)
+        {
+            ContentLevels victimContentLevels = GetContentLevelsForMapAndZone(victim->GetMapId(), victim->GetZoneId());
+            uint32 gainReferenceBase = Acore::XP::BaseGain(outReward.GainReferenceLevel, victim->GetLevel(), victimContentLevels);
+            uint32 intendedBase = Acore::XP::BaseGain(outReward.MaxNotGrayMemberLevel, victim->GetLevel(), victimContentLevels);
+            if (gainReferenceBase > 0)
+                outReward.BaseExperience = static_cast<uint32>(static_cast<float>(outReward.BaseExperience) * static_cast<float>(intendedBase) / static_cast<float>(gainReferenceBase));
+        }
         if (outReward.BaseExperience > 0 && victim->IsCreature() == true)
         {
             CreatureTemplate const* creatureTemplate = victim->ToCreature()->GetCreatureTemplate();
@@ -5773,18 +5815,115 @@ float EverQuestMod::GetZoneWideGroupExperienceRate(Player* player, const EverQue
 {
     if (reward.IsValid == false || reward.AliveSumLevel == 0)
         return 1.0f;
-    return reward.GroupRate * static_cast<float>(GetPlayerLevelForExperienceGain(player)) / static_cast<float>(reward.AliveSumLevel);
+    return reward.GroupRate * static_cast<float>(GetGroupExperienceLevelForPlayer(player)) / static_cast<float>(reward.AliveSumLevel);
+}
+
+bool EverQuestMod::IsAlternateGroupExperienceFormulaActive(uint32 aliveMemberCount)
+{
+    if (ConfigAlternateGroupExperienceFormulaEnabled == false)
+        return false;
+    return aliveMemberCount >= 2 && aliveMemberCount <= 5;
+}
+
+float EverQuestMod::GetGroupExperienceCorrectionForKill(Player* killer, Unit* victim)
+{
+    if (killer == nullptr || victim == nullptr)
+        return 1.0f;
+
+    // Nothing can differ unless one of the two systems that distort the levels is in play at all
+    if (MentorshipStateCount.load() == 0 && ConfigPlayerLevelCap == 0)
+        return 1.0f;
+
+    Group* group = killer->GetGroup();
+    if (group == nullptr)
+        return 1.0f;
+
+    bool haveCoreReference = false;
+    bool haveIntendedReference = false;
+    bool anythingDiffers = false;
+    uint8 coreMaxLevel = 0;
+    uint8 coreReferenceLevel = 0;
+    uint8 intendedMaxLevel = 0;
+    uint8 intendedReferenceLevel = 0;
+
+    // Mirrors KillRewarder::_InitGroupData
+    for (GroupReference* itr = group->GetFirstMember(); itr != nullptr; itr = itr->next())
+    {
+        Player* member = itr->GetSource();
+        if (member == nullptr)
+            continue;
+        if (member != killer && member->IsAtGroupRewardDistance(victim) == false)
+            continue;
+        if (member->IsAlive() == false)
+            continue;
+
+        uint8 realLevel = GetGroupExperienceLevelForPlayer(member);
+        bool isCapped = IsPlayerReportingLevelCap(member);
+        bool isTethered = IsPlayerExcludedFromGroupExperienceShare(member);
+        uint8 reportedLevel = isCapped == true ? static_cast<uint8>(255) : realLevel;
+        if (isCapped == true || isTethered == true)
+            anythingDiffers = true;
+        if (coreMaxLevel < reportedLevel)
+            coreMaxLevel = reportedLevel;
+        if (victim->GetLevel() > Acore::XP::GetGrayLevel(reportedLevel) && (haveCoreReference == false || coreReferenceLevel < reportedLevel))
+        {
+            haveCoreReference = true;
+            coreReferenceLevel = reportedLevel;
+        }
+        if (isTethered == true)
+            continue;
+        if (intendedMaxLevel < realLevel)
+            intendedMaxLevel = realLevel;
+        if (victim->GetLevel() > Acore::XP::GetGrayLevel(realLevel) && (haveIntendedReference == false || intendedReferenceLevel < realLevel))
+        {
+            haveIntendedReference = true;
+            intendedReferenceLevel = realLevel;
+        }
+    }
+
+    if (anythingDiffers == false)
+        return 1.0f;
+
+    // The core is already handing out nothing, and a rate cannot bring that back
+    if (haveCoreReference == false)
+        return 1.0f;
+
+    // Acore::XP::Gain is deliberately not used here.  It fires OnPlayerBeforeGetLevelForXPGain, which this module itself overrides with something that takes a lock and records the
+    // player as being inside Player::GiveXP, and it would run a maxed player as "255" through BaseGain and come back with nothing
+    ContentLevels victimContentLevels = GetContentLevelsForMapAndZone(victim->GetMapId(), victim->GetZoneId());
+    uint32 coreBaseExperience = Acore::XP::BaseGain(coreReferenceLevel, victim->GetLevel(), victimContentLevels);
+    if (coreBaseExperience == 0)
+        return 1.0f;
+
+    // No member the victim is worth anything to once the tethered ones are set aside, so nobody should be earning from it
+    uint32 intendedBaseExperience = haveIntendedReference == false ? 0 : Acore::XP::BaseGain(intendedReferenceLevel, victim->GetLevel(), victimContentLevels);
+    float coreHalfFactor = (coreMaxLevel == coreReferenceLevel) ? 1.0f : 0.5f;
+    float intendedHalfFactor = (haveIntendedReference == true && victim->GetLevel() > Acore::XP::GetGrayLevel(intendedMaxLevel)) ? 1.0f : 0.5f;
+
+    return (static_cast<float>(intendedBaseExperience) * intendedHalfFactor) / (static_cast<float>(coreBaseExperience) * coreHalfFactor);
+}
+
+float EverQuestMod::GetRetailGroupExperienceRate(uint8 memberLevel, uint32 aliveMemberCount, uint32 aliveSumLevel, bool isRaid)
+{
+    if (aliveSumLevel == 0)
+        return 1.0f;
+    return Acore::XP::xp_in_group_rate(aliveMemberCount, isRaid) * static_cast<float>(memberLevel) / static_cast<float>(aliveSumLevel);
+}
+
+float EverQuestMod::GetAlternateGroupExperienceRate(uint8 memberLevel, uint32 aliveMemberCount, uint32 aliveSumLevel)
+{
+    if (aliveSumLevel == 0)
+        return 1.0f;
+
+    float bonusTotalRatePercent = static_cast<float>(aliveMemberCount - 1) * (ConfigAlternateGroupExperienceAddPercentPerAddedMember * 0.01f);
+    float memberLevelShare = static_cast<float>(memberLevel) / static_cast<float>(aliveSumLevel);
+    return memberLevelShare * (1.0f + bonusTotalRatePercent);
 }
 
 float EverQuestMod::GetGroupExperienceRateForMember(Player* member, const EverQuestZoneWideKillReward& reward)
 {
-    // The alternate formula is an even split plus a bonus per added member, and only covers party sized groups
-    if (ConfigAlternateGroupExperienceFormulaEnabled == true && reward.AliveMemberCount >= 2 && reward.AliveMemberCount <= 5)
-    {
-        float bonusTotalRatePercent = static_cast<float>(reward.AliveMemberCount - 1) * (ConfigAlternateGroupExperienceAddPercentPerAddedMember * 0.01f);
-        float splitBaseRate = 1.0f / static_cast<float>(reward.AliveMemberCount);
-        return splitBaseRate * (1.0f + bonusTotalRatePercent);
-    }
+    if (IsAlternateGroupExperienceFormulaActive(reward.AliveMemberCount) == true)
+        return GetAlternateGroupExperienceRate(GetGroupExperienceLevelForPlayer(member), reward.AliveMemberCount, reward.AliveSumLevel);
 
     return GetZoneWideGroupExperienceRate(member, reward);
 }
@@ -5828,6 +5967,9 @@ void EverQuestMod::GrantZoneWideGroupRewardsForKill(Player* killer, Unit* victim
         // Anything the core already paid out is left alone
         if (member->IsAtGroupRewardDistance(victim) == true)
             continue;
+        // A mentor or an apprentice takes no share of a kill, so nothing is worked out for them here and their pet earns nothing from it either
+        if (IsPlayerExcludedFromGroupExperienceShare(member) == true)
+            continue;
         if (IsInZoneWideGroupRewardRange(member, victim) == false)
             continue;
 
@@ -5855,7 +5997,7 @@ void EverQuestMod::GrantZoneWideGroupRewardsForKill(Player* killer, Unit* victim
         if (victim->IsCreature() == true)
         {
             uint8 highestAttackerLevel = victim->ToCreature()->GetHighestPlayerAttackerLevel();
-            if (highestAttackerLevel > reward.MaxLevel && victim->GetLevel() <= Acore::XP::GetGrayLevel(highestAttackerLevel))
+            if (highestAttackerLevel > reward.MaxLevelIncludingTethered && victim->GetLevel() <= Acore::XP::GetGrayLevel(highestAttackerLevel))
                 experience = experience / 2 + 1;
         }
 
@@ -9080,7 +9222,7 @@ void EverQuestMod::RecalculateTemporaryFactionReactionsForPlayer(Player* player)
             adjustedStanding = ReputationMgr::Reputation_Cap;
         else if (adjustedStanding < ReputationMgr::Reputation_Bottom)
             adjustedStanding = ReputationMgr::Reputation_Bottom;
-        ReputationRank naturalRank = ReputationMgr::ReputationToRank(naturalStanding);
+        int32 naturalRankValue = (int32)ReputationMgr::ReputationToRank(naturalStanding);
         int32 adjustedRankValue = (int32)ReputationMgr::ReputationToRank(adjustedStanding);
 
         // Illusion band steps only move factions with a good or evil baseline; None and Neutral factions never move
@@ -10813,7 +10955,7 @@ EverQuestPlayerControllerData EverQuestMod::GetPlayerControllerData(Player* play
 {
     EverQuestPlayerControllerData controllerData;
     controllerData.GUID = player->GetGUID().GetCounter();
-    QueryResult queryResult = CharacterDatabase.Query("SELECT nextSecondaryClass, currentSecondaryClass, secondaryExpPool, illusionFaceId, showBardPulse, issuedIllusionItemId, hideWoWGear, dungeonMode, adventurerDisqualified, deathExpLost, deathExpRestGranted, deathExpLostClass, hailWindowOnRightClick, showDispelMessage, dispelMessageColor, pendingStartItemEQClass FROM mod_everquest_character_settings WHERE guid = {}", player->GetGUID().GetCounter());
+    QueryResult queryResult = CharacterDatabase.Query("SELECT nextSecondaryClass, currentSecondaryClass, secondaryExpPool, illusionFaceId, showBardPulse, issuedIllusionItemId, hideWoWGear, dungeonMode, adventurerDisqualified, deathExpLost, deathExpRestGranted, deathExpLostClass, hailWindowOnRightClick, showDispelMessage, dispelMessageColor, pendingStartItemEQClass, mentorshipRole, mentorshipRealLevel, mentorshipRealExp, mentorshipBankedProgress FROM mod_everquest_character_settings WHERE guid = {}", player->GetGUID().GetCounter());
     if (!queryResult || queryResult->GetRowCount() == 0)
     {
         const EverQuestClassMap classMap = GetClassMapForWOWClassID(player->getClass());
@@ -10833,6 +10975,10 @@ EverQuestPlayerControllerData EverQuestMod::GetPlayerControllerData(Player* play
         controllerData.DeathExpRestGranted = 0;
         controllerData.DeathExpLostSecondaryClass = 0;
         controllerData.PendingStartItemEQClass = EQ_EQCLASS_NONE;
+        controllerData.MentorshipRole = EQ_MENTORSHIP_ROLE_NONE;
+        controllerData.MentorshipRealLevel = 0;
+        controllerData.MentorshipRealExperience = 0;
+        controllerData.MentorshipBankedProgress = 0.0f;
     }
     else
     {
@@ -10853,6 +10999,10 @@ EverQuestPlayerControllerData EverQuestMod::GetPlayerControllerData(Player* play
         controllerData.ShowDispelMessage = fields[13].Get<bool>();
         controllerData.DispelMessageColor = fields[14].Get<uint32>() & 0xFFFFFF;
         controllerData.PendingStartItemEQClass = fields[15].Get<uint8>();
+        controllerData.MentorshipRole = fields[16].Get<uint8>();
+        controllerData.MentorshipRealLevel = fields[17].Get<uint8>();
+        controllerData.MentorshipRealExperience = fields[18].Get<uint32>();
+        controllerData.MentorshipBankedProgress = fields[19].Get<float>();
     }
     return controllerData;
 }
@@ -11469,6 +11619,10 @@ void EverQuestMod::ApplyExpLossForSpiritReleaseForPlayer(Player* player)
     if (ConfigExpLossOnDeathEnabled == false)
         return;
 
+    // No exp loss when in a temp level
+    if (IsPlayerMentorshipLevelAdjusted(player) == true)
+        return;
+
     // Do nothing if the level is below the minimum
     uint8 playerLevel = player->GetLevel();
     if (playerLevel < ConfigExpLossOnDeathMinLevel)
@@ -11581,7 +11735,10 @@ void EverQuestMod::RestoreDeathExpLossOnResurrectForPlayer(Player* player)
         return;
     }
 
-    // The debt is settled by this resurrection whether or not any of it converts into experience below
+    // Can't restore experience to someone in mentorship
+    if (IsPlayerMentorshipLevelAdjusted(player) == true)
+        return;
+
     uint32 owedExperience = controllerData.DeathExpLost;
     uint32 grantedRestExperience = controllerData.DeathExpRestGranted;
     ClearDeathExpLossForPlayer(player);
@@ -11693,6 +11850,24 @@ void EverQuestMod::SaveDeathExpLossForPlayer(Player* player)
         controllerData.DeathExpLostSecondaryClass);
 }
 
+bool EverQuestMod::IsPlayerReportingLevelCap(Player const* player)
+{
+    if (player == nullptr || ConfigPlayerLevelCap == 0)
+        return false;
+    if (static_cast<uint32>(player->GetLevel()) + 1 < ConfigPlayerLevelCap)
+        return false;
+
+    uint32 nextLevelExperience = player->GetUInt32Value(PLAYER_NEXT_LEVEL_XP);
+    if (nextLevelExperience == 0)
+        return false;
+    return player->GetUInt32Value(PLAYER_XP) >= nextLevelExperience - 1;
+}
+
+uint8 EverQuestMod::GetGroupExperienceLevelForPlayer(Player const* player)
+{
+    return player->GetLevel();
+}
+
 void EverQuestMod::HandleLevelCapOnBeforeExperienceGain(Player const* player, uint8& levelForExpGain)
 {
     if (ConfigPlayerLevelCap == 0)
@@ -11705,13 +11880,8 @@ void EverQuestMod::HandleLevelCapOnBeforeExperienceGain(Player const* player, ui
     }
 
     // Once the bar is parked one point short of a capped level up, report max level so GiveXP discards the gain
-    if (static_cast<uint32>(player->GetLevel()) + 1 >= ConfigPlayerLevelCap)
-    {
-        uint32 curExp = player->GetUInt32Value(PLAYER_XP);
-        uint32 nextLevelExp = player->GetUInt32Value(PLAYER_NEXT_LEVEL_XP);
-        if (nextLevelExp > 0 && curExp >= nextLevelExp - 1)
-            levelForExpGain = 255;
-    }
+    if (IsPlayerReportingLevelCap(player) == true)
+        levelForExpGain = 255;
 }
 
 bool EverQuestMod::HandleLevelCapOnCanGiveLevel(Player* player, uint8 newLevel)
@@ -11749,6 +11919,1105 @@ void EverQuestMod::ProcessLevelCapStateForPlayer(Player* player)
         if (nextLevelExp > 0)
             player->SetUInt32Value(PLAYER_XP, nextLevelExp - 1);
     }
+}
+
+float EverQuestMod::GetLevelProgressFromLevelAndExperience(uint8 level, uint32 experience)
+{
+    uint32 levelXPSpan = sObjectMgr->GetXPForLevel(level);
+    if (levelXPSpan == 0)
+        return static_cast<float>(level);
+
+    float levelFraction = static_cast<float>(experience) / static_cast<float>(levelXPSpan);
+    if (levelFraction < 0.0f)
+        levelFraction = 0.0f;
+    if (levelFraction > 1.0f)
+        levelFraction = 1.0f;
+    return static_cast<float>(level) + levelFraction;
+}
+
+uint32 EverQuestMod::GetExperienceSpanForLevelOrNearestBelow(uint8 level)
+{
+    uint32 levelXPSpan = sObjectMgr->GetXPForLevel(level);
+    while (levelXPSpan == 0 && level > 1)
+    {
+        level--;
+        levelXPSpan = sObjectMgr->GetXPForLevel(level);
+    }
+    return levelXPSpan;
+}
+
+uint8 EverQuestMod::GetLevelCapForExperienceAwards()
+{
+    uint8 coreMaxLevel = static_cast<uint8>(sWorld->getIntConfig(CONFIG_MAX_PLAYER_LEVEL));
+    if (ConfigPlayerLevelCap > 1 && (ConfigPlayerLevelCap - 1) < static_cast<uint32>(coreMaxLevel))
+        return static_cast<uint8>(ConfigPlayerLevelCap - 1);
+    return coreMaxLevel;
+}
+
+bool EverQuestMod::IsPlayerExperienceBarCapped(Player* player)
+{
+    if (player == nullptr)
+        return false;
+
+    if (player->GetLevel() >= static_cast<uint8>(sWorld->getIntConfig(CONFIG_MAX_PLAYER_LEVEL)))
+        return true;
+
+    if (ConfigPlayerLevelCap != 0 && static_cast<uint32>(player->GetLevel()) + 1 >= ConfigPlayerLevelCap)
+    {
+        uint32 currentExperience = player->GetUInt32Value(PLAYER_XP);
+        uint32 nextLevelExperience = player->GetUInt32Value(PLAYER_NEXT_LEVEL_XP);
+        if (nextLevelExperience > 0 && currentExperience >= nextLevelExperience - 1)
+            return true;
+    }
+    return false;
+}
+
+bool EverQuestMod::IsMentorshipEnabled()
+{
+    return IsEnabled == true && ConfigMentorshipEnabled == true;
+}
+
+uint8 EverQuestMod::GetMentorshipRoleForPlayerGUID(ObjectGuid playerGUID)
+{
+    if (MentorshipStateCount.load() == 0)
+        return EQ_MENTORSHIP_ROLE_NONE;
+
+    std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+    unordered_map<ObjectGuid, EverQuestMentorshipState>::const_iterator stateIterator = MentorshipStatesByPlayerGUID.find(playerGUID);
+    if (stateIterator == MentorshipStatesByPlayerGUID.end())
+        return EQ_MENTORSHIP_ROLE_NONE;
+    return stateIterator->second.Role;
+}
+
+bool EverQuestMod::IsPlayerMentorshipLevelAdjusted(Player* player)
+{
+    if (player == nullptr)
+        return false;
+    uint8 role = GetMentorshipRoleForPlayerGUID(player->GetGUID());
+    return role == EQ_MENTORSHIP_ROLE_MENTOR || role == EQ_MENTORSHIP_ROLE_APPRENTICE;
+}
+
+bool EverQuestMod::TryGetMentorshipRealLevelForPlayer(Player* player, uint8& outRealLevel)
+{
+    if (player == nullptr || MentorshipStateCount.load() == 0)
+        return false;
+
+    std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+    unordered_map<ObjectGuid, EverQuestMentorshipState>::const_iterator stateIterator = MentorshipStatesByPlayerGUID.find(player->GetGUID());
+    if (stateIterator == MentorshipStatesByPlayerGUID.end())
+        return false;
+    if (stateIterator->second.Role != EQ_MENTORSHIP_ROLE_MENTOR && stateIterator->second.Role != EQ_MENTORSHIP_ROLE_APPRENTICE)
+        return false;
+    if (stateIterator->second.RealLevel == 0)
+        return false;
+    outRealLevel = stateIterator->second.RealLevel;
+    return true;
+}
+
+bool EverQuestMod::IsQuestBlockedByMentorshipForPlayer(Player* player, Quest const* quest)
+{
+    if (player == nullptr || quest == nullptr)
+        return false;
+
+    uint8 realLevel = 0;
+    if (TryGetMentorshipRealLevelForPlayer(player, realLevel) == false)
+        return false;
+    return quest->GetMinLevel() > static_cast<uint32>(realLevel);
+}
+
+uint32 EverQuestMod::FindQuestStarterItemEntryForPlayer(Player* player, uint32 questID)
+{
+    if (player == nullptr || questID == 0)
+        return 0;
+
+    for (uint8 slotIndex = EQUIPMENT_SLOT_START; slotIndex < INVENTORY_SLOT_ITEM_END; ++slotIndex)
+    {
+        Item* heldItem = player->GetItemByPos(INVENTORY_SLOT_BAG_0, slotIndex);
+        if (heldItem != nullptr && heldItem->GetTemplate() != nullptr && heldItem->GetTemplate()->StartQuest == questID)
+            return heldItem->GetEntry();
+    }
+    for (uint8 bagSlotIndex = INVENTORY_SLOT_BAG_START; bagSlotIndex < INVENTORY_SLOT_BAG_END; ++bagSlotIndex)
+    {
+        Bag* heldBag = player->GetBagByPos(bagSlotIndex);
+        if (heldBag == nullptr)
+            continue;
+        for (uint32 bagIndex = 0; bagIndex < heldBag->GetBagSize(); ++bagIndex)
+        {
+            Item* heldItem = player->GetItemByPos(bagSlotIndex, static_cast<uint8>(bagIndex));
+            if (heldItem != nullptr && heldItem->GetTemplate() != nullptr && heldItem->GetTemplate()->StartQuest == questID)
+                return heldItem->GetEntry();
+        }
+    }
+    return 0;
+}
+
+void EverQuestMod::ReturnRefusedQuestStarterItemToPlayer(Player* player, uint32 itemEntry)
+{
+    if (player == nullptr || itemEntry == 0)
+        return;
+
+    // Only a quest that came from an item loses one, so most refusals have nothing to hand back
+    if (player->HasItemCount(itemEntry, 1, true) == true)
+        return;
+
+    ItemPosCountVec destinationPosition;
+    if (player->CanStoreNewItem(NULL_BAG, NULL_SLOT, destinationPosition, itemEntry, 1) == EQUIP_ERR_OK)
+    {
+        Item* returnedItem = player->StoreNewItem(destinationPosition, itemEntry, true);
+        if (returnedItem != nullptr)
+        {
+            player->SendNewItem(returnedItem, 1, true, false);
+            return;
+        }
+    }
+
+    Item* mailedItem = Item::CreateItem(itemEntry, 1, player);
+    if (mailedItem == nullptr)
+    {
+        LOG_ERROR("module.EverQuest", "Could not hand item {} back to player {} after a mentorship refused the quest that item starts", itemEntry, player->GetGUID().ToString());
+        return;
+    }
+
+    CharacterDatabaseTransaction transaction = CharacterDatabase.BeginTransaction();
+    mailedItem->SaveToDB(transaction);
+    MailDraft mailDraft("Returned quest item", "Your bags were full, so the item that starts the quest a mentorship would not let you take has been sent back to you.");
+    mailDraft.AddItem(mailedItem);
+    mailDraft.SendMailTo(transaction, MailReceiver(player), MailSender(MAIL_NORMAL, player->GetGUID().GetCounter(), MAIL_STATIONERY_DEFAULT), MAIL_CHECK_MASK_COPIED);
+    CharacterDatabase.CommitTransaction(transaction);
+
+    if (player->GetSession() != nullptr)
+        ChatHandler(player->GetSession()).SendSysMessage("Your bags were full, so the item that quest came from has been mailed back to you.");
+}
+
+void EverQuestMod::RefuseMentorshipBlockedQuestForPlayer(Player* player, Quest const* quest)
+{
+    if (player == nullptr || quest == nullptr)
+        return;
+    uint32 questID = quest->GetQuestId();
+
+    // The core destroys a quest starting item right after this point, with nothing able to stop it, so the entry is noted now while the item is still held and handed back on this character's next tick
+    uint32 questStarterItemEntry = FindQuestStarterItemEntryForPlayer(player, questID);
+
+    // Mirrors WorldSession::HandleQuestLogRemoveQuest, so the quest is left cleanly takeable again once the tether ends
+    uint16 questLogSlot = player->FindQuestSlot(questID);
+    if (quest->HasSpecialFlag(QUEST_SPECIAL_FLAGS_TIMED) == true)
+        player->RemoveTimedQuest(questID);
+    player->TakeQuestSourceItem(questID, true);
+    player->AbandonQuest(questID);
+    player->RemoveActiveQuest(questID);
+    player->RemoveTimedAchievement(ACHIEVEMENT_TIMED_TYPE_QUEST, questID);
+    if (questLogSlot < MAX_QUEST_LOG_SIZE)
+        player->SetQuestSlot(questLogSlot, 0);
+
+    if (quest->HasFlag(QUEST_FLAGS_FLAGS_PVP) == true)
+    {
+        player->pvpInfo.IsHostile = player->pvpInfo.IsInHostileArea || player->HasPvPForcingQuest();
+        player->UpdatePvPState();
+    }
+
+    if (questStarterItemEntry != 0)
+    {
+        std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+        unordered_map<ObjectGuid, EverQuestMentorshipState>::iterator stateIterator = MentorshipStatesByPlayerGUID.find(player->GetGUID());
+        if (stateIterator != MentorshipStatesByPlayerGUID.end())
+            stateIterator->second.PendingQuestStarterItemEntry = questStarterItemEntry;
+    }
+
+    if (player->GetSession() == nullptr)
+        return;
+    uint8 realLevel = 0;
+    TryGetMentorshipRealLevelForPlayer(player, realLevel);
+    ChatHandler(player->GetSession()).PSendSysMessage("|cffFF0000\"{}\" needs level {}, and your own level is |cff00FF00{}|cffFF0000. A borrowed mentorship level does not open quests.|r", quest->GetTitle(), quest->GetMinLevel(), realLevel);
+}
+
+bool EverQuestMod::IsPlayerExcludedFromGroupExperienceShare(Player* player)
+{
+    return IsPlayerMentorshipLevelAdjusted(player);
+}
+
+void EverQuestMod::AddCappedAnchorExperienceForPlayer(Player* player, uint32 grantedExperience)
+{
+    if (player == nullptr || grantedExperience == 0 || MentorshipStateCount.load() == 0)
+        return;
+
+    std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+    unordered_map<ObjectGuid, EverQuestMentorshipState>::iterator ownStateIterator = MentorshipStatesByPlayerGUID.find(player->GetGUID());
+    if (ownStateIterator == MentorshipStatesByPlayerGUID.end() || ownStateIterator->second.Role != EQ_MENTORSHIP_ROLE_ANCHOR)
+        return;
+    ownStateIterator->second.AnchorCappedExperience += grantedExperience;
+
+    unordered_map<ObjectGuid, EverQuestMentorshipState>::iterator partnerStateIterator = MentorshipStatesByPlayerGUID.find(ownStateIterator->second.PartnerGUID);
+    if (partnerStateIterator != MentorshipStatesByPlayerGUID.end() && partnerStateIterator->second.PartnerGUID == player->GetGUID())
+        partnerStateIterator->second.AnchorCappedExperience += grantedExperience;
+}
+
+void EverQuestMod::ApplyMentorshipAuraForPlayer(Player* player, uint8 role)
+{
+    if (player == nullptr)
+        return;
+
+    uint32 auraSpellID = 0;
+    if (role == EQ_MENTORSHIP_ROLE_MENTOR)
+        auraSpellID = ConfigSystemMentorshipMentorAuraSpellID;
+    else if (role == EQ_MENTORSHIP_ROLE_APPRENTICE)
+        auraSpellID = ConfigSystemMentorshipApprenticeAuraSpellID;
+    if (auraSpellID == 0)
+        return;
+    if (sSpellMgr->GetSpellInfo(auraSpellID) == nullptr)
+        return;
+    if (player->HasAura(auraSpellID) == true)
+        return;
+    player->CastSpell(player, auraSpellID, true);
+}
+
+void EverQuestMod::RemoveMentorshipAurasFromPlayer(Player* player)
+{
+    if (player == nullptr)
+        return;
+    if (ConfigSystemMentorshipMentorAuraSpellID != 0)
+        player->RemoveAurasDueToSpell(ConfigSystemMentorshipMentorAuraSpellID);
+    if (ConfigSystemMentorshipApprenticeAuraSpellID != 0)
+        player->RemoveAurasDueToSpell(ConfigSystemMentorshipApprenticeAuraSpellID);
+}
+
+void EverQuestMod::ApplyMentorshipLevelForPlayer(Player* player, uint8 newLevel)
+{
+    if (player == nullptr || newLevel == 0)
+        return;
+    if (player->GetLevel() == newLevel)
+        return;
+
+    PlayerLevelInfo levelInfo;
+    sObjectMgr->GetPlayerLevelInfo(player->getRace(true), player->getClass(), newLevel, &levelInfo);
+
+    PlayerClassLevelInfo classLevelInfo;
+    sObjectMgr->GetPlayerClassLevelInfo(player->getClass(), newLevel, &classLevelInfo);
+
+    player->_ApplyAllLevelScaleItemMods(false);
+    player->SetLevel(newLevel, true);
+    player->SetUInt32Value(PLAYER_NEXT_LEVEL_XP, sObjectMgr->GetXPForLevel(newLevel));
+
+    for (uint8 statIndex = STAT_STRENGTH; statIndex < MAX_STATS; ++statIndex)
+        player->SetCreateStat(Stats(statIndex), levelInfo.stats[statIndex]);
+
+    player->SetCreateHealth(classLevelInfo.basehealth);
+    player->SetCreateMana(classLevelInfo.basemana);
+
+    // Unit::SetMaxHealth and Unit::SetMaxPower pull current health and mana down with them, so no clamping is needed
+    player->UpdateAllStats();
+
+    player->_ApplyAllLevelScaleItemMods(true);
+
+    if (Pet* pet = player->GetPet())
+        pet->SynchronizeLevelWithOwner();
+
+    if (Guild* guild = player->GetGuild())
+        guild->UpdateMemberData(player, GUILD_MEMBER_DATA_LEVEL, newLevel);
+}
+
+void EverQuestMod::SaveMentorshipStateForPlayer(Player* player, uint8 role, uint8 realLevel, uint32 realExperience, float bankedProgress)
+{
+    if (player == nullptr)
+        return;
+
+    EverQuestPlayerControllerData* liveControllerData = GetOrLoadActivePlayerClassControllerData(player);
+    if (liveControllerData == nullptr)
+        return;
+    liveControllerData->MentorshipRole = role;
+    liveControllerData->MentorshipRealLevel = realLevel;
+    liveControllerData->MentorshipRealExperience = realExperience;
+    liveControllerData->MentorshipBankedProgress = bankedProgress;
+
+    EverQuestPlayerControllerData controllerData;
+    {
+        std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+        unordered_map<ObjectGuid, EverQuestPlayerControllerData>::const_iterator controllerDataIterator = ActivePlayerClassControllerDataByGUID.find(player->GetGUID());
+        if (controllerDataIterator == ActivePlayerClassControllerDataByGUID.end())
+            return;
+        controllerData = controllerDataIterator->second;
+    }
+
+    CharacterDatabase.Execute("INSERT INTO `mod_everquest_character_settings` (`guid`, `currentSecondaryClass`, `nextSecondaryClass`, `secondaryExpPool`, `mentorshipRole`, `mentorshipRealLevel`, `mentorshipRealExp`, `mentorshipBankedProgress`) VALUES ({}, {}, {}, {}, {}, {}, {}, {}) ON DUPLICATE KEY UPDATE `mentorshipRole` = {}, `mentorshipRealLevel` = {}, `mentorshipRealExp` = {}, `mentorshipBankedProgress` = {}",
+        player->GetGUID().GetCounter(),
+        controllerData.CurrentSecondClass,
+        controllerData.NextSecondClass,
+        controllerData.SecondaryExpPool,
+        controllerData.MentorshipRole,
+        controllerData.MentorshipRealLevel,
+        controllerData.MentorshipRealExperience,
+        controllerData.MentorshipBankedProgress,
+        controllerData.MentorshipRole,
+        controllerData.MentorshipRealLevel,
+        controllerData.MentorshipRealExperience,
+        controllerData.MentorshipBankedProgress);
+}
+
+void EverQuestMod::AwardBankedMentorshipProgressToPlayer(Player* player, float bankedProgress)
+{
+    if (player == nullptr)
+        return;
+    if (bankedProgress <= 0.0f)
+    {
+        if (player->GetSession() != nullptr)
+            ChatHandler(player->GetSession()).SendSysMessage("Your apprenticeship ended without anything to show for it, since nothing was earned while it lasted.");
+        return;
+    }
+
+    uint8 levelCap = GetLevelCapForExperienceAwards();
+    uint8 startingLevel = player->GetLevel();
+    uint8 newLevel = startingLevel;
+    uint32 newExperience = player->GetUInt32Value(PLAYER_XP);
+    float remainingProgress = bankedProgress;
+
+    while (remainingProgress > 0.0f)
+    {
+        uint32 levelXPSpan = sObjectMgr->GetXPForLevel(newLevel);
+        if (levelXPSpan == 0)
+        {
+            newExperience = 0;
+            break;
+        }
+
+        float progressIntoLevel = static_cast<float>(newExperience) / static_cast<float>(levelXPSpan);
+        if (progressIntoLevel > 1.0f)
+            progressIntoLevel = 1.0f;
+        float progressLeftInLevel = 1.0f - progressIntoLevel;
+
+        if (remainingProgress < progressLeftInLevel)
+        {
+            newExperience = static_cast<uint32>(static_cast<float>(levelXPSpan) * (progressIntoLevel + remainingProgress));
+            break;
+        }
+
+        // Already at the highest level experience is allowed to reach, so the bar stops one point short and the rest is dropped
+        if (static_cast<uint32>(newLevel) >= static_cast<uint32>(levelCap))
+        {
+            newExperience = levelXPSpan - 1;
+            break;
+        }
+
+        remainingProgress -= progressLeftInLevel;
+        newExperience = 0;
+        newLevel++;
+    }
+
+    // The core's own maximum level has no experience bar of its own
+    if (newLevel >= static_cast<uint8>(sWorld->getIntConfig(CONFIG_MAX_PLAYER_LEVEL)))
+        newExperience = 0;
+
+    if (newLevel != startingLevel)
+        player->GiveLevel(newLevel);
+    player->SetUInt32Value(PLAYER_XP, newExperience);
+
+    if (player->GetSession() == nullptr)
+        return;
+    if (newLevel != startingLevel)
+        ChatHandler(player->GetSession()).PSendSysMessage("Your apprenticeship earned you|cff00FF00 {:.2f} |rlevels, bringing you to level |cff00FF00{}|r!", bankedProgress, newLevel);
+    else
+        ChatHandler(player->GetSession()).PSendSysMessage("Your apprenticeship earned you|cff00FF00 {:.2f} |rlevels of experience!", bankedProgress);
+}
+
+void EverQuestMod::SendMentorshipStateToPlayer(Player* player)
+{
+    if (player == nullptr || player->GetSession() == nullptr)
+        return;
+
+    EverQuestMentorshipState state;
+    bool haveState = false;
+    if (MentorshipStateCount.load() != 0)
+    {
+        std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+        unordered_map<ObjectGuid, EverQuestMentorshipState>::const_iterator stateIterator = MentorshipStatesByPlayerGUID.find(player->GetGUID());
+        if (stateIterator != MentorshipStatesByPlayerGUID.end())
+        {
+            state = stateIterator->second;
+            haveState = true;
+        }
+    }
+
+    // I hate how these look, TODO: Make this template better
+    std::string addonMessage = fmt::format("EQMENTORSHIP\tSTATE\t{}\t{}\t{}\t{}\t{}\t{}",
+        haveState == true ? state.Role : (uint8)EQ_MENTORSHIP_ROLE_NONE,
+        haveState == true ? state.PartnerName : "",
+        player->GetLevel(),
+        (haveState == true && state.RealLevel != 0) ? state.RealLevel : player->GetLevel(),
+        IsMentorshipEnabled() == true ? 1 : 0,
+        ConfigMentorshipMinLevelGap < 2 ? 2 : ConfigMentorshipMinLevelGap);
+    WorldPacket data;
+    ChatHandler::BuildChatPacket(data, CHAT_MSG_SYSTEM, LANG_ADDON, nullptr, nullptr, addonMessage);
+    player->GetSession()->SendPacket(&data);
+}
+
+void EverQuestMod::SendMentorshipRequestPromptToPlayer(Player* player, const EverQuestMentorshipRequest& request)
+{
+    if (player == nullptr || player->GetSession() == nullptr)
+        return;
+
+    std::string addonMessage = fmt::format("EQMENTORSHIP\tREQUEST\t{}\t{}\t{}",
+        request.RequesterName,
+        request.RequesterRole,
+        ConfigMentorshipRequestTimeoutInSec);
+    WorldPacket data;
+    ChatHandler::BuildChatPacket(data, CHAT_MSG_SYSTEM, LANG_ADDON, nullptr, nullptr, addonMessage);
+    player->GetSession()->SendPacket(&data);
+}
+
+void EverQuestMod::ReportMentorshipStatusToPlayer(Player* player)
+{
+    if (player == nullptr || player->GetSession() == nullptr)
+        return;
+    ChatHandler handler(player->GetSession());
+    if (MentorshipStateCount.load() == 0)
+    {
+        handler.SendSysMessage("You are not in a mentorship.");
+        return;
+    }
+
+    EverQuestMentorshipState state;
+    {
+        std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+        unordered_map<ObjectGuid, EverQuestMentorshipState>::const_iterator stateIterator = MentorshipStatesByPlayerGUID.find(player->GetGUID());
+        if (stateIterator == MentorshipStatesByPlayerGUID.end())
+        {
+            handler.SendSysMessage("You are not in a mentorship.");
+            return;
+        }
+        state = stateIterator->second;
+    }
+
+    if (state.Role == EQ_MENTORSHIP_ROLE_ANCHOR)
+    {
+        handler.PSendSysMessage("|cff00FF00{}|r is tethered to you, standing at level |cff00FF00{}|r.", state.PartnerName, player->GetLevel());
+        handler.SendSysMessage("Leaving the group or logging out ends it for both of you.");
+        return;
+    }
+
+    if (state.Role == EQ_MENTORSHIP_ROLE_MENTOR)
+    {
+        handler.PSendSysMessage("You are mentoring |cff00FF00{}|r, standing at level |cff00FF00{}|r instead of your own level |cff00FF00{}|r.", state.PartnerName, player->GetLevel(), state.RealLevel);
+        handler.SendSysMessage("You earn no experience while mentoring, and you keep pace one level above them.");
+        return;
+    }
+
+    handler.PSendSysMessage("You are apprenticed to |cff00FF00{}|r, standing at level |cff00FF00{}|r instead of your own level |cff00FF00{}|r.", state.PartnerName, player->GetLevel(), state.RealLevel);
+    handler.PSendSysMessage("Banked so far:|cff00FF00 {:.2f} |rlevels, paid out at level |cff00FF00{}|r when the apprenticeship ends.", state.BankedProgress, state.RealLevel);
+}
+
+bool EverQuestMod::RequestMentorshipForPlayer(Player* requester, Player* target, uint8 requestedRole)
+{
+    if (requester == nullptr || requester->GetSession() == nullptr)
+        return false;
+    ChatHandler handler(requester->GetSession());
+
+    if (IsMentorshipEnabled() == false)
+    {
+        handler.SendSysMessage("Mentorship is turned off on this server.");
+        return false;
+    }
+    if (requestedRole != EQ_MENTORSHIP_ROLE_MENTOR && requestedRole != EQ_MENTORSHIP_ROLE_APPRENTICE)
+        return false;
+    if (target == nullptr || target->GetSession() == nullptr || target == requester)
+    {
+        handler.SendSysMessage("Pick another character who is online to tether with.");
+        return false;
+    }
+
+    Group* group = requester->GetGroup();
+    if (group == nullptr || group->IsMember(target->GetGUID()) == false)
+    {
+        handler.PSendSysMessage("You have to be grouped with {} before you can tether to them.", target->GetName());
+        return false;
+    }
+    if (requester->IsAlive() == false || target->IsAlive() == false)
+    {
+        handler.SendSysMessage("Both of you have to be alive to start a mentorship.");
+        return false;
+    }
+    if (requester->IsInCombat() == true || target->IsInCombat() == true)
+    {
+        handler.SendSysMessage("Neither of you can be in combat to start a mentorship.");
+        return false;
+    }
+    Map* requesterMap = requester->FindMap();
+    Map* targetMap = target->FindMap();
+    if ((requesterMap != nullptr && requesterMap->IsBattlegroundOrArena() == true) || (targetMap != nullptr && targetMap->IsBattlegroundOrArena() == true))
+    {
+        handler.SendSysMessage("A mentorship cannot be started in a battleground or arena.");
+        return false;
+    }
+    if (GetMentorshipRoleForPlayerGUID(requester->GetGUID()) != EQ_MENTORSHIP_ROLE_NONE)
+    {
+        handler.SendSysMessage("You are already in a mentorship. End that one first.");
+        return false;
+    }
+    if (GetMentorshipRoleForPlayerGUID(target->GetGUID()) != EQ_MENTORSHIP_ROLE_NONE)
+    {
+        handler.PSendSysMessage("{} is already in a mentorship.", target->GetName());
+        return false;
+    }
+
+    uint32 requesterLevel = static_cast<uint32>(requester->GetLevel());
+    uint32 targetLevel = static_cast<uint32>(target->GetLevel());
+    uint32 minimumLevelGap = ConfigMentorshipMinLevelGap < 2 ? 2 : ConfigMentorshipMinLevelGap;
+
+    if (requestedRole == EQ_MENTORSHIP_ROLE_MENTOR)
+    {
+        if (requesterLevel < targetLevel + minimumLevelGap)
+        {
+            handler.PSendSysMessage("You have to be at least {} levels above {} to mentor them.", minimumLevelGap, target->GetName());
+            return false;
+        }
+    }
+    else
+    {
+        if (targetLevel < requesterLevel + minimumLevelGap)
+        {
+            handler.PSendSysMessage("{} has to be at least {} levels above you before you can apprentice to them.", target->GetName(), minimumLevelGap);
+            return false;
+        }
+    }
+
+    EverQuestMentorshipRequest request;
+    request.RequesterGUID = requester->GetGUID();
+    request.RequesterName = requester->GetName();
+    request.RequesterRole = requestedRole;
+    request.ExpiresAtUnixTime = static_cast<time_t>(GameTime::GetGameTime().count()) + static_cast<time_t>(ConfigMentorshipRequestTimeoutInSec);
+    {
+        std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+        MentorshipRequestsByTargetGUID[target->GetGUID()] = request;
+    }
+
+    if (requestedRole == EQ_MENTORSHIP_ROLE_MENTOR)
+    {
+        handler.PSendSysMessage("You asked |cff00FF00{}|r to let you mentor them. They have {} seconds to accept.", target->GetName(), ConfigMentorshipRequestTimeoutInSec);
+        ChatHandler(target->GetSession()).PSendSysMessage("|cff00FF00{}|r wants to mentor you, dropping to one level above you so you can adventure together.", requester->GetName());
+    }
+    else
+    {
+        handler.PSendSysMessage("You asked |cff00FF00{}|r to take you on as an apprentice. They have {} seconds to accept.", target->GetName(), ConfigMentorshipRequestTimeoutInSec);
+        ChatHandler(target->GetSession()).PSendSysMessage("|cff00FF00{}|r wants to apprentice to you, rising to one level below you and earning at your pace.", requester->GetName());
+    }
+    SendMentorshipRequestPromptToPlayer(target, request);
+    return true;
+}
+
+void EverQuestMod::DeclineMentorshipRequestForPlayer(Player* player)
+{
+    if (player == nullptr || player->GetSession() == nullptr)
+        return;
+
+    EverQuestMentorshipRequest request;
+    bool haveRequest = false;
+    {
+        std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+        unordered_map<ObjectGuid, EverQuestMentorshipRequest>::const_iterator requestIterator = MentorshipRequestsByTargetGUID.find(player->GetGUID());
+        if (requestIterator != MentorshipRequestsByTargetGUID.end())
+        {
+            request = requestIterator->second;
+            haveRequest = true;
+            MentorshipRequestsByTargetGUID.erase(player->GetGUID());
+        }
+    }
+    if (haveRequest == false)
+    {
+        ChatHandler(player->GetSession()).SendSysMessage("Nobody has offered you a mentorship.");
+        return;
+    }
+
+    ChatHandler(player->GetSession()).PSendSysMessage("You turned down |cff00FF00{}|r.", request.RequesterName);
+    Player* requester = ObjectAccessor::FindConnectedPlayer(request.RequesterGUID);
+    if (requester != nullptr && requester->GetSession() != nullptr)
+        ChatHandler(requester->GetSession()).PSendSysMessage("|cff00FF00{}|r turned down your mentorship offer.", player->GetName());
+}
+
+void EverQuestMod::ClearMentorshipRequestsInvolvingPlayerGUID(ObjectGuid playerGUID)
+{
+    std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+    MentorshipRequestsByTargetGUID.erase(playerGUID);
+    unordered_map<ObjectGuid, EverQuestMentorshipRequest>::iterator requestIterator = MentorshipRequestsByTargetGUID.begin();
+    while (requestIterator != MentorshipRequestsByTargetGUID.end())
+    {
+        if (requestIterator->second.RequesterGUID == playerGUID)
+            requestIterator = MentorshipRequestsByTargetGUID.erase(requestIterator);
+        else
+            ++requestIterator;
+    }
+}
+
+void EverQuestMod::AcceptMentorshipRequestForPlayer(Player* player)
+{
+    if (player == nullptr || player->GetSession() == nullptr)
+        return;
+    ChatHandler handler(player->GetSession());
+
+    EverQuestMentorshipRequest request;
+    bool haveRequest = false;
+    {
+        std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+        unordered_map<ObjectGuid, EverQuestMentorshipRequest>::const_iterator requestIterator = MentorshipRequestsByTargetGUID.find(player->GetGUID());
+        if (requestIterator != MentorshipRequestsByTargetGUID.end())
+        {
+            request = requestIterator->second;
+            haveRequest = true;
+            MentorshipRequestsByTargetGUID.erase(player->GetGUID());
+        }
+    }
+    if (haveRequest == false)
+    {
+        handler.SendSysMessage("Nobody has offered you a mentorship.");
+        return;
+    }
+    if (request.ExpiresAtUnixTime < static_cast<time_t>(GameTime::GetGameTime().count()))
+    {
+        handler.PSendSysMessage("The offer from {} already expired.", request.RequesterName);
+        return;
+    }
+
+    Player* adjustedPlayer = ObjectAccessor::FindConnectedPlayer(request.RequesterGUID);
+    if (adjustedPlayer == nullptr || adjustedPlayer->GetSession() == nullptr)
+    {
+        handler.PSendSysMessage("{} is no longer online.", request.RequesterName);
+        return;
+    }
+    ChatHandler adjustedHandler(adjustedPlayer->GetSession());
+
+    if (IsMentorshipEnabled() == false)
+    {
+        handler.SendSysMessage("Mentorship is turned off on this server.");
+        return;
+    }
+    Group* group = player->GetGroup();
+    if (group == nullptr || group->IsMember(adjustedPlayer->GetGUID()) == false)
+    {
+        handler.PSendSysMessage("You are not grouped with {} any more.", adjustedPlayer->GetName());
+        return;
+    }
+    if (player->IsAlive() == false || adjustedPlayer->IsAlive() == false)
+    {
+        handler.SendSysMessage("Both of you have to be alive to start a mentorship.");
+        return;
+    }
+    if (player->IsInCombat() == true || adjustedPlayer->IsInCombat() == true)
+    {
+        handler.SendSysMessage("Neither of you can be in combat to start a mentorship.");
+        return;
+    }
+    if (GetMentorshipRoleForPlayerGUID(player->GetGUID()) != EQ_MENTORSHIP_ROLE_NONE || GetMentorshipRoleForPlayerGUID(adjustedPlayer->GetGUID()) != EQ_MENTORSHIP_ROLE_NONE)
+    {
+        handler.SendSysMessage("One of you is already in a mentorship.");
+        return;
+    }
+
+    uint8 adjustedRole = request.RequesterRole;
+    uint32 anchorLevel = static_cast<uint32>(player->GetLevel());
+    uint32 realLevel = static_cast<uint32>(adjustedPlayer->GetLevel());
+    uint32 minimumLevelGap = ConfigMentorshipMinLevelGap < 2 ? 2 : ConfigMentorshipMinLevelGap;
+    uint32 adjustedLevel = 0;
+
+    if (adjustedRole == EQ_MENTORSHIP_ROLE_MENTOR)
+    {
+        if (realLevel < anchorLevel + minimumLevelGap)
+        {
+            handler.SendSysMessage("The level difference is no longer big enough for a mentorship.");
+            adjustedHandler.SendSysMessage("The level difference is no longer big enough for a mentorship.");
+            return;
+        }
+        adjustedLevel = anchorLevel + 1;
+    }
+    else if (adjustedRole == EQ_MENTORSHIP_ROLE_APPRENTICE)
+    {
+        if (anchorLevel < realLevel + minimumLevelGap)
+        {
+            handler.SendSysMessage("The level difference is no longer big enough for an apprenticeship.");
+            adjustedHandler.SendSysMessage("The level difference is no longer big enough for an apprenticeship.");
+            return;
+        }
+        adjustedLevel = anchorLevel - 1;
+    }
+    else
+        return;
+
+    if (adjustedLevel == 0 || adjustedLevel > static_cast<uint32>(sWorld->getIntConfig(CONFIG_MAX_PLAYER_LEVEL)))
+    {
+        handler.SendSysMessage("That mentorship would need a level this server does not allow.");
+        adjustedHandler.SendSysMessage("That mentorship would need a level this server does not allow.");
+        return;
+    }
+
+    uint32 realExperience = adjustedPlayer->GetUInt32Value(PLAYER_XP);
+    uint32 anchorExperience = player->GetUInt32Value(PLAYER_XP);
+
+    EverQuestMentorshipState adjustedState;
+    adjustedState.PartnerGUID = player->GetGUID();
+    adjustedState.PartnerName = player->GetName();
+    adjustedState.Role = adjustedRole;
+    adjustedState.RealLevel = static_cast<uint8>(realLevel);
+    adjustedState.RealExperience = realExperience;
+    adjustedState.AnchorStartProgress = GetLevelProgressFromLevelAndExperience(static_cast<uint8>(anchorLevel), anchorExperience);
+    adjustedState.AnchorLevel = static_cast<uint8>(anchorLevel);
+    adjustedState.AnchorExperience = anchorExperience;
+    adjustedState.RestoreNoExperienceFlag = adjustedPlayer->HasPlayerFlag(PLAYER_FLAGS_NO_XP_GAIN);
+
+    EverQuestMentorshipState anchorState;
+    anchorState.PartnerGUID = adjustedPlayer->GetGUID();
+    anchorState.PartnerName = adjustedPlayer->GetName();
+    anchorState.Role = EQ_MENTORSHIP_ROLE_ANCHOR;
+    anchorState.AnchorLevel = static_cast<uint8>(anchorLevel);
+    anchorState.AnchorExperience = anchorExperience;
+
+    {
+        std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+        MentorshipStatesByPlayerGUID[adjustedPlayer->GetGUID()] = adjustedState;
+        MentorshipStatesByPlayerGUID[player->GetGUID()] = anchorState;
+        MentorshipRequestsByTargetGUID.erase(adjustedPlayer->GetGUID());
+        MentorshipStateCount.store(static_cast<uint32>(MentorshipStatesByPlayerGUID.size()));
+    }
+
+    // Written before the level actually moves, so a server that goes down in between still knows what to put back
+    SaveMentorshipStateForPlayer(adjustedPlayer, adjustedRole, static_cast<uint8>(realLevel), realExperience, 0.0f);
+
+    adjustedPlayer->SetPlayerFlag(PLAYER_FLAGS_NO_XP_GAIN);
+    ApplyMentorshipLevelForPlayer(adjustedPlayer, static_cast<uint8>(adjustedLevel));
+    adjustedPlayer->SetUInt32Value(PLAYER_XP, 0);
+    ApplyMentorshipAuraForPlayer(adjustedPlayer, adjustedRole);
+
+    if (adjustedRole == EQ_MENTORSHIP_ROLE_MENTOR)
+    {
+        adjustedHandler.PSendSysMessage("You are now mentoring |cff00FF00{}|r. You stand at level |cff00FF00{}|r until it ends, you earn no experience, and your own level |cff00FF00{}|r is waiting for you.", player->GetName(), adjustedLevel, realLevel);
+        handler.PSendSysMessage("|cff00FF00{}|r is now mentoring you at level |cff00FF00{}|r.", adjustedPlayer->GetName(), adjustedLevel);
+    }
+    else
+    {
+        adjustedHandler.PSendSysMessage("You are now apprenticed to |cff00FF00{}|r. You stand at level |cff00FF00{}|r until it ends, and everything they earn is banked for your own level |cff00FF00{}|r.", player->GetName(), adjustedLevel, realLevel);
+        handler.PSendSysMessage("|cff00FF00{}|r is now your apprentice at level |cff00FF00{}|r.", adjustedPlayer->GetName(), adjustedLevel);
+    }
+
+    SendMentorshipStateToPlayer(adjustedPlayer);
+    SendMentorshipStateToPlayer(player);
+}
+
+void EverQuestMod::EndMentorshipForPlayer(Player* player, const string& reason, bool tellPartner)
+{
+    if (player == nullptr)
+        return;
+
+    EverQuestMentorshipState state;
+    bool haveState = false;
+    {
+        std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+        MentorshipRequestsByTargetGUID.erase(player->GetGUID());
+        unordered_map<ObjectGuid, EverQuestMentorshipState>::const_iterator stateIterator = MentorshipStatesByPlayerGUID.find(player->GetGUID());
+        if (stateIterator != MentorshipStatesByPlayerGUID.end())
+        {
+            state = stateIterator->second;
+            haveState = true;
+            MentorshipStatesByPlayerGUID.erase(player->GetGUID());
+            MentorshipStateCount.store(static_cast<uint32>(MentorshipStatesByPlayerGUID.size()));
+        }
+        if (haveState == true && tellPartner == true)
+        {
+            unordered_map<ObjectGuid, EverQuestMentorshipState>::iterator partnerStateIterator = MentorshipStatesByPlayerGUID.find(state.PartnerGUID);
+            if (partnerStateIterator != MentorshipStatesByPlayerGUID.end() && partnerStateIterator->second.PartnerGUID == player->GetGUID())
+            {
+                partnerStateIterator->second.EndRequested = true;
+                partnerStateIterator->second.EndReason = reason;
+            }
+        }
+    }
+    if (haveState == false)
+        return;
+
+    RemoveMentorshipAurasFromPlayer(player);
+
+    std::string reasonSuffix = reason.empty() == true ? "." : (" (" + reason + ").");
+    if (state.Role == EQ_MENTORSHIP_ROLE_ANCHOR)
+    {
+        if (player->GetSession() != nullptr)
+            ChatHandler(player->GetSession()).PSendSysMessage("Your mentorship with |cff00FF00{}|r has ended{}", state.PartnerName, reasonSuffix);
+        SendMentorshipStateToPlayer(player);
+        return;
+    }
+
+    // The borrowed level goes back first, so nothing can save this character while it is still set at it
+    if (state.RestoreNoExperienceFlag == false)
+        player->RemovePlayerFlag(PLAYER_FLAGS_NO_XP_GAIN);
+    if (state.RealLevel != 0)
+    {
+        ApplyMentorshipLevelForPlayer(player, state.RealLevel);
+        player->SetUInt32Value(PLAYER_XP, state.RealExperience);
+        RebuildLevelDerivedStateAfterMentorshipForPlayer(player);
+    }
+    SaveMentorshipStateForPlayer(player, EQ_MENTORSHIP_ROLE_NONE, 0, 0, 0.0f);
+
+    if (player->GetSession() != nullptr)
+        ChatHandler(player->GetSession()).PSendSysMessage("Your mentorship with |cff00FF00{}|r has ended{} You are back to level |cff00FF00{}|r.", state.PartnerName, reasonSuffix, player->GetLevel());
+
+    // Only ever paid onto the real level.  Skipped when there was no real level to go back to, so a damaged row cannot hand out levels while the character is still set at a borrowed one
+    if (state.Role == EQ_MENTORSHIP_ROLE_APPRENTICE && state.RealLevel != 0)
+        AwardBankedMentorshipProgressToPlayer(player, state.BankedProgress);
+
+    SendMentorshipStateToPlayer(player);
+}
+
+void EverQuestMod::UpdateMentorshipForPlayer(Player* player, uint32 diffInMS)
+{
+    if (player == nullptr || MentorshipStateCount.load() == 0)
+        return;
+
+    EverQuestMentorshipState state;
+    uint32 questStarterItemToReturn = 0;
+    bool recheckIsDue = false;
+    {
+        std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+        unordered_map<ObjectGuid, EverQuestMentorshipState>::iterator stateIterator = MentorshipStatesByPlayerGUID.find(player->GetGUID());
+        if (stateIterator == MentorshipStatesByPlayerGUID.end())
+            return;
+        questStarterItemToReturn = stateIterator->second.PendingQuestStarterItemEntry;
+        stateIterator->second.PendingQuestStarterItemEntry = 0;
+        stateIterator->second.RecheckTimerInMS += diffInMS;
+        if (stateIterator->second.RecheckTimerInMS >= EQ_MENTORSHIP_RECHECK_INTERVAL_IN_MS)
+        {
+            stateIterator->second.RecheckTimerInMS = 0;
+            recheckIsDue = true;
+            state = stateIterator->second;
+        }
+    }
+
+    // A refused quest that came from an item had that item destroyed out from under it, so it goes back first
+    if (questStarterItemToReturn != 0)
+        ReturnRefusedQuestStarterItemToPlayer(player, questStarterItemToReturn);
+
+    if (recheckIsDue == false)
+        return;
+
+    // The partner already unwound their half and left the reason behind
+    if (state.EndRequested == true)
+    {
+        EndMentorshipForPlayer(player, state.EndReason, false);
+        return;
+    }
+
+    // The partner's record disappearing is how their logout reaches this side
+    bool partnerStillTethered = false;
+    {
+        std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+        unordered_map<ObjectGuid, EverQuestMentorshipState>::const_iterator partnerStateIterator = MentorshipStatesByPlayerGUID.find(state.PartnerGUID);
+        partnerStillTethered = partnerStateIterator != MentorshipStatesByPlayerGUID.end() && partnerStateIterator->second.PartnerGUID == player->GetGUID();
+    }
+    if (partnerStillTethered == false)
+    {
+        EndMentorshipForPlayer(player, "your partner is no longer online", false);
+        return;
+    }
+
+    Group* group = player->GetGroup();
+    if (group == nullptr || group->IsMember(state.PartnerGUID) == false)
+    {
+        EndMentorshipForPlayer(player, "you are no longer grouped together", true);
+        return;
+    }
+
+    // Brackets there are picked off the level being stood at, and a borrowed one arrives with gear and abilities that do not belong to it
+    Map* playerMap = player->FindMap();
+    if (playerMap != nullptr && playerMap->IsBattlegroundOrArena() == true)
+    {
+        EndMentorshipForPlayer(player, "a mentorship cannot be carried into a battleground or arena", true);
+        return;
+    }
+
+    // Anchors handle publishing
+    if (state.Role == EQ_MENTORSHIP_ROLE_ANCHOR)
+    {
+        uint8 anchorLevel = player->GetLevel();
+        uint32 anchorExperience = player->GetUInt32Value(PLAYER_XP);
+
+        std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+        unordered_map<ObjectGuid, EverQuestMentorshipState>::iterator ownStateIterator = MentorshipStatesByPlayerGUID.find(player->GetGUID());
+        if (ownStateIterator == MentorshipStatesByPlayerGUID.end())
+            return;
+        ownStateIterator->second.AnchorLevel = anchorLevel;
+        ownStateIterator->second.AnchorExperience = anchorExperience;
+
+        unordered_map<ObjectGuid, EverQuestMentorshipState>::iterator partnerStateIterator = MentorshipStatesByPlayerGUID.find(state.PartnerGUID);
+        if (partnerStateIterator != MentorshipStatesByPlayerGUID.end() && partnerStateIterator->second.PartnerGUID == player->GetGUID())
+        {
+            partnerStateIterator->second.AnchorLevel = anchorLevel;
+            partnerStateIterator->second.AnchorExperience = anchorExperience;
+        }
+        return;
+    }
+
+    // Nothing to keep pace with until the anchor has published at least once
+    if (state.AnchorLevel == 0)
+        return;
+
+    uint32 anchorLevel = static_cast<uint32>(state.AnchorLevel);
+    uint32 realLevel = static_cast<uint32>(state.RealLevel);
+    uint32 desiredLevel = 0;
+
+    if (state.Role == EQ_MENTORSHIP_ROLE_MENTOR)
+    {
+        // A mentor stands one level above the character they are helping, and steps aside once that stops being a step down
+        if (anchorLevel + 1 >= realLevel)
+        {
+            EndMentorshipForPlayer(player, "the character you were mentoring reached your own level", true);
+            return;
+        }
+        desiredLevel = anchorLevel + 1;
+    }
+    else
+    {
+        // An apprentice stands one level below the character carrying them, and steps aside once that stops being a step up
+        if (anchorLevel <= realLevel + 1)
+        {
+            EndMentorshipForPlayer(player, "you caught up to the character carrying you", true);
+            return;
+        }
+        desiredLevel = anchorLevel - 1;
+    }
+
+    if (static_cast<uint32>(player->GetLevel()) != desiredLevel)
+    {
+        ApplyMentorshipLevelForPlayer(player, static_cast<uint8>(desiredLevel));
+        if (player->GetSession() != nullptr)
+            ChatHandler(player->GetSession()).PSendSysMessage("Keeping pace with |cff00FF00{}|r, you now stand at level |cff00FF00{}|r.", state.PartnerName, desiredLevel);
+        SendMentorshipStateToPlayer(player);
+    }
+
+    if (state.Role != EQ_MENTORSHIP_ROLE_APPRENTICE)
+        return;
+
+    // Everything the anchor made since the tether started, counted in levels rather than raw experience so it lands the same whether it is paid out at level 6 or level 60
+    float bankedProgress = GetLevelProgressFromLevelAndExperience(state.AnchorLevel, state.AnchorExperience) - state.AnchorStartProgress;
+    if (bankedProgress < 0.0f)
+        bankedProgress = 0.0f;
+    if (state.AnchorCappedExperience > 0)
+    {
+        uint32 cappedLevelXPSpan = GetExperienceSpanForLevelOrNearestBelow(state.AnchorLevel);
+        if (cappedLevelXPSpan > 0)
+            bankedProgress += static_cast<float>(state.AnchorCappedExperience) / static_cast<float>(cappedLevelXPSpan);
+    }
+
+    // Show that pace on the apprentice's own bar, so a borrowed level does not look frozen
+    uint32 adjustedLevelXPSpan = sObjectMgr->GetXPForLevel(player->GetLevel());
+    if (adjustedLevelXPSpan > 0)
+    {
+        float pacedFraction = bankedProgress - std::floor(bankedProgress);
+        if (pacedFraction < 0.0f)
+            pacedFraction = 0.0f;
+        if (pacedFraction > 0.999f)
+            pacedFraction = 0.999f;
+        player->SetUInt32Value(PLAYER_XP, static_cast<uint32>(static_cast<float>(adjustedLevelXPSpan) * pacedFraction));
+    }
+
+    bool saveBankedProgress = false;
+    {
+        std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+        unordered_map<ObjectGuid, EverQuestMentorshipState>::iterator ownStateIterator = MentorshipStatesByPlayerGUID.find(player->GetGUID());
+        if (ownStateIterator == MentorshipStatesByPlayerGUID.end())
+            return;
+        ownStateIterator->second.BankedProgress = bankedProgress;
+        ownStateIterator->second.SaveTimerInMS += EQ_MENTORSHIP_RECHECK_INTERVAL_IN_MS;
+        if (ownStateIterator->second.SaveTimerInMS >= EQ_MENTORSHIP_BANK_SAVE_INTERVAL_IN_MS)
+        {
+            ownStateIterator->second.SaveTimerInMS = 0;
+            if (ownStateIterator->second.SavedBankedProgress != bankedProgress)
+            {
+                ownStateIterator->second.SavedBankedProgress = bankedProgress;
+                saveBankedProgress = true;
+            }
+        }
+    }
+    if (saveBankedProgress == true)
+        SaveMentorshipStateForPlayer(player, state.Role, state.RealLevel, state.RealExperience, bankedProgress);
+}
+
+bool EverQuestMod::HasPendingMentorshipLevelRestoreForPlayer(Player* player)
+{
+    if (player == nullptr)
+        return false;
+    EverQuestPlayerControllerData* controllerData = GetOrLoadActivePlayerClassControllerData(player);
+    if (controllerData == nullptr)
+        return false;
+    return controllerData->MentorshipRole != EQ_MENTORSHIP_ROLE_NONE && controllerData->MentorshipRealLevel != 0;
+}
+
+uint8 EverQuestMod::GetEarnedLevelForPlayer(Player* player)
+{
+    if (player == nullptr)
+        return 0;
+
+    uint8 realLevel = 0;
+    if (TryGetMentorshipRealLevelForPlayer(player, realLevel) == true)
+        return realLevel;
+
+    EverQuestPlayerControllerData* controllerData = GetOrLoadActivePlayerClassControllerData(player);
+    if (controllerData != nullptr && controllerData->MentorshipRole != EQ_MENTORSHIP_ROLE_NONE && controllerData->MentorshipRealLevel != 0)
+        return controllerData->MentorshipRealLevel;
+
+    return player->GetLevel();
+}
+
+void EverQuestMod::RebuildLevelDerivedStateAfterMentorshipForPlayer(Player* player)
+{
+    if (player == nullptr)
+        return;
+
+    player->InitTalentForLevel();
+    player->InitGlyphsForLevel();
+    player->InitTaxiNodesForLevel();
+    player->UpdateSkillsForLevel();
+
+    // Player::UpdateSkillsForLevel moves the maximum but leaves the value where it was, since in normal play a level only ever goes up.  Coming back down off a borrowed one it has to come with,
+    // or an apprentice keeps the weapon and defense skill they ground out at a level they never earned.  Only skills whose ceiling is the level itself are touched, so professions and the like are left completely alone
+    uint16 maxSkillForLevel = player->GetMaxSkillValueForLevel();
+    if (maxSkillForLevel == 0)
+        return;
+    for (uint32 skillID = 1; skillID < ConfigMaxSkillIDCheck; ++skillID)
+    {
+        if (player->GetPureSkillValue(skillID) <= maxSkillForLevel)
+            continue;
+        SkillRaceClassInfoEntry const* skillRaceClassInfo = GetSkillRaceClassInfo(skillID, player->getRace(), player->getClass());
+        if (skillRaceClassInfo == nullptr)
+            continue;
+        if (GetSkillRangeType(skillRaceClassInfo) != SKILL_RANGE_LEVEL)
+            continue;
+        player->SetSkill(static_cast<uint16>(skillID), player->GetSkillStep(static_cast<uint16>(skillID)), maxSkillForLevel, maxSkillForLevel);
+    }
+}
+
+void EverQuestMod::RestoreMentorshipStateOnLoginForPlayer(Player* player)
+{
+    if (player == nullptr)
+        return;
+
+    EverQuestPlayerControllerData* controllerData = GetOrLoadActivePlayerClassControllerData(player);
+    if (controllerData == nullptr || controllerData->MentorshipRole == EQ_MENTORSHIP_ROLE_NONE)
+        return;
+
+    uint8 role = controllerData->MentorshipRole;
+    uint8 realLevel = controllerData->MentorshipRealLevel;
+    uint32 realExperience = controllerData->MentorshipRealExperience;
+    float bankedProgress = controllerData->MentorshipBankedProgress;
+
+    RemoveMentorshipAurasFromPlayer(player);
+    player->RemovePlayerFlag(PLAYER_FLAGS_NO_XP_GAIN);
+    if (realLevel != 0)
+    {
+        ApplyMentorshipLevelForPlayer(player, realLevel);
+        player->SetUInt32Value(PLAYER_XP, realExperience);
+
+        // Player::LoadFromDB already rebuilt talents, glyph slots, taxi nodes and skill caps from the borrowed level this character was saved at, so all four have to be rebuilt again now that the real level is back
+        RebuildLevelDerivedStateAfterMentorshipForPlayer(player);
+    }
+    SaveMentorshipStateForPlayer(player, EQ_MENTORSHIP_ROLE_NONE, 0, 0, 0.0f);
+
+    if (player->GetSession() != nullptr)
+        ChatHandler(player->GetSession()).PSendSysMessage("Your mentorship did not end cleanly, so you have been put back to level |cff00FF00{}|r.", realLevel);
+
+    // Same rule as the clean end: the bank is only ever paid onto the real level
+    if (role == EQ_MENTORSHIP_ROLE_APPRENTICE && realLevel != 0)
+        AwardBankedMentorshipProgressToPlayer(player, bankedProgress);
 }
 
 map<string, EverQuestPlayerClassInfoItem> EverQuestMod::GetPlayerClassInfoByClassNameForPlayer(Player* player)
@@ -12538,6 +13807,9 @@ bool EverQuestMod::PerformPlayerDelete(ObjectGuid guid)
     {
         std::lock_guard<std::mutex> lock(RuntimeStateMutex);
         ActivePlayerClassControllerDataByGUID.erase(guid);
+        MentorshipStatesByPlayerGUID.erase(guid);
+        MentorshipRequestsByTargetGUID.erase(guid);
+        MentorshipStateCount.store(static_cast<uint32>(MentorshipStatesByPlayerGUID.size()));
         PendingEquipmentStorageCommitMSByGUID.erase(guid);
         AgileFighterRefreshTimerMSByPlayerGUID.erase(guid);
     }

@@ -140,17 +140,54 @@ EverQuest.ExpLossOnDeath.ResurrectRestorePercent = 90
 #	Default: False (group exp is reduced like a live server)
 #
 # 	EverQuest.AlternateGroupExperienceFormula.AddPercentPerMember
-#		When enabled, this is how much bonus experience to grant each party member based on
-#       number in the group beyond 1.  For example, 20% would mean that if 3 party members are in the
-#       group then exp per member would be "(CreatureKillEXPReward / 3) + ((3 - 1) * 0.2"
-#       Only members that are online, alive, and close enough to the kill to share it are counted
-#       toward the member number.
+#		When enabled, this is how much bonus experience to add to the group's shared pool for every
+#       member in the group beyond 1.  For example, 20% would mean that a 3 member group's pool is
+#       "CreatureKillEXPReward * (1 + ((3 - 1) * 0.2))".  That pool is then split between the members
+#       in proportion to their levels, the same way the retail formula splits it, so a low level
+#       member grouped with much higher level members still only earns their own small share and
+#       cannot be power leveled.  Only members that are online, alive, and close enough to the kill
+#       to share it are counted toward the member number and the level total.
 #	Default: 20 (Matches EQ's 20% per member bonus in 2003)
 #
 ###################################################################################################
 
 EverQuest.AlternateGroupExperienceFormula.Enabled = False
 EverQuest.AlternateGroupExperienceFormula.AddPercentPerMember = 20
+
+###################################################################################################
+#
+# 	EverQuest.Mentorship.Enabled
+#		If true, two grouped characters can tether themselves together so that they are semi-near in
+#        level and can tackle content together.  Started from the right click menu on a targeted group
+#        member, or with ".eqmentorship".
+#       Mentor: The higher level character drops to one level above the character they are helping,
+#        earns no experience at all while it lasts, and keeps pace one level above them.
+#       Apprentice: The lower level character rises to one level below the character carrying them,
+#        earns nothing directly, and instead banks how far that character progressed.  When the
+#        apprenticeship ends they are put back to their own level and given the same number of
+#        levels of progress, so 2.5 levels earned by a level 50 becomes 2.5 levels for a level 6.
+#       NOTE: The tethered character keeps every spell, talent, glyph and point of skill they
+#        earned, and gear already worn stays worn no matter what level it asks for
+#       NOTE: The tethered character loses no experience when they die
+#       NOTE: Leaving the group or logging out ends it for both characters
+#       NOTE: A tethered character earns nothing, so they are also left out of the group's
+#        experience split entirely rather than taking a share the rest of the group would get
+#	Default: True (enabled)
+#
+# 	EverQuest.Mentorship.MinLevelGap
+#		How many levels apart the two characters have to be before they can tether.  Values under
+#        2 are treated as 2, since a one level gap leaves nothing to adjust.
+#	Default: 3 (the two characters must be at least 3 levels apart)
+#
+# 	EverQuest.Mentorship.RequestTimeoutInSeconds
+#		How long an offer waits for the other character to accept it before it expires.
+#	Default: 30
+#
+###################################################################################################
+
+EverQuest.Mentorship.Enabled = True
+EverQuest.Mentorship.MinLevelGap = 3
+EverQuest.Mentorship.RequestTimeoutInSeconds = 30
 
 ###################################################################################################
 #

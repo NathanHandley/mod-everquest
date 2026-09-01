@@ -109,6 +109,19 @@ public:
             return true;
         if (pItem == nullptr)
             return true;
+
+        // Don't allow apprentice characters wear things they shouldn't
+        uint8 mentorshipRealLevel = 0;
+        if (EverQuest->TryGetMentorshipRealLevelForPlayer(player, mentorshipRealLevel) == true)
+        {
+            ItemTemplate const* itemTemplate = pItem->GetTemplate();
+            if (itemTemplate != nullptr && itemTemplate->RequiredLevel > mentorshipRealLevel)
+            {
+                ChatHandler(player->GetSession()).PSendSysMessage("You cannot equip that while tethered. Your own level is {}, and it needs level {}.", mentorshipRealLevel, itemTemplate->RequiredLevel);
+                return false;
+            }
+        }
+
         if (EverQuest->IsItemEQClassAllowedForPlayer(player, pItem->GetEntry()) == true)
             return true;
 
@@ -339,6 +352,11 @@ public:
     {
         if (EverQuest->IsEnabled == false)
             return;
+
+        // At cap, no bar to move
+        if (EverQuest->IsPlayerExperienceBarCapped(player) == true)
+            EverQuest->AddCappedAnchorExperienceForPlayer(player, amount);
+
         if (EverQuest->ConfigSecondaryExpPoolGainPercent <= 0.0f)
             return;
 
@@ -346,6 +364,10 @@ public:
         if (xpSource != PlayerXPSource::XPSOURCE_KILL)
             return;
         if (victim == nullptr || victim->IsCreature() == false)
+            return;
+
+        // A mentor or an apprentice keeps none of this, so none of it fills the secondary class pool either
+        if (EverQuest->IsPlayerMentorshipLevelAdjusted(player) == true)
             return;
 
         uint32 added = EverQuest->AddToSecondaryExpPoolForPlayer(player, amount);
@@ -400,6 +422,7 @@ public:
 
         EverQuest->RestoreInstanceValidityOutsideInstances(player);
         EverQuest->ProcessLevelCapStateForPlayer(player);
+        EverQuest->UpdateMentorshipForPlayer(player, p_time);
         EverQuest->UpdatePlayerIllusionGearDisplay(player, p_time);
         EverQuest->ConsumePendingTemporaryFactionRecalculation(player);
         EverQuest->UpdatePlayerTracking(player, p_time);
@@ -469,14 +492,17 @@ public:
         }
 
         // Disable any group exp reduction if needed. Kills that the zone wide share above already rated are left alone, so this covers Azeroth and any EverQuest kill that share did not apply to
-        if (zoneWideRateApplied == false && EverQuest->ConfigAlternateGroupExperienceFormulaEnabled == true)
+        if (zoneWideRateApplied == false)
         {
             Group* group = player->GetGroup();
             if (group != nullptr)
             {
-                // Only count members that are online, alive, and near the kill
+                // Only count members that are online, alive, and near the kill.  Their levels are summed as well, since the pool still splits by level share and not evenly, which is what keeps a low level member from being power leveled
                 Unit* rewardVictim = rewarder->GetVictim();
                 uint32 eligibleMemberCount = 0;
+                uint32 eligibleSumLevel = 0;
+                uint32 excludedMemberCount = 0;
+                uint32 parkedMemberCount = 0;
                 for (GroupReference* itr = group->GetFirstMember(); itr != nullptr; itr = itr->next())
                 {
                     Player* member = itr->GetSource();
@@ -484,17 +510,39 @@ public:
                         continue;
                     if (IsInGroupExperienceRangeOfKill(member, rewardVictim) == false)
                         continue;
+                    // A mentor or an apprentice earns nothing from the kill, so counting them would only take experience away from the members that do
+                    if (EverQuest->IsPlayerExcludedFromGroupExperienceShare(member) == true)
+                    {
+                        excludedMemberCount++;
+                        continue;
+                    }
                     eligibleMemberCount++;
+                    eligibleSumLevel += EverQuest->GetGroupExperienceLevelForPlayer(member);
+                    if (EverQuest->IsPlayerReportingLevelCap(member) == true)
+                        parkedMemberCount++;
                 }
 
-                if (eligibleMemberCount >= 2 && eligibleMemberCount <= 5)
+                if (eligibleSumLevel > 0)
                 {
-                    float bonusTotalRatePercent = static_cast<float>(eligibleMemberCount - 1) * (EverQuest->ConfigAlternateGroupExperienceAddPercentPerAddedMember * 0.01f);
-                    float splitBaseRate = 1.0f / static_cast<float>(eligibleMemberCount);
-                    rate = splitBaseRate * (1.0f + bonusTotalRatePercent);
+                    if (EverQuest->IsAlternateGroupExperienceFormulaActive(eligibleMemberCount) == true)
+                        rate = EverQuest->GetAlternateGroupExperienceRate(EverQuest->GetGroupExperienceLevelForPlayer(player), eligibleMemberCount, eligibleSumLevel);
+                    else if (excludedMemberCount > 0 || parkedMemberCount > 0)
+                    {
+                        // The core built its rate over the whole group, counting tethered members and counting a max one as level 255, so it has to be rebuilt here without either distortion
+                        // Left alone when neither was present, since the core's own eligibility rules are the better ones
+                        bool isRaidKill = false;
+                        if (group->isRaidGroup() == true && rewardVictim != nullptr && rewardVictim->IsPlayer() == false && rewardVictim->GetCharmerOrOwnerGUID().IsPlayer() == false)
+                        {
+                            MapEntry const* mapEntry = sMapStore.LookupEntry(player->GetMapId());
+                            isRaidKill = mapEntry != nullptr && mapEntry->IsRaid();
+                        }
+                        rate = EverQuest->GetRetailGroupExperienceRate(EverQuest->GetGroupExperienceLevelForPlayer(player), eligibleMemberCount, eligibleSumLevel, isRaidKill);
+                    }
                 }
             }
         }
+
+        rate *= EverQuest->GetGroupExperienceCorrectionForKill(zoneWideKiller, zoneWideVictim);
 
         // Kill credit for a non-EQ creature outside of an EQ zone permanently costs the player the adventurer aura
         if (EverQuest->IsCreatureKillDisqualifyingForAdventurer(player, rewarder->GetVictim()) == true)
@@ -654,13 +702,27 @@ public:
         EverQuest->SetInitialCreatePositionForPlayer(player);
     }
 
-    bool OnPlayerCheckItemInSlotAtLoadInventory(Player* player, Item* /*item*/, uint8 /*slot*/, uint8& /*err*/, uint16& /*dest*/) override
+    bool OnPlayerCheckItemInSlotAtLoadInventory(Player* player, Item* item, uint8 slot, uint8& err, uint16& dest) override
     {
         if (EverQuest->IsEnabled == false)
             return true;
 
         // Equipped items load before login autolearn, so without this some items can go away if you switch sub classes (for the first time) in some situations
         EverQuest->ApplyAutoLearnedClassSkillsAndSpells(player);
+
+        // A character that went down while standing at a mentorship level is still standing at it here, since the real level is not put back until login
+        if (item != nullptr && EverQuest->HasPendingMentorshipLevelRestoreForPlayer(player) == true)
+        {
+            InventoryResult equipResult = player->CanEquipItem(slot, dest, item, false, false);
+            if (equipResult == EQUIP_ERR_CANT_EQUIP_LEVEL_I)
+            {
+                err = EQUIP_ERR_OK;
+                dest = ((INVENTORY_SLOT_BAG_0 << 8) | slot);
+            }
+            else
+                err = (uint8)equipResult;
+            return false;
+        }
         return true;
     }
 
@@ -674,6 +736,10 @@ public:
 
         // Pick up a character that logged out inside a raid instance
         EverQuest->UpdateRaidLowInstanceStateForPlayer(player);
+
+        // A mentorship that never ended cleanly is undone before anything else looks at this character's level
+        EverQuest->RestoreMentorshipStateOnLoginForPlayer(player);
+        EverQuest->SendMentorshipStateToPlayer(player);
 
         // Report which dungeon mode this character is on, and prime the client UI with it
         EverQuest->SendDungeonModeStateToPlayer(player, true);
@@ -846,6 +912,9 @@ public:
 
         EverQuest->ClearClientVersionCheckForPlayer(player->GetGUID());
 
+        // The tether itself was already unwound in OnPlayerBeforeLogout, so only any unanswered offer is left to drop
+        EverQuest->ClearMentorshipRequestsInvolvingPlayerGUID(player->GetGUID());
+
         // Stop counting the character as being inside a raid instance
         EverQuest->ClearRaidLowInstanceStateForPlayer(player->GetGUID());
 
@@ -1001,6 +1070,25 @@ public:
         EverQuest->ApplyExpLossForSpiritReleaseForPlayer(player);
     }
 
+    void OnPlayerQuestAccept(Player* player, Quest const* quest) override
+    {
+        if (EverQuest->IsEnabled == false)
+            return;
+        if (EverQuest->IsQuestBlockedByMentorshipForPlayer(player, quest) == false)
+            return;
+        EverQuest->RefuseMentorshipBlockedQuestForPlayer(player, quest);
+    }
+
+    bool OnPlayerBeforeQuestComplete(Player* player, uint32 questID) override
+    {
+        if (EverQuest->IsEnabled == false)
+            return true;
+        Quest const* quest = sObjectMgr->GetQuestTemplate(questID);
+        if (EverQuest->IsQuestBlockedByMentorshipForPlayer(player, quest) == false)
+            return true;
+        return false;
+    }
+
     // This is done to ensure repeatable quests give EXP more than once
     void OnPlayerQuestComputeXP(Player* player, Quest const* quest, uint32& xpValue) override
     {
@@ -1033,6 +1121,9 @@ public:
     {
         if (EverQuest->IsEnabled == false)
             return;
+
+        // This runs before the logout save, which is the only window where a borrowed level can be handed back without the character ever being written to the database standing at it
+        EverQuest->EndMentorshipForPlayer(player, "you logged out", true);
 
         // Any pending equipment storage commit must have executed before the logout save and class switch are queued
         EverQuest->WaitForPendingEquipmentStorageCommitForPlayer(player->GetGUID());

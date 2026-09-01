@@ -53,9 +53,13 @@ struct BuildValuesCachePosPointers;
 
 #define EQ_MOD_VERSION                              84
 
-// Color of the "your spell was dispelled" chat line, as 0xRRGGBB, for characters that never picked one
 #define EQ_DISPEL_MESSAGE_DEFAULT_COLOR             0xFFAA00
 
+#define EQ_MENTORSHIP_ROLE_NONE                     0
+#define EQ_MENTORSHIP_ROLE_MENTOR                   1
+#define EQ_MENTORSHIP_ROLE_APPRENTICE               2
+#define EQ_MENTORSHIP_ROLE_ANCHOR                   3 // The 'other half' of the mentorship (the unchanged / tethered person)
+#define EQ_MENTORSHIP_RECHECK_INTERVAL_IN_MS        1000
 #define EQ_EQCLASS_NONE                             0
 #define EQ_EQCLASS_WARRIOR                          1
 #define EQ_EQCLASS_CLERIC                           2
@@ -1076,6 +1080,7 @@ struct EverQuestZoneWideKillReward
     uint32 AliveMemberCount = 0;
     uint32 AliveSumLevel = 0;
     uint8 MaxLevel = 0;
+    uint8 MaxLevelIncludingTethered = 0;
     Player* MaxNotGrayMember = nullptr;
     uint8 MaxNotGrayMemberLevel = 0;
     bool IsFullXP = false;
@@ -1130,10 +1135,52 @@ struct EverQuestPlayerControllerData
     bool ShowDispelMessage = false;
     uint32 DispelMessageColor = EQ_DISPEL_MESSAGE_DEFAULT_COLOR;
     bool AdventurerDisqualified = false;
-    uint32 DeathExpLost = 0;                // Experience taken by spirit releases since the last resurrection, and still restorable.  Zero means nothing is pending
-    uint32 DeathExpRestGranted = 0;         // How much of that loss was handed back as rest experience, so a restore can take the same share of it away again
-    uint8 DeathExpLostSecondaryClass = 0;   // Secondary EQ class the loss belongs to, since a class switch parks the level and experience the restore would target
-    uint8 PendingStartItemEQClass = 0;      // Secondary EQ class that was just switched into for the first time and is still owed its start items, since the switch runs at logout
+    uint32 DeathExpLost = 0;
+    uint32 DeathExpRestGranted = 0;
+    uint8 DeathExpLostSecondaryClass = 0;
+    uint8 PendingStartItemEQClass = 0;
+    uint8 MentorshipRole = EQ_MENTORSHIP_ROLE_NONE;
+    uint8 MentorshipRealLevel = 0;
+    uint32 MentorshipRealExperience = 0;
+    float MentorshipBankedProgress = 0.0f;
+};
+
+// Each side of a mentorship relatiorship have a record
+struct EverQuestMentorshipState
+{
+    ObjectGuid PartnerGUID;
+    string PartnerName = "";
+    uint8 Role = EQ_MENTORSHIP_ROLE_NONE;
+
+    // Only the level adjusted side fills these in
+    uint8 RealLevel = 0;
+    uint32 RealExperience = 0;
+
+    // Only an apprentice fills these in.  Progress is a level plus how far into it the experience bar is
+    float AnchorStartProgress = 0.0f;
+    float BankedProgress = 0.0f;
+    float SavedBankedProgress = 0.0f;
+
+    // Anchor values
+    uint8 AnchorLevel = 0;
+    uint32 AnchorExperience = 0;
+    uint32 AnchorCappedExperience = 0;
+
+    // Control in case the character switched off exp
+    bool RestoreNoExperienceFlag = false;
+
+    // Other
+    uint32 PendingQuestStarterItemEntry = 0;
+    bool EndRequested = false;
+    string EndReason = "";
+    uint32 RecheckTimerInMS = 0;
+    uint32 SaveTimerInMS = 0;
+};
+
+struct EverQuestMentorshipRequest
+{
+    ObjectGuid RequesterGUID;
+    string RequesterName = "";
 };
 
 class EverQuestPlayerClassInfoItem
@@ -1253,6 +1300,7 @@ public:
     float ConfigExpLossOnDeathResurrectRestorePercent;
     bool ConfigAlternateGroupExperienceFormulaEnabled;
     float ConfigAlternateGroupExperienceAddPercentPerAddedMember;
+    bool ConfigMentorshipEnabled;
     bool ConfigSpellDisableStackingOfSameDOT;
     bool ConfigSpellBuffLevelRestrictionsEnabled;
     bool ConfigSpellCrowdControlLevelRestrictionsEnabled;
@@ -1400,6 +1448,7 @@ public:
     unordered_set<ObjectGuid> PlayersGainingExperience;
     unordered_set<ObjectGuid> PlayersLastDeathWasNotPlayerKill;
     unordered_set<ObjectGuid> PlayersPendingLevelCapExperiencePark;
+    unordered_map<ObjectGuid, EverQuestMentorshipState> MentorshipStatesByPlayerGUID;
     unordered_map<uint64, unordered_map<ObjectGuid, vector<EverQuestUnitHasteAuraEffect>>> EQHasteAuraEffectsByMapInstanceKeyThenUnitGUID; // Map-instance keyed since creature GUIDs repeat across instance copies of a map
     unordered_map<ObjectGuid, uint32> BearFormShieldArmorShiftAmountByPlayerGUID;
     unordered_map<ObjectGuid, uint32> AgileFighterRefreshTimerMSByPlayerGUID;
@@ -1619,6 +1668,8 @@ public:
     uint8 GetPlayerLevelForExperienceGain(Player* player);
     void BuildZoneWideKillReward(Group* group, Player* killer, Unit* victim, EverQuestZoneWideKillReward& outReward);
     float GetZoneWideGroupExperienceRate(Player* player, const EverQuestZoneWideKillReward& reward);
+    bool IsAlternateGroupExperienceFormulaActive(uint32 aliveMemberCount);
+    float GetAlternateGroupExperienceRate(uint8 memberLevel, uint32 aliveMemberCount, uint32 aliveSumLevel);
     float GetGroupExperienceRateForMember(Player* member, const EverQuestZoneWideKillReward& reward);
     void ApplyEQOnkillReputationsForPlayer(Player* player, Unit* victim);
     void GrantZoneWideGroupRewardsForKill(Player* killer, Unit* victim, const EverQuestZoneWideKillReward& reward);
@@ -1874,6 +1925,39 @@ public:
     void HandleLevelCapOnBeforeExperienceGain(Player const* player, uint8& levelForExpGain);
     bool HandleLevelCapOnCanGiveLevel(Player* player, uint8 newLevel);
     void ProcessLevelCapStateForPlayer(Player* player);
+
+    // Mentorship (TODO: Make a separate module for this)
+    static float GetLevelProgressFromLevelAndExperience(uint8 level, uint32 experience);
+    static uint32 GetExperienceSpanForLevelOrNearestBelow(uint8 level);
+    uint8 GetLevelCapForExperienceAwards();
+    bool IsPlayerExperienceBarCapped(Player* player);
+    void AddCappedAnchorExperienceForPlayer(Player* player, uint32 grantedExperience);
+    bool IsMentorshipEnabled();
+    uint8 GetMentorshipRoleForPlayerGUID(ObjectGuid playerGUID);
+    bool IsPlayerMentorshipLevelAdjusted(Player* player);
+    bool TryGetMentorshipRealLevelForPlayer(Player* player, uint8& outRealLevel);
+    bool IsQuestBlockedByMentorshipForPlayer(Player* player, Quest const* quest);
+    void RefuseMentorshipBlockedQuestForPlayer(Player* player, Quest const* quest);
+    uint32 FindQuestStarterItemEntryForPlayer(Player* player, uint32 questID);
+    void ReturnRefusedQuestStarterItemToPlayer(Player* player, uint32 itemEntry);
+    bool IsPlayerExcludedFromGroupExperienceShare(Player* player);
+    bool RequestMentorshipForPlayer(Player* requester, Player* target, uint8 requestedRole);
+    void AcceptMentorshipRequestForPlayer(Player* player);
+    void DeclineMentorshipRequestForPlayer(Player* player);
+    void ClearMentorshipRequestsInvolvingPlayerGUID(ObjectGuid playerGUID);
+    void EndMentorshipForPlayer(Player* player, const string& reason, bool tellPartner);
+    void UpdateMentorshipForPlayer(Player* player, uint32 diffInMS);
+    void RestoreMentorshipStateOnLoginForPlayer(Player* player);
+    bool HasPendingMentorshipLevelRestoreForPlayer(Player* player);
+    uint8 GetEarnedLevelForPlayer(Player* player);
+    void RebuildLevelDerivedStateAfterMentorshipForPlayer(Player* player);
+    void ReportMentorshipStatusToPlayer(Player* player);
+    void SendMentorshipStateToPlayer(Player* player);
+    void SendMentorshipRequestPromptToPlayer(Player* player, const EverQuestMentorshipRequest& request);
+    void ApplyMentorshipLevelForPlayer(Player* player, uint8 newLevel);
+    void ApplyMentorshipAuraForPlayer(Player* player, uint8 role);
+    void RemoveMentorshipAurasFromPlayer(Player* player);
+    void AwardBankedMentorshipProgressToPlayer(Player* player, float bankedProgress);
     void SendExpPoolAddonMessageToPlayer(Player* player, uint32 gainedExp);
     void SetInitialEQClassesForPlayer(Player* player);
     void SetInitialCreatePositionForPlayer(Player* player);

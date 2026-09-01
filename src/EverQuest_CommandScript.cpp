@@ -138,6 +138,7 @@ public:
             { "eqdispelmessage", HandleEQDispelMessageCommand,  SEC_PLAYER, Console::No },
             { "eqoptions", HandleEQOptionsCommand,              SEC_PLAYER, Console::No },
             { "eqauctionfilter", HandleEQAuctionFilterCommand,  SEC_PLAYER, Console::No },
+            { "eqmentorship", HandleEQMentorshipCommand,        SEC_PLAYER, Console::No },
             { "class",  classCommandTable                                               },
             { "track",  trackCommandTable                                               },
             { "eqadventurer", adventurerCommandTable                                    },
@@ -670,6 +671,72 @@ public:
 
         EverQuest->SetDungeonModeInstancedForPlayer(player, dungeonModeInstanced);
         EverQuest->SendDungeonModeStateToPlayer(player, true);
+        return true;
+    }
+
+    static bool HandleEQMentorshipCommand(ChatHandler* handler, const char* args)
+    {
+        if (EverQuest->IsEnabled == false)
+            return true;
+
+        Player* player = handler->GetPlayer();
+        if (player == nullptr)
+            return true;
+
+        std::vector<std::string> tokens = SplitCommandArgs(args, 2);
+        std::string subCommand = tokens.empty() == true ? std::string() : tokens[0];
+        boost::algorithm::to_lower(subCommand);
+
+        if (subCommand == "sync")
+        {
+            EverQuest->SendMentorshipStateToPlayer(player);
+            return true;
+        }
+        if (subCommand == "accept")
+        {
+            EverQuest->AcceptMentorshipRequestForPlayer(player);
+            return true;
+        }
+        if (subCommand == "decline")
+        {
+            EverQuest->DeclineMentorshipRequestForPlayer(player);
+            return true;
+        }
+        if (subCommand == "end" || subCommand == "stop" || subCommand == "cancel")
+        {
+            if (EverQuest->GetMentorshipRoleForPlayerGUID(player->GetGUID()) == EQ_MENTORSHIP_ROLE_NONE)
+                handler->SendSysMessage("You are not in a mentorship.");
+            else
+                EverQuest->EndMentorshipForPlayer(player, "you ended it", true);
+            return true;
+        }
+        if (subCommand == "status" || subCommand == "info")
+        {
+            EverQuest->ReportMentorshipStatusToPlayer(player);
+            return true;
+        }
+        if (subCommand == "mentor" || subCommand == "apprentice")
+        {
+            // A name can be passed by the client addon, and the current target stands in when it is left off
+            Player* targetPlayer = nullptr;
+            if (tokens.size() > 1)
+                targetPlayer = ObjectAccessor::FindPlayerByName(tokens[1], true);
+            else
+                targetPlayer = handler->getSelectedPlayer();
+            if (targetPlayer == nullptr)
+            {
+                handler->SendSysMessage("Target the character you want to tether with, or pass their name.");
+                return true;
+            }
+            EverQuest->RequestMentorshipForPlayer(player, targetPlayer, subCommand == "mentor" ? EQ_MENTORSHIP_ROLE_MENTOR : EQ_MENTORSHIP_ROLE_APPRENTICE);
+            return true;
+        }
+
+        handler->SendSysMessage(".eqmentorship 'mentor', 'apprentice', 'accept', 'decline', 'end' or 'status'");
+        handler->SendSysMessage("Mentoring a grouped character drops you to one level above them for as long as it lasts, and you earn nothing while it does.");
+        handler->SendSysMessage("Apprenticing to a grouped character raises you to one level below them, and everything they earn is banked and paid out at your own level when it ends.");
+        handler->SendSysMessage("Leaving the group or logging out ends it, and dying costs the tethered character no experience.");
+        EverQuest->ReportMentorshipStatusToPlayer(player);
         return true;
     }
 
