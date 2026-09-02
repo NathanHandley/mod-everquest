@@ -117,6 +117,8 @@ EverQuestMod::EverQuestMod() :
     ConfigSpellBardFearDiminishingReturnsResetTimeInMS(15000),
     ConfigSpellNoSwingTimerResetForEQSpells(true),
     ConfigSpellNoSwingTimerResetForWoWSpells(false),
+    ConfigSpellMovementCastSnareEnabled(true),
+    ConfigSpellMovementCastJumpCancelEnabled(true),
     ConfigCombatSkillsDisableBashKickStunOnPlayers(false),
     ConfigCombatSkillsDisabledBashKickStunInterruptsPlayerCast(true),
     ConfigEvadeEnabled(true),
@@ -242,6 +244,8 @@ bool EverQuestMod::LoadConfigurationSystemDataFromDB()
                 ConfigSystemRaidMiniBossRespawnVarianceInSec = (uint32)atoi(value.c_str());
             else if (key == "CompleteHealExhaustionSpellID")
                 ConfigSystemCompleteHealExhaustionSpellID = (uint32)atoi(value.c_str());
+            else if (key == "MovementCastSnareSpellID")
+                ConfigSystemMovementCastSnareSpellID = (uint32)atoi(value.c_str());
             else if (key == "CompleteHealExhaustionManaCostPercentPerStack")
                 ConfigSystemCompleteHealExhaustionManaCostPercentPerStack = (uint32)atoi(value.c_str());
             else if (key == "IllusionObjectMaxDistance")
@@ -341,6 +345,8 @@ void EverQuestMod::LoadConfigurationFile()
     ConfigSpellBuffLevelRestrictionsEnabled = sConfigMgr->GetOption<bool>("EverQuest.Spells.BuffLevelRestrictionsEnabled", true);
     ConfigSpellCrowdControlLevelRestrictionsEnabled = sConfigMgr->GetOption<bool>("EverQuest.Spells.CrowdControlLevelRestrictionsEnabled", true);
     ConfigSpellHasteCapEnabled = sConfigMgr->GetOption<bool>("EverQuest.Spells.HasteCapEnabled", true);
+    ConfigSpellMovementCastSnareEnabled = sConfigMgr->GetOption<bool>("EverQuest.Spells.MovementCastSnareEnabled", true);
+    ConfigSpellMovementCastJumpCancelEnabled = sConfigMgr->GetOption<bool>("EverQuest.Spells.MovementCastJumpCancelEnabled", true);
     ConfigSpellHasteCapPercent = sConfigMgr->GetOption<float>("EverQuest.Spells.HasteCapPercent", 100.0f);
     ConfigSpellBardFearDiminishingReturnsEnabled = sConfigMgr->GetOption<bool>("EverQuest.Spells.BardFearDiminishingReturnsEnabled", true);
     ConfigSpellBardFearDiminishingReturnsResetTimeInMS = sConfigMgr->GetOption<uint32>("EverQuest.Spells.BardFearDiminishingReturnsResetTimeInMS", 15000);
@@ -3577,6 +3583,104 @@ const EverQuestSpell& EverQuestMod::GetSpellDataForSpellID(uint32 spellID)
         static const EverQuestSpell returnEmpty;
         return returnEmpty;
     }
+}
+
+void EverQuestMod::LoadSpellMovementCastSnareData()
+{
+    MovementCastSnareSpellIDs.clear();
+    QueryResult queryResult = WorldDatabase.Query("SELECT SpellID FROM mod_everquest_spell_movement_cast_snare;");
+    if (queryResult)
+    {
+        do
+        {
+            Field* fields = queryResult->Fetch();
+            MovementCastSnareSpellIDs.insert(fields[0].Get<uint32>());
+        } while (queryResult->NextRow());
+    }
+    LOG_INFO("module.EverQuest", "EverQuestMod loaded {} spells that slow the caster when cast on the move", uint32(MovementCastSnareSpellIDs.size()));
+}
+
+bool EverQuestMod::IsMovementCastSpell(uint32 spellID)
+{
+    return MovementCastSnareSpellIDs.find(spellID) != MovementCastSnareSpellIDs.end();
+}
+
+bool EverQuestMod::IsMovementCastSnareSpell(uint32 spellID)
+{
+    if (ConfigSpellMovementCastSnareEnabled == false || ConfigSystemMovementCastSnareSpellID == 0)
+        return false;
+    return IsMovementCastSpell(spellID);
+}
+
+void EverQuestMod::CancelMovementCastForJumpingPlayer(Player* player)
+{
+    if (player == nullptr || ConfigSpellMovementCastJumpCancelEnabled == false || MovementCastSnareSpellIDs.empty() == true)
+        return;
+    Spell* spell = player->GetCurrentSpell(CURRENT_GENERIC_SPELL);
+    if (spell == nullptr || spell->getState() != SPELL_STATE_PREPARING || spell->GetCastTimeRemaining() <= 0)
+        return;
+    if (spell->IsTriggered() == true || spell->IsAutoRepeat() == true || spell->IsNextMeleeSwingSpell() == true)
+        return;
+    if (IsMovementCastSpell(spell->GetSpellInfo()->Id) == false)
+        return;
+
+    // The cancel runs the module's own OnSpellCastCancel hook, which is what lifts the casting slow
+    spell->cancel(true);
+}
+
+void EverQuestMod::ApplyMovementCastSnareForPlayer(Player* player, Spell* spell)
+{
+    if (player == nullptr || spell == nullptr)
+        return;
+    if (spell->IsTriggered() == true || spell->getState() != SPELL_STATE_PREPARING || spell->GetCastTimeRemaining() <= 0)
+        return;
+    if (player->isMoving() == false)
+        return;
+    if (IsMovementCastSnareSpell(spell->GetSpellInfo()->Id) == false)
+        return;
+    if (player->HasAura(ConfigSystemMovementCastSnareSpellID) == true)
+        return;
+
+    Aura* snareAura = player->AddAura(ConfigSystemMovementCastSnareSpellID, player);
+    if (snareAura == nullptr)
+        return;
+
+    // Run the debuff timer down with the cast it belongs to, so the icon reads as what it is.  The buffer covers a cast that gets pushed back, and if it does run out early the next movement packet simply puts the slow back on
+    int32 snareDurationInMS = spell->GetCastTimeRemaining() + EQ_MOVEMENT_CAST_SNARE_DURATION_BUFFER_IN_MS;
+    if (snareDurationInMS < snareAura->GetMaxDuration())
+    {
+        snareAura->SetMaxDuration(snareDurationInMS);
+        snareAura->SetDuration(snareDurationInMS);
+        snareAura->SetNeedClientUpdateForTargets();
+    }
+}
+
+void EverQuestMod::ApplyMovementCastSnareForPlayerCurrentCast(Player* player)
+{
+    if (player == nullptr || MovementCastSnareSpellIDs.empty() == true)
+        return;
+    ApplyMovementCastSnareForPlayer(player, player->GetCurrentSpell(CURRENT_GENERIC_SPELL));
+}
+
+void EverQuestMod::ClearMovementCastSnareForPlayer(Player* player)
+{
+    if (player == nullptr || ConfigSystemMovementCastSnareSpellID == 0)
+        return;
+    if (player->HasAura(ConfigSystemMovementCastSnareSpellID) == false)
+        return;
+    player->RemoveAurasDueToSpell(ConfigSystemMovementCastSnareSpellID);
+}
+
+void EverQuestMod::UpdateMovementCastSnareForPlayer(Player* player)
+{
+    if (player == nullptr || ConfigSystemMovementCastSnareSpellID == 0)
+        return;
+    if (player->HasAura(ConfigSystemMovementCastSnareSpellID) == false)
+        return;
+    Spell* spell = player->GetCurrentSpell(CURRENT_GENERIC_SPELL);
+    if (spell != nullptr && spell->getState() == SPELL_STATE_PREPARING && IsMovementCastSnareSpell(spell->GetSpellInfo()->Id) == true)
+        return;
+    player->RemoveAurasDueToSpell(ConfigSystemMovementCastSnareSpellID);
 }
 
 void EverQuestMod::LoadIllusionDisplayData()

@@ -36,7 +36,29 @@ public:
     }
 };
 
+class EverQuest_MovementHandlerScript : public MovementHandlerScript
+{
+public:
+    EverQuest_MovementHandlerScript() : MovementHandlerScript("EverQuest_MovementHandlerScript") {}
+
+    void OnPlayerMove(Player* player, MovementInfo /*movementInfo*/, uint32 opcode) override
+    {
+        if (EverQuest->IsEnabled == false)
+            return;
+
+        // Jumping breaks the cast outright, so there is no slow left to apply
+        if (opcode == MSG_MOVE_JUMP)
+        {
+            EverQuest->CancelMovementCastForJumpingPlayer(player);
+            return;
+        }
+
+        EverQuest->ApplyMovementCastSnareForPlayerCurrentCast(player);
+    }
+};
+
 void AddEverQuestMiscScripts()
 {
     new EverQuest_MiscScript();
+    new EverQuest_MovementHandlerScript();
 }

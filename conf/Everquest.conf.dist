@@ -250,6 +250,29 @@ EverQuest.Spells.HasteCapPercent = 100
 
 ###################################################################################################
 #
+# 	EverQuest.Spells.MovementCastSnareEnabled
+#       If enabled in the converter at generation, moving while casting can be enabled and if it is,
+#       then this setting can add a snare that only takes effect while moving to avoid moving at
+#       full speed while casting.  Clears on stop movement
+#	Default: True
+#
+###################################################################################################
+
+EverQuest.Spells.MovementCastSnareEnabled = True
+
+###################################################################################################
+#
+# 	EverQuest.Spells.MovementCastJumpCancelEnabled
+#		If true, jumping while casting one of those spells breaks the cast, the way it did before
+#		the spells were opened up to movement
+#	Default: True
+#
+###################################################################################################
+
+EverQuest.Spells.MovementCastJumpCancelEnabled = True
+
+###################################################################################################
+#
 # 	EverQuest.Spells.BardFearDiminishingReturnsEnabled
 #		If true, the fear from a bard fear song diminishes on creature targets the way WoW fear
 #		already diminishes on players - the first landing lasts its full duration, the next one

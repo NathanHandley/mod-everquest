@@ -427,6 +427,7 @@ public:
         EverQuest->ConsumePendingTemporaryFactionRecalculation(player);
         EverQuest->UpdatePlayerTracking(player, p_time);
         EverQuest->UpdateAgileFighterCombatAura(player, p_time);
+        EverQuest->UpdateMovementCastSnareForPlayer(player);
         if (EverQuest->ConfigSpellSummonPlayerAcrossZones == true)
             EverQuest->ConsumePendingSummonRequest(player);
 

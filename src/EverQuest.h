@@ -51,7 +51,9 @@ class ByteBuffer;
 struct AreaTrigger;
 struct BuildValuesCachePosPointers;
 
-#define EQ_MOD_VERSION                              85
+#define EQ_MOD_VERSION                              87
+
+#define EQ_MOVEMENT_CAST_SNARE_DURATION_BUFFER_IN_MS 2000 // How much longer than the remaining cast time the casting slow is given, so a pushed-back cast keeps it
 
 #define EQ_DISPEL_MESSAGE_DEFAULT_COLOR             0xFFAA00
 
@@ -1279,6 +1281,7 @@ public:
     uint32 ConfigSystemRaidBossRespawnVarianceInSec;
     uint32 ConfigSystemRaidMiniBossRespawnVarianceInSec = 0;
     uint32 ConfigSystemCompleteHealExhaustionSpellID = 0;
+    uint32 ConfigSystemMovementCastSnareSpellID = 0;
     uint32 ConfigSystemCompleteHealExhaustionManaCostPercentPerStack = 0;
     float ConfigSystemIllusionObjectMaxDistance = 0;
     float ConfigSystemIllusionObjectTreeMaxDistance = 0;
@@ -1319,6 +1322,8 @@ public:
     uint32 ConfigSpellBardFearDiminishingReturnsResetTimeInMS;
     bool ConfigSpellNoSwingTimerResetForEQSpells;
     bool ConfigSpellNoSwingTimerResetForWoWSpells;
+    bool ConfigSpellMovementCastSnareEnabled;
+    bool ConfigSpellMovementCastJumpCancelEnabled;
     bool ConfigCombatSkillsDisableBashKickStunOnPlayers;
     bool ConfigCombatSkillsDisabledBashKickStunInterruptsPlayerCast;
     bool ConfigCombatSkillsRangedAttackEnabled;
@@ -1426,6 +1431,7 @@ public:
     unordered_set<uint32> WornEffectSpellIDs;
     unordered_map<uint32, EverQuestSpell> SpellDataBySpellID;
     unordered_set<uint32> BardSongTickSpellIDs;
+    unordered_set<uint32> MovementCastSnareSpellIDs;
     unordered_map<uint64, uint32> IllusionDisplayIDsByLookupKey;
     unordered_map<uint64, uint32> IllusionFaceDisplayIDsByLookupKey;
     uint32 IllusionMaxFaceIndex;
@@ -1582,6 +1588,14 @@ public:
     bool IsWornEffectSpell(uint32 spellID);
     void LoadSpellData();
     const EverQuestSpell& GetSpellDataForSpellID(uint32 spellID);
+    void LoadSpellMovementCastSnareData();
+    bool IsMovementCastSpell(uint32 spellID);
+    bool IsMovementCastSnareSpell(uint32 spellID);
+    void CancelMovementCastForJumpingPlayer(Player* player);
+    void ApplyMovementCastSnareForPlayer(Player* player, Spell* spell);
+    void ApplyMovementCastSnareForPlayerCurrentCast(Player* player);
+    void ClearMovementCastSnareForPlayer(Player* player);
+    void UpdateMovementCastSnareForPlayer(Player* player);
     void LoadIllusionDisplayData();
     bool IsIllusionFormSpell(uint32 spellID);
     uint64 GetIllusionDisplayLookupKey(uint32 formSpellID, uint32 bodySet, uint32 tintID, bool helmOn);

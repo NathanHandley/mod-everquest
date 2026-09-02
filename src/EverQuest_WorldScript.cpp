@@ -60,6 +60,7 @@ public:
         EverQuest->LoadItemTemplateData();
         EverQuest->LoadItemWoWToEQSwapData();
         EverQuest->LoadSpellData();
+        EverQuest->LoadSpellMovementCastSnareData();
         EverQuest->LoadIllusionDisplayData();
         EverQuest->LoadIllusionFaceData();
         EverQuest->LoadIllusionObjectData();

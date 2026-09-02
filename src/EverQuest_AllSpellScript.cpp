@@ -163,8 +163,12 @@ public:
         targetInfo.effectMask = targetInfo.effectMask & (uint8)(~stunEffectMask);
     }
 
-    void OnSpellPrepare(Spell* /*spell*/, Unit* caster, SpellInfo const* spellInfo) override
+    void OnSpellPrepare(Spell* spell, Unit* caster, SpellInfo const* spellInfo) override
     {
+        // A cast started while already moving pays for it in movement speed until the cast ends
+        if (EverQuest->IsEnabled == true && caster != nullptr && caster->IsPlayer() == true)
+            EverQuest->ApplyMovementCastSnareForPlayer(caster->ToPlayer(), spell);
+
         uint32 failChancePercent = GetEffectFailChance(caster, spellInfo);
         if (failChancePercent == 0)
             return;
@@ -194,10 +198,16 @@ public:
         PendingSpellFailuresByCasterGUID[caster->GetGUID()] = std::move(pendingFailure);
     }
 
-    void OnSpellCastCancel(Spell* /*spell*/, Unit* caster, SpellInfo const* /*spellInfo*/, bool /*bySelf*/) override
+    void OnSpellCastCancel(Spell* spell, Unit* caster, SpellInfo const* spellInfo, bool /*bySelf*/) override
     {
         if (caster == nullptr)
             return;
+
+        // A cast that never finished still lifts the slow it brought on
+        if (EverQuest->IsEnabled == true && caster->IsPlayer() == true && spellInfo != nullptr && spell != nullptr && spell->IsTriggered() == false
+            && EverQuest->IsMovementCastSnareSpell(spellInfo->Id) == true)
+            EverQuest->ClearMovementCastSnareForPlayer(caster->ToPlayer());
+
         std::lock_guard<std::mutex> lock(PendingSpellFailuresMutex);
         PendingSpellFailuresByCasterGUID.erase(caster->GetGUID());
     }
@@ -304,6 +314,10 @@ public:
 
         // Give back the swing time the core just reset away.  This runs before the EverQuest spell checks below, since WoW spells can be configured for it too
         EverQuest->RestoreSwingTimersAfterSpellCast(caster, spell);
+
+        // The casting slow lifts the moment the cast lands.  This is above the EverQuest spell checks below, since the WoW class spells can carry it too
+        if (caster->IsPlayer() == true && spellInfo != nullptr && spell->IsTriggered() == false && EverQuest->IsMovementCastSnareSpell(spellInfo->Id) == true)
+            EverQuest->ClearMovementCastSnareForPlayer(caster->ToPlayer());
 
         // Verify it's an EQ spell that is mapped
         if (spellInfo == nullptr)
