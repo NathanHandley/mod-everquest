@@ -3641,12 +3641,16 @@ void EverQuestMod::ApplyMovementCastSnareForPlayer(Player* player, Spell* spell)
     if (player->HasAura(ConfigSystemMovementCastSnareSpellID) == true)
         return;
 
+    // Everything needed off the spell is read before the aura goes on, so nothing here touches a spell that is mid-prepare
+    // after another system has had a chance to run
+    int32 snareDurationInMS = spell->GetCastTimeRemaining() + EQ_MOVEMENT_CAST_SNARE_DURATION_BUFFER_IN_MS;
+
     Aura* snareAura = player->AddAura(ConfigSystemMovementCastSnareSpellID, player);
     if (snareAura == nullptr)
         return;
 
-    // Run the debuff timer down with the cast it belongs to, so the icon reads as what it is.  The buffer covers a cast that gets pushed back, and if it does run out early the next movement packet simply puts the slow back on
-    int32 snareDurationInMS = spell->GetCastTimeRemaining() + EQ_MOVEMENT_CAST_SNARE_DURATION_BUFFER_IN_MS;
+    // Run the debuff timer down with the cast it belongs to, so the icon reads as what it is.  The buffer covers a cast that
+    // gets pushed back, and if it does run out early the next movement packet simply puts the slow back on
     if (snareDurationInMS < snareAura->GetMaxDuration())
     {
         snareAura->SetMaxDuration(snareDurationInMS);

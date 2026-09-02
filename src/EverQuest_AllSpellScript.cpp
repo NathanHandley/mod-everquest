@@ -316,7 +316,7 @@ public:
         EverQuest->RestoreSwingTimersAfterSpellCast(caster, spell);
 
         // The casting slow lifts the moment the cast lands.  This is above the EverQuest spell checks below, since the WoW class spells can carry it too
-        if (caster->IsPlayer() == true && spellInfo != nullptr && spell->IsTriggered() == false && EverQuest->IsMovementCastSnareSpell(spellInfo->Id) == true)
+        if (caster != nullptr && caster->IsPlayer() == true && spellInfo != nullptr && spell->IsTriggered() == false && EverQuest->IsMovementCastSnareSpell(spellInfo->Id) == true)
             EverQuest->ClearMovementCastSnareForPlayer(caster->ToPlayer());
 
         // Verify it's an EQ spell that is mapped
