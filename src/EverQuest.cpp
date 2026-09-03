@@ -14,6 +14,8 @@
 //  You should have received a copy of the GNU General Public License
 //  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+// TODO: Seriously this is getting too big
+
 #include "Bag.h"
 #include "Chat.h"
 #include "GameEventMgr.h"
@@ -90,9 +92,6 @@ EverQuestMod::EverQuestMod() :
     ConfigSystemAdventurerAuraSpellID(0),
     ConfigSystemMentorshipMentorAuraSpellID(0),
     ConfigSystemMentorshipApprenticeAuraSpellID(0),
-    ConfigSystemAgileFighterSpellID(0),
-    ConfigSystemAgileFighterCombatMasterSpellID(0),
-    ConfigSystemAgileFighterCombatExpertSpellID(0),
     ConfigSystemFactionGoodClassMask(0),
     ConfigSystemFactionEvilClassMask(0),
     ConfigSystemFactionGoodRaceMask(0),
@@ -232,12 +231,52 @@ bool EverQuestMod::LoadConfigurationSystemDataFromDB()
                 ConfigSystemMentorshipMentorAuraSpellID = (uint32)atoi(value.c_str());
             else if (key == "MentorshipApprenticeAuraSpellID")
                 ConfigSystemMentorshipApprenticeAuraSpellID = (uint32)atoi(value.c_str());
-            else if (key == "AgileFighterSpellID")
-                ConfigSystemAgileFighterSpellID = (uint32)atoi(value.c_str());
-            else if (key == "AgileFighterCombatMasterSpellID")
-                ConfigSystemAgileFighterCombatMasterSpellID = (uint32)atoi(value.c_str());
-            else if (key == "AgileFighterCombatExpertSpellID")
-                ConfigSystemAgileFighterCombatExpertSpellID = (uint32)atoi(value.c_str());
+            else if (key == "ClassAuraEnabled")
+                ConfigSystemClassAuraEnabled = atoi(value.c_str()) != 0;
+            else if (key.rfind("ClassAuraSpellID", 0) == 0)
+                SetClassAuraSpellIDFromConfigKey(key.substr(16), (uint32)atoi(value.c_str()));
+            else if (key == "ClassAuraPrivateSpellFamilyID")
+                ConfigSystemClassAuraPrivateSpellFamilyID = (uint32)atoi(value.c_str());
+            else if (key == "ClassAuraEnchanterFocusManaThresholdPercent")
+                ConfigSystemClassAuraEnchanterFocusManaThresholdPercent = (uint32)atoi(value.c_str());
+            else if (key == "ClassAuraBardInstrumentMeleeAutoAttackDamagePercent")
+                ConfigSystemClassAuraBardInstrumentMeleeAutoAttackDamagePercent = (uint32)atoi(value.c_str());
+            else if (key == "ClassAuraMonkSelfHealCastTimeReductionPercent")
+                ConfigSystemClassAuraMonkSelfHealCastTimeReductionPercent = (uint32)atoi(value.c_str());
+            else if (key == "ClassAuraRangerRicochetChancePercent")
+                ConfigSystemClassAuraRangerRicochetChancePercent = (uint32)atoi(value.c_str());
+            else if (key == "ClassAuraRangerRicochetRange")
+                ConfigSystemClassAuraRangerRicochetRange = (float)atof(value.c_str());
+            else if (key == "ClassAuraPaladinHealSelfPercent")
+                ConfigSystemClassAuraPaladinHealSelfPercent = (uint32)atoi(value.c_str());
+            else if (key == "ClassAuraPaladinUndeadDemonDoubleDamageChancePercent")
+                ConfigSystemClassAuraPaladinUndeadDemonDoubleDamageChancePercent = (uint32)atoi(value.c_str());
+            else if (key == "ClassAuraWarriorTripleAttackChancePercent")
+                ConfigSystemClassAuraWarriorTripleAttackChancePercent = (uint32)atoi(value.c_str());
+            else if (key == "ClassAuraWizardFocusStacksLostPerMovementEvent")
+                ConfigSystemClassAuraWizardFocusStacksLostPerMovementEvent = (uint32)atoi(value.c_str());
+            else if (key == "ClassAuraWizardFocusMovementIntervalInMS")
+                ConfigSystemClassAuraWizardFocusMovementIntervalInMS = (uint32)atoi(value.c_str());
+            else if (key == "ClassAuraNecromancerDebuffTransferCooldownInMS")
+                ConfigSystemClassAuraNecromancerDebuffTransferCooldownInMS = (uint32)atoi(value.c_str());
+            else if (key == "ClassAuraNecromancerMarkDirectDamagePercentPerStack")
+                ConfigSystemClassAuraNecromancerMarkDirectDamagePercentPerStack = (uint32)atoi(value.c_str());
+            else if (key == "ClassAuraNecromancerMarkDotDamagePercentPerStack")
+                ConfigSystemClassAuraNecromancerMarkDotDamagePercentPerStack = (uint32)atoi(value.c_str());
+            else if (key == "ClassAuraClericCadenceReductionPercent")
+                ConfigSystemClassAuraClericCadenceReductionPercent = (uint32)atoi(value.c_str());
+            else if (key == "ClassAuraDruidDirectHealRegenPercent")
+                ConfigSystemClassAuraDruidDirectHealRegenPercent = (uint32)atoi(value.c_str());
+            else if (key == "ClassAuraDruidDirectHealRegenTickCount")
+                ConfigSystemClassAuraDruidDirectHealRegenTickCount = (uint32)atoi(value.c_str());
+            else if (key == "ClassAuraDruidDamageShieldPercent")
+                ConfigSystemClassAuraDruidDamageShieldPercent = (uint32)atoi(value.c_str());
+            else if (key == "ClassAuraDruidImpairedTargetDamagePercent")
+                ConfigSystemClassAuraDruidImpairedTargetDamagePercent = (uint32)atoi(value.c_str());
+            else if (key == "ClassAuraShamanDotExtendChancePercent")
+                ConfigSystemClassAuraShamanDotExtendChancePercent = (uint32)atoi(value.c_str());
+            else if (key == "ClassAuraShamanDotExtendInMS")
+                ConfigSystemClassAuraShamanDotExtendInMS = (uint32)atoi(value.c_str());
             else if (key == "RaidBossRespawnVarianceInSec")
                 ConfigSystemRaidBossRespawnVarianceInSec = (uint32)atoi(value.c_str());
             else if (key == "RaidMiniBossRespawnVarianceInSec")
@@ -347,6 +386,7 @@ void EverQuestMod::LoadConfigurationFile()
     ConfigSpellHasteCapEnabled = sConfigMgr->GetOption<bool>("EverQuest.Spells.HasteCapEnabled", true);
     ConfigSpellMovementCastSnareEnabled = sConfigMgr->GetOption<bool>("EverQuest.Spells.MovementCastSnareEnabled", true);
     ConfigSpellMovementCastJumpCancelEnabled = sConfigMgr->GetOption<bool>("EverQuest.Spells.MovementCastJumpCancelEnabled", true);
+    ConfigSpellClassAurasEnabled = sConfigMgr->GetOption<bool>("EverQuest.Spells.ClassAurasEnabled", true);
     ConfigSpellHasteCapPercent = sConfigMgr->GetOption<float>("EverQuest.Spells.HasteCapPercent", 100.0f);
     ConfigSpellBardFearDiminishingReturnsEnabled = sConfigMgr->GetOption<bool>("EverQuest.Spells.BardFearDiminishingReturnsEnabled", true);
     ConfigSpellBardFearDiminishingReturnsResetTimeInMS = sConfigMgr->GetOption<uint32>("EverQuest.Spells.BardFearDiminishingReturnsResetTimeInMS", 15000);
@@ -3640,6 +3680,9 @@ void EverQuestMod::ApplyMovementCastSnareForPlayer(Player* player, Spell* spell)
         return;
     if (player->HasAura(ConfigSystemMovementCastSnareSpellID) == true)
         return;
+    // The Wizard class aura casts on the move at full speed
+    if (IsMovementCastSnareExemptForPlayer(player) == true)
+        return;
 
     // Everything needed off the spell is read before the aura goes on, so nothing here touches a spell that is mid-prepare
     // after another system has had a chance to run
@@ -4338,6 +4381,9 @@ void EverQuestMod::TrackEQHasteAurasAndEnforceCapOnAuraApply(Unit* unit, Aura* a
         return;
     if (IsSpellAnEQSpell(spellID) == false)
         return;
+    // The class auras' haste is exempt from the cap by design
+    if (IsClassAuraSpell(spellID) == true)
+        return;
 
     // Only positive melee/ranged haste effects count against the cap (slows stay untouched)
     bool hasPositiveHasteEffect = false;
@@ -4631,111 +4677,6 @@ void EverQuestMod::ClearBearFormShieldArmorShiftForPlayer(ObjectGuid playerGUID)
     // Only the tracking is dropped, since the stat modifiers themselves live on the player object and are rebuilt on the next login
     std::lock_guard<std::mutex> lock(RuntimeStateMutex);
     BearFormShieldArmorShiftAmountByPlayerGUID.erase(playerGUID);
-}
-
-uint32 EverQuestMod::GetAgileFighterCombatAuraSpellIDForPlayer(Player* player)
-{
-    if (player == nullptr)
-        return 0;
-    if (ConfigSystemAgileFighterSpellID == 0)
-        return 0;
-    if (player->HasSpell(ConfigSystemAgileFighterSpellID) == false)
-        return 0;
-
-    bool isWearingLeather = false;
-    bool isWearingMailOrPlate = false;
-    bool isUsingShield = false;
-    for (uint8 equipSlotIndex = EQUIPMENT_SLOT_START; equipSlotIndex < EQUIPMENT_SLOT_END; ++equipSlotIndex)
-    {
-        Item* equippedItem = player->GetItemByPos(INVENTORY_SLOT_BAG_0, equipSlotIndex);
-        if (equippedItem == nullptr)
-            continue;
-        ItemTemplate const* itemTemplate = equippedItem->GetTemplate();
-        if (itemTemplate == nullptr || itemTemplate->Class != ITEM_CLASS_ARMOR)
-            continue;
-        switch (itemTemplate->SubClass)
-        {
-        case ITEM_SUBCLASS_ARMOR_LEATHER:
-            isWearingLeather = true;
-            break;
-        case ITEM_SUBCLASS_ARMOR_MAIL:
-        case ITEM_SUBCLASS_ARMOR_PLATE:
-            isWearingMailOrPlate = true;
-            break;
-        case ITEM_SUBCLASS_ARMOR_SHIELD:
-            isUsingShield = true;
-            break;
-        default:
-            break;
-        }
-    }
-
-    // Mail, plate or a shield disqualifies both tiers, and cloth-only (or nothing) will elevate the player to Combat Master
-    if (isWearingMailOrPlate == true || isUsingShield == true)
-        return 0;
-    if (isWearingLeather == false)
-        return ConfigSystemAgileFighterCombatMasterSpellID;
-    return ConfigSystemAgileFighterCombatExpertSpellID;
-}
-
-void EverQuestMod::RefreshAgileFighterCombatAuraForPlayer(Player* player)
-{
-    if (player == nullptr)
-        return;
-    if (ConfigSystemAgileFighterSpellID == 0)
-        return;
-
-    uint32 desiredAuraSpellID = GetAgileFighterCombatAuraSpellIDForPlayer(player);
-
-    // Can't have both Combat Master and Combat Expert, so use higher
-    if (ConfigSystemAgileFighterCombatMasterSpellID != 0 && desiredAuraSpellID != ConfigSystemAgileFighterCombatMasterSpellID && player->HasAura(ConfigSystemAgileFighterCombatMasterSpellID) == true)
-        player->RemoveAurasDueToSpell(ConfigSystemAgileFighterCombatMasterSpellID);
-    if (ConfigSystemAgileFighterCombatExpertSpellID != 0 && desiredAuraSpellID != ConfigSystemAgileFighterCombatExpertSpellID && player->HasAura(ConfigSystemAgileFighterCombatExpertSpellID) == true)
-        player->RemoveAurasDueToSpell(ConfigSystemAgileFighterCombatExpertSpellID);
-
-    if (desiredAuraSpellID != 0 && player->HasAura(desiredAuraSpellID) == false)
-        player->AddAura(desiredAuraSpellID, player);
-}
-
-void EverQuestMod::ReapplyAgileFighterCombatAuraForPlayer(Player* player)
-{
-    if (player == nullptr)
-        return;
-    if (ConfigSystemAgileFighterSpellID == 0)
-        return;
-    if (ConfigSystemAgileFighterCombatMasterSpellID != 0 && player->HasAura(ConfigSystemAgileFighterCombatMasterSpellID) == true)
-        player->RemoveAurasDueToSpell(ConfigSystemAgileFighterCombatMasterSpellID);
-    if (ConfigSystemAgileFighterCombatExpertSpellID != 0 && player->HasAura(ConfigSystemAgileFighterCombatExpertSpellID) == true)
-        player->RemoveAurasDueToSpell(ConfigSystemAgileFighterCombatExpertSpellID);
-    RefreshAgileFighterCombatAuraForPlayer(player);
-}
-
-void EverQuestMod::UpdateAgileFighterCombatAura(Player* player, uint32 diffInMS)
-{
-    if (player == nullptr)
-        return;
-    if (ConfigSystemAgileFighterSpellID == 0)
-        return;
-
-    // Check occassionally in case equipment changed by a mechanism with no hook
-    uint32 refreshTimerMS = 0;
-    {
-        std::lock_guard<std::mutex> lock(RuntimeStateMutex);
-        uint32& storedRefreshTimerMS = AgileFighterRefreshTimerMSByPlayerGUID[player->GetGUID()];
-        storedRefreshTimerMS += diffInMS;
-        refreshTimerMS = storedRefreshTimerMS;
-        if (refreshTimerMS >= EQ_AGILE_FIGHTER_REFRESH_INTERVAL_MS)
-            storedRefreshTimerMS = 0;
-    }
-    if (refreshTimerMS < EQ_AGILE_FIGHTER_REFRESH_INTERVAL_MS)
-        return;
-    RefreshAgileFighterCombatAuraForPlayer(player);
-}
-
-void EverQuestMod::ClearAgileFighterTrackingForPlayer(ObjectGuid playerGUID)
-{
-    std::lock_guard<std::mutex> lock(RuntimeStateMutex);
-    AgileFighterRefreshTimerMSByPlayerGUID.erase(playerGUID);
 }
 
 void EverQuestMod::LoadQuestCompletionReputations()
@@ -13928,7 +13869,6 @@ bool EverQuestMod::PerformPlayerDelete(ObjectGuid guid)
         MentorshipRequestsByTargetGUID.erase(guid);
         MentorshipStateCount.store(static_cast<uint32>(MentorshipStatesByPlayerGUID.size()));
         PendingEquipmentStorageCommitMSByGUID.erase(guid);
-        AgileFighterRefreshTimerMSByPlayerGUID.erase(guid);
     }
     {
         std::lock_guard<std::mutex> lock(PendingStorageTransactionMutex);

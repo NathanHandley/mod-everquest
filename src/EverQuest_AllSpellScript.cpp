@@ -61,7 +61,7 @@ public:
         return EverQuest->GetSpellDataForSpellID(spellInfo->Id).EffectFailChancePercent;
     }
 
-    void OnSpellCheckCast(Spell* spell, bool /*strict*/, SpellCastResult& res) override
+    void OnSpellCheckCast(Spell* spell, bool strict, SpellCastResult& res) override
     {
         if (EverQuest->IsEnabled == false)
             return;
@@ -69,6 +69,10 @@ public:
             return;
         if (spell == nullptr || spell->GetCaster() == nullptr)
             return;
+
+        // Class auras: cast time / mana cost / instant adjustments have to be set up before the core works those out (strict check only)
+        if (spell->GetCaster()->IsPlayer() == true)
+            EverQuest->ApplyClassAuraCastAdjustmentsOnCheckCast(spell->GetCaster()->ToPlayer(), spell, strict);
 
         // Creature-cast charms follow extra limit rules
         Unit* target = spell->m_targets.GetUnitTarget();
@@ -169,6 +173,10 @@ public:
         if (EverQuest->IsEnabled == true && caster != nullptr && caster->IsPlayer() == true)
             EverQuest->ApplyMovementCastSnareForPlayer(caster->ToPlayer(), spell);
 
+        // Class auras: the cast time is locked in now, so the casting speed side of any cast adjustment is finished
+        if (EverQuest->IsEnabled == true && caster != nullptr && caster->IsPlayer() == true)
+            EverQuest->FinishClassAuraCastAdjustmentsOnPrepare(caster->ToPlayer(), spell);
+
         uint32 failChancePercent = GetEffectFailChance(caster, spellInfo);
         if (failChancePercent == 0)
             return;
@@ -207,6 +215,10 @@ public:
         if (EverQuest->IsEnabled == true && caster->IsPlayer() == true && spellInfo != nullptr && spell != nullptr && spell->IsTriggered() == false
             && EverQuest->IsMovementCastSnareSpell(spellInfo->Id) == true)
             EverQuest->ClearMovementCastSnareForPlayer(caster->ToPlayer());
+
+        // Class auras: a cancelled cast gives back nothing and keeps no adjustment
+        if (EverQuest->IsEnabled == true && caster->IsPlayer() == true && spell != nullptr)
+            EverQuest->HandleClassAuraSpellCastCancel(caster->ToPlayer(), spell);
 
         std::lock_guard<std::mutex> lock(PendingSpellFailuresMutex);
         PendingSpellFailuresByCasterGUID.erase(caster->GetGUID());
@@ -318,6 +330,10 @@ public:
         // The casting slow lifts the moment the cast lands.  This is above the EverQuest spell checks below, since the WoW class spells can carry it too
         if (caster != nullptr && caster->IsPlayer() == true && spellInfo != nullptr && spell->IsTriggered() == false && EverQuest->IsMovementCastSnareSpell(spellInfo->Id) == true)
             EverQuest->ClearMovementCastSnareForPlayer(caster->ToPlayer());
+
+        // Class auras: spend a readied charge and build the Wizard's focus and the Cleric's cadence.  Above the EQ spell checks since WoW spells count too
+        if (caster != nullptr && caster->IsPlayer() == true)
+            EverQuest->HandleClassAuraSpellCast(caster->ToPlayer(), spell);
 
         // Verify it's an EQ spell that is mapped
         if (spellInfo == nullptr)

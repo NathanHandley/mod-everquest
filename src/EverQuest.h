@@ -45,13 +45,14 @@ static uint32 ConfigMaxSkillIDCheck = 1000;         // The highest level of skil
 class Unit;
 class Aura;
 class Spell;
+class Pet;
 class AuraApplication;
 class WorldPacket;
 class ByteBuffer;
 struct AreaTrigger;
 struct BuildValuesCachePosPointers;
 
-#define EQ_MOD_VERSION                              87
+#define EQ_MOD_VERSION                              89
 
 #define EQ_MOVEMENT_CAST_SNARE_DURATION_BUFFER_IN_MS 2000 // How much longer than the remaining cast time the casting slow is given, so a pushed-back cast keeps it
 
@@ -327,7 +328,10 @@ struct BuildValuesCachePosPointers;
 #define EQ_TRACKING_FOUND_DISTANCE                  15.0f   // Within this many yards, the tracked creature counts as found
 #define EQ_TRACKING_SCAN_MIN_INTERVAL_MS            2000    // Minimum time between track scans for one player (guards against command spam)
 
-#define EQ_AGILE_FIGHTER_REFRESH_INTERVAL_MS        2000    // How often to scan for gear changes since some forms of unequip have no hook
+#define EQ_PLAYER_CUSTOMDATA_CLASSAURA              "EQClassAura"
+#define EQ_CLASS_AURA_GEAR_REFRESH_INTERVAL_MS      2000    // Gear and pet based class auras rescan on this interval since some ways they change have no hook
+#define EQ_CLASS_AURA_MANA_CHECK_INTERVAL_MS        500     // How often the Enchanter mana threshold is checked
+#define EQ_SPELL_ID_AUTO_SHOT                       75
 
 // Vulak`Aerr (Temple of Veeshan) spawns perma-rooted and "locked" (unattackable, non-aggro) until every required dragon is dead, matching Velious-era EQ
 #define EQ_VULAK_CREATURE_TEMPLATE_ID               55045
@@ -794,6 +798,73 @@ class EverQuestPlayerIllusionState
 public:
     uint32 FormSpellID = 0;
     uint32 RefreshTimerMS = 0;
+};
+
+// These need to sync with the converter's values (ClassAuraSpellType.cs)
+enum EverQuestClassAuraSpellType : uint32
+{
+    EQ_CLASSAURA_SPELL_ENCHANTER_PASSIVE = 0,
+    EQ_CLASSAURA_SPELL_ENCHANTER_AURA = 1,
+    EQ_CLASSAURA_SPELL_ENCHANTER_FOCUS = 2,
+    EQ_CLASSAURA_SPELL_BARD_PASSIVE = 3,
+    EQ_CLASSAURA_SPELL_BARD_AURA = 4,
+    EQ_CLASSAURA_SPELL_BARD_INSTRUMENT = 5,
+    EQ_CLASSAURA_SPELL_MONK_PASSIVE = 6,
+    EQ_CLASSAURA_SPELL_MONK_AURA = 7,
+    EQ_CLASSAURA_SPELL_MONK_LIGHT_ARMOR = 8,
+    EQ_CLASSAURA_SPELL_MONK_HEAVY_ARMOR = 9,
+    EQ_CLASSAURA_SPELL_RANGER_PASSIVE = 10,
+    EQ_CLASSAURA_SPELL_RANGER_AURA = 11,
+    EQ_CLASSAURA_SPELL_RANGER_SPEED = 12,
+    EQ_CLASSAURA_SPELL_RANGER_RICOCHET = 13,
+    EQ_CLASSAURA_SPELL_ROGUE_PASSIVE = 14,
+    EQ_CLASSAURA_SPELL_ROGUE_AURA = 15,
+    EQ_CLASSAURA_SPELL_ROGUE_EXPLOIT = 16,
+    EQ_CLASSAURA_SPELL_PALADIN_PASSIVE = 17,
+    EQ_CLASSAURA_SPELL_PALADIN_AURA = 18,
+    EQ_CLASSAURA_SPELL_PALADIN_HEAL = 19,
+    EQ_CLASSAURA_SPELL_SHADOWKNIGHT_PASSIVE = 20,
+    EQ_CLASSAURA_SPELL_SHADOWKNIGHT_AURA = 21,
+    EQ_CLASSAURA_SPELL_SHADOWKNIGHT_EDGE = 22,
+    EQ_CLASSAURA_SPELL_WARRIOR_PASSIVE = 23,
+    EQ_CLASSAURA_SPELL_WARRIOR_AURA = 24,
+    EQ_CLASSAURA_SPELL_WIZARD_PASSIVE = 25,
+    EQ_CLASSAURA_SPELL_WIZARD_AURA = 26,
+    EQ_CLASSAURA_SPELL_WIZARD_FOCUS = 27,
+    EQ_CLASSAURA_SPELL_MAGICIAN_PASSIVE = 28,
+    EQ_CLASSAURA_SPELL_MAGICIAN_AURA = 29,
+    EQ_CLASSAURA_SPELL_MAGICIAN_PET_PASSIVE = 30,
+    EQ_CLASSAURA_SPELL_MAGICIAN_OWNER_FOCUS = 31,
+    EQ_CLASSAURA_SPELL_MAGICIAN_PET_FURY = 32,
+    EQ_CLASSAURA_SPELL_NECROMANCER_PASSIVE = 33,
+    EQ_CLASSAURA_SPELL_NECROMANCER_AURA = 34,
+    EQ_CLASSAURA_SPELL_NECROMANCER_MARK = 35,
+    EQ_CLASSAURA_SPELL_CLERIC_PASSIVE = 36,
+    EQ_CLASSAURA_SPELL_CLERIC_AURA = 37,
+    EQ_CLASSAURA_SPELL_CLERIC_CADENCE = 38,
+    EQ_CLASSAURA_SPELL_CLERIC_HASTE = 39,
+    EQ_CLASSAURA_SPELL_DRUID_PASSIVE = 40,
+    EQ_CLASSAURA_SPELL_DRUID_AURA = 41,
+    EQ_CLASSAURA_SPELL_DRUID_REGROWTH = 42,
+    EQ_CLASSAURA_SPELL_SHAMAN_PASSIVE = 43,
+    EQ_CLASSAURA_SPELL_SHAMAN_AURA = 44,
+    EQ_CLASSAURA_SPELL_SHAMAN_SLOW_MARK = 45,
+    EQ_CLASSAURA_SPELL_SHAMAN_VIGOR = 46,
+    EQ_CLASSAURA_SPELL_CAST_SPEED_HELPER = 47,
+    EQ_CLASSAURA_SPELL_TYPE_COUNT = 48
+};
+
+class EverQuestPlayerClassAuraState : public DataMap::Base
+{
+public:
+    uint32 GearRefreshTimerMS = 0;
+    uint32 ManaCheckTimerMS = 0;
+    bool WasMoving = false;
+    uint32 MovingAccumulatedMS = 0;
+    uint32 NextDebuffTransferAllowedMS = 0;
+    uint32 PendingCastAdjustSpellID = 0;        // The spell whose successful cast spends the readied cleric / shadow knight charge
+    bool PendingCadenceConsume = false;
+    bool PendingEdgeConsume = false;
 };
 
 class EverQuestPlayerTrackingState : public DataMap::Base
@@ -1275,9 +1346,31 @@ public:
     uint32 ConfigSystemAdventurerAuraSpellID;
     uint32 ConfigSystemMentorshipMentorAuraSpellID;
     uint32 ConfigSystemMentorshipApprenticeAuraSpellID;
-    uint32 ConfigSystemAgileFighterSpellID;
-    uint32 ConfigSystemAgileFighterCombatMasterSpellID;
-    uint32 ConfigSystemAgileFighterCombatExpertSpellID;
+    bool ConfigSystemClassAuraEnabled = false;
+    uint32 ConfigSystemClassAuraSpellIDs[EQ_CLASSAURA_SPELL_TYPE_COUNT] = { 0 };
+    uint32 ConfigSystemClassAuraSpellIDMin = 0;
+    uint32 ConfigSystemClassAuraSpellIDMax = 0;
+    uint32 ConfigSystemClassAuraPrivateSpellFamilyID = 0;
+    uint32 ConfigSystemClassAuraEnchanterFocusManaThresholdPercent = 80;
+    uint32 ConfigSystemClassAuraBardInstrumentMeleeAutoAttackDamagePercent = 33;
+    uint32 ConfigSystemClassAuraMonkSelfHealCastTimeReductionPercent = 50;
+    uint32 ConfigSystemClassAuraRangerRicochetChancePercent = 15;
+    float ConfigSystemClassAuraRangerRicochetRange = 10.0f;
+    uint32 ConfigSystemClassAuraPaladinHealSelfPercent = 15;
+    uint32 ConfigSystemClassAuraPaladinUndeadDemonDoubleDamageChancePercent = 20;
+    uint32 ConfigSystemClassAuraWarriorTripleAttackChancePercent = 50;
+    uint32 ConfigSystemClassAuraWizardFocusStacksLostPerMovementEvent = 1;
+    uint32 ConfigSystemClassAuraWizardFocusMovementIntervalInMS = 1000;
+    uint32 ConfigSystemClassAuraNecromancerDebuffTransferCooldownInMS = 20000;
+    uint32 ConfigSystemClassAuraNecromancerMarkDirectDamagePercentPerStack = 1;
+    uint32 ConfigSystemClassAuraNecromancerMarkDotDamagePercentPerStack = 2;
+    uint32 ConfigSystemClassAuraClericCadenceReductionPercent = 33;
+    uint32 ConfigSystemClassAuraDruidDirectHealRegenPercent = 20;
+    uint32 ConfigSystemClassAuraDruidDirectHealRegenTickCount = 4;
+    uint32 ConfigSystemClassAuraDruidDamageShieldPercent = 40;
+    uint32 ConfigSystemClassAuraDruidImpairedTargetDamagePercent = 8;
+    uint32 ConfigSystemClassAuraShamanDotExtendChancePercent = 33;
+    uint32 ConfigSystemClassAuraShamanDotExtendInMS = 3000;
     uint32 ConfigSystemRaidBossRespawnVarianceInSec;
     uint32 ConfigSystemRaidMiniBossRespawnVarianceInSec = 0;
     uint32 ConfigSystemCompleteHealExhaustionSpellID = 0;
@@ -1324,6 +1417,7 @@ public:
     bool ConfigSpellNoSwingTimerResetForWoWSpells;
     bool ConfigSpellMovementCastSnareEnabled;
     bool ConfigSpellMovementCastJumpCancelEnabled;
+    bool ConfigSpellClassAurasEnabled = true;
     bool ConfigCombatSkillsDisableBashKickStunOnPlayers;
     bool ConfigCombatSkillsDisabledBashKickStunInterruptsPlayerCast;
     bool ConfigCombatSkillsRangedAttackEnabled;
@@ -1468,7 +1562,6 @@ public:
     std::atomic<uint32> MentorshipStateCount{ 0 };
     unordered_map<uint64, unordered_map<ObjectGuid, vector<EverQuestUnitHasteAuraEffect>>> EQHasteAuraEffectsByMapInstanceKeyThenUnitGUID; // Map-instance keyed since creature GUIDs repeat across instance copies of a map
     unordered_map<ObjectGuid, uint32> BearFormShieldArmorShiftAmountByPlayerGUID;
-    unordered_map<ObjectGuid, uint32> AgileFighterRefreshTimerMSByPlayerGUID;
     unordered_map<uint32, vector<EverQuestCreatureLootGroup>> CreatureLootGroupsByCreatureTemplateID;
     unordered_map<uint64, unordered_map<ObjectGuid, vector<uint32>>> PreloadedLootItemIDsByMapInstanceKeyThenCreatureGUID; // Map-instance keyed since creature GUIDs repeat across instance copies of a map
     unordered_map<uint64, unordered_map<ObjectGuid, unordered_map<uint32, uint32>>> PreloadedLootCountsByMapInstanceKeyThenCreatureGUID;
@@ -1639,11 +1732,43 @@ public:
     uint32 GetEquippedShieldBaseArmorForPlayer(Player* player);
     void RefreshBearFormShieldArmorShiftForPlayer(Player* player);
     void ClearBearFormShieldArmorShiftForPlayer(ObjectGuid playerGUID);
-    uint32 GetAgileFighterCombatAuraSpellIDForPlayer(Player* player);
-    void RefreshAgileFighterCombatAuraForPlayer(Player* player);
-    void ReapplyAgileFighterCombatAuraForPlayer(Player* player);
-    void UpdateAgileFighterCombatAura(Player* player, uint32 diffInMS);
-    void ClearAgileFighterTrackingForPlayer(ObjectGuid playerGUID);
+
+    // EQ Class Auras (EverQuest_ClassAuras.cpp)
+    void SetClassAuraSpellIDFromConfigKey(const string& spellTypeName, uint32 spellID);
+    bool IsClassAuraSystemEnabled();
+    uint32 GetClassAuraSpellID(EverQuestClassAuraSpellType spellType);
+    bool IsClassAuraSpell(uint32 spellID);
+    bool PlayerHasClassAura(Player* player, EverQuestClassAuraSpellType auraSpellType);
+    EverQuestPlayerClassAuraState* GetClassAuraStateForPlayer(Player* player);
+    Unit* GetActiveClassAuraPetForPlayer(Player* player);
+    void ReapplyClassAurasForPlayer(Player* player);
+    void RefreshClassAurasForPlayer(Player* player);
+    void RefreshClassAuraGearAurasForPlayer(Player* player);
+    void UpdateClassAurasForPlayer(Player* player, uint32 diffInMS);
+    void ClearClassAuraStateForPlayer(Player* player);
+    void RefreshMonkArmorAuraForPlayer(Player* player);
+    void RefreshBardInstrumentAuraForPlayer(Player* player);
+    void UpdateEnchanterFocusForPlayer(Player* player);
+    void UpdateWizardFocusMovementForPlayer(Player* player, uint32 diffInMS);
+    void RefreshMagicianPetAuraForPlayer(Player* player);
+    void ApplyMagicianPetAuraToPet(Pet* pet);
+    void HandleClassAuraPetStrike(Unit* attacker, Unit* victim);
+    void HandleClassAuraShamanStrike(Unit* attacker, Unit* victim);
+    void ApplyClassAuraMeleeDamageMods(Unit* attacker, Unit* victim, uint32& damage);
+    void ApplyClassAuraDirectSpellDamageMods(Unit* target, Unit* attacker, int32& damage, SpellInfo const* spellInfo);
+    void TryRangerRicochet(Player* attacker, Unit* target, int32 damage);
+    void ApplyClassAuraPeriodicTickMods(Unit* target, Unit* attacker, uint32& amount, SpellInfo const* spellInfo);
+    bool TryTransferDebuffToNecromancerPet(Player* player, Aura* aura);
+    void HandleClassAuraSlowAuraApply(Unit* target, Aura* aura);
+    void HandleClassAuraSlowAuraRemove(Unit* target, Aura* aura);
+    void ApplyClassAuraDamageShieldAmountOnAuraApply(Unit* target, Aura* aura);
+    void ApplyClassAuraCastAdjustmentsOnCheckCast(Player* player, Spell* spell, bool strict);
+    void FinishClassAuraCastAdjustmentsOnPrepare(Player* player, Spell* spell);
+    void HandleClassAuraSpellCastCancel(Player* player, Spell* spell);
+    void ClearClassAuraCastAdjustmentsForPlayer(Player* player);
+    void HandleClassAuraSpellCast(Player* player, Spell* spell);
+    bool IsMovementCastSnareExemptForPlayer(Player* player);
+
     void LoadQuestCompletionReputations();
     const list<EverQuestQuestCompletionReputation>& GetQuestCompletionReputationsForQuestTemplate(uint32 questTemplateID);
     void LoadQuestReactions();

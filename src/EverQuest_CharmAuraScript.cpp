@@ -24,7 +24,6 @@
 
 using namespace std;
 
-// Intercept charm spells because otherwise the player gets stuck in combat
 class EverQuest_CharmAuraScript: public AuraScript
 {
     PrepareAuraScript(EverQuest_CharmAuraScript);

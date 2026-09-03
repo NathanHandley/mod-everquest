@@ -32,6 +32,7 @@ void AddEverQuestPlayerCasterOnlySpellScripts();
 void AddEverQuestFrostbiteChillSpellScripts();
 void AddEverQuestDamageShieldMarkScripts();
 void AddEverQuestCompleteHealExhaustionScripts();
+void AddEverQuestClassAuraScripts();
 void AddEverQuestRainWaveAreaCapSpellScripts();
 void AddEverQuestTalentInteractionScripts();
 void AddEverQuestItemScripts();
@@ -65,6 +66,7 @@ void Addmod_everquestScripts()
     AddEverQuestFrostbiteChillSpellScripts();
     AddEverQuestDamageShieldMarkScripts();
     AddEverQuestCompleteHealExhaustionScripts();
+    AddEverQuestClassAuraScripts();
     AddEverQuestRainWaveAreaCapSpellScripts();
     AddEverQuestTalentInteractionScripts();
     AddEverQuestItemScripts();

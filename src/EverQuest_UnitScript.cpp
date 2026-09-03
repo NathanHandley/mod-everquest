@@ -206,6 +206,12 @@ public:
 
         EverQuest->TrackEQHasteAurasAndEnforceCapOnAuraApply(unit, aura);
 
+        // A slow landed by a Shaman class aura holder brings its burden mark along
+        EverQuest->HandleClassAuraSlowAuraApply(unit, aura);
+
+        // A damage shield applied by a Druid class aura holder hits harder
+        EverQuest->ApplyClassAuraDamageShieldAmountOnAuraApply(unit, aura);
+
         if (EverQuest->IsSpellBlockedByMaxCreatureTargetLevel(aura->GetId(), unit, aura->GetCaster()) == true)
         {
             Unit* ccAuraCaster = aura->GetCaster();
@@ -259,6 +265,10 @@ public:
             return;
         }
 
+        // A Necromancer class aura holder hands enemy debuffs to their pet
+        if (EverQuest->TryTransferDebuffToNecromancerPet(player, aura) == true)
+            return;
+
         if (EverQuest->IsSpellAnEQBardSong(spellID) == true && EverQuest->ConfigBardMaxConcurrentSongs != 0)
         {
             // Only the lookup needs the lock; the queue itself is only touched by this player's own thread
@@ -292,7 +302,12 @@ public:
             return;
 
         if (aurApp != nullptr && aurApp->GetBase() != nullptr)
+        {
             EverQuest->UntrackEQHasteAurasAndEnforceCapOnAuraRemove(unit, aurApp->GetBase());
+
+            // The last slow from a Shaman class aura holder takes its burden mark with it
+            EverQuest->HandleClassAuraSlowAuraRemove(unit, aurApp->GetBase());
+        }
 
         // A fading ModFaction (Alliance line) aura takes the caster's temporary reputation bonus with it
         if (unit->IsCreature() == true && aurApp != nullptr && aurApp->GetBase() != nullptr)
@@ -373,6 +388,10 @@ public:
             return;
 
         uint32 spellID = spellInfo->Id;
+
+        // Class auras: the Druid's heal over time bonus and the Necromancer's marks (any spell, EQ or WoW)
+        EverQuest->ApplyClassAuraPeriodicTickMods(target, attacker, damage, spellInfo);
+
         if (EverQuest->IsSpellAnEQSpell(spellID) == false)
             return;
 
@@ -533,6 +552,9 @@ public:
 
         TryApplyBashKickStunForbearanceOnSuppressedStun(target, attacker, spellInfo);
 
+        // Class auras: the Necromancer's marks, the Druid's impaired target bonus and the Ranger's ricochet (any spell, EQ or WoW)
+        EverQuest->ApplyClassAuraDirectSpellDamageMods(target, attacker, damage, spellInfo);
+
         if (EverQuest->ConfigSpellTalentAlignmentEnabled == false)
             return;
         if (damage <= 0)
@@ -575,6 +597,22 @@ public:
 
         // Rampage and wild rampage swings can carry a damage percent modifier
         EverQuest->ApplyCreatureCombatAbilityDamageMod(attacker, damage);
+
+        // Class auras: the Bard's instrument bonus and the Paladin's double damage against undead and demons
+        EverQuest->ApplyClassAuraMeleeDamageMods(attacker, target, damage);
+    }
+
+    uint32 DealDamage(Unit* attacker, Unit* victim, uint32 damage, DamageEffectType damagetype) override
+    {
+        if (EverQuest->IsEnabled == false)
+            return damage;
+        if (damagetype != DIRECT_DAMAGE || damage == 0 || attacker == nullptr || victim == nullptr)
+            return damage;
+
+        // Class auras: a controlled creature's strike (Necromancer mark) and a Shaman's swing
+        EverQuest->HandleClassAuraPetStrike(attacker, victim);
+        EverQuest->HandleClassAuraShamanStrike(attacker, victim);
+        return damage;
     }
 
     void OnBeforeRollMeleeOutcomeAgainst(Unit const* attacker, Unit const* victim, WeaponAttackType attType,

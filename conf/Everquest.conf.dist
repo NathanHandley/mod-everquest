@@ -250,6 +250,18 @@ EverQuest.Spells.HasteCapPercent = 100
 
 ###################################################################################################
 #
+# 	EverQuest.Spells.ClassAurasEnabled
+#		If true, every EverQuest class (primary or secondary) keeps its class aura applied and its
+#		class effects active (Mind of Clarity, Agile Fighter, Warmaster and the rest).  The auras
+#		and their amounts come from the converter, and this only switches the server side on or off.
+#	Default: True
+#
+###################################################################################################
+
+EverQuest.Spells.ClassAurasEnabled = True
+
+###################################################################################################
+#
 # 	EverQuest.Spells.MovementCastSnareEnabled
 #       If enabled in the converter at generation, moving while casting can be enabled and if it is,
 #       then this setting can add a snare that only takes effect while moving to avoid moving at

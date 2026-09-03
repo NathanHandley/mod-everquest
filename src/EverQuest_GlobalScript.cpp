@@ -132,6 +132,15 @@ public:
         if (hasAuraEffect == true && EverQuest->IsWornEffectSpell(spell->Id) == false)
             spell->AttributesCu |= SPELL_ATTR0_CU_SINGLE_AURA_STACK;
 
+        // EQ class aura effects can keep one shared copy per target no matter who applied it
+        if (EverQuest->IsClassAuraSpell(spell->Id) == true)
+        {
+            if (spell->Id == EverQuest->GetClassAuraSpellID(EQ_CLASSAURA_SPELL_DRUID_REGROWTH))
+                spell->AttributesCu &= ~SPELL_ATTR0_CU_SINGLE_AURA_STACK;
+            else if (hasAuraEffect == true)
+                spell->AttributesCu |= SPELL_ATTR0_CU_SINGLE_AURA_STACK;
+        }
+
         // Self buffs that tick damage shouldn't break effects
         if (allSelfTargeted && hasHarmfulPeriodic)
             spell->AttributesEx4 |= SPELL_ATTR4_DAMAGE_DOESNT_BREAK_AURAS;

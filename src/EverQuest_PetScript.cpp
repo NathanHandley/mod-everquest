@@ -57,6 +57,9 @@ public:
         // Pets do not play idle (fidget) sounds while under player control
         EverQuest->UpdatePetFidgetSilence(pet);
 
+        // A Magician class aura holder's pet carries the pet side of the bond
+        EverQuest->ApplyMagicianPetAuraToPet(pet);
+
         // Skip non-EQ pets
         if (EverQuest->HasPetDataForCreatureTemplateID(pet->GetCreatureTemplate()->Entry) == false)
             return;
