@@ -206,6 +206,9 @@ public:
 
         EverQuest->TrackEQHasteAurasAndEnforceCapOnAuraApply(unit, aura);
 
+        // Slows needs to be weaker on boss creatures
+        EverQuest->ApplyEQSlowBossReductionOnAuraApply(unit, aura);
+
         // A slow landed by a Shaman class aura holder brings its burden mark along
         EverQuest->HandleClassAuraSlowAuraApply(unit, aura);
 

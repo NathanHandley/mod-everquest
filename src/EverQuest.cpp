@@ -111,7 +111,9 @@ EverQuestMod::EverQuestMod() :
     ConfigSpellBuffLevelRestrictionsEnabled(true),
     ConfigSpellCrowdControlLevelRestrictionsEnabled(true),
     ConfigSpellHasteCapEnabled(true),
-    ConfigSpellHasteCapPercent(100.0f),
+    ConfigSpellHasteCapPercent(50.0f),
+    ConfigSpellHasteCapMod(0.5f),
+    ConfigSpellSlowsWeakerOnBossesEnabled(true),
     ConfigSpellBardFearDiminishingReturnsEnabled(true),
     ConfigSpellBardFearDiminishingReturnsResetTimeInMS(15000),
     ConfigSpellNoSwingTimerResetForEQSpells(true),
@@ -277,6 +279,8 @@ bool EverQuestMod::LoadConfigurationSystemDataFromDB()
                 ConfigSystemClassAuraShamanDotExtendChancePercent = (uint32)atoi(value.c_str());
             else if (key == "ClassAuraShamanDotExtendInMS")
                 ConfigSystemClassAuraShamanDotExtendInMS = (uint32)atoi(value.c_str());
+            else if (key == "SlowBossEffectivenessMod")
+                ConfigSystemSlowBossEffectivenessMod = (float)atof(value.c_str());
             else if (key == "RaidBossRespawnVarianceInSec")
                 ConfigSystemRaidBossRespawnVarianceInSec = (uint32)atoi(value.c_str());
             else if (key == "RaidMiniBossRespawnVarianceInSec")
@@ -387,7 +391,9 @@ void EverQuestMod::LoadConfigurationFile()
     ConfigSpellMovementCastSnareEnabled = sConfigMgr->GetOption<bool>("EverQuest.Spells.MovementCastSnareEnabled", true);
     ConfigSpellMovementCastJumpCancelEnabled = sConfigMgr->GetOption<bool>("EverQuest.Spells.MovementCastJumpCancelEnabled", true);
     ConfigSpellClassAurasEnabled = sConfigMgr->GetOption<bool>("EverQuest.Spells.ClassAurasEnabled", true);
-    ConfigSpellHasteCapPercent = sConfigMgr->GetOption<float>("EverQuest.Spells.HasteCapPercent", 100.0f);
+    ConfigSpellHasteCapPercent = sConfigMgr->GetOption<float>("EverQuest.Spells.HasteCapPercent", 50.0f);
+    ConfigSpellHasteCapMod = sConfigMgr->GetOption<float>("EverQuest.Spells.HasteCapMod", 0.5f);
+    ConfigSpellSlowsWeakerOnBossesEnabled = sConfigMgr->GetOption<bool>("EverQuest.Spells.SlowsWeakerOnBossesEnabled", true);
     ConfigSpellBardFearDiminishingReturnsEnabled = sConfigMgr->GetOption<bool>("EverQuest.Spells.BardFearDiminishingReturnsEnabled", true);
     ConfigSpellBardFearDiminishingReturnsResetTimeInMS = sConfigMgr->GetOption<uint32>("EverQuest.Spells.BardFearDiminishingReturnsResetTimeInMS", 15000);
     ConfigSpellNoSwingTimerResetForEQSpells = sConfigMgr->GetOption<bool>("EverQuest.Spells.NoSwingTimerResetForEQSpells", true);
@@ -4572,16 +4578,19 @@ void EverQuestMod::EnforceEQHastePercentCapOnUnit(Unit* unit, vector<EverQuestUn
 
 float EverQuestMod::GetEQHasteCapPercentForUnit(Unit* unit)
 {
-    // Follows TAKP Client::GetHasteCap and NPC::GetHasteCap, with the config value taking the place of the 60+ player rule value
+    // Follows TAKP Client::GetHasteCap and NPC::GetHasteCap, with the config value taking the place of the 60+ player rule value.
+    // Every cap that comes out of the TAKP level rules gets scaled by the config mod, since those aren't directly configurable.
+    // ConfigSpellHasteCapPercent is already the finished 60+ player value, so it is deliberately left unscaled
+    float capMod = ConfigSpellHasteCapMod < 0.0f ? 0.0f : ConfigSpellHasteCapMod;
     if (unit->IsPlayer() == true)
     {
         uint8 level = unit->GetLevel();
         if (level > 59)
             return ConfigSpellHasteCapPercent < 0 ? 0 : ConfigSpellHasteCapPercent;
         else if (level > 50)
-            return 85;
+            return 85.0f * capMod;
         else
-            return (float)(level + 25);
+            return (float)(level + 25) * capMod;
     }
 
     // Non-charmed pets cap based on their and their owner's level, and all other creatures are effectively uncapped
@@ -4591,9 +4600,55 @@ float EverQuestMod::GetEQHasteCapPercentForUnit(Unit* unit)
         int capPercent = 110 + (int)unit->GetLevel();
         capPercent += std::max(0, (int)owner->GetLevel() - 39);
         capPercent += std::max(0, (int)owner->GetLevel() - 60);
-        return (float)capPercent;
+        return (float)capPercent * capMod;
     }
-    return 250;
+    return 250.0f * capMod;
+}
+
+void EverQuestMod::ApplyEQSlowBossReductionOnAuraApply(Unit* unit, Aura* aura)
+{
+    if (ConfigSpellSlowsWeakerOnBossesEnabled == false)
+        return;
+    if (unit == nullptr || aura == nullptr || aura->IsRemoved() == true || aura->GetType() != UNIT_AURA_TYPE)
+        return;
+
+    // Only EverQuest slows are adjusted here, but the boss test is the creature flag so WoW bosses (Ragnaros and friends) count too
+    uint32 spellID = aura->GetId();
+    if (spellID < ConfigSystemSpellDBCIDMin || spellID > ConfigSystemSpellDBCIDMax)
+        return;
+    if (IsSpellAnEQSpell(spellID) == false)
+        return;
+    Creature* creature = unit->ToCreature();
+    if (creature == nullptr || creature->isWorldBoss() == false)
+        return;
+
+    float effectivenessMod = ConfigSystemSlowBossEffectivenessMod;
+    if (effectivenessMod < 0.0f)
+        effectivenessMod = 0.0f;
+    if (effectivenessMod >= 1.0f)
+        return;
+
+    // Recalculating the natural amount keeps a buff refresh from stacking the reduction on top of an already reduced amount
+    Unit* caster = aura->GetCaster();
+    for (uint8 i = 0; i < MAX_SPELL_EFFECTS; ++i)
+    {
+        AuraEffect* auraEffect = aura->GetEffect(i);
+        if (auraEffect == nullptr)
+            continue;
+        AuraType auraType = auraEffect->GetAuraType();
+        if (auraType != SPELL_AURA_MOD_MELEE_HASTE && auraType != SPELL_AURA_MOD_RANGED_HASTE && auraType != SPELL_AURA_MOD_MELEE_RANGED_HASTE && auraType != SPELL_AURA_MELEE_SLOW)
+            continue;
+        int32 naturalAmount = auraEffect->CalculateAmount(caster);
+        if (naturalAmount >= 0)
+            continue;
+        int32 reducedAmount = (int32)std::lround((float)naturalAmount * effectivenessMod);
+
+        // Never let the reduction erase a slow completely, since the spell still reads as a slow on the tooltip
+        if (reducedAmount == 0)
+            reducedAmount = -1;
+        if (auraEffect->GetAmount() != reducedAmount)
+            auraEffect->ChangeAmount(reducedAmount);
+    }
 }
 
 uint32 EverQuestMod::GetEquippedShieldBaseArmorForPlayer(Player* player)

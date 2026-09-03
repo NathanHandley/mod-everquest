@@ -1371,6 +1371,7 @@ public:
     uint32 ConfigSystemClassAuraDruidImpairedTargetDamagePercent = 8;
     uint32 ConfigSystemClassAuraShamanDotExtendChancePercent = 33;
     uint32 ConfigSystemClassAuraShamanDotExtendInMS = 3000;
+    float ConfigSystemSlowBossEffectivenessMod = 0.5f;
     uint32 ConfigSystemRaidBossRespawnVarianceInSec;
     uint32 ConfigSystemRaidMiniBossRespawnVarianceInSec = 0;
     uint32 ConfigSystemCompleteHealExhaustionSpellID = 0;
@@ -1411,6 +1412,8 @@ public:
     bool ConfigSpellCrowdControlLevelRestrictionsEnabled;
     bool ConfigSpellHasteCapEnabled;
     float ConfigSpellHasteCapPercent;
+    float ConfigSpellHasteCapMod;
+    bool ConfigSpellSlowsWeakerOnBossesEnabled;
     bool ConfigSpellBardFearDiminishingReturnsEnabled;
     uint32 ConfigSpellBardFearDiminishingReturnsResetTimeInMS;
     bool ConfigSpellNoSwingTimerResetForEQSpells;
@@ -1729,6 +1732,7 @@ public:
     void UntrackEQHasteAurasAndEnforceCapOnAuraRemove(Unit* unit, Aura* aura);
     void EnforceEQHastePercentCapOnUnit(Unit* unit, vector<EverQuestUnitHasteAuraEffect>& trackedHasteAuraEffects);
     float GetEQHasteCapPercentForUnit(Unit* unit);
+    void ApplyEQSlowBossReductionOnAuraApply(Unit* unit, Aura* aura);
     uint32 GetEquippedShieldBaseArmorForPlayer(Player* player);
     void RefreshBearFormShieldArmorShiftForPlayer(Player* player);
     void ClearBearFormShieldArmorShiftForPlayer(ObjectGuid playerGUID);
