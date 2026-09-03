@@ -155,6 +155,21 @@ public:
         if (charmProtectedEffectMask != 0)
             targetInfo.effectMask = targetInfo.effectMask & (uint8)(~charmProtectedEffectMask);
 
+        // An EverQuest boss ignores interrupts, unless it is in the middle of a heal
+        uint8 bossInterruptProtectedEffectMask = EverQuest->GetBossInterruptProtectedEffectMaskForTarget(spellInfo, target);
+        if (bossInterruptProtectedEffectMask != 0)
+            targetInfo.effectMask = targetInfo.effectMask & (uint8)(~bossInterruptProtectedEffectMask);
+
+        // An EverQuest boss is never silenced
+        uint8 bossSilenceProtectedEffectMask = EverQuest->GetBossSilenceProtectedEffectMaskForTarget(spellInfo, target);
+        if (bossSilenceProtectedEffectMask != 0)
+            targetInfo.effectMask = targetInfo.effectMask & (uint8)(~bossSilenceProtectedEffectMask);
+
+        // A WoW stun is held to the same level rule the EverQuest stun spells already follow
+        uint8 creatureStunProtectedEffectMask = EverQuest->GetCreatureStunProtectedEffectMaskForTarget(spellInfo, target, spell->GetCaster());
+        if (creatureStunProtectedEffectMask != 0)
+            targetInfo.effectMask = targetInfo.effectMask & (uint8)(~creatureStunProtectedEffectMask);
+
         if (EverQuest->ShouldStripBashKickStunBeforeItLands(spellInfo->Id, target) == false)
             return;
 

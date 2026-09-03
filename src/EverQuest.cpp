@@ -114,6 +114,9 @@ EverQuestMod::EverQuestMod() :
     ConfigSpellHasteCapPercent(50.0f),
     ConfigSpellHasteCapMod(0.5f),
     ConfigSpellSlowsWeakerOnBossesEnabled(true),
+    ConfigSpellBossInterruptImmunityEnabled(true),
+    ConfigSpellBossSilenceImmunityEnabled(true),
+    ConfigSpellCreatureWoWStunImmunityEnabled(true),
     ConfigSpellBardFearDiminishingReturnsEnabled(true),
     ConfigSpellBardFearDiminishingReturnsResetTimeInMS(15000),
     ConfigSpellNoSwingTimerResetForEQSpells(true),
@@ -390,6 +393,9 @@ void EverQuestMod::LoadConfigurationFile()
     ConfigSpellHasteCapPercent = sConfigMgr->GetOption<float>("EverQuest.Spells.HasteCapPercent", 50.0f);
     ConfigSpellHasteCapMod = sConfigMgr->GetOption<float>("EverQuest.Spells.HasteCapMod", 0.5f);
     ConfigSpellSlowsWeakerOnBossesEnabled = sConfigMgr->GetOption<bool>("EverQuest.Spells.SlowsWeakerOnBossesEnabled", true);
+    ConfigSpellBossInterruptImmunityEnabled = sConfigMgr->GetOption<bool>("EverQuest.Spells.BossInterruptImmunityEnabled", true);
+    ConfigSpellBossSilenceImmunityEnabled = sConfigMgr->GetOption<bool>("EverQuest.Spells.BossSilenceImmunityEnabled", true);
+    ConfigSpellCreatureWoWStunImmunityEnabled = sConfigMgr->GetOption<bool>("EverQuest.Spells.CreatureWoWStunImmunityEnabled", true);
     ConfigSpellBardFearDiminishingReturnsEnabled = sConfigMgr->GetOption<bool>("EverQuest.Spells.BardFearDiminishingReturnsEnabled", true);
     ConfigSpellBardFearDiminishingReturnsResetTimeInMS = sConfigMgr->GetOption<uint32>("EverQuest.Spells.BardFearDiminishingReturnsResetTimeInMS", 15000);
     ConfigSpellNoSwingTimerResetForEQSpells = sConfigMgr->GetOption<bool>("EverQuest.Spells.NoSwingTimerResetForEQSpells", true);
@@ -4302,6 +4308,152 @@ uint8 EverQuestMod::GetCharmProtectedDispelEffectMaskForTarget(SpellInfo const* 
         }
     }
     return blockedEffectMask;
+}
+
+bool EverQuestMod::IsHealingSpell(SpellInfo const* spellInfo)
+{
+    if (spellInfo == nullptr)
+        return false;
+
+    bool hasHealEffect = false;
+    for (uint8 i = 0; i < MAX_SPELL_EFFECTS; ++i)
+    {
+        // Anything that also deals damage counts as an attack and never as a heal, which is what keeps EQ lifetaps out of this
+        uint32 effectType = spellInfo->Effects[i].Effect;
+        if (effectType == SPELL_EFFECT_SCHOOL_DAMAGE || effectType == SPELL_EFFECT_ENVIRONMENTAL_DAMAGE || effectType == SPELL_EFFECT_HEALTH_LEECH
+            || effectType == SPELL_EFFECT_WEAPON_DAMAGE || effectType == SPELL_EFFECT_WEAPON_DAMAGE_NOSCHOOL || effectType == SPELL_EFFECT_WEAPON_PERCENT_DAMAGE
+            || effectType == SPELL_EFFECT_NORMALIZED_WEAPON_DMG)
+            return false;
+        if (effectType == SPELL_EFFECT_HEAL || effectType == SPELL_EFFECT_HEAL_MAX_HEALTH || effectType == SPELL_EFFECT_HEAL_MECHANICAL
+            || effectType == SPELL_EFFECT_HEAL_PCT)
+        {
+            hasHealEffect = true;
+            continue;
+        }
+        if (spellInfo->Effects[i].IsAura() == false)
+            continue;
+        uint32 auraType = spellInfo->Effects[i].ApplyAuraName;
+        if (auraType == SPELL_AURA_PERIODIC_DAMAGE || auraType == SPELL_AURA_PERIODIC_DAMAGE_PERCENT || auraType == SPELL_AURA_PERIODIC_LEECH)
+            return false;
+        if (auraType == SPELL_AURA_PERIODIC_HEAL || auraType == SPELL_AURA_OBS_MOD_HEALTH || auraType == SPELL_AURA_PERIODIC_HEALTH_FUNNEL)
+            hasHealEffect = true;
+    }
+    return hasHealEffect;
+}
+
+bool EverQuestMod::IsUnitCastingHealingSpell(Unit* unit)
+{
+    if (unit == nullptr)
+        return false;
+
+    // Only the generic and channeled slots are checked, matching the slots the core interrupt effect can actually stop
+    for (uint32 i = CURRENT_FIRST_NON_MELEE_SPELL; i < CURRENT_AUTOREPEAT_SPELL; ++i)
+    {
+        Spell* currentSpell = unit->GetCurrentSpell(CurrentSpellTypes(i));
+        if (currentSpell == nullptr)
+            continue;
+        if (currentSpell->getState() != SPELL_STATE_CASTING && currentSpell->getState() != SPELL_STATE_PREPARING)
+            continue;
+        if (IsHealingSpell(currentSpell->GetSpellInfo()) == true)
+            return true;
+    }
+    return false;
+}
+
+bool EverQuestMod::IsEQBossTierCreature(Unit* unit)
+{
+    // Deliberately the EQ difficulty type and not the boss creature flag, so WoW encounters keep stock behavior
+    if (unit == nullptr)
+        return false;
+    Creature* creature = unit->ToCreature();
+    if (creature == nullptr)
+        return false;
+    if (HasCreatureDataForCreatureTemplateID(creature->GetEntry()) == false)
+        return false;
+    uint32 difficultyType = GetCreatureDataForCreatureTemplateID(creature->GetEntry()).DifficultyType;
+    return difficultyType == EQ_CREATURE_DIFFICULTY_RAIDBOSS || difficultyType == EQ_CREATURE_DIFFICULTY_RAIDMINIBOSS;
+}
+
+uint8 EverQuestMod::GetBossInterruptProtectedEffectMaskForTarget(SpellInfo const* spellInfo, Unit* target)
+{
+    if (ConfigSpellBossInterruptImmunityEnabled == false)
+        return 0;
+    if (spellInfo == nullptr || target == nullptr)
+        return 0;
+    if (IsEQBossTierCreature(target) == false)
+        return 0;
+
+    uint8 interruptEffectMask = 0;
+    for (uint8 i = 0; i < MAX_SPELL_EFFECTS; ++i)
+        if (spellInfo->Effects[i].Effect == SPELL_EFFECT_INTERRUPT_CAST)
+            interruptEffectMask |= (uint8)(1 << i);
+    if (interruptEffectMask == 0)
+        return 0;
+
+    // A heal is the one cast that can still be stopped, so a boss caught mid heal is interrupted normally
+    if (IsUnitCastingHealingSpell(target) == true)
+        return 0;
+
+    return interruptEffectMask;
+}
+
+uint8 EverQuestMod::GetBossSilenceProtectedEffectMaskForTarget(SpellInfo const* spellInfo, Unit* target)
+{
+    if (ConfigSpellBossSilenceImmunityEnabled == false)
+        return 0;
+    if (spellInfo == nullptr || target == nullptr)
+        return 0;
+    if (IsEQBossTierCreature(target) == false)
+        return 0;
+
+    // The mechanic catches the converted EQ silences (which are tagged Silenced) and the aura types catch everything else
+    uint8 silenceEffectMask = 0;
+    for (uint8 i = 0; i < MAX_SPELL_EFFECTS; ++i)
+    {
+        if (spellInfo->Effects[i].IsEffect() == false)
+            continue;
+        if (spellInfo->Effects[i].IsAura(SPELL_AURA_MOD_SILENCE) == true || spellInfo->Effects[i].IsAura(SPELL_AURA_MOD_PACIFY_SILENCE) == true
+            || spellInfo->Effects[i].Mechanic == MECHANIC_SILENCE)
+            silenceEffectMask |= (uint8)(1 << i);
+    }
+    return silenceEffectMask;
+}
+
+uint8 EverQuestMod::GetCreatureStunProtectedEffectMaskForTarget(SpellInfo const* spellInfo, Unit* target, Unit* caster)
+{
+    // An EverQuest creature the EQ stun rules already protect is protected from WoW stuns as well
+    if (ConfigSpellCreatureWoWStunImmunityEnabled == false)
+        return 0;
+    if (spellInfo == nullptr || target == nullptr)
+        return 0;
+    Creature* creature = target->ToCreature();
+    if (creature == nullptr)
+        return 0;
+    if (HasCreatureDataForCreatureTemplateID(creature->GetEntry()) == false)
+        return 0;
+
+    // Mirrors the caster side of IsSpellBlockedByMaxCreatureTargetLevel, so NPC and pet casts stay exempt like they are in TAKP
+    if (caster == nullptr || caster->IsPlayer() == false)
+        return 0;
+    if (caster->ToPlayer()->IsGameMaster() == true)
+        return 0;
+
+    // EQ stun spells carry their own per spell level cap, including the ones deliberately left uncapped, so they are left alone
+    if (spellInfo->Id >= ConfigSystemSpellDBCIDMin && spellInfo->Id <= ConfigSystemSpellDBCIDMax && IsSpellAnEQSpell(spellInfo->Id) == true)
+        return 0;
+
+    if (target->GetLevel() <= EQ_STUN_NPC_IMMUNE_ABOVE_LEVEL)
+        return 0;
+
+    uint8 stunEffectMask = 0;
+    for (uint8 i = 0; i < MAX_SPELL_EFFECTS; ++i)
+    {
+        if (spellInfo->Effects[i].IsEffect() == false)
+            continue;
+        if (spellInfo->Effects[i].IsAura(SPELL_AURA_MOD_STUN) == true || spellInfo->Effects[i].Mechanic == MECHANIC_STUN)
+            stunEffectMask |= (uint8)(1 << i);
+    }
+    return stunEffectMask;
 }
 
 bool EverQuestMod::ApplyBardSongFearDiminishingReturnsOnAuraApply(Unit* target, Aura* aura)

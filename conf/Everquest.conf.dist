@@ -260,12 +260,39 @@ EverQuest.Spells.CrowdControlLevelRestrictionsEnabled = True
 #		SPELL_SLOW_BOSS_EFFECTINESS_MOD) so that the spell tooltips match what actually lands
 #	Default: True (reduce effect on bosses)
 #
+# 	EverQuest.Spells.BossInterruptImmunityEnabled
+#		If true, spell interrupts (Kick, Counterspell, Pummel and anything else carrying the interrupt
+#		cast effect) do nothing to EverQuest raid bosses and raid mini bosses.  The one exception is a
+#		boss that is casting a healing spell, which can still be interrupted normally.  The rest of the
+#		interrupting spell still lands, so a Kick keeps doing its damage.  Only EQ creatures are
+#		covered, so WoW encounters built around interrupting are untouched
+#	Default: True (bosses ignore interrupts except while healing)
+#
+# 	EverQuest.Spells.BossSilenceImmunityEnabled
+#		If true, silence never lands on EverQuest raid bosses and raid mini bosses.  EQ defines stun and
+#		fear immunity per creature (special_abilities, which the converter turns into creature_immunities
+#		rows) but has no silence immunity at all, so this stands in for it as a blanket boss rule.  Both
+#		the converted EQ silences and WoW silences are covered.  Only EQ creatures are affected
+#	Default: True (bosses cannot be silenced)
+#
+# 	EverQuest.Spells.CreatureWoWStunImmunityEnabled
+#		If true, a WoW stun cast at any EverQuest creature above level 55 is dropped, which is the same
+#		level rule the EQ stun spells already follow through their per spell MaxCreatureTargetLevel cap
+#		(TAKP Spells:BaseImmunityLevel).  Without this a creature that no EQ stun can touch is still
+#		stunnable by Hammer of Justice, Kidney Shot and the like.  EQ spells are left alone here since
+#		they carry their own cap, including the ones deliberately left uncapped, and NPC / pet casters
+#		stay exempt exactly as they are for the EQ rule.  WoW creatures are not affected
+#	Default: True (WoW stuns follow the EQ stun level rule)
+#
 ###################################################################################################
 
 EverQuest.Spells.HasteCapEnabled = True
 EverQuest.Spells.HasteCapPercent = 50
 EverQuest.Spells.HasteCapMod = 0.5
 EverQuest.Spells.SlowsWeakerOnBossesEnabled = True
+EverQuest.Spells.BossInterruptImmunityEnabled = True
+EverQuest.Spells.BossSilenceImmunityEnabled = True
+EverQuest.Spells.CreatureWoWStunImmunityEnabled = True
 
 ###################################################################################################
 #

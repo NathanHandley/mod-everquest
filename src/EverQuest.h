@@ -87,6 +87,8 @@ struct BuildValuesCachePosPointers;
 #define EQ_BASHKICKSTUN_MIN_CHANCE                  2
 #define EQ_BASHKICKSTUN_NPC_IMMUNE_ABOVE_LEVEL      55
 
+#define EQ_STUN_NPC_IMMUNE_ABOVE_LEVEL              55 // TODO: Consider changing this for 61+ content
+
 // Pre-defined by the WoW core
 #define EQ_DAZE_SPELL_ID                            1604
 #define EQ_DEATHKNIGHT_DEATHGATE_SPELL_ID           50977
@@ -1412,6 +1414,9 @@ public:
     float ConfigSpellHasteCapPercent;
     float ConfigSpellHasteCapMod;
     bool ConfigSpellSlowsWeakerOnBossesEnabled;
+    bool ConfigSpellBossInterruptImmunityEnabled;
+    bool ConfigSpellBossSilenceImmunityEnabled;
+    bool ConfigSpellCreatureWoWStunImmunityEnabled;
     bool ConfigSpellBardFearDiminishingReturnsEnabled;
     uint32 ConfigSpellBardFearDiminishingReturnsResetTimeInMS;
     bool ConfigSpellNoSwingTimerResetForEQSpells;
@@ -1723,6 +1728,12 @@ public:
     bool IsSpellBlockedByMaxCreatureTargetLevel(uint32 spellID, Unit* target, Unit* caster);
     bool IsCreatureCharmBlockedByCharmLimits(uint32 spellID, Unit* target, Unit* caster);
     uint8 GetCharmProtectedDispelEffectMaskForTarget(SpellInfo const* spellInfo, Unit* target);
+    bool IsHealingSpell(SpellInfo const* spellInfo);
+    bool IsUnitCastingHealingSpell(Unit* unit);
+    bool IsEQBossTierCreature(Unit* unit);
+    uint8 GetBossInterruptProtectedEffectMaskForTarget(SpellInfo const* spellInfo, Unit* target);
+    uint8 GetBossSilenceProtectedEffectMaskForTarget(SpellInfo const* spellInfo, Unit* target);
+    uint8 GetCreatureStunProtectedEffectMaskForTarget(SpellInfo const* spellInfo, Unit* target, Unit* caster);
     bool ApplyBardSongFearDiminishingReturnsOnAuraApply(Unit* target, Aura* aura);
     void RemoveCreatureFearDiminishingReturnState(Creature* creature);
     uint64 GetHasteTrackingKeyForUnit(Unit* unit);
