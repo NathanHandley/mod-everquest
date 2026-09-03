@@ -138,6 +138,17 @@ public:
         // Don't remove already-equipped items during inventory load
         if (player->GetSession() != nullptr && player->GetSession()->PlayerLoading() == true)
             return true;
+
+        // Don't allow an apprentence learn from a spell scroll
+        uint8 mentorshipRealLevel = 0;
+        if (EverQuest->TryGetMentorshipRealLevelForPlayer(player, mentorshipRealLevel) == true && proto->RequiredLevel > mentorshipRealLevel)
+        {
+            result = EQUIP_ERR_CANT_EQUIP_LEVEL_I;
+            if (player->GetSession() != nullptr)
+                ChatHandler(player->GetSession()).PSendSysMessage("You cannot use that while tethered. Your own level is {}, and it needs level {}.", mentorshipRealLevel, proto->RequiredLevel);
+            return false;
+        }
+
         if (EverQuest->IsItemEQClassAllowedForPlayer(player, proto->ItemId) == true)
             return true;
 
