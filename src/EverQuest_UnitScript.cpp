@@ -206,6 +206,9 @@ public:
 
         EverQuest->TrackEQHasteAurasAndEnforceCapOnAuraApply(unit, aura);
 
+        // Raw attack power buffs do not add together, only the strongest one on the unit applies
+        EverQuest->TrackAttackPowerAurasAndEnforceHighestOnlyOnAuraApply(unit, aura);
+
         // Slows needs to be weaker on boss creatures
         EverQuest->ApplyEQSlowBossReductionOnAuraApply(unit, aura);
 
@@ -304,6 +307,7 @@ public:
         if (aurApp != nullptr && aurApp->GetBase() != nullptr)
         {
             EverQuest->UntrackEQHasteAurasAndEnforceCapOnAuraRemove(unit, aurApp->GetBase());
+            EverQuest->UntrackAttackPowerAurasAndEnforceHighestOnlyOnAuraRemove(unit, aurApp->GetBase());
 
             // The last slow from a Shaman class aura holder takes its burden mark with it
             EverQuest->HandleClassAuraSlowAuraRemove(unit, aurApp->GetBase());

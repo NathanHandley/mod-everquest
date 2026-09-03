@@ -113,6 +113,7 @@ EverQuestMod::EverQuestMod() :
     ConfigSpellHasteCapEnabled(true),
     ConfigSpellHasteCapPercent(50.0f),
     ConfigSpellHasteCapMod(0.5f),
+    ConfigSpellAttackPowerHighestOnlyEnabled(true),
     ConfigSpellSlowsWeakerOnBossesEnabled(true),
     ConfigSpellBossInterruptImmunityEnabled(true),
     ConfigSpellBossSilenceImmunityEnabled(true),
@@ -392,6 +393,7 @@ void EverQuestMod::LoadConfigurationFile()
     ConfigSpellClassAurasEnabled = sConfigMgr->GetOption<bool>("EverQuest.Spells.ClassAurasEnabled", true);
     ConfigSpellHasteCapPercent = sConfigMgr->GetOption<float>("EverQuest.Spells.HasteCapPercent", 50.0f);
     ConfigSpellHasteCapMod = sConfigMgr->GetOption<float>("EverQuest.Spells.HasteCapMod", 0.5f);
+    ConfigSpellAttackPowerHighestOnlyEnabled = sConfigMgr->GetOption<bool>("EverQuest.Spells.AttackPowerHighestOnlyEnabled", true);
     ConfigSpellSlowsWeakerOnBossesEnabled = sConfigMgr->GetOption<bool>("EverQuest.Spells.SlowsWeakerOnBossesEnabled", true);
     ConfigSpellBossInterruptImmunityEnabled = sConfigMgr->GetOption<bool>("EverQuest.Spells.BossInterruptImmunityEnabled", true);
     ConfigSpellBossSilenceImmunityEnabled = sConfigMgr->GetOption<bool>("EverQuest.Spells.BossSilenceImmunityEnabled", true);
@@ -4517,12 +4519,12 @@ void EverQuestMod::RemoveCreatureFearDiminishingReturnState(Creature* creature)
     creature->CustomData.Erase(EQ_CREATURE_CUSTOMDATA_FEARDIMINISH);
 }
 
-static const uint64 EQ_HASTE_TRACKING_KEY_PLAYERS = UINT64_MAX;
+static const uint64 EQ_AURA_EFFECT_TRACKING_KEY_PLAYERS = UINT64_MAX;
 
-uint64 EverQuestMod::GetHasteTrackingKeyForUnit(Unit* unit)
+uint64 EverQuestMod::GetAuraEffectTrackingKeyForUnit(Unit* unit)
 {
     if (unit->IsPlayer() == true)
-        return EQ_HASTE_TRACKING_KEY_PLAYERS;
+        return EQ_AURA_EFFECT_TRACKING_KEY_PLAYERS;
     return GetMapInstanceKey(unit->GetMap());
 }
 
@@ -4561,7 +4563,7 @@ void EverQuestMod::TrackEQHasteAurasAndEnforceCapOnAuraApply(Unit* unit, Aura* a
     vector<EverQuestUnitHasteAuraEffect>* trackedHasteAuraEffects = nullptr;
     {
         std::lock_guard<std::mutex> lock(RuntimeStateMutex);
-        trackedHasteAuraEffects = &EQHasteAuraEffectsByMapInstanceKeyThenUnitGUID[GetHasteTrackingKeyForUnit(unit)][unit->GetGUID()];
+        trackedHasteAuraEffects = &EQHasteAuraEffectsByMapInstanceKeyThenUnitGUID[GetAuraEffectTrackingKeyForUnit(unit)][unit->GetGUID()];
     }
 
     // EQ haste category comes from the spell row, falling back to worn-spell lookup then the spell/song for safety
@@ -4619,7 +4621,7 @@ void EverQuestMod::UntrackEQHasteAurasAndEnforceCapOnAuraRemove(Unit* unit, Aura
     vector<EverQuestUnitHasteAuraEffect>* trackedHasteAuraEffects = nullptr;
     {
         std::lock_guard<std::mutex> lock(RuntimeStateMutex);
-        auto trackedMapIter = EQHasteAuraEffectsByMapInstanceKeyThenUnitGUID.find(GetHasteTrackingKeyForUnit(unit));
+        auto trackedMapIter = EQHasteAuraEffectsByMapInstanceKeyThenUnitGUID.find(GetAuraEffectTrackingKeyForUnit(unit));
         if (trackedMapIter == EQHasteAuraEffectsByMapInstanceKeyThenUnitGUID.end())
             return;
         auto trackedIter = trackedMapIter->second.find(unit->GetGUID());
@@ -4645,7 +4647,7 @@ void EverQuestMod::UntrackEQHasteAurasAndEnforceCapOnAuraRemove(Unit* unit, Aura
     if (trackedHasteAuraEffects->empty() == true)
     {
         std::lock_guard<std::mutex> lock(RuntimeStateMutex);
-        auto trackedMapIter = EQHasteAuraEffectsByMapInstanceKeyThenUnitGUID.find(GetHasteTrackingKeyForUnit(unit));
+        auto trackedMapIter = EQHasteAuraEffectsByMapInstanceKeyThenUnitGUID.find(GetAuraEffectTrackingKeyForUnit(unit));
         if (trackedMapIter != EQHasteAuraEffectsByMapInstanceKeyThenUnitGUID.end())
         {
             trackedMapIter->second.erase(unit->GetGUID());
@@ -4751,6 +4753,206 @@ float EverQuestMod::GetEQHasteCapPercentForUnit(Unit* unit)
         return (float)capPercent * capMod;
     }
     return 250.0f * capMod;
+}
+
+bool EverQuestMod::DoesAuraHaveAttackPowerEffect(Aura* aura)
+{
+    SpellInfo const* spellInfo = aura->GetSpellInfo();
+    if (spellInfo == nullptr)
+        return false;
+    return spellInfo->HasAura(SPELL_AURA_MOD_ATTACK_POWER) == true || spellInfo->HasAura(SPELL_AURA_MOD_RANGED_ATTACK_POWER) == true;
+}
+
+bool EverQuestMod::IsHighestOnlyAttackPowerSpell(uint32 spellID)
+{
+    SpellInfo const* spellInfo = sSpellMgr->GetSpellInfo(spellID);
+    if (spellInfo == nullptr)
+        return false;
+
+    // The stock WOW flat attack power buffs (Battle Shout, Blessing of Might) and reductions (Demoralizing Shout, Curse of Weakness) already refuse to stack within their own
+    // kind through spell groups 1004 and 1062, so they take part here too and the EQ spells join those same pools instead of adding on top of them
+    SpellInfo const* firstRankSpellInfo = spellInfo->GetFirstRankSpell();
+    uint32 firstRankSpellID = firstRankSpellInfo != nullptr ? firstRankSpellInfo->Id : spellID;
+    if (sSpellMgr->IsSpellMemberOfSpellGroup(firstRankSpellID, SpellGroup(EQ_WOW_FLAT_ATTACK_POWER_BUFF_SPELL_GROUP_ID)) == true)
+        return true;
+    if (sSpellMgr->IsSpellMemberOfSpellGroup(firstRankSpellID, SpellGroup(EQ_WOW_FLAT_ATTACK_POWER_DEBUFF_SPELL_GROUP_ID)) == true)
+        return true;
+
+    // Everything else has to be a converted EverQuest spell
+    if (spellID < ConfigSystemSpellDBCIDMin || spellID > ConfigSystemSpellDBCIDMax)
+        return false;
+
+    // Worn item effects are their own additive bucket in EverQuest and stack with spell attack power, and passives (the class auras) are not buffs a player stacked on themselves
+    if (IsWornEffectSpell(spellID) == true)
+        return false;
+    if (spellInfo->IsPassive() == true)
+        return false;
+    return true;
+}
+
+void EverQuestMod::TrackAttackPowerAurasAndEnforceHighestOnlyOnAuraApply(Unit* unit, Aura* aura)
+{
+    if (ConfigSpellAttackPowerHighestOnlyEnabled == false)
+        return;
+    if (DoesAuraHaveAttackPowerEffect(aura) == false)
+        return;
+    uint32 spellID = aura->GetId();
+    if (IsHighestOnlyAttackPowerSpell(spellID) == false)
+        return;
+
+    // Capture the natural (unclamped) amounts.  Buff refreshes reset effect amounts to their recalculated natural values before this/ hook fires, so the current amount is the natural amount
+    // except for an effect that was already clamped to zero when the character was saved, which comes back clamped and has to be recovered from the spell data
+    Unit* caster = aura->GetCaster();
+    EverQuestUnitAttackPowerAuraEffect newAttackPowerAuraEffects[MAX_SPELL_EFFECTS];
+    uint8 newAttackPowerAuraEffectCount = 0;
+    for (uint8 i = 0; i < MAX_SPELL_EFFECTS; ++i)
+    {
+        AuraEffect* auraEffect = aura->GetEffect(i);
+        if (auraEffect == nullptr)
+            continue;
+        AuraType auraType = auraEffect->GetAuraType();
+        if (auraType != SPELL_AURA_MOD_ATTACK_POWER && auraType != SPELL_AURA_MOD_RANGED_ATTACK_POWER)
+            continue;
+
+        int32 naturalAmount = auraEffect->GetAmount();
+        if (naturalAmount == 0)
+        {
+            int32 baseAmount = auraEffect->GetBaseAmount();
+            naturalAmount = aura->GetSpellInfo()->Effects[i].CalcValue(caster, &baseAmount);
+        }
+        if (naturalAmount == 0)
+            continue;
+
+        newAttackPowerAuraEffects[newAttackPowerAuraEffectCount].SpellID = spellID;
+        newAttackPowerAuraEffects[newAttackPowerAuraEffectCount].CasterGUID = aura->GetCasterGUID();
+        newAttackPowerAuraEffects[newAttackPowerAuraEffectCount].EffectIndex = i;
+        newAttackPowerAuraEffects[newAttackPowerAuraEffectCount].AuraType = (uint32)auraType;
+        newAttackPowerAuraEffects[newAttackPowerAuraEffectCount].NaturalAmount = naturalAmount;
+        ++newAttackPowerAuraEffectCount;
+    }
+    if (newAttackPowerAuraEffectCount == 0)
+        return;
+
+    // Only the lookup needs the lock (the vector itself is only touched by the unit's own map thread)
+    vector<EverQuestUnitAttackPowerAuraEffect>* trackedAttackPowerAuraEffects = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+        trackedAttackPowerAuraEffects = &EQAttackPowerAuraEffectsByMapInstanceKeyThenUnitGUID[GetAuraEffectTrackingKeyForUnit(unit)][unit->GetGUID()];
+    }
+
+    for (uint8 i = 0; i < newAttackPowerAuraEffectCount; ++i)
+    {
+        EverQuestUnitAttackPowerAuraEffect& newAttackPowerAuraEffect = newAttackPowerAuraEffects[i];
+        bool foundExisting = false;
+        for (EverQuestUnitAttackPowerAuraEffect& trackedAttackPowerAuraEffect : *trackedAttackPowerAuraEffects)
+        {
+            if (trackedAttackPowerAuraEffect.SpellID == newAttackPowerAuraEffect.SpellID && trackedAttackPowerAuraEffect.CasterGUID == newAttackPowerAuraEffect.CasterGUID
+                && trackedAttackPowerAuraEffect.EffectIndex == newAttackPowerAuraEffect.EffectIndex)
+            {
+                trackedAttackPowerAuraEffect.NaturalAmount = newAttackPowerAuraEffect.NaturalAmount;
+                foundExisting = true;
+                break;
+            }
+        }
+        if (foundExisting == false)
+            trackedAttackPowerAuraEffects->push_back(newAttackPowerAuraEffect);
+    }
+
+    EnforceHighestOnlyAttackPowerOnUnit(unit, *trackedAttackPowerAuraEffects);
+}
+
+void EverQuestMod::UntrackAttackPowerAurasAndEnforceHighestOnlyOnAuraRemove(Unit* unit, Aura* aura)
+{
+    if (ConfigSpellAttackPowerHighestOnlyEnabled == false)
+        return;
+    if (DoesAuraHaveAttackPowerEffect(aura) == false)
+        return;
+    uint32 spellID = aura->GetId();
+
+    // Only the lookup needs the lock (the vector itself is only touched by the unit's own map thread)
+    vector<EverQuestUnitAttackPowerAuraEffect>* trackedAttackPowerAuraEffects = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+        auto trackedMapIter = EQAttackPowerAuraEffectsByMapInstanceKeyThenUnitGUID.find(GetAuraEffectTrackingKeyForUnit(unit));
+        if (trackedMapIter == EQAttackPowerAuraEffectsByMapInstanceKeyThenUnitGUID.end())
+            return;
+        auto trackedIter = trackedMapIter->second.find(unit->GetGUID());
+        if (trackedIter == trackedMapIter->second.end())
+            return;
+        trackedAttackPowerAuraEffects = &trackedIter->second;
+    }
+
+    bool removedAny = false;
+    for (vector<EverQuestUnitAttackPowerAuraEffect>::iterator effectIter = trackedAttackPowerAuraEffects->begin(); effectIter != trackedAttackPowerAuraEffects->end();)
+    {
+        if (effectIter->SpellID == spellID && effectIter->CasterGUID == aura->GetCasterGUID())
+        {
+            effectIter = trackedAttackPowerAuraEffects->erase(effectIter);
+            removedAny = true;
+        }
+        else
+            ++effectIter;
+    }
+    if (removedAny == false)
+        return;
+
+    if (trackedAttackPowerAuraEffects->empty() == true)
+    {
+        std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+        auto trackedMapIter = EQAttackPowerAuraEffectsByMapInstanceKeyThenUnitGUID.find(GetAuraEffectTrackingKeyForUnit(unit));
+        if (trackedMapIter != EQAttackPowerAuraEffectsByMapInstanceKeyThenUnitGUID.end())
+        {
+            trackedMapIter->second.erase(unit->GetGUID());
+            if (trackedMapIter->second.empty())
+                EQAttackPowerAuraEffectsByMapInstanceKeyThenUnitGUID.erase(trackedMapIter);
+        }
+        return;
+    }
+
+    EnforceHighestOnlyAttackPowerOnUnit(unit, *trackedAttackPowerAuraEffects);
+}
+
+void EverQuestMod::EnforceHighestOnlyAttackPowerOnUnit(Unit* unit, vector<EverQuestUnitAttackPowerAuraEffect>& trackedAttackPowerAuraEffects)
+{
+    // Raw attack power gains never add together in EverQuest, and neither do raw attack power reductions, so only the strongest of each applies
+    uint32 auraTypesToProcess[2] = { SPELL_AURA_MOD_ATTACK_POWER, SPELL_AURA_MOD_RANGED_ATTACK_POWER };
+    for (uint32 auraType : auraTypesToProcess)
+    {
+        int gainWinnerIndex = -1;
+        int reductionWinnerIndex = -1;
+        for (size_t i = 0; i < trackedAttackPowerAuraEffects.size(); ++i)
+        {
+            EverQuestUnitAttackPowerAuraEffect& trackedAttackPowerAuraEffect = trackedAttackPowerAuraEffects[i];
+            if (trackedAttackPowerAuraEffect.AuraType != auraType)
+                continue;
+            if (unit->GetAuraEffect(trackedAttackPowerAuraEffect.SpellID, trackedAttackPowerAuraEffect.EffectIndex, trackedAttackPowerAuraEffect.CasterGUID) == nullptr)
+                continue;
+            if (trackedAttackPowerAuraEffect.NaturalAmount > 0)
+            {
+                if (gainWinnerIndex == -1 || trackedAttackPowerAuraEffect.NaturalAmount > trackedAttackPowerAuraEffects[gainWinnerIndex].NaturalAmount)
+                    gainWinnerIndex = (int)i;
+            }
+            else if (trackedAttackPowerAuraEffect.NaturalAmount < 0)
+            {
+                if (reductionWinnerIndex == -1 || trackedAttackPowerAuraEffect.NaturalAmount < trackedAttackPowerAuraEffects[reductionWinnerIndex].NaturalAmount)
+                    reductionWinnerIndex = (int)i;
+            }
+        }
+
+        for (size_t i = 0; i < trackedAttackPowerAuraEffects.size(); ++i)
+        {
+            EverQuestUnitAttackPowerAuraEffect& trackedAttackPowerAuraEffect = trackedAttackPowerAuraEffects[i];
+            if (trackedAttackPowerAuraEffect.AuraType != auraType)
+                continue;
+            AuraEffect* auraEffect = unit->GetAuraEffect(trackedAttackPowerAuraEffect.SpellID, trackedAttackPowerAuraEffect.EffectIndex, trackedAttackPowerAuraEffect.CasterGUID);
+            if (auraEffect == nullptr)
+                continue;
+            bool isWinner = gainWinnerIndex == (int)i || reductionWinnerIndex == (int)i;
+            int32 newAmount = isWinner == true ? trackedAttackPowerAuraEffect.NaturalAmount : 0;
+            if (auraEffect->GetAmount() != newAmount)
+                auraEffect->ChangeAmount(newAmount);
+        }
+    }
 }
 
 void EverQuestMod::ApplyEQSlowBossReductionOnAuraApply(Unit* unit, Aura* aura)
@@ -10613,6 +10815,7 @@ void EverQuestMod::ClearPerMapRuntimeStateForMap(Map* map)
         VisualEquippedItemsByMapInstanceKeyThenCreatureGUID.erase(mapInstanceKey);
         CreaturesResolvingEQMeleeExtraAttacksByMapInstanceKey.erase(mapInstanceKey);
         EQHasteAuraEffectsByMapInstanceKeyThenUnitGUID.erase(mapInstanceKey);
+        EQAttackPowerAuraEffectsByMapInstanceKeyThenUnitGUID.erase(mapInstanceKey);
         if (strandedCreatureCount > 0)
             LOG_ERROR("module.EverQuest", "EverQuestMod::ClearPerMapRuntimeStateForMap dropped {} creature(s) still tracked on map {} instance {} at destruction, which means OnCreatureRemoveWorld did not fire for them", strandedCreatureCount, map->GetId(), map->GetInstanceId());
     }

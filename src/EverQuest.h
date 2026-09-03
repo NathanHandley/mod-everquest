@@ -191,6 +191,9 @@ struct BuildValuesCachePosPointers;
 #define EQ_HASTE_TYPE_SPELL_V1                      2
 #define EQ_HASTE_TYPE_SPELL_V2                      3
 
+#define EQ_WOW_FLAT_ATTACK_POWER_BUFF_SPELL_GROUP_ID    1004 // WOW's stock "Flat AP Buffs" group (Battle Shout, Blessing of Might)
+#define EQ_WOW_FLAT_ATTACK_POWER_DEBUFF_SPELL_GROUP_ID  1062 // WOW's stock "AP Debuffs" group (Demoralizing Shout/Roar, Vindication, Curse of Weakness)
+
 #define EQ_PET_NAMING_TYPE_PET                      0
 #define EQ_PET_NAMING_TYPE_FAMILIAR                 1
 #define EQ_PET_NAMING_TYPE_WARDER                   2
@@ -1306,6 +1309,15 @@ struct EverQuestUnitHasteAuraEffect
     uint32 HasteType;
 };
 
+struct EverQuestUnitAttackPowerAuraEffect
+{
+    uint32 SpellID;
+    ObjectGuid CasterGUID;
+    uint8 EffectIndex;
+    uint32 AuraType;
+    int32 NaturalAmount;    // The amount the effect would apply if it were the strongest one of its direction on the unit
+};
+
 class EverQuestClassMap
 {
 public:
@@ -1429,6 +1441,7 @@ public:
     bool ConfigSpellHasteCapEnabled;
     float ConfigSpellHasteCapPercent;
     float ConfigSpellHasteCapMod;
+    bool ConfigSpellAttackPowerHighestOnlyEnabled;
     bool ConfigSpellSlowsWeakerOnBossesEnabled;
     bool ConfigSpellBossInterruptImmunityEnabled;
     bool ConfigSpellBossSilenceImmunityEnabled;
@@ -1584,6 +1597,7 @@ public:
     unordered_map<ObjectGuid, EverQuestMentorshipRequest> MentorshipRequestsByTargetGUID;
     std::atomic<uint32> MentorshipStateCount{ 0 };
     unordered_map<uint64, unordered_map<ObjectGuid, vector<EverQuestUnitHasteAuraEffect>>> EQHasteAuraEffectsByMapInstanceKeyThenUnitGUID; // Map-instance keyed since creature GUIDs repeat across instance copies of a map
+    unordered_map<uint64, unordered_map<ObjectGuid, vector<EverQuestUnitAttackPowerAuraEffect>>> EQAttackPowerAuraEffectsByMapInstanceKeyThenUnitGUID; // Map-instance keyed since creature GUIDs repeat across instance copies of a map
     unordered_map<ObjectGuid, uint32> BearFormArmorShiftAmountByPlayerGUID; // Shield, mail and plate armor moved out of the form-multiplied base value
     unordered_map<uint32, vector<EverQuestCreatureLootGroup>> CreatureLootGroupsByCreatureTemplateID;
     unordered_map<uint64, unordered_map<ObjectGuid, vector<uint32>>> PreloadedLootItemIDsByMapInstanceKeyThenCreatureGUID; // Map-instance keyed since creature GUIDs repeat across instance copies of a map
@@ -1754,11 +1768,16 @@ public:
     uint8 GetCreatureStunProtectedEffectMaskForTarget(SpellInfo const* spellInfo, Unit* target, Unit* caster);
     bool ApplyBardSongFearDiminishingReturnsOnAuraApply(Unit* target, Aura* aura);
     void RemoveCreatureFearDiminishingReturnState(Creature* creature);
-    uint64 GetHasteTrackingKeyForUnit(Unit* unit);
+    uint64 GetAuraEffectTrackingKeyForUnit(Unit* unit);
     void TrackEQHasteAurasAndEnforceCapOnAuraApply(Unit* unit, Aura* aura);
     void UntrackEQHasteAurasAndEnforceCapOnAuraRemove(Unit* unit, Aura* aura);
     void EnforceEQHastePercentCapOnUnit(Unit* unit, vector<EverQuestUnitHasteAuraEffect>& trackedHasteAuraEffects);
     float GetEQHasteCapPercentForUnit(Unit* unit);
+    bool DoesAuraHaveAttackPowerEffect(Aura* aura);
+    bool IsHighestOnlyAttackPowerSpell(uint32 spellID);
+    void TrackAttackPowerAurasAndEnforceHighestOnlyOnAuraApply(Unit* unit, Aura* aura);
+    void UntrackAttackPowerAurasAndEnforceHighestOnlyOnAuraRemove(Unit* unit, Aura* aura);
+    void EnforceHighestOnlyAttackPowerOnUnit(Unit* unit, vector<EverQuestUnitAttackPowerAuraEffect>& trackedAttackPowerAuraEffects);
     void ApplyEQSlowBossReductionOnAuraApply(Unit* unit, Aura* aura);
     bool IsItemArmorExcludedFromBearFormMultiplier(ItemTemplate const* itemTemplate);
     uint32 GetEquippedItemBaseArmorExcludedFromBearFormMultiplier(Item* item);

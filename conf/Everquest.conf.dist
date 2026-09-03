@@ -253,6 +253,18 @@ EverQuest.Spells.CrowdControlLevelRestrictionsEnabled = True
 #		unmodified TAKP caps
 #	Default: 0.5
 #
+# 	EverQuest.Spells.AttackPowerHighestOnlyEnabled
+#		If true, raw attack power buffs never add together and neither do raw attack power reductions -
+#		only the strongest of each applies to a unit, the same way EverQuest treats its ATK spells.  The
+#		weaker ones still land and stay visible (so everything else they do keeps working), they just
+#		contribute no attack power until the stronger one falls off.  Gains and reductions are separate
+#		pools, so the best buff and the best debuff are both live at once.  WoW's own flat attack power
+#		spells take part as well (spell groups "Flat AP Buffs" - Battle Shout, Blessing of Might - and
+#		"AP Debuffs" - Demoralizing Shout/Roar, Vindication, Curse of Weakness), so an EverQuest spell
+#		will not stack on top of those either.  Worn item effects are exempt, since EverQuest keeps item
+#		ATK in its own additive bucket
+#	Default: True (use EverQuest behavior)
+#
 # 	EverQuest.Spells.SlowsWeakerOnBossesEnabled
 #		If true, EverQuest attack speed slows land at reduced strength on creatures flagged as bosses
 #		(CREATURE_TYPE_FLAG_BOSS_MOB), which covers both EQ raid bosses / mini bosses and WoW bosses
@@ -289,6 +301,7 @@ EverQuest.Spells.CrowdControlLevelRestrictionsEnabled = True
 EverQuest.Spells.HasteCapEnabled = True
 EverQuest.Spells.HasteCapPercent = 50
 EverQuest.Spells.HasteCapMod = 0.5
+EverQuest.Spells.AttackPowerHighestOnlyEnabled = True
 EverQuest.Spells.SlowsWeakerOnBossesEnabled = True
 EverQuest.Spells.BossInterruptImmunityEnabled = True
 EverQuest.Spells.BossSilenceImmunityEnabled = True
