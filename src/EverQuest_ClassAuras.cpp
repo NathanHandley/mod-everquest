@@ -40,7 +40,7 @@ static const char* EQ_CLASSAURA_SPELL_TYPE_NAMES[EQ_CLASSAURA_SPELL_TYPE_COUNT] 
     "EnchanterPassive", "EnchanterAura", "EnchanterFocus",
     "BardPassive", "BardAura", "BardInstrument",
     "MonkPassive", "MonkAura", "MonkLightArmor", "MonkHeavyArmor",
-    "RangerPassive", "RangerAura", "RangerSpeed", "RangerRicochet",
+    "RangerPassive", "RangerAura", "RangerSpeed", "RangerTackShot",
     "RoguePassive", "RogueAura", "RogueExploit",
     "PaladinPassive", "PaladinAura", "PaladinHeal",
     "ShadowKnightPassive", "ShadowKnightAura", "ShadowKnightEdge",
@@ -447,6 +447,12 @@ void EverQuestMod::ApplyClassAuraMeleeDamageMods(Unit* attacker, Unit* victim, u
         return;
     if (attacker == nullptr || victim == nullptr || damage == 0)
         return;
+
+    // Ranger
+    int32 tackShotDamage = (int32)damage;
+    ApplyClassAuraTackShotDamageBonus(attacker, victim, tackShotDamage);
+    damage = (uint32)tackShotDamage;
+
     if (attacker->IsPlayer() == false)
         return;
     Player* player = attacker->ToPlayer();
@@ -479,12 +485,43 @@ static bool HasPeriodicDamageFromCaster(Unit* target, ObjectGuid casterGUID)
     return false;
 }
 
+void EverQuestMod::ApplyClassAuraTackShotDamageBonus(Unit* attacker, Unit* victim, int32& damage)
+{
+    if (attacker == nullptr || victim == nullptr || damage <= 0)
+        return;
+    uint32 tackShotSpellID = GetClassAuraSpellID(EQ_CLASSAURA_SPELL_RANGER_TACK_SHOT);
+    if (tackShotSpellID == 0)
+        return;
+    if (victim->HasAura(tackShotSpellID) == false)
+        return;
+    Player* ranger = attacker->GetCharmerOrOwnerPlayerOrPlayerItself();
+    if (ranger == nullptr)
+        return;
+    if (ranger != attacker && (ranger->FindMap() == nullptr || ranger->FindMap() != attacker->FindMap()))
+        return;
+    if (PlayerHasClassAura(ranger, EQ_CLASSAURA_SPELL_RANGER_AURA) == false)
+        return;
+    Aura* mark = victim->GetAura(tackShotSpellID, ranger->GetGUID());
+    if (mark == nullptr)
+        return;
+    int32 bonusPercent = (int32)ConfigSystemClassAuraRangerTackShotDamagePercentPerStack * (int32)mark->GetStackAmount();
+    if (victim->isMoving() == true)
+        bonusPercent *= 2;
+    if (bonusPercent <= 0)
+        return;
+    damage += (damage * bonusPercent) / 100;
+}
+
 void EverQuestMod::ApplyClassAuraDirectSpellDamageMods(Unit* target, Unit* attacker, int32& damage, SpellInfo const* spellInfo)
 {
     if (IsClassAuraSystemEnabled() == false)
         return;
     if (target == nullptr || attacker == nullptr || spellInfo == nullptr || damage <= 0)
         return;
+
+    // Rangers and their pets alike
+    ApplyClassAuraTackShotDamageBonus(attacker, target, damage);
+
     if (attacker->IsPlayer() == false)
         return;
     Player* player = attacker->ToPlayer();
@@ -504,56 +541,6 @@ void EverQuestMod::ApplyClassAuraDirectSpellDamageMods(Unit* target, Unit* attac
         if (isImpaired == true)
             damage += (damage * (int32)ConfigSystemClassAuraDruidImpairedTargetDamagePercent) / 100;
     }
-
-    if (spellInfo->Id == EQ_SPELL_ID_AUTO_SHOT && PlayerHasClassAura(player, EQ_CLASSAURA_SPELL_RANGER_AURA) == true)
-        TryRangerRicochet(player, target, damage);
-}
-
-void EverQuestMod::TryRangerRicochet(Player* attacker, Unit* target, int32 damage)
-{
-    uint32 ricochetSpellID = GetClassAuraSpellID(EQ_CLASSAURA_SPELL_RANGER_RICOCHET);
-    if (ricochetSpellID == 0 || damage <= 0)
-        return;
-    if (roll_chance_i((int32)ConfigSystemClassAuraRangerRicochetChancePercent) == false)
-        return;
-    float range = ConfigSystemClassAuraRangerRicochetRange;
-    if (range <= 0.0f)
-        return;
-    SpellInfo const* ricochetSpellInfo = sSpellMgr->GetSpellInfo(ricochetSpellID);
-    if (ricochetSpellInfo == nullptr)
-        return;
-
-    std::list<Unit*> nearbyUnits;
-    Acore::AnyUnfriendlyUnitInObjectRangeCheck check(target, attacker, range);
-    Acore::UnitListSearcher<Acore::AnyUnfriendlyUnitInObjectRangeCheck> searcher(target, nearbyUnits, check);
-    Cell::VisitObjects(target, searcher, range);
-
-    std::vector<Unit*> candidates;
-    for (Unit* nearbyUnit : nearbyUnits)
-    {
-        if (nearbyUnit == nullptr || nearbyUnit == target || nearbyUnit == attacker)
-            continue;
-        if (nearbyUnit->IsAlive() == false || nearbyUnit->IsInCombat() == false)
-            continue;
-        if (attacker->IsValidAttackTarget(nearbyUnit) == false || nearbyUnit->IsImmunedToDamage(SPELL_SCHOOL_MASK_NORMAL) == true)
-            continue;
-        if (nearbyUnit->IsCreature() == true && nearbyUnit->ToCreature()->IsEvadingAttacks() == true)
-            continue;
-        if (nearbyUnit->HasBreakableByDamageCrowdControlAura() == true || nearbyUnit->HasAuraType(SPELL_AURA_MOD_STUN) == true
-            || nearbyUnit->HasAuraType(SPELL_AURA_MOD_CONFUSE) == true || nearbyUnit->HasAuraType(SPELL_AURA_MOD_FEAR) == true)
-            continue;
-        if (attacker->IsWithinLOSInMap(nearbyUnit) == false)
-            continue;
-        candidates.push_back(nearbyUnit);
-    }
-    if (candidates.empty() == true)
-        return;
-    Unit* ricochetTarget = candidates[urand(0, (uint32)candidates.size() - 1)];
-
-    SpellNonMeleeDamage ricochetDamage(attacker, ricochetTarget, ricochetSpellInfo, SPELL_SCHOOL_MASK_NORMAL);
-    ricochetDamage.damage = (uint32)damage;
-    attacker->SendSpellNonMeleeDamageLog(&ricochetDamage);
-    attacker->DealSpellDamage(&ricochetDamage, true);
 }
 
 void EverQuestMod::ApplyClassAuraPeriodicTickMods(Unit* target, Unit* attacker, uint32& amount, SpellInfo const* spellInfo)
@@ -562,14 +549,21 @@ void EverQuestMod::ApplyClassAuraPeriodicTickMods(Unit* target, Unit* attacker, 
         return;
     if (attacker == nullptr || spellInfo == nullptr || amount == 0)
         return;
-    if (attacker->IsPlayer() == false)
-        return;
-    Player* player = attacker->ToPlayer();
 
+    // This hook also fires for heal ticks, which the bonuses below must never touch
     bool isHealTick = spellInfo->HasAura(SPELL_AURA_PERIODIC_HEAL) == true && spellInfo->HasAura(SPELL_AURA_PERIODIC_DAMAGE) == false
         && spellInfo->HasAura(SPELL_AURA_PERIODIC_LEECH) == false && spellInfo->HasAura(SPELL_AURA_PERIODIC_DAMAGE_PERCENT) == false;
     if (isHealTick == true)
         return;
+
+    // Ranger
+    int32 tackShotAmount = (int32)amount;
+    ApplyClassAuraTackShotDamageBonus(attacker, target, tackShotAmount);
+    amount = (uint32)tackShotAmount;
+
+    if (attacker->IsPlayer() == false)
+        return;
+    Player* player = attacker->ToPlayer();
 
     uint32 markSpellID = GetClassAuraSpellID(EQ_CLASSAURA_SPELL_NECROMANCER_MARK);
     if (markSpellID != 0 && target != nullptr && PlayerHasClassAura(player, EQ_CLASSAURA_SPELL_NECROMANCER_AURA) == true)
@@ -676,37 +670,6 @@ void EverQuestMod::HandleClassAuraSlowAuraApply(Unit* target, Aura* aura)
             mark->SetMaxDuration(durationInMS);
         mark->SetDuration(durationInMS);
         mark->SetNeedClientUpdateForTargets();
-    }
-}
-
-void EverQuestMod::ApplyClassAuraDamageShieldAmountOnAuraApply(Unit* target, Aura* aura)
-{
-    if (IsClassAuraSystemEnabled() == false)
-        return;
-    if (target == nullptr || aura == nullptr || aura->IsRemoved() == true || aura->GetType() != UNIT_AURA_TYPE)
-        return;
-    SpellInfo const* spellInfo = aura->GetSpellInfo();
-    if (spellInfo == nullptr || spellInfo->HasAura(SPELL_AURA_DAMAGE_SHIELD) == false)
-        return;
-    if (IsClassAuraSpell(aura->GetId()) == true)
-        return;
-    int32 percent = (int32)ConfigSystemClassAuraDruidDamageShieldPercent;
-    if (percent <= 0)
-        return;
-    Unit* caster = aura->GetCaster();
-    if (caster == nullptr || caster->IsPlayer() == false)
-        return;
-    if (PlayerHasClassAura(caster->ToPlayer(), EQ_CLASSAURA_SPELL_DRUID_AURA) == false)
-        return;
-    for (uint8 i = 0; i < MAX_SPELL_EFFECTS; i++)
-    {
-        AuraEffect* effect = aura->GetEffect(i);
-        if (effect == nullptr || effect->GetAuraType() != SPELL_AURA_DAMAGE_SHIELD)
-            continue;
-        int32 baseAmount = effect->CalculateAmount(caster);
-        if (baseAmount <= 0)
-            continue;
-        effect->ChangeAmount(baseAmount + (baseAmount * percent) / 100);
     }
 }
 

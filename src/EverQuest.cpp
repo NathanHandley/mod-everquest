@@ -245,10 +245,8 @@ bool EverQuestMod::LoadConfigurationSystemDataFromDB()
                 ConfigSystemClassAuraBardInstrumentMeleeAutoAttackDamagePercent = (uint32)atoi(value.c_str());
             else if (key == "ClassAuraMonkSelfHealCastTimeReductionPercent")
                 ConfigSystemClassAuraMonkSelfHealCastTimeReductionPercent = (uint32)atoi(value.c_str());
-            else if (key == "ClassAuraRangerRicochetChancePercent")
-                ConfigSystemClassAuraRangerRicochetChancePercent = (uint32)atoi(value.c_str());
-            else if (key == "ClassAuraRangerRicochetRange")
-                ConfigSystemClassAuraRangerRicochetRange = (float)atof(value.c_str());
+            else if (key == "ClassAuraRangerTackShotDamagePercentPerStack")
+                ConfigSystemClassAuraRangerTackShotDamagePercentPerStack = (uint32)atoi(value.c_str());
             else if (key == "ClassAuraPaladinHealSelfPercent")
                 ConfigSystemClassAuraPaladinHealSelfPercent = (uint32)atoi(value.c_str());
             else if (key == "ClassAuraPaladinUndeadDemonDoubleDamageChancePercent")
@@ -271,8 +269,6 @@ bool EverQuestMod::LoadConfigurationSystemDataFromDB()
                 ConfigSystemClassAuraDruidDirectHealRegenPercent = (uint32)atoi(value.c_str());
             else if (key == "ClassAuraDruidDirectHealRegenTickCount")
                 ConfigSystemClassAuraDruidDirectHealRegenTickCount = (uint32)atoi(value.c_str());
-            else if (key == "ClassAuraDruidDamageShieldPercent")
-                ConfigSystemClassAuraDruidDamageShieldPercent = (uint32)atoi(value.c_str());
             else if (key == "ClassAuraDruidImpairedTargetDamagePercent")
                 ConfigSystemClassAuraDruidImpairedTargetDamagePercent = (uint32)atoi(value.c_str());
             else if (key == "ClassAuraShamanDotExtendChancePercent")

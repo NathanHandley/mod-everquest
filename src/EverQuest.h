@@ -52,7 +52,7 @@ class ByteBuffer;
 struct AreaTrigger;
 struct BuildValuesCachePosPointers;
 
-#define EQ_MOD_VERSION                              89
+#define EQ_MOD_VERSION                              90
 
 #define EQ_MOVEMENT_CAST_SNARE_DURATION_BUFFER_IN_MS 2000 // How much longer than the remaining cast time the casting slow is given, so a pushed-back cast keeps it
 
@@ -816,7 +816,7 @@ enum EverQuestClassAuraSpellType : uint32
     EQ_CLASSAURA_SPELL_RANGER_PASSIVE = 10,
     EQ_CLASSAURA_SPELL_RANGER_AURA = 11,
     EQ_CLASSAURA_SPELL_RANGER_SPEED = 12,
-    EQ_CLASSAURA_SPELL_RANGER_RICOCHET = 13,
+    EQ_CLASSAURA_SPELL_RANGER_TACK_SHOT = 13,
     EQ_CLASSAURA_SPELL_ROGUE_PASSIVE = 14,
     EQ_CLASSAURA_SPELL_ROGUE_AURA = 15,
     EQ_CLASSAURA_SPELL_ROGUE_EXPLOIT = 16,
@@ -1354,8 +1354,7 @@ public:
     uint32 ConfigSystemClassAuraEnchanterFocusManaThresholdPercent = 80;
     uint32 ConfigSystemClassAuraBardInstrumentMeleeAutoAttackDamagePercent = 33;
     uint32 ConfigSystemClassAuraMonkSelfHealCastTimeReductionPercent = 50;
-    uint32 ConfigSystemClassAuraRangerRicochetChancePercent = 15;
-    float ConfigSystemClassAuraRangerRicochetRange = 10.0f;
+    uint32 ConfigSystemClassAuraRangerTackShotDamagePercentPerStack = 1;
     uint32 ConfigSystemClassAuraPaladinHealSelfPercent = 15;
     uint32 ConfigSystemClassAuraPaladinUndeadDemonDoubleDamageChancePercent = 20;
     uint32 ConfigSystemClassAuraWarriorTripleAttackChancePercent = 50;
@@ -1367,7 +1366,6 @@ public:
     uint32 ConfigSystemClassAuraClericCadenceReductionPercent = 33;
     uint32 ConfigSystemClassAuraDruidDirectHealRegenPercent = 20;
     uint32 ConfigSystemClassAuraDruidDirectHealRegenTickCount = 4;
-    uint32 ConfigSystemClassAuraDruidDamageShieldPercent = 40;
     uint32 ConfigSystemClassAuraDruidImpairedTargetDamagePercent = 8;
     uint32 ConfigSystemClassAuraShamanDotExtendChancePercent = 33;
     uint32 ConfigSystemClassAuraShamanDotExtendInMS = 3000;
@@ -1760,12 +1758,11 @@ public:
     void HandleClassAuraShamanStrike(Unit* attacker, Unit* victim);
     void ApplyClassAuraMeleeDamageMods(Unit* attacker, Unit* victim, uint32& damage);
     void ApplyClassAuraDirectSpellDamageMods(Unit* target, Unit* attacker, int32& damage, SpellInfo const* spellInfo);
-    void TryRangerRicochet(Player* attacker, Unit* target, int32 damage);
+    void ApplyClassAuraTackShotDamageBonus(Unit* attacker, Unit* victim, int32& damage);
     void ApplyClassAuraPeriodicTickMods(Unit* target, Unit* attacker, uint32& amount, SpellInfo const* spellInfo);
     bool TryTransferDebuffToNecromancerPet(Player* player, Aura* aura);
     void HandleClassAuraSlowAuraApply(Unit* target, Aura* aura);
     void HandleClassAuraSlowAuraRemove(Unit* target, Aura* aura);
-    void ApplyClassAuraDamageShieldAmountOnAuraApply(Unit* target, Aura* aura);
     void ApplyClassAuraCastAdjustmentsOnCheckCast(Player* player, Spell* spell, bool strict);
     void FinishClassAuraCastAdjustmentsOnPrepare(Player* player, Spell* spell);
     void HandleClassAuraSpellCastCancel(Player* player, Spell* spell);

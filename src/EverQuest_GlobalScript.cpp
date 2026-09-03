@@ -137,6 +137,11 @@ public:
         {
             if (spell->Id == EverQuest->GetClassAuraSpellID(EQ_CLASSAURA_SPELL_DRUID_REGROWTH))
                 spell->AttributesCu &= ~SPELL_ATTR0_CU_SINGLE_AURA_STACK;
+            else if (spell->Id == EverQuest->GetClassAuraSpellID(EQ_CLASSAURA_SPELL_RANGER_TACK_SHOT))
+            {
+                spell->AttributesCu &= ~SPELL_ATTR0_CU_SINGLE_AURA_STACK;
+                spell->AttributesEx3 |= SPELL_ATTR3_DOT_STACKING_RULE;
+            }
             else if (hasAuraEffect == true)
                 spell->AttributesCu |= SPELL_ATTR0_CU_SINGLE_AURA_STACK;
         }

@@ -26,7 +26,7 @@
 
 using namespace std;
 
-// Rogue "Master Exploiter": landed swings stack the exploit, and a miss, dodge or parry wipes it
+// Rogue "Master Exploiter": any landed attack (autoattack, ability or harmful spell) stacks the momentum, and any attack that is missed, dodged or parried costs half of the stacks (rounded down)
 class EverQuest_ClassAuraRogueAuraScript : public AuraScript
 {
     PrepareAuraScript(EverQuest_ClassAuraRogueAuraScript);
@@ -45,7 +45,12 @@ class EverQuest_ClassAuraRogueAuraScript : public AuraScript
         uint32 hitMask = eventInfo.GetHitMask();
         if ((hitMask & (PROC_HIT_MISS | PROC_HIT_DODGE | PROC_HIT_PARRY)) != 0)
         {
-            rogue->RemoveAurasDueToSpell(exploitSpellID);
+            if (Aura* exploit = rogue->GetAura(exploitSpellID))
+            {
+                int32 stacksToLose = (int32)exploit->GetStackAmount() / 2;
+                if (stacksToLose > 0)
+                    exploit->ModStackAmount(-stacksToLose);
+            }
             return;
         }
         if ((hitMask & (PROC_HIT_NORMAL | PROC_HIT_CRITICAL | PROC_HIT_BLOCK | PROC_HIT_ABSORB)) != 0)
@@ -58,12 +63,12 @@ class EverQuest_ClassAuraRogueAuraScript : public AuraScript
     }
 };
 
-// Ranger "Swift Reactions": every landed melee swing or Auto Shot quickens the ranger's stride
+// Ranger "Swift Reactions": every landed melee or ranged autoattack quickens the ranger's stride, and every landed ranged autoattack (bow, gun, thrown), ranged ability or harmful spell tacks its target
 class EverQuest_ClassAuraRangerAuraScript : public AuraScript
 {
     PrepareAuraScript(EverQuest_ClassAuraRangerAuraScript);
 
-    void HandleProc(ProcEventInfo& /*eventInfo*/)
+    void HandleProc(ProcEventInfo& eventInfo)
     {
         PreventDefaultAction();
         if (EverQuest->IsClassAuraSystemEnabled() == false)
@@ -71,10 +76,22 @@ class EverQuest_ClassAuraRangerAuraScript : public AuraScript
         Unit* ranger = GetTarget();
         if (ranger == nullptr || ranger->IsPlayer() == false || ranger->IsAlive() == false)
             return;
+        uint32 typeMask = eventInfo.GetTypeMask();
         uint32 speedSpellID = EverQuest->GetClassAuraSpellID(EQ_CLASSAURA_SPELL_RANGER_SPEED);
-        if (speedSpellID == 0)
+        if (speedSpellID != 0 && (typeMask & (PROC_FLAG_DONE_MELEE_AUTO_ATTACK | PROC_FLAG_DONE_RANGED_AUTO_ATTACK)) != 0)
+            ranger->CastSpell(ranger, speedSpellID, true);
+
+        if ((typeMask & (PROC_FLAG_DONE_RANGED_AUTO_ATTACK | PROC_FLAG_DONE_SPELL_RANGED_DMG_CLASS | PROC_FLAG_DONE_SPELL_MAGIC_DMG_CLASS_NEG | PROC_FLAG_DONE_SPELL_NONE_DMG_CLASS_NEG)) == 0)
             return;
-        ranger->CastSpell(ranger, speedSpellID, true);
+        uint32 tackShotSpellID = EverQuest->GetClassAuraSpellID(EQ_CLASSAURA_SPELL_RANGER_TACK_SHOT);
+        if (tackShotSpellID == 0)
+            return;
+        Unit* target = eventInfo.GetProcTarget();
+        if (target == nullptr || target == ranger || target->IsAlive() == false || target->FindMap() != ranger->FindMap())
+            return;
+        if (ranger->IsValidAttackTarget(target) == false)
+            return;
+        ranger->CastSpell(target, tackShotSpellID, true);
     }
 
     void Register() override

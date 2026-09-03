@@ -212,9 +212,6 @@ public:
         // A slow landed by a Shaman class aura holder brings its burden mark along
         EverQuest->HandleClassAuraSlowAuraApply(unit, aura);
 
-        // A damage shield applied by a Druid class aura holder hits harder
-        EverQuest->ApplyClassAuraDamageShieldAmountOnAuraApply(unit, aura);
-
         if (EverQuest->IsSpellBlockedByMaxCreatureTargetLevel(aura->GetId(), unit, aura->GetCaster()) == true)
         {
             Unit* ccAuraCaster = aura->GetCaster();
@@ -555,7 +552,7 @@ public:
 
         TryApplyBashKickStunForbearanceOnSuppressedStun(target, attacker, spellInfo);
 
-        // Class auras: the Necromancer's marks, the Druid's impaired target bonus and the Ranger's ricochet (any spell, EQ or WoW)
+        // Class auras: the Ranger's Tack Shot mark, the Necromancer's marks and the Druid's impaired target bonus (any spell, EQ or WoW)
         EverQuest->ApplyClassAuraDirectSpellDamageMods(target, attacker, damage, spellInfo);
 
         if (EverQuest->ConfigSpellTalentAlignmentEnabled == false)
