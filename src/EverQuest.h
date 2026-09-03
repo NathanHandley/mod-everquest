@@ -1465,7 +1465,7 @@ public:
     float ConfigSecondaryExpPoolGainPercent;
     uint32 ConfigSecondaryExpPoolMaxPooled;
     uint32 ConfigPlayerLevelCap;
-    bool ConfigPlayerShieldArmorIgnoresBearFormMultiplier;
+    bool ConfigPlayerHeavyArmorIgnoresBearFormMultiplier;
     bool ConfigPlayerAddHearthstoneToNewCharacters;
     bool ConfigPlayerAddMasterTotemToShamans;
     bool ConfigPlayerAddRacialGuiseItemOnLogin;
@@ -1567,7 +1567,7 @@ public:
     unordered_map<ObjectGuid, EverQuestMentorshipRequest> MentorshipRequestsByTargetGUID;
     std::atomic<uint32> MentorshipStateCount{ 0 };
     unordered_map<uint64, unordered_map<ObjectGuid, vector<EverQuestUnitHasteAuraEffect>>> EQHasteAuraEffectsByMapInstanceKeyThenUnitGUID; // Map-instance keyed since creature GUIDs repeat across instance copies of a map
-    unordered_map<ObjectGuid, uint32> BearFormShieldArmorShiftAmountByPlayerGUID;
+    unordered_map<ObjectGuid, uint32> BearFormArmorShiftAmountByPlayerGUID; // Shield, mail and plate armor moved out of the form-multiplied base value
     unordered_map<uint32, vector<EverQuestCreatureLootGroup>> CreatureLootGroupsByCreatureTemplateID;
     unordered_map<uint64, unordered_map<ObjectGuid, vector<uint32>>> PreloadedLootItemIDsByMapInstanceKeyThenCreatureGUID; // Map-instance keyed since creature GUIDs repeat across instance copies of a map
     unordered_map<uint64, unordered_map<ObjectGuid, unordered_map<uint32, uint32>>> PreloadedLootCountsByMapInstanceKeyThenCreatureGUID;
@@ -1742,9 +1742,11 @@ public:
     void EnforceEQHastePercentCapOnUnit(Unit* unit, vector<EverQuestUnitHasteAuraEffect>& trackedHasteAuraEffects);
     float GetEQHasteCapPercentForUnit(Unit* unit);
     void ApplyEQSlowBossReductionOnAuraApply(Unit* unit, Aura* aura);
-    uint32 GetEquippedShieldBaseArmorForPlayer(Player* player);
-    void RefreshBearFormShieldArmorShiftForPlayer(Player* player);
-    void ClearBearFormShieldArmorShiftForPlayer(ObjectGuid playerGUID);
+    bool IsItemArmorExcludedFromBearFormMultiplier(ItemTemplate const* itemTemplate);
+    uint32 GetEquippedItemBaseArmorExcludedFromBearFormMultiplier(Item* item);
+    uint32 GetEquippedBaseArmorExcludedFromBearFormMultiplierForPlayer(Player* player);
+    void RefreshBearFormArmorShiftForPlayer(Player* player);
+    void ClearBearFormArmorShiftForPlayer(ObjectGuid playerGUID);
 
     // EQ Class Auras (EverQuest_ClassAuras.cpp)
     void SetClassAuraSpellIDFromConfigKey(const string& spellTypeName, uint32 spellID);

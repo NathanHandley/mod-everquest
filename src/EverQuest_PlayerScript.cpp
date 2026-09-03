@@ -399,8 +399,8 @@ public:
         // Equipping gear while illusioned can change change gear under some situations
         EverQuest->RefreshIllusionGearDisplayForPlayer(player);
 
-        // Swapping a shield in or out changes how much armor bear/dire bear form should leave unmultiplied
-        EverQuest->RefreshBearFormShieldArmorShiftForPlayer(player);
+        // Swapping a shield, mail or plate piece in or out changes how much armor bear/dire bear form should leave unmultiplied
+        EverQuest->RefreshBearFormArmorShiftForPlayer(player);
 
         // Armor type, shield and held instruments drive the Monk and Bard class auras
         EverQuest->RefreshClassAuraGearAurasForPlayer(player);
@@ -411,7 +411,7 @@ public:
         if (EverQuest->IsEnabled == false)
             return;
 
-        EverQuest->RefreshBearFormShieldArmorShiftForPlayer(player);
+        EverQuest->RefreshBearFormArmorShiftForPlayer(player);
         EverQuest->RefreshClassAuraGearAurasForPlayer(player);
     }
 
@@ -431,11 +431,11 @@ public:
         if (EverQuest->ConfigSpellSummonPlayerAcrossZones == true)
             EverQuest->ConsumePendingSummonRequest(player);
 
-        // Some ways a shield leaves the offhand have no unequip hook (auto-unequip when a two-hander goes on, item destruction),
+        // Some ways an item leaves a slot have no unequip hook (auto-unequip when a two-hander goes on, item destruction),
         // so revalidate while the form that cares about it is held
         uint8 currentForm = player->GetShapeshiftForm();
         if (currentForm == FORM_BEAR || currentForm == FORM_DIREBEAR)
-            EverQuest->RefreshBearFormShieldArmorShiftForPlayer(player);
+            EverQuest->RefreshBearFormArmorShiftForPlayer(player);
     }
 
     void OnPlayerReputationRankChange(Player* player, uint32 factionID, ReputationRank /*newRank*/, ReputationRank /*oldRank*/, bool /*increased*/) override
@@ -868,7 +868,7 @@ public:
         EverQuest->RecalculateTemporaryFactionReactionsForPlayer(player);
 
         // A saved bear/dire bear form comes back with the character, and armor is rebuilt from scratch on login
-        EverQuest->RefreshBearFormShieldArmorShiftForPlayer(player);
+        EverQuest->RefreshBearFormArmorShiftForPlayer(player);
 
         // Rebuild the EQ class auras from what the character knows and wears
         EverQuest->ReapplyClassAurasForPlayer(player);
@@ -941,8 +941,8 @@ public:
         // Stop tracking any illusion gear display state
         EverQuest->ClearIllusionTrackingForPlayer(player->GetGUID());
 
-        // Stop tracking any bear form shield armor shift
-        EverQuest->ClearBearFormShieldArmorShiftForPlayer(player->GetGUID());
+        // Stop tracking any bear form armor shift
+        EverQuest->ClearBearFormArmorShiftForPlayer(player->GetGUID());
 
         // Drop the class aura cast helper and per-player state
         EverQuest->ClearClassAuraStateForPlayer(player);

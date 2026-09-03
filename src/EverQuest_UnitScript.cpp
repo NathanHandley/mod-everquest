@@ -670,8 +670,8 @@ public:
         if (unit == nullptr || unit->IsPlayer() == false)
             return;
 
-        // Entering or leaving bear/dire bear form changes whether an equipped shield's armor gets multiplied by the form
-        EverQuest->RefreshBearFormShieldArmorShiftForPlayer(unit->ToPlayer());
+        // Entering or leaving bear/dire bear form changes whether equipped shield, mail and plate armor gets multiplied by the form
+        EverQuest->RefreshBearFormArmorShiftForPlayer(unit->ToPlayer());
     }
 
     // Records the buffer positions of player visible item fields when value update packets build, so that OnPatchValuesUpdate below can

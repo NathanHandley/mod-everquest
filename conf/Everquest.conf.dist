@@ -717,17 +717,17 @@ EverQuest.Player.LevelCap = 0
 
 ###################################################################################################
 #
-# 	EverQuest.Player.ShieldArmorIgnoresBearFormMultiplier
-#		Bear form and dire bear form multiply all armor that equipped items contribute.  Shields are
-#		usable by druids in EQ, and if true an equipped shield's armor is left out of that
-#		multiplier while one of those forms is held, so the shield still gives its normal armor but
-#		does not get scaled up by the form.  All other armor (and every percent-based armor effect)
-#		is unaffected.
-#	Default: True (shield armor is not multiplied by bear/dire bear form)
+# 	EverQuest.Player.HeavyArmorIgnoresBearFormMultiplier
+#		Bear form and dire bear form multiply all armor that equipped items contribute.  Shields, mail and
+#		plate are wearable by druids in EQ, and if true the armor from equipped shield, mail and plate
+#		items is left out of that multiplier while one of those forms is held, so those items still give
+#		their normal armor but do not get scaled up by the form.  Cloth and leather armor (and every
+#		percent-based armor effect) are unaffected.
+#	Default: True (shield, mail and plate armor is not multiplied by bear/dire bear form)
 #
 ###################################################################################################
 
-EverQuest.Player.ShieldArmorIgnoresBearFormMultiplier = True
+EverQuest.Player.HeavyArmorIgnoresBearFormMultiplier = True
 
 ###################################################################################################
 #

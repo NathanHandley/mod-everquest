@@ -474,7 +474,7 @@ void EverQuestMod::LoadConfigurationFile()
     ConfigMentorshipRequestTimeoutInSec = sConfigMgr->GetOption<uint32>("EverQuest.Mentorship.RequestTimeoutInSeconds", 30);
 
     // Player Armor
-    ConfigPlayerShieldArmorIgnoresBearFormMultiplier = sConfigMgr->GetOption<bool>("EverQuest.Player.ShieldArmorIgnoresBearFormMultiplier", true);
+    ConfigPlayerHeavyArmorIgnoresBearFormMultiplier = sConfigMgr->GetOption<bool>("EverQuest.Player.HeavyArmorIgnoresBearFormMultiplier", true);
 
     // Player Hearthstone
     ConfigPlayerAddHearthstoneToNewCharacters = sConfigMgr->GetOption<bool>("EverQuest.Player.AddHearthstoneToNewCharacters", true);
@@ -4799,21 +4799,34 @@ void EverQuestMod::ApplyEQSlowBossReductionOnAuraApply(Unit* unit, Aura* aura)
     }
 }
 
-uint32 EverQuestMod::GetEquippedShieldBaseArmorForPlayer(Player* player)
+bool EverQuestMod::IsItemArmorExcludedFromBearFormMultiplier(ItemTemplate const* itemTemplate)
 {
-    if (player == nullptr)
-        return 0;
-    Item* offHandItem = player->GetItemByPos(INVENTORY_SLOT_BAG_0, EQUIPMENT_SLOT_OFFHAND);
-    if (offHandItem == nullptr)
+    // Bear and dire bear form are meant to multiply only cloth and leather armor.  Druids in EQ can wear shields, mail and plate, so those keep their face value
+    if (itemTemplate == nullptr)
+        return false;
+    if (itemTemplate->Class != ITEM_CLASS_ARMOR)
+        return false;
+    switch (itemTemplate->SubClass)
+    {
+        case ITEM_SUBCLASS_ARMOR_MAIL:
+        case ITEM_SUBCLASS_ARMOR_PLATE:
+        case ITEM_SUBCLASS_ARMOR_SHIELD:
+            return true;
+        default:
+            return false;
+    }
+}
+
+uint32 EverQuestMod::GetEquippedItemBaseArmorExcludedFromBearFormMultiplier(Item* item)
+{
+    if (item == nullptr)
         return 0;
 
-    // The core skips item bonuses entirely for a broken item, so a broken shield has put no armor into the base value
-    if (offHandItem->IsBroken() == true)
+    // The core skips item bonuses entirely for a broken item, so a broken item has put no armor into the base value
+    if (item->IsBroken() == true)
         return 0;
-    ItemTemplate const* itemTemplate = offHandItem->GetTemplate();
-    if (itemTemplate == nullptr)
-        return 0;
-    if (itemTemplate->Class != ITEM_CLASS_ARMOR || itemTemplate->SubClass != ITEM_SUBCLASS_ARMOR_SHIELD)
+    ItemTemplate const* itemTemplate = item->GetTemplate();
+    if (IsItemArmorExcludedFromBearFormMultiplier(itemTemplate) == false)
         return 0;
 
     // Scaling stat (heirloom) armor is resolved against the player's level inside the core and is not reproduced here
@@ -4821,42 +4834,52 @@ uint32 EverQuestMod::GetEquippedShieldBaseArmorForPlayer(Player* player)
         return 0;
 
     // Mirrors Player::_ApplyItemBonuses, which pulls the armor damage modifier back out before adding item armor to the base value
-    uint32 shieldArmor = itemTemplate->Armor;
-    if (shieldArmor != 0 && itemTemplate->ArmorDamageModifier != 0)
+    uint32 itemArmor = itemTemplate->Armor;
+    if (itemArmor != 0 && itemTemplate->ArmorDamageModifier != 0)
     {
-        if ((uint32)itemTemplate->ArmorDamageModifier >= shieldArmor)
+        if ((uint32)itemTemplate->ArmorDamageModifier >= itemArmor)
             return 0;
-        shieldArmor -= (uint32)itemTemplate->ArmorDamageModifier;
+        itemArmor -= (uint32)itemTemplate->ArmorDamageModifier;
     }
-    return shieldArmor;
+    return itemArmor;
 }
 
-void EverQuestMod::RefreshBearFormShieldArmorShiftForPlayer(Player* player)
+uint32 EverQuestMod::GetEquippedBaseArmorExcludedFromBearFormMultiplierForPlayer(Player* player)
 {
-    if (ConfigPlayerShieldArmorIgnoresBearFormMultiplier == false)
+    if (player == nullptr)
+        return 0;
+    uint32 totalExcludedArmor = 0;
+    for (uint8 slot = EQUIPMENT_SLOT_START; slot < EQUIPMENT_SLOT_END; ++slot)
+        totalExcludedArmor += GetEquippedItemBaseArmorExcludedFromBearFormMultiplier(player->GetItemByPos(INVENTORY_SLOT_BAG_0, slot));
+    return totalExcludedArmor;
+}
+
+void EverQuestMod::RefreshBearFormArmorShiftForPlayer(Player* player)
+{
+    if (ConfigPlayerHeavyArmorIgnoresBearFormMultiplier == false)
         return;
     if (player == nullptr)
         return;
 
-    // Bear and dire bear form multiply every point of armor that equipped items put into the armor base value.  Shields are usable by druids in EQ, and EQ shield AC should come through
-    // at face value, so while the player is in one of those forms the shield's armor is moved out of the base value (which the form multiplies) and into the total value (which it does not).
-    // Everything else about the armor calculation, including percent auras, is unchanged
+    // Bear and dire bear form multiply every point of armor that equipped items put into the armor base value.  Shields, mail and plate are wearable by druids in EQ, and their AC
+    // should come through at face value, so while the player is in one of those forms that armor is moved out of the base value (which the form multiplies) and into the total
+    // value (which it does not).  Everything else about the armor calculation, including percent auras, is unchanged
     uint32 desiredShiftAmount = 0;
     uint8 currentForm = player->GetShapeshiftForm();
     if (currentForm == FORM_BEAR || currentForm == FORM_DIREBEAR)
-        desiredShiftAmount = GetEquippedShieldBaseArmorForPlayer(player);
+        desiredShiftAmount = GetEquippedBaseArmorExcludedFromBearFormMultiplierForPlayer(player);
 
     uint32 appliedShiftAmount = 0;
     {
         std::lock_guard<std::mutex> lock(RuntimeStateMutex);
-        auto appliedShiftItr = BearFormShieldArmorShiftAmountByPlayerGUID.find(player->GetGUID());
-        if (appliedShiftItr != BearFormShieldArmorShiftAmountByPlayerGUID.end())
+        auto appliedShiftItr = BearFormArmorShiftAmountByPlayerGUID.find(player->GetGUID());
+        if (appliedShiftItr != BearFormArmorShiftAmountByPlayerGUID.end())
             appliedShiftAmount = appliedShiftItr->second;
     }
     if (appliedShiftAmount == desiredShiftAmount)
         return;
 
-    // Take back any prior shift first, since the shield (and so the amount moved) can change while the form is held
+    // Take back any prior shift first, since the equipped items (and so the amount moved) can change while the form is held
     if (appliedShiftAmount != 0)
     {
         player->HandleStatFlatModifier(UNIT_MOD_ARMOR, BASE_VALUE, (float)appliedShiftAmount, true);
@@ -4870,16 +4893,16 @@ void EverQuestMod::RefreshBearFormShieldArmorShiftForPlayer(Player* player)
 
     std::lock_guard<std::mutex> lock(RuntimeStateMutex);
     if (desiredShiftAmount == 0)
-        BearFormShieldArmorShiftAmountByPlayerGUID.erase(player->GetGUID());
+        BearFormArmorShiftAmountByPlayerGUID.erase(player->GetGUID());
     else
-        BearFormShieldArmorShiftAmountByPlayerGUID[player->GetGUID()] = desiredShiftAmount;
+        BearFormArmorShiftAmountByPlayerGUID[player->GetGUID()] = desiredShiftAmount;
 }
 
-void EverQuestMod::ClearBearFormShieldArmorShiftForPlayer(ObjectGuid playerGUID)
+void EverQuestMod::ClearBearFormArmorShiftForPlayer(ObjectGuid playerGUID)
 {
     // Only the tracking is dropped, since the stat modifiers themselves live on the player object and are rebuilt on the next login
     std::lock_guard<std::mutex> lock(RuntimeStateMutex);
-    BearFormShieldArmorShiftAmountByPlayerGUID.erase(playerGUID);
+    BearFormArmorShiftAmountByPlayerGUID.erase(playerGUID);
 }
 
 void EverQuestMod::LoadQuestCompletionReputations()
