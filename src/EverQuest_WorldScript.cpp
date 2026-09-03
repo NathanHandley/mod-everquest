@@ -66,6 +66,7 @@ public:
         EverQuest->LoadIllusionObjectData();
         EverQuest->LoadQuestCompletionReputations();
         EverQuest->LoadQuestReactions();
+        EverQuest->LoadQuestFactionRequirements();
         EverQuest->LoadGossipReactions();
         EverQuest->LoadPetData();
         EverQuest->LoadPetSilentDisplayData();

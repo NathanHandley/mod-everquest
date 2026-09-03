@@ -4992,6 +4992,164 @@ const list<EverQuestQuestReaction>& EverQuestMod::GetQuestReactions(uint32 quest
     }
 }
 
+void EverQuestMod::LoadQuestFactionRequirements()
+{
+    QuestFactionRequirementByQuestTemplateID.clear();
+    QueryResult queryResult = WorldDatabase.Query("SELECT QuestTemplateID, FactionID, MinimumFactionRank FROM mod_everquest_quest_faction_requirement;");
+    if (queryResult)
+    {
+        do
+        {
+            Field* fields = queryResult->Fetch();
+            EverQuestQuestFactionRequirement questFactionRequirement;
+            uint32 questTemplateID = fields[0].Get<uint32>();
+            questFactionRequirement.FactionID = fields[1].Get<uint32>();
+            questFactionRequirement.MinimumFactionRank = fields[2].Get<uint8>();
+            QuestFactionRequirementByQuestTemplateID[questTemplateID] = questFactionRequirement;
+        } while (queryResult->NextRow());
+    }
+}
+
+ReputationRank EverQuestMod::GetEffectiveFactionRankForPlayer(Player* player, uint32 factionID)
+{
+    if (player == nullptr || factionID == 0)
+        return REP_NEUTRAL;
+    FactionEntry const* factionEntry = sFactionStore.LookupEntry(factionID);
+    if (factionEntry == nullptr || factionEntry->CanHaveReputation() == false)
+        return REP_NEUTRAL;
+    ReputationMgr& reputationMgr = player->GetReputationMgr();
+
+    // Mirrors the reputation half of Unit::GetFactionReactionTo, so a temporary adjustment (alliance spells, illusions) counts here exactly like it does for the con color
+    unordered_map<uint32, EverQuestReputationFactionInfo>::const_iterator factionInfoIterator = EQReputationFactionInfoByFactionID.find(factionID);
+    if (factionInfoIterator != EQReputationFactionInfoByFactionID.end())
+    {
+        FactionTemplateEntry const* factionTemplateEntry = sFactionTemplateStore.LookupEntry(factionInfoIterator->second.FactionTemplateID);
+        if (factionTemplateEntry != nullptr)
+        {
+            ReputationRank const* forcedRank = reputationMgr.GetForcedRankIfAny(factionTemplateEntry);
+            if (forcedRank != nullptr)
+                return *forcedRank;
+        }
+    }
+    ReputationRank naturalRank = reputationMgr.GetRank(factionEntry);
+    if (reputationMgr.IsAtWar(factionEntry) == true && naturalRank > REP_NEUTRAL)
+        naturalRank = REP_NEUTRAL;
+    return naturalRank;
+}
+
+bool EverQuestMod::IsQuestBlockedByFactionStandingForPlayer(Player* player, Quest const* quest)
+{
+    if (player == nullptr || quest == nullptr)
+        return false;
+    unordered_map<uint32, EverQuestQuestFactionRequirement>::const_iterator requirementIterator = QuestFactionRequirementByQuestTemplateID.find(quest->GetQuestId());
+    if (requirementIterator == QuestFactionRequirementByQuestTemplateID.end())
+        return false;
+    if (requirementIterator->second.MinimumFactionRank == 0)
+        return false;
+    return static_cast<uint8>(GetEffectiveFactionRankForPlayer(player, requirementIterator->second.FactionID)) < requirementIterator->second.MinimumFactionRank;
+}
+
+void EverQuestMod::SendFactionGatedQuestRefusalToPlayer(Player* player, Quest const* quest)
+{
+    if (player == nullptr || player->GetSession() == nullptr || quest == nullptr)
+        return;
+    unordered_map<uint32, EverQuestQuestFactionRequirement>::const_iterator requirementIterator = QuestFactionRequirementByQuestTemplateID.find(quest->GetQuestId());
+    if (requirementIterator == QuestFactionRequirementByQuestTemplateID.end())
+        return;
+    FactionEntry const* factionEntry = sFactionStore.LookupEntry(requirementIterator->second.FactionID);
+    if (factionEntry == nullptr)
+        return;
+    ChatHandler(player->GetSession()).PSendSysMessage("Your standing with {} is too low for them to accept that.", factionEntry->name[LOCALE_enUS]);
+}
+
+void EverQuestMod::QueueFactionGatedQuestRefreshForPlayer(ObjectGuid playerGUID)
+{
+    if (QuestFactionRequirementByQuestTemplateID.empty() == true)
+        return;
+    std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+    PlayersPendingFactionGatedQuestRefresh.insert(playerGUID);
+}
+
+void EverQuestMod::UpdateFactionGatedQuestsForPlayer(Player* player, uint32 diffInMS)
+{
+    // The client renders the questgiver standing requirement from quest_template's reputation objective, but the core measures that objective against raw
+    // standing, so it never completes while a temporary EQ adjustment is what qualifies the player. These quests are therefore marked complete here instead,
+    // on the player's own update: an alliance spell or illusion can arrive from inside an aura handler, and completing a quest touches zone and area auras
+    if (player == nullptr || player->IsInWorld() == false || QuestFactionRequirementByQuestTemplateID.empty() == true)
+        return;
+
+    // A standing change asks for an immediate pass, otherwise the log is swept on a slow timer since nothing in the core will notice the last hand-in item arriving
+    bool hasPendingRefresh = false;
+    {
+        std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+        unordered_set<ObjectGuid>::iterator pendingIterator = PlayersPendingFactionGatedQuestRefresh.find(player->GetGUID());
+        if (pendingIterator != PlayersPendingFactionGatedQuestRefresh.end())
+        {
+            PlayersPendingFactionGatedQuestRefresh.erase(pendingIterator);
+            hasPendingRefresh = true;
+        }
+    }
+    if (hasPendingRefresh == false)
+    {
+        EverQuestPlayerQuestFactionState* questFactionState = player->CustomData.GetDefault<EverQuestPlayerQuestFactionState>(EQ_PLAYER_CUSTOMDATA_QUESTFACTION);
+        questFactionState->RecheckTimerMS += diffInMS;
+        if (questFactionState->RecheckTimerMS < EQ_QUEST_FACTION_RECHECK_INTERVAL_IN_MS)
+            return;
+        questFactionState->RecheckTimerMS = 0;
+    }
+    RefreshFactionGatedQuestsForPlayer(player);
+}
+
+void EverQuestMod::RefreshFactionGatedQuestsForPlayer(Player* player)
+{
+    for (uint16 questLogSlot = 0; questLogSlot < MAX_QUEST_LOG_SIZE; ++questLogSlot)
+    {
+        uint32 questID = player->GetQuestSlotQuestId(questLogSlot);
+        if (questID == 0)
+            continue;
+        if (QuestFactionRequirementByQuestTemplateID.find(questID) == QuestFactionRequirementByQuestTemplateID.end())
+            continue;
+        Quest const* quest = sObjectMgr->GetQuestTemplate(questID);
+        if (quest == nullptr)
+            continue;
+        QuestStatus questStatus = player->GetQuestStatus(questID);
+        if (IsQuestBlockedByFactionStandingForPlayer(player, quest) == true)
+        {
+            // Standing that fell back below the requirement takes the hand-in away again
+            if (questStatus == QUEST_STATUS_COMPLETE)
+                player->IncompleteQuest(questID);
+            continue;
+        }
+        if (questStatus == QUEST_STATUS_INCOMPLETE && AreNonFactionQuestObjectivesMetForPlayer(player, quest, questLogSlot) == true)
+            player->CompleteQuest(questID);
+    }
+}
+
+bool EverQuestMod::AreNonFactionQuestObjectivesMetForPlayer(Player* player, Quest const* quest, uint16 questLogSlot)
+{
+    for (uint8 objectiveIndex = 0; objectiveIndex < QUEST_ITEM_OBJECTIVES_COUNT; ++objectiveIndex)
+    {
+        if (quest->RequiredItemCount[objectiveIndex] == 0)
+            continue;
+        if (player->GetItemCount(quest->RequiredItemId[objectiveIndex], false) < quest->RequiredItemCount[objectiveIndex])
+            return false;
+    }
+    for (uint8 objectiveIndex = 0; objectiveIndex < QUEST_OBJECTIVES_COUNT; ++objectiveIndex)
+    {
+        if (quest->RequiredNpcOrGo[objectiveIndex] == 0 || quest->RequiredNpcOrGoCount[objectiveIndex] == 0)
+            continue;
+        if (player->GetQuestSlotCounter(questLogSlot, objectiveIndex) < quest->RequiredNpcOrGoCount[objectiveIndex])
+            return false;
+    }
+    if (quest->GetPlayersSlain() != 0)
+        return false;
+    if (quest->HasSpecialFlag(QUEST_SPECIAL_FLAGS_EXPLORATION_OR_EVENT) == true || quest->HasSpecialFlag(QUEST_SPECIAL_FLAGS_TIMED) == true)
+        return false;
+    if (quest->GetRewOrReqMoney() < 0 && player->HasEnoughMoney(-quest->GetRewOrReqMoney()) == false)
+        return false;
+    return true;
+}
+
 void EverQuestMod::LoadGossipReactions()
 {
     GossipReactionsByGossipCreatureTemplateID.clear();
@@ -9356,6 +9514,9 @@ void EverQuestMod::ResolveEQReputationFactions()
         EverQuestReputationFactionInfo factionInfo;
         factionInfo.BaseAlignment = factionPair.second.BaseAlignment;
         factionInfo.PredominantEQRaceID = factionPair.second.PredominantEQRaceID;
+
+        // Any template on the faction will do, since a forced reaction is keyed on the faction the template points at
+        factionInfo.FactionTemplateID = factionPair.second.FactionTemplateID;
         EQReputationFactionInfoByFactionID[factionID] = factionInfo;
     }
 }
@@ -9564,6 +9725,9 @@ void EverQuestMod::RecalculateTemporaryFactionReactionsForPlayer(Player* player)
 
     // Push the current forced reaction set to the client so con colors and interactions update immediately
     reputationMgr.SendForceReactions();
+
+    // A standing change can open or close a faction-gated quest hand-in, and nothing else will retry it
+    QueueFactionGatedQuestRefreshForPlayer(player->GetGUID());
 }
 
 void EverQuestMod::QueueTemporaryFactionRecalculationForPlayer(ObjectGuid playerGUID)
@@ -9653,6 +9817,7 @@ void EverQuestMod::ClearTemporaryFactionStateForPlayer(ObjectGuid playerGUID)
     TempFactionBonusByPlayerGUID.erase(playerGUID);
     ForcedFactionReactionIDsByPlayerGUID.erase(playerGUID);
     PlayersPendingTempFactionRecalculation.erase(playerGUID);
+    PlayersPendingFactionGatedQuestRefresh.erase(playerGUID);
 }
 
 void EverQuestMod::ClearTempFactionBonusForPlayer(Player* player)

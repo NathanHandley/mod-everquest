@@ -425,6 +425,7 @@ public:
         EverQuest->UpdateMentorshipForPlayer(player, p_time);
         EverQuest->UpdatePlayerIllusionGearDisplay(player, p_time);
         EverQuest->ConsumePendingTemporaryFactionRecalculation(player);
+        EverQuest->UpdateFactionGatedQuestsForPlayer(player, p_time);
         EverQuest->UpdatePlayerTracking(player, p_time);
         EverQuest->UpdateClassAurasForPlayer(player, p_time);
         EverQuest->UpdateMovementCastSnareForPlayer(player);
@@ -1085,9 +1086,15 @@ public:
         if (EverQuest->IsEnabled == false)
             return true;
         Quest const* quest = sObjectMgr->GetQuestTemplate(questID);
-        if (EverQuest->IsQuestBlockedByMentorshipForPlayer(player, quest) == false)
-            return true;
-        return false;
+        if (EverQuest->IsQuestBlockedByMentorshipForPlayer(player, quest) == true)
+            return false;
+
+        if (EverQuest->IsQuestBlockedByFactionStandingForPlayer(player, quest) == true)
+        {
+            EverQuest->SendFactionGatedQuestRefusalToPlayer(player, quest);
+            return false;
+        }
+        return true;
     }
 
     // This is done to ensure repeatable quests give EXP more than once

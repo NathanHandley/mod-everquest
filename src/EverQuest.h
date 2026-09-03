@@ -52,7 +52,7 @@ class ByteBuffer;
 struct AreaTrigger;
 struct BuildValuesCachePosPointers;
 
-#define EQ_MOD_VERSION                              90
+#define EQ_MOD_VERSION                              92
 
 #define EQ_MOVEMENT_CAST_SNARE_DURATION_BUFFER_IN_MS 2000 // How much longer than the remaining cast time the casting slow is given, so a pushed-back cast keeps it
 
@@ -331,6 +331,8 @@ struct BuildValuesCachePosPointers;
 #define EQ_TRACKING_SCAN_MIN_INTERVAL_MS            2000    // Minimum time between track scans for one player (guards against command spam)
 
 #define EQ_PLAYER_CUSTOMDATA_CLASSAURA              "EQClassAura"
+#define EQ_PLAYER_CUSTOMDATA_QUESTFACTION           "EQQuestFaction"
+#define EQ_QUEST_FACTION_RECHECK_INTERVAL_IN_MS     1000
 #define EQ_CLASS_AURA_GEAR_REFRESH_INTERVAL_MS      2000    // Gear and pet based class auras rescan on this interval since some ways they change have no hook
 #define EQ_CLASS_AURA_MANA_CHECK_INTERVAL_MS        500     // How often the Enchanter mana threshold is checked
 #define EQ_SPELL_ID_AUTO_SHOT                       75
@@ -913,6 +915,19 @@ public:
     int32 CompletionRewardValue = 0;
 };
 
+class EverQuestQuestFactionRequirement
+{
+public:
+    uint32 FactionID = 0;
+    uint8 MinimumFactionRank = 0;
+};
+
+class EverQuestPlayerQuestFactionState : public DataMap::Base
+{
+public:
+    uint32 RecheckTimerMS = 0;
+};
+
 class EverQuestQuestReaction
 {
 public:
@@ -1182,6 +1197,7 @@ struct EverQuestReputationFactionInfo
 {
     uint8 BaseAlignment = EQ_FACTION_ALIGNMENT_NONE;
     uint32 PredominantEQRaceID = 0;
+    uint32 FactionTemplateID = 0;
 };
 
 struct EverQuestPlayerTempFactionBonus
@@ -1540,6 +1556,7 @@ public:
     unordered_map<ObjectGuid, EverQuestPlayerIllusionState> PlayerIllusionStatesByPlayerGUID;
     unordered_map<uint32, list<EverQuestQuestCompletionReputation>> QuestCompletionReputationsByQuestTemplateID;
     unordered_map<uint32, list<EverQuestQuestReaction>> QuestReactionListByQuestTemplateID;
+    unordered_map<uint32, EverQuestQuestFactionRequirement> QuestFactionRequirementByQuestTemplateID;
     unordered_map<uint32, vector<EverQuestGossipReaction>> GossipReactionsByGossipCreatureTemplateID;
     unordered_map<uint32, EverQuestPet> PetDataByCreatureTemplateID;
     unordered_map<uint8, unordered_map<uint8, EverQuestPlayerCreateInfo>> PlayerCreateInfoByRaceIDThenClassID;
@@ -1593,6 +1610,7 @@ public:
     unordered_map<ObjectGuid, EverQuestPlayerTempFactionBonus> TempFactionBonusByPlayerGUID;
     unordered_map<ObjectGuid, vector<uint32>> ForcedFactionReactionIDsByPlayerGUID;
     unordered_set<ObjectGuid> PlayersPendingTempFactionRecalculation;
+    unordered_set<ObjectGuid> PlayersPendingFactionGatedQuestRefresh;
     unordered_map<ObjectGuid, uint32> CorpseIllusionOriginalNativeDisplayByPlayerGUID;
     unordered_map<ObjectGuid, EverQuestPendingSummonRequest> PendingSummonRequestByTargetPlayerGUID;
     unordered_map<uint8, EverQuestClassMap> ClassMapByWOWClassID;
@@ -1787,6 +1805,13 @@ public:
     const list<EverQuestQuestCompletionReputation>& GetQuestCompletionReputationsForQuestTemplate(uint32 questTemplateID);
     void LoadQuestReactions();
     const list<EverQuestQuestReaction>& GetQuestReactions(uint32 questTemplateID);
+    void LoadQuestFactionRequirements();
+    bool IsQuestBlockedByFactionStandingForPlayer(Player* player, Quest const* quest);
+    void SendFactionGatedQuestRefusalToPlayer(Player* player, Quest const* quest);
+    void QueueFactionGatedQuestRefreshForPlayer(ObjectGuid playerGUID);
+    void UpdateFactionGatedQuestsForPlayer(Player* player, uint32 diffInMS);
+    void RefreshFactionGatedQuestsForPlayer(Player* player);
+    bool AreNonFactionQuestObjectivesMetForPlayer(Player* player, Quest const* quest, uint16 questLogSlot);
     void LoadGossipReactions();
     bool HandleGossipHello(Player* player, Creature* creature);
     bool HandleGossipSelect(Player* player, Creature* creature, uint32 sender, uint32 action);
@@ -1963,6 +1988,7 @@ public:
     void QueueTemporaryFactionRecalculationForPlayer(ObjectGuid playerGUID);
     void ConsumePendingTemporaryFactionRecalculation(Player* player);
     uint8 GetPlayerBaselineFactionAlignment(Player* player);
+    ReputationRank GetEffectiveFactionRankForPlayer(Player* player, uint32 factionID);
     void GetIllusionFactionBandSteps(uint8 playerAlignment, uint8 illusionAlignment, int32& stepsTowardGoodOut, int32& stepsTowardEvilOut);
     void ClearTemporaryFactionStateForPlayer(ObjectGuid playerGUID);
     void ClearTempFactionBonusForPlayer(Player* player);
