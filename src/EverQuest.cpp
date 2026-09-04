@@ -46,6 +46,8 @@
 #include "MapMgr.h"
 #include "MotionMaster.h"
 #include "MovementGenerator.h"
+#include "PathGenerator.h"
+#include "GridTerrainData.h"
 #include "CharacterCache.h"
 #include "ObjectAccessor.h"
 #include "Opcodes.h"
@@ -2185,10 +2187,255 @@ bool EverQuestMod::IsCreatureInReactionWalk(ObjectGuid creatureGUID)
     return ReactionWalkCreatureGUIDs.find(creatureGUID) != ReactionWalkCreatureGUIDs.end();
 }
 
-bool EverQuestMod::StartReactionWalk(Creature* creature, float x, float y, float z, float orientation, bool hasOrientation, bool isRun, vector<EverQuestPendingKillSpawnAction>& actionsOnArrival)
+float EverQuestMod::GetTerrainSnappedZ(Creature* creature, float priorX, float priorY, float priorZ, float initialTargetX, float initialTargetY, float initialTargetZ,
+    bool& foundValidZ, bool disableGroundContour, float minZ, float maxZ)
+{
+    if (disableGroundContour == true)
+    {
+        foundValidZ = true;
+        return initialTargetZ;
+    }
+
+    foundValidZ = false;
+
+    // Prior point might be in water
+    bool isPriorPointInWater = false;
+    if (priorX != 0 && priorY != 0 && priorZ != 0)
+    {
+        LiquidData priorLiquidDataBelow = creature->GetMap()->GetLiquidData(creature->GetPhaseMask(), priorX, priorY, priorZ, 0, {});
+        if (priorLiquidDataBelow.Status)
+            isPriorPointInWater = true;
+    }
+
+    // Calculate a solid floor
+    float solidFloorZ = -20001;
+    if (minZ != 0 && maxZ != 0)
+    {
+        solidFloorZ = creature->GetMapHeight(initialTargetX, initialTargetY, maxZ, true, maxZ - minZ);
+    }
+    else
+    {
+        float targetTestZ = initialTargetZ;
+        int floorLoopNum = 0;
+        float curAddedZStep = 0;
+        if (isPriorPointInWater == false)
+            curAddedZStep = 1.0f;
+        while (solidFloorZ < -20000)
+        {
+            targetTestZ = initialTargetZ + (floorLoopNum * curAddedZStep);
+            curAddedZStep += 1.0f;
+            float floorSearchDist = floorLoopNum * 20.0f;
+            if (floorSearchDist > 0.0f)
+                solidFloorZ = creature->GetMapHeight(initialTargetX, initialTargetY, targetTestZ, true, floorSearchDist);
+            floorLoopNum++;
+            if (floorLoopNum >= 10)
+                break;
+        }
+    }
+
+    if (solidFloorZ < -20000)
+    {
+        // No solid floor means it's out of bounds or over a large body of water, so first test if it's a body of water
+        LiquidData targetLiquidDataBelow = creature->GetMap()->GetLiquidData(creature->GetPhaseMask(), initialTargetX, initialTargetY, initialTargetZ - EQ_MOVE_TEST_Z_DOWN_AMOUNT_FOR_WATER_TEST, 0, {});
+        if (targetLiquidDataBelow.Status)
+        {
+            foundValidZ = true;
+            if (isPriorPointInWater == true && priorZ <= (targetLiquidDataBelow.Level - EQ_MOVE_UNDER_WATER_SURFACE_SKIM_REDICTION))
+                return priorZ;
+            else
+                return targetLiquidDataBelow.Level - EQ_MOVE_UNDER_WATER_SURFACE_SKIM_REDICTION;
+        }
+        else
+            return initialTargetZ;
+    }
+    else
+    {
+        foundValidZ = true;
+        if (isPriorPointInWater == true)
+        {
+            LiquidData targetLiquidDataAtRef = creature->GetMap()->GetLiquidData(creature->GetPhaseMask(), initialTargetX, initialTargetY, initialTargetZ, 0, {});
+            if (targetLiquidDataAtRef.Status)
+            {
+                float skimLevel = targetLiquidDataAtRef.Level - EQ_MOVE_UNDER_WATER_SURFACE_SKIM_REDICTION;
+                if (solidFloorZ > priorZ || solidFloorZ > skimLevel)
+                    return solidFloorZ;
+                else if (priorZ > skimLevel)
+                    return skimLevel;
+                else
+                    return priorZ;
+            }
+        }
+        return solidFloorZ;
+    }
+}
+
+bool EverQuestMod::BuildTerrainSnappedMovementPath(Creature* creature, float initialTargetX, float initialTargetY, float initialTargetZ, bool disableGroundContour,
+    float minZ, float maxZ, bool failWhenNoPathAndNoValidZ, Movement::PointsArray& pathNodesOut, float& snappedTargetZOut)
+{
+    pathNodesOut.clear();
+
+    bool foundValidZ = false;
+    float terrainSnappedTargetZ = GetTerrainSnappedZ(creature, 0, 0, 0, initialTargetX, initialTargetY, initialTargetZ, foundValidZ, disableGroundContour, minZ, maxZ);
+    snappedTargetZOut = terrainSnappedTargetZ;
+
+    // Generate a base path to make sure it exists
+    PathGenerator path(creature);
+    bool result = path.CalculatePath(initialTargetX, initialTargetY, initialTargetZ, false);
+    PathType pathType = path.GetPathType();
+    bool pathFound = ((result == true) && ((pathType & PATHFIND_NOPATH) == 0));
+    Movement::PointsArray fallbackPath;
+    const Movement::PointsArray* pathNodesPtr = &path.GetPath();
+
+    // If there is no single spline-based path, it was probably too long so break it into parts
+    if (pathFound == false)
+    {
+        float distToTarget = creature->GetExactDist(initialTargetX, initialTargetY, terrainSnappedTargetZ);
+        if (distToTarget > 30.0f)
+        {
+            const float MAX_SAFE_SEGMENT = 220.0f;
+
+            Position current = creature->GetPosition();
+            float dx = initialTargetX - current.GetPositionX();
+            float dy = initialTargetY - current.GetPositionY();
+            float dz = terrainSnappedTargetZ - current.GetPositionZ();
+            float dist = std::sqrt(dx * dx + dy * dy + dz * dz);
+
+            if (dist > 5.0f)
+            {
+                float ratio = std::min(1.0f, MAX_SAFE_SEGMENT / dist);
+                float interX = current.GetPositionX() + dx * ratio;
+                float interY = current.GetPositionY() + dy * ratio;
+                float interZ = current.GetPositionZ() + dz * ratio;
+
+                PathGenerator shortPath(creature);
+                bool shortResult = shortPath.CalculatePath(interX, interY, interZ, false);
+                if (shortResult && (shortPath.GetPathType() & PATHFIND_NOPATH) == 0)
+                {
+                    fallbackPath = shortPath.GetPath();
+                    if (fallbackPath.size() >= 2)
+                    {
+                        pathNodesPtr = &fallbackPath;
+                        pathFound = true;
+                    }
+                }
+            }
+        }
+    }
+
+    if (pathFound == false && foundValidZ == false && failWhenNoPathAndNoValidZ == true)
+        return false;
+
+    const Movement::PointsArray& pathNodes = *pathNodesPtr;
+    if (pathNodes.size() < 2)
+        return false;
+
+    // Walk the path to generate steps that are small enough to snap the character to the Z
+    Movement::PointsArray& waypointPath = pathNodesOut;
+    waypointPath.emplace_back(creature->GetPositionX(), creature->GetPositionY(), creature->GetPositionZ());
+    Position previousPosition = creature->GetPosition();
+    float priorInterimZ = -100001.0f;
+    for (int cornerIndex = 1; cornerIndex < (int)pathNodes.size(); ++cornerIndex)
+    {
+        Position corner(pathNodes[cornerIndex].x, pathNodes[cornerIndex].y, pathNodes[cornerIndex].z);
+        bool isFinalCorner = (cornerIndex == (int)pathNodes.size() - 1);
+
+        float segDX = corner.GetPositionX() - previousPosition.GetPositionX();
+        float segDY = corner.GetPositionY() - previousPosition.GetPositionY();
+        float segDZ = corner.GetPositionZ() - previousPosition.GetPositionZ();
+        float segLength = std::sqrt(segDX * segDX + segDY * segDY + segDZ * segDZ);
+
+        if (segLength < 0.001f)
+            continue;
+
+        float ux = segDX / segLength;
+        float uy = segDY / segLength;
+        float uz = segDZ / segLength;
+
+        float endThreshold = isFinalCorner ? EQ_MOVE_SMALL_STEP_SIZE_LAST_DISTANCE : EQ_MOVE_SMALL_STEP_SIZE_DISTANCE;
+        float remainingDistance = segLength;
+
+        bool nodeCapReached = false;
+        while (remainingDistance > endThreshold)
+        {
+            // Prevent oversizing paths
+            if (waypointPath.size() >= EQ_MOVE_MAX_PATH_NODES)
+            {
+                nodeCapReached = true;
+                break;
+            }
+
+            float interimX = previousPosition.GetPositionX() + ux * EQ_MOVE_SMALL_STEP_SIZE_DISTANCE;
+            float interimY = previousPosition.GetPositionY() + uy * EQ_MOVE_SMALL_STEP_SIZE_DISTANCE;
+            float interimZ = previousPosition.GetPositionZ() + uz * EQ_MOVE_SMALL_STEP_SIZE_DISTANCE;
+
+            if (priorInterimZ < -100000)
+                priorInterimZ = interimZ;
+
+            interimZ = GetTerrainSnappedZ(creature, previousPosition.GetPositionX(), previousPosition.GetPositionY(),
+                previousPosition.GetPositionZ(), interimX, interimY, priorInterimZ, foundValidZ, disableGroundContour, minZ, maxZ);
+
+            waypointPath.emplace_back(interimX, interimY, interimZ);
+            previousPosition = Position(interimX, interimY, interimZ);
+            remainingDistance -= EQ_MOVE_SMALL_STEP_SIZE_DISTANCE;
+            priorInterimZ = interimZ;
+        }
+
+        // When cap is hit, stop at the last interim node instead of an unsnapped one
+        if (nodeCapReached)
+            break;
+
+        // Add corner
+        float refZ = (priorInterimZ < -100000.0f) ? corner.GetPositionZ() : priorInterimZ;
+        float cornerZ = GetTerrainSnappedZ(creature, previousPosition.GetPositionX(), previousPosition.GetPositionY(),
+            previousPosition.GetPositionZ(), corner.GetPositionX(), corner.GetPositionY(), refZ,
+            foundValidZ, disableGroundContour, minZ, maxZ);
+
+        waypointPath.emplace_back(corner.GetPositionX(), corner.GetPositionY(), cornerZ);
+        previousPosition = Position(corner.GetPositionX(), corner.GetPositionY(), cornerZ);
+        priorInterimZ = cornerZ;
+    }
+
+    // Add for saftey, though this shouldn't happen...
+    if (waypointPath.size() <= 1)
+        waypointPath.emplace_back(initialTargetX, initialTargetY, terrainSnappedTargetZ);
+
+    return true;
+}
+
+bool EverQuestMod::StartTerrainSnappedMoveToPoint(Creature* creature, float x, float y, float z, bool isRun)
+{
+    if (creature == nullptr)
+        return false;
+
+    // A placed creature can be told to ignore the ground contour by its zone data, and a scripted spawn has no such row
+    bool disableGroundContour = false;
+    if (creature->GetSpawnId() != 0)
+        disableGroundContour = GetCreatureInstanceData(creature->GetSpawnId()).DisableGroundContour;
+
+    // The roam box is deliberately not used here, since a scripted destination is usually outside of it
+    Movement::PointsArray pathNodes;
+    float snappedTargetZ = z;
+    if (BuildTerrainSnappedMovementPath(creature, x, y, z, disableGroundContour, 0, 0, false, pathNodes, snappedTargetZ) == false)
+        return false;
+
+    creature->SetWalk(isRun == false);
+    creature->GetMotionMaster()->Clear(false);
+    creature->GetMotionMaster()->MoveSplinePath(&pathNodes, isRun == true ? FORCED_MOVEMENT_RUN : FORCED_MOVEMENT_WALK);
+    return true;
+}
+
+bool EverQuestMod::StartReactionWalk(Creature* creature, float x, float y, float z, float orientation, bool hasOrientation, bool isRun, vector<EverQuestPendingKillSpawnAction>& actionsOnArrival, bool reissueMoveWhenStalled)
 {
     if (creature == nullptr || creature->IsAlive() == false)
         return false;
+
+    // A long walk cannot be given the same patience as a short one, or its queued actions get dropped in transit
+    float moveSpeed = creature->GetSpeed(isRun == true ? MOVE_RUN : MOVE_WALK);
+    if (moveSpeed < 0.1f)
+        moveSpeed = 0.1f;
+    uint32 timeoutMS = EQ_REACTION_WALK_TIMEOUT_MS + static_cast<uint32>((creature->GetExactDist(x, y, z) / moveSpeed) * 2000.0f);
+    if (timeoutMS > EQ_REACTION_WALK_MAX_TIMEOUT_MS)
+        timeoutMS = EQ_REACTION_WALK_MAX_TIMEOUT_MS;
 
     // Talking to a creature makes the core pause its movement before any script gets a say, so a creature on a reaction walk is made non-interactable for the trip and gets its flags back when it arrives
     uint32 savedNpcFlags = (uint32)creature->GetCreatureTemplate()->npcflag;
@@ -2212,8 +2459,11 @@ bool EverQuestMod::StartReactionWalk(Creature* creature, float x, float y, float
         watcher.DestinationZ = z;
         watcher.DestinationOrientation = orientation;
         watcher.HasDestinationOrientation = hasOrientation;
+        watcher.TimeoutMS = timeoutMS;
         watcher.SavedNpcFlags = savedNpcFlags;
         watcher.HasSavedNpcFlags = true;
+        watcher.ReissueMoveWhenStalled = reissueMoveWhenStalled;
+        watcher.StallCheckRemainingMS = EQ_REACTION_WALK_STALL_CHECK_MS;
         watcher.ActionsOnArrival = actionsOnArrival;
         watchers.push_back(watcher);
         ReactionWalkCreatureGUIDs.insert(creature->GetGUID());
@@ -2222,9 +2472,14 @@ bool EverQuestMod::StartReactionWalk(Creature* creature, float x, float y, float
     creature->ReplaceAllNpcFlags(UNIT_NPC_FLAG_NONE);
 
     // Take the creature off whatever it was doing so its normal waypoint or roaming generator does not fight the walk
-    creature->SetWalk(isRun == false);
-    creature->GetMotionMaster()->Clear();
-    creature->GetMotionMaster()->MovePoint(EQ_REACTION_WALK_POINT_ID, x, y, z);
+    if (StartTerrainSnappedMoveToPoint(creature, x, y, z, isRun) == false)
+    {
+        // Nothing walkable could be built, so fall back to letting the core path it however it can
+        creature->SetWalk(isRun == false);
+        creature->GetMotionMaster()->Clear();
+        creature->GetMotionMaster()->MovePoint(EQ_REACTION_WALK_POINT_ID, x, y, z);
+    }
+    LOG_DEBUG("module.EverQuest", "EverQuestMod::StartReactionWalk creature {} walking {} yards to ({}, {}, {}) with a {} ms timeout", creature->GetEntry(), creature->GetExactDist(x, y, z), x, y, z, timeoutMS);
     return true;
 }
 
@@ -2365,7 +2620,26 @@ void EverQuestMod::UpdatePendingArrivalActions(Map* map, uint32 diff)
             bool hasTimedOut = watcher.ElapsedMS >= watcher.TimeoutMS;
 
             if (moverIsGone == false && hasArrived == false && hasTimedOut == false)
+            {
+                if (watcher.ReissueMoveWhenStalled == true && mover->IsInCombat() == false)
+                {
+                    if (watcher.StallCheckRemainingMS > diff)
+                        watcher.StallCheckRemainingMS -= diff;
+                    else
+                    {
+                        watcher.StallCheckRemainingMS = EQ_REACTION_WALK_STALL_CHECK_MS;
+                        if (mover->movespline->Finalized() == true)
+                        {
+                            StartTerrainSnappedMoveToPoint(mover, watcher.DestinationX, watcher.DestinationY, watcher.DestinationZ, true);
+                            LOG_DEBUG("module.EverQuest", "EverQuestMod::UpdatePendingArrivalActions creature {} stalled {} yards short of its reaction walk, so the next leg was built", mover->GetEntry(), mover->GetExactDist2d(watcher.DestinationX, watcher.DestinationY));
+                        }
+                    }
+                }
                 continue;
+            }
+
+            if (hasArrived == false)
+                LOG_DEBUG("module.EverQuest", "EverQuestMod::UpdatePendingArrivalActions dropping {} queued action(s) for creature {}, which {} after {} ms", (uint32)watcher.ActionsOnArrival.size(), mover != nullptr ? mover->GetEntry() : 0, moverIsGone == true ? "left the world" : "never reached its destination", watcher.ElapsedMS);
 
             ReactionWalkCreatureGUIDs.erase(watcher.MoverGUID);
             ReactionWalkCreatureCount.store((uint32)ReactionWalkCreatureGUIDs.size());
@@ -2429,6 +2703,21 @@ void EverQuestMod::UpdatePendingArrivalActions(Map* map, uint32 diff)
                 Player* listener = (action.ListenerGUID ? ObjectAccessor::GetPlayer(map, action.ListenerGUID) : nullptr);
                 if (listener != nullptr)
                     MakeCreatureAttackPlayer(action.TargetCreatureTemplateID, map, listener);
+                continue;
+            }
+            if (action.ActionType == EQ_KILLSPAWN_ACTION_ATTACKNPC)
+            {
+                // The creature that made the walk is the one being marched on
+                if (mover != nullptr)
+                    MakeCreaturesAssaultCreature(action.TargetCreatureTemplateID, map, mover);
+                continue;
+            }
+            if (action.ActionType == EQ_KILLSPAWN_ACTION_ASSAULTARRIVE)
+            {
+                // Here the mover is the attacker, which has just finished its march to the victim
+                Creature* assaultVictim = map->GetCreature(action.AssaultTargetGUID);
+                if (mover != nullptr && assaultVictim != nullptr)
+                    EngageScriptedAssault(mover, assaultVictim);
                 continue;
             }
             if (action.ActionType == EQ_KILLSPAWN_ACTION_DESPAWN && mover != nullptr && action.TargetCreatureTemplateID == mover->GetEntry())
@@ -5543,6 +5832,7 @@ bool EverQuestMod::HandleGossipSelect(Player* player, Creature* creature, uint32
         case EQ_QUEST_REACTION_EMOTE: arrivalAction.ActionType = EQ_KILLSPAWN_ACTION_EMOTE; break;
         case EQ_QUEST_REACTION_YELL: arrivalAction.ActionType = EQ_KILLSPAWN_ACTION_YELL; break;
         case EQ_QUEST_REACTION_ATTACKPLAYER: arrivalAction.ActionType = EQ_KILLSPAWN_ACTION_ATTACKPLAYER; break;
+        case EQ_QUEST_REACTION_ATTACKNPC: arrivalAction.ActionType = EQ_KILLSPAWN_ACTION_ATTACKNPC; break;
         case EQ_QUEST_REACTION_DESPAWN: arrivalAction.ActionType = EQ_KILLSPAWN_ACTION_DESPAWN; break;
         case EQ_QUEST_REACTION_SPAWN:
         case EQ_QUEST_REACTION_SPAWNUNIQUE:
@@ -5605,6 +5895,10 @@ bool EverQuestMod::HandleGossipSelect(Player* player, Creature* creature, uint32
         case EQ_QUEST_REACTION_ATTACKPLAYER:
         {
             MakeCreatureAttackPlayer(gossipReaction.TargetCreatureTemplateID, map, player);
+        } break;
+        case EQ_QUEST_REACTION_ATTACKNPC:
+        {
+            MakeCreaturesAssaultCreature(gossipReaction.TargetCreatureTemplateID, map, creature);
         } break;
         case EQ_QUEST_REACTION_DESPAWN:
         {
@@ -11068,13 +11362,10 @@ void EverQuestMod::ExecutePendingReactionSpawn(const EverQuestPendingReactionSpa
     float z = pendingSpawn.PositionZ;
     float orientation = pendingSpawn.Orientation;
 
-    // Cancel out if it should be a unique spawn, and the creature exists
-    if (pendingSpawn.EnforceUniqueSpawn == true)
-    {
-        vector<Creature*> loadedCreatures = GetLoadedCreaturesWithEntryID(map, entryID);
-        if (loadedCreatures.size() > 0)
-            return;
-    }
+    // Cancel out if it should be a unique spawn and a live copy is already up.  A corpse or a despawned placeholder
+    // counts as the creature not being up, matching EQ's unique_spawn, so a stale body never blocks the event
+    if (pendingSpawn.EnforceUniqueSpawn == true && HasAliveCreatureWithEntryInMap(map, entryID, nullptr) == true)
+        return;
 
     Creature* creature = new Creature();
     if (!creature->Create(map->GenerateLowGuid<HighGuid::Unit>(), map, PHASEMASK_NORMAL, entryID, 0, x, y, z, orientation)) // Players are always in phase 1
@@ -11280,6 +11571,79 @@ void EverQuestMod::MakeCreatureAttackPlayer(uint32 entryID, Map* map, Player* pl
             creature->SetTarget(player->GetGUID());
             creature->Attack(player, true); // Should this be false when there is magic/ranged involved?
         }
+}
+
+void EverQuestMod::MakeCreaturesAssaultCreature(uint32 entryID, Map* map, Creature* victim)
+{
+    if (map == nullptr || victim == nullptr || victim->IsAlive() == false)
+        return;
+
+    vector<Creature*> loadedCreatures = GetLoadedCreaturesWithEntryID(map, entryID);
+    uint32 sentCount = 0;
+    for (Creature* attacker : loadedCreatures)
+    {
+        if (attacker == nullptr || attacker == victim || attacker->IsAlive() == false)
+            continue;
+
+        // An attacker already on top of the victim just swings.  Anything further off marches the whole way there first, since the EQ spawn points for these ambushes sit well away from the npc being hunted
+        if (attacker->GetExactDist(victim) <= EQ_ASSAULT_ENGAGE_DISTANCE)
+        {
+            EngageScriptedAssault(attacker, victim);
+            sentCount++;
+            continue;
+        }
+
+        EverQuestPendingKillSpawnAction arrivalAction;
+        arrivalAction.ActionType = EQ_KILLSPAWN_ACTION_ASSAULTARRIVE;
+        arrivalAction.AssaultTargetGUID = victim->GetGUID();
+        vector<EverQuestPendingKillSpawnAction> actionsOnArrival;
+        actionsOnArrival.push_back(arrivalAction);
+        if (StartReactionWalk(attacker, victim->GetPositionX(), victim->GetPositionY(), victim->GetPositionZ(), 0, false, true, actionsOnArrival, true) == true)
+            sentCount++;
+        else
+            LOG_ERROR("module.EverQuest", "EverQuestMod::MakeCreaturesAssaultCreature could not send creature {} on its march to creature {}", attacker->GetEntry(), victim->GetEntry());
+    }
+    if (sentCount == 0)
+        LOG_ERROR("module.EverQuest", "EverQuestMod::MakeCreaturesAssaultCreature found no living creature with template {} on map {} to send at creature {}, so nothing was ordered to attack it", entryID, map->GetId(), victim->GetEntry());
+    else
+        LOG_INFO("module.EverQuest", "EverQuestMod::MakeCreaturesAssaultCreature sent {} creature(s) of template {} at creature {}", sentCount, entryID, victim->GetEntry());
+}
+
+void EverQuestMod::EngageScriptedAssault(Creature* attacker, Creature* victim)
+{
+    if (attacker == nullptr || victim == nullptr)
+        return;
+    if (attacker->IsAlive() == false || victim->IsAlive() == false)
+        return;
+    if (attacker->GetMap() != victim->GetMap())
+        return;
+
+    // Quest npcs sit on a neutral faction that nothing in the world is hostile to, so the core refuses the attack outright.  The assailant faction exists only for this, and names those neutral factions as its enemies
+    if (attacker->IsHostileTo(victim) == false)
+    {
+        if (sFactionTemplateStore.LookupEntry(EQ_FACTION_TEMPLATE_SCRIPTED_ASSAILANT) == nullptr)
+        {
+            LOG_ERROR("module.EverQuest", "EverQuestMod::EngageScriptedAssault cannot send creature {} at creature {}, as faction template {} is missing from FactionTemplate.dbc", attacker->GetEntry(), victim->GetEntry(), EQ_FACTION_TEMPLATE_SCRIPTED_ASSAILANT);
+            return;
+        }
+        attacker->SetFaction(EQ_FACTION_TEMPLATE_SCRIPTED_ASSAILANT);
+    }
+    attacker->SetReactState(REACT_AGGRESSIVE);
+    attacker->SetTarget(victim->GetGUID());
+
+    // One point of hate, like the EQ script, so a player who steps in front of the attacker pulls it off the victim
+    attacker->SetInCombatWith(victim);
+    attacker->AddThreat(victim, 1.0f);
+    if (attacker->IsAIEnabled == true && attacker->AI() != nullptr)
+        attacker->AI()->AttackStart(victim);
+    else
+        attacker->Attack(victim, true);
+
+    // Hostility is the one thing that can silently fail here, and without it the attacker stands next to the victim doing nothing
+    if (attacker->IsHostileTo(victim) == false)
+        LOG_ERROR("module.EverQuest", "EverQuestMod::EngageScriptedAssault creature {} is still not hostile to creature {} on faction template {}, so it cannot fight it.  The victim's faction needs an enemy slot on the scripted assailant faction", attacker->GetEntry(), victim->GetEntry(), attacker->GetFaction());
+    else
+        LOG_INFO("module.EverQuest", "EverQuestMod::EngageScriptedAssault creature {} engaged creature {}", attacker->GetEntry(), victim->GetEntry());
 }
 
 bool EverQuestMod::IsSpellAnEQSpell(uint32 spellID)

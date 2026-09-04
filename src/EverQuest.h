@@ -28,6 +28,7 @@
 #include "CreatureData.h"
 #include "Player.h"
 #include "Chat.h"
+#include "MoveSplineInitArgs.h"
 
 #include <string>
 #include <list>
@@ -216,6 +217,7 @@ struct BuildValuesCachePosPointers;
 #define EQ_QUEST_REACTION_WALKTO                    9
 #define EQ_QUEST_REACTION_WALKGRID                  11
 #define EQ_QUEST_REACTION_SPAWNOBJECT               12
+#define EQ_QUEST_REACTION_ATTACKNPC                 13
 
 #define EQ_KILLSPAWN_ACTION_SPAWN                   0
 #define EQ_KILLSPAWN_ACTION_DESPAWN                 1
@@ -227,6 +229,8 @@ struct BuildValuesCachePosPointers;
 #define EQ_KILLSPAWN_ACTION_ATTACKPLAYER            7
 #define EQ_KILLSPAWN_ACTION_WALKPATH                8
 #define EQ_KILLSPAWN_ACTION_SPAWNOBJECT             9
+#define EQ_KILLSPAWN_ACTION_ATTACKNPC               10
+#define EQ_KILLSPAWN_ACTION_ASSAULTARRIVE           11
 
 #define EQ_REACTION_WALK_TIMEOUT_MS                 120000
 #define EQ_REACTION_WALK_MAX_TIMEOUT_MS             900000
@@ -235,6 +239,9 @@ struct BuildValuesCachePosPointers;
 #define EQ_REACTION_OBJECT_DEFAULT_LIFETIME_SEC     1800
 #define EQ_REACTION_WALK_ARRIVE_DISTANCE            5.0f
 #define EQ_REACTION_WALK_POINT_ID                   9910001
+#define EQ_REACTION_WALK_STALL_CHECK_MS             1000
+#define EQ_ASSAULT_ENGAGE_DISTANCE                  30.0f
+#define EQ_FACTION_TEMPLATE_SCRIPTED_ASSAILANT      2338 // TODO: Read this from the converter
 
 #define EQ_KILLSPAWN_TRIGGER_DEATH                  0
 #define EQ_KILLSPAWN_TRIGGER_COMBAT                 1
@@ -538,6 +545,7 @@ public:
     bool UseMoverPositionY = false;
     bool UseMoverPositionZ = false;
     bool UseMoverOrientation = false;
+    ObjectGuid AssaultTargetGUID;
 };
 
 class EverQuestPendingArrivalAction
@@ -553,6 +561,8 @@ public:
     uint32 TimeoutMS = EQ_REACTION_WALK_TIMEOUT_MS;
     uint32 SavedNpcFlags = 0;
     bool HasSavedNpcFlags = false;
+    bool ReissueMoveWhenStalled = false;
+    uint32 StallCheckRemainingMS = 0;
     vector<EverQuestPendingKillSpawnAction> ActionsOnArrival;
 };
 
@@ -1679,7 +1689,12 @@ public:
     void TriggerQuestKillSpawn(Map* map, const EverQuestQuestReaction& questReaction);
     void EnqueuePendingKillSpawnAction(Map* map, EverQuestPendingKillSpawnAction& action);
     void UpdatePendingKillSpawnActions(Map* map, uint32 diff);
-    bool StartReactionWalk(Creature* creature, float x, float y, float z, float orientation, bool hasOrientation, bool isRun, vector<EverQuestPendingKillSpawnAction>& actionsOnArrival);
+    bool StartReactionWalk(Creature* creature, float x, float y, float z, float orientation, bool hasOrientation, bool isRun, vector<EverQuestPendingKillSpawnAction>& actionsOnArrival, bool reissueMoveWhenStalled = false);
+    float GetTerrainSnappedZ(Creature* creature, float priorX, float priorY, float priorZ, float initialTargetX, float initialTargetY, float initialTargetZ,
+        bool& foundValidZ, bool disableGroundContour, float minZ = 0, float maxZ = 0);
+    bool BuildTerrainSnappedMovementPath(Creature* creature, float initialTargetX, float initialTargetY, float initialTargetZ, bool disableGroundContour,
+        float minZ, float maxZ, bool failWhenNoPathAndNoValidZ, Movement::PointsArray& pathNodesOut, float& snappedTargetZOut);
+    bool StartTerrainSnappedMoveToPoint(Creature* creature, float x, float y, float z, bool isRun);
     bool StartReactionGridWalk(Creature* creature, uint32 pathListID, vector<EverQuestPendingKillSpawnAction>& actionsOnArrival);
     void SpawnReactionGameObject(Creature* summoner, uint32 gameObjectEntryID, float x, float y, float z, uint32 lifetimeSec);
     bool DoesPlayerMeetGossipRequirements(Player* player, Creature* creature, const EverQuestGossipReaction& gossipReaction);
@@ -2057,6 +2072,8 @@ public:
     void ClearPerMapRuntimeStateForMap(Map* map);
     void DespawnCreature(uint32 entryID, Map* map);
     void MakeCreatureAttackPlayer(uint32 entryID, Map* map, Player* player);
+    void MakeCreaturesAssaultCreature(uint32 entryID, Map* map, Creature* victim);
+    void EngageScriptedAssault(Creature* attacker, Creature* victim);
     bool IsSpellAnEQSpell(uint32 spellID);
     bool ShouldSpellPreserveSwingTimers(uint32 spellID);
     void StashSwingTimersBeforeSpellCast(Player* player, Spell* spell);

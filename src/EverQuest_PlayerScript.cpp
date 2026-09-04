@@ -260,6 +260,7 @@ public:
                 case EQ_QUEST_REACTION_EMOTE: arrivalAction.ActionType = EQ_KILLSPAWN_ACTION_EMOTE; break;
                 case EQ_QUEST_REACTION_YELL: arrivalAction.ActionType = EQ_KILLSPAWN_ACTION_YELL; break;
                 case EQ_QUEST_REACTION_ATTACKPLAYER: arrivalAction.ActionType = EQ_KILLSPAWN_ACTION_ATTACKPLAYER; break;
+                case EQ_QUEST_REACTION_ATTACKNPC: arrivalAction.ActionType = EQ_KILLSPAWN_ACTION_ATTACKNPC; break;
                 case EQ_QUEST_REACTION_DESPAWN: arrivalAction.ActionType = EQ_KILLSPAWN_ACTION_DESPAWN; break;
                 case EQ_QUEST_REACTION_SPAWN:
                 case EQ_QUEST_REACTION_SPAWNUNIQUE:
@@ -297,6 +298,12 @@ public:
                 case EQ_QUEST_REACTION_ATTACKPLAYER:
                 {
                     EverQuest->MakeCreatureAttackPlayer(questReaction.CreatureTemplateID, map, player);
+                } break;
+                case EQ_QUEST_REACTION_ATTACKNPC:
+                {
+                    Creature* assaultVictim = EverQuest->GetNearestLoadedCreatureWithEntryID(map, questReaction.QuestgiverCreatureTemplateID, player);
+                    if (assaultVictim != nullptr)
+                        EverQuest->MakeCreaturesAssaultCreature(questReaction.CreatureTemplateID, map, assaultVictim);
                 } break;
                 case EQ_QUEST_REACTION_DESPAWN:
                 {
