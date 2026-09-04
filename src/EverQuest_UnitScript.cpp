@@ -259,15 +259,6 @@ public:
         if (EverQuest->GetSpellDataForSpellID(spellID).IllusionFormEQRaceID != 0)
             EverQuest->RecalculateTemporaryFactionReactionsForPlayer(player);
 
-        if (EverQuest->IsSpellBlockedByMinTargetLevel(spellID, unit, aura->GetCaster()) == true)
-        {
-            Unit* auraCaster = aura->GetCaster();
-            unit->RemoveAura(aura);
-            if (auraCaster != nullptr && auraCaster->IsPlayer() == true)
-                ChatHandler(auraCaster->ToPlayer()->GetSession()).PSendSysMessage("Your spell is too powerful for your intended target.");
-            return;
-        }
-
         // A Necromancer class aura holder hands enemy debuffs to their pet
         if (EverQuest->TryTransferDebuffToNecromancerPet(player, aura) == true)
             return;

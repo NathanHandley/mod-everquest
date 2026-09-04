@@ -74,6 +74,7 @@ EverQuestMod::EverQuestMod() :
     IsEnabled(true),
     ConfigWorldScale(1),
     ConfigBardMaxConcurrentSongs(1),
+    ConfigSpellBuffLevelRestrictionsEnabled(false),
     ConfigSystemMapDBCIDMin(0),
     ConfigSystemMapDBCIDMax(0),
     ConfigSystemSpellDBCIDMin(0),
@@ -108,7 +109,6 @@ EverQuestMod::EverQuestMod() :
     ConfigAlternateGroupExperienceFormulaEnabled(false),
     ConfigAlternateGroupExperienceAddPercentPerAddedMember(20.0f),
     ConfigSpellDisableStackingOfSameDOT(false),
-    ConfigSpellBuffLevelRestrictionsEnabled(true),
     ConfigSpellCrowdControlLevelRestrictionsEnabled(true),
     ConfigSpellHasteCapEnabled(true),
     ConfigSpellHasteCapPercent(50.0f),
@@ -199,6 +199,8 @@ bool EverQuestMod::LoadConfigurationSystemDataFromDB()
                 configModVersion = atoi(value.c_str());
             else if (key == "BardMaxConcurrentSongs")
                 ConfigBardMaxConcurrentSongs = (uint32)atoi(value.c_str());
+            else if (key == "BuffLevelRestrictionsEnabled")
+                ConfigSpellBuffLevelRestrictionsEnabled = value == "1" ? true : false;
             else if (key == "CreatureTemplateIDMin")
                 ConfigSystemCreatureTemplateIDMin = (uint32)atoi(value.c_str());
             else if (key == "CreatureTemplateIDMax")
@@ -388,7 +390,6 @@ void EverQuestMod::LoadConfigurationFile()
 
     // Spells
     ConfigSpellDisableStackingOfSameDOT = sConfigMgr->GetOption<bool>("EverQuest.Spells.DisableStackingOfSameDOT", false);
-    ConfigSpellBuffLevelRestrictionsEnabled = sConfigMgr->GetOption<bool>("EverQuest.Spells.BuffLevelRestrictionsEnabled", true);
     ConfigSpellCrowdControlLevelRestrictionsEnabled = sConfigMgr->GetOption<bool>("EverQuest.Spells.CrowdControlLevelRestrictionsEnabled", true);
     ConfigSpellHasteCapEnabled = sConfigMgr->GetOption<bool>("EverQuest.Spells.HasteCapEnabled", true);
     ConfigSpellMovementCastSnareEnabled = sConfigMgr->GetOption<bool>("EverQuest.Spells.MovementCastSnareEnabled", true);
@@ -4190,18 +4191,23 @@ bool EverQuestMod::IsIllusionObjectFormBlockedByLevitation(uint32 spellID, Unit*
     return IsUnitLevitating(target);
 }
 
-bool EverQuestMod::IsSpellBlockedByMinTargetLevel(uint32 spellID, Unit* target, Unit* caster)
+bool EverQuestMod::IsSpellBlockedByMinTargetLevel(uint32 spellID, Unit* target, Unit* caster, bool isCastFromItem)
 {
+    // TAKP only checks this on a player's own direct cast, so item clickies, procs and worn effects are all exempt
     if (ConfigSpellBuffLevelRestrictionsEnabled == false)
         return false;
+    if (isCastFromItem == true)
+        return false;
     if (target == nullptr || target->IsPlayer() == false)
+        return false;
+    if (caster == nullptr || caster->IsPlayer() == false)
+        return false;
+    if (caster->ToPlayer()->IsGameMaster() == true)
         return false;
     const EverQuestSpell& spellData = GetSpellDataForSpellID(spellID);
     if (spellData.MinTargetLevel == 0)
         return false;
     if (target->GetLevel() >= spellData.MinTargetLevel)
-        return false;
-    if (caster != nullptr && caster->IsPlayer() == true && caster->ToPlayer()->IsGameMaster() == true)
         return false;
     return true;
 }

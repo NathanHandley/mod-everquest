@@ -117,7 +117,7 @@ public:
         // Enforce buff restriction up front to avoid mana/cooldown triggers
         if (target == nullptr)
             return;
-        if (EverQuest->IsSpellBlockedByMinTargetLevel(spell->GetSpellInfo()->Id, target, spell->GetCaster()) == true)
+        if (EverQuest->IsSpellBlockedByMinTargetLevel(spell->GetSpellInfo()->Id, target, spell->GetCaster(), spell->m_CastItem != nullptr) == true)
             res = SPELL_FAILED_LOWLEVEL;
         else if (EverQuest->IsSpellBlockedByMaxCreatureTargetLevel(spell->GetSpellInfo()->Id, target, spell->GetCaster()) == true)
             res = SPELL_FAILED_HIGHLEVEL;

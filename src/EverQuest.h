@@ -52,7 +52,7 @@ class ByteBuffer;
 struct AreaTrigger;
 struct BuildValuesCachePosPointers;
 
-#define EQ_MOD_VERSION                              93
+#define EQ_MOD_VERSION                              94
 
 #define EQ_MOVEMENT_CAST_SNARE_DURATION_BUFFER_IN_MS 2000 // How much longer than the remaining cast time the casting slow is given, so a pushed-back cast keeps it
 
@@ -1351,6 +1351,7 @@ public:
     // Configs (from database)
     float ConfigWorldScale;
     uint32 ConfigBardMaxConcurrentSongs;
+    bool ConfigSpellBuffLevelRestrictionsEnabled;
     uint32 ConfigSystemMapDBCIDMin;
     uint32 ConfigSystemMapDBCIDMax;
     uint32 ConfigSystemSpellDBCIDMin;
@@ -1437,7 +1438,6 @@ public:
     uint32 ConfigMentorshipMinLevelGap;
     uint32 ConfigMentorshipRequestTimeoutInSec;
     bool ConfigSpellDisableStackingOfSameDOT;
-    bool ConfigSpellBuffLevelRestrictionsEnabled;
     bool ConfigSpellCrowdControlLevelRestrictionsEnabled;
     bool ConfigSpellHasteCapEnabled;
     float ConfigSpellHasteCapPercent;
@@ -1757,7 +1757,7 @@ public:
     bool DoesSpellApplyLevitation(SpellInfo const* spellInfo);
     bool IsLevitationBlockedByIllusionObjectForm(SpellInfo const* spellInfo, Unit* target);
     bool IsIllusionObjectFormBlockedByLevitation(uint32 spellID, Unit* target);
-    bool IsSpellBlockedByMinTargetLevel(uint32 spellID, Unit* target, Unit* caster);
+    bool IsSpellBlockedByMinTargetLevel(uint32 spellID, Unit* target, Unit* caster, bool isCastFromItem);
     bool IsSpellBlockedByMaxCreatureTargetLevel(uint32 spellID, Unit* target, Unit* caster);
     bool IsCreatureCharmBlockedByCharmLimits(uint32 spellID, Unit* target, Unit* caster);
     uint8 GetCharmProtectedDispelEffectMaskForTarget(SpellInfo const* spellInfo, Unit* target);

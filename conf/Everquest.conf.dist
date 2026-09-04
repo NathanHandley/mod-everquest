@@ -226,18 +226,6 @@ EverQuest.Spells.DisableStackingOfSameDOT = False
 
 ###################################################################################################
 #
-# 	EverQuest.Spells.BuffLevelRestrictionsEnabled
-#		If true, beneficial buffs above spell level 50 will not land on players below level
-#		(spell level / 2) + 15, matching EverQuest behavior. Applies to direct casts, group and
-#		area landings, item clickies, and procs. Bard songs are exempt.
-#	Default: True (use EverQuest behavior)
-#
-###################################################################################################
-
-EverQuest.Spells.BuffLevelRestrictionsEnabled = True
-
-###################################################################################################
-#
 # 	EverQuest.Spells.CrowdControlLevelRestrictionsEnabled
 #		If true, player-cast stun, mesmerize, and charm spells will not land on creatures above the
 #       spell's EverQuest max target level (stuns default to a max of level 55 when the	EverQuest
