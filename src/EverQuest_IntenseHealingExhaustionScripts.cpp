@@ -24,15 +24,15 @@
 
 using namespace std;
 
-class EverQuest_CompleteHealSpellScript : public SpellScript
+class EverQuest_IntenseHealingSpellScript : public SpellScript
 {
-    PrepareSpellScript(EverQuest_CompleteHealSpellScript);
+    PrepareSpellScript(EverQuest_IntenseHealingSpellScript);
 
     void HandleAfterCast()
     {
         if (EverQuest->IsEnabled == false)
             return;
-        if (EverQuest->ConfigSystemCompleteHealExhaustionSpellID == 0)
+        if (EverQuest->ConfigSystemIntenseHealingExhaustionSpellID == 0)
             return;
 
         // Creatures have no spell mods, so the debuff would do nothing for them
@@ -45,16 +45,16 @@ class EverQuest_CompleteHealSpellScript : public SpellScript
             return;
 
         // Stacked on cast completion, which is also when the cast paid its (already multiplied) mana
-        caster->CastSpell(caster, EverQuest->ConfigSystemCompleteHealExhaustionSpellID, true);
+        caster->CastSpell(caster, EverQuest->ConfigSystemIntenseHealingExhaustionSpellID, true);
     }
 
     void Register() override
     {
-        AfterCast += SpellCastFn(EverQuest_CompleteHealSpellScript::HandleAfterCast);
+        AfterCast += SpellCastFn(EverQuest_IntenseHealingSpellScript::HandleAfterCast);
     }
 };
 
-void AddEverQuestCompleteHealExhaustionScripts()
+void AddEverQuestIntenseHealingExhaustionScripts()
 {
-    RegisterSpellScript(EverQuest_CompleteHealSpellScript);
+    RegisterSpellScript(EverQuest_IntenseHealingSpellScript);
 }
