@@ -80,6 +80,8 @@ EverQuest.Quest.GrantExpOnRepeatCompletion = True
 #       happens when an area has no usable graveyard_zone row (the core then falls back to Westfall
 #       or the Crossroads).  Every correction is written to the server log with the map and area
 #       that caused it, so the underlying graveyard_zone data can be fixed
+#       NOTE: Logging in never asks for a graveyard at all, so that path is covered separately by
+#       EverQuest.Login.ReturnCharactersToNorrath below
 #	Default: True (enabled, an EverQuest death stays in Norrath and a WoW death stays in Azeroth)
 #
 # 	EverQuest.Death.FallbackGraveyardID
@@ -92,6 +94,29 @@ EverQuest.Quest.GrantExpOnRepeatCompletion = True
 
 EverQuest.Death.EnforceGraveyardDomain = True
 EverQuest.Death.FallbackGraveyardID = 1813
+
+###################################################################################################
+# Login Settings
+#
+# 	EverQuest.Login.ReturnCharactersToNorrath
+#		If true, a character that logged out in an EverQuest zone always comes back in one.  When
+#       AzerothCore cannot restore a saved position at login it silently relocates the character to
+#       their home bind, which is the hearthstone spot and is usually in Azeroth, and none of those
+#       relocations ask for a graveyard so the death graveyard rules above never see them.  The
+#       common cause is logging out inside an instanced EverQuest zone whose instance has since gone
+#       away, since an instanced zone has no areatrigger aimed at its own map for the core to fall
+#       back on
+#       A ghost is sent to the graveyard for the zone their corpse is in, then to their EverQuest
+#       bind point, then to EverQuest.Death.FallbackGraveyardID.  Anyone else is sent to the zone
+#       safe point of the zone they logged out in (the open world copy of it when they logged out
+#       inside an instance), then to their EverQuest bind point, then to their race and class
+#       starting position.  Every correction is written to the server log.  Doesn't apply to GM
+#       accounts
+#	Default: True (enabled, a character of Norrath is never dropped into Azeroth at login)
+#
+###################################################################################################
+
+EverQuest.Login.ReturnCharactersToNorrath = True
 
 ###################################################################################################
 # EXP Loss on Death Settings

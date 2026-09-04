@@ -747,6 +747,9 @@ public:
         // Start the grace timer for the client data version report (kicks stale clients that bypassed the update launcher)
         EverQuest->BeginClientVersionCheckForPlayer(player);
 
+        // Handle odd edge cases where a player logs in but the server doesn't know where to put them
+        EverQuest->EnforceWorldDomainAtLogin(player);
+
         // Pick up a character that logged out inside a raid instance
         EverQuest->UpdateRaidLowInstanceStateForPlayer(player);
 

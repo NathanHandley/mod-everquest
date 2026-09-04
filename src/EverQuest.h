@@ -1420,6 +1420,7 @@ public:
     uint32 ConfigMapRestrictedMapCheckIntervalInSeconds;
     bool ConfigDeathEnforceGraveyardDomain = true;
     uint32 ConfigDeathFallbackGraveyardID = 0;
+    bool ConfigLoginReturnCharactersToNorrath = true;
     bool ConfigClientVersionCheckEnabled = false;
     uint32 ConfigClientVersionCheckGraceTimeInSeconds = 30;
     uint32 ConfigClientVersionCheckKickDelayInSeconds = 10;
@@ -1963,6 +1964,9 @@ public:
     uint32 GetNearestEverQuestGraveyardIDForPosition(uint32 mapID, float x, float y, float z);
     uint32 GetFallbackEverQuestGraveyardID();
     void EnforceGraveyardDomainForDeath(Player* player, TeamId teamId, bool nearCorpse, uint32& graveyardOverride);
+    void EnforceWorldDomainAtLogin(Player* player);
+    bool TryReturnGhostToNorrathGraveyardAtLogin(Player* player, uint32 arrivalMapID);
+    bool TryReturnCharacterToNorrathAtLogin(Player* player, uint32 arrivalMapID);
     void LoadZoneData();
     void LoadZoneTeleportDestinationData();
     bool IsZoneTeleportDestination(uint32 mapID, float x, float y, float z);

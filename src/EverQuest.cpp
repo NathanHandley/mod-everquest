@@ -361,6 +361,9 @@ void EverQuestMod::LoadConfigurationFile()
     ConfigDeathEnforceGraveyardDomain = sConfigMgr->GetOption<bool>("EverQuest.Death.EnforceGraveyardDomain", true);
     ConfigDeathFallbackGraveyardID = sConfigMgr->GetOption<uint32>("EverQuest.Death.FallbackGraveyardID", 1813);
 
+    // Login
+    ConfigLoginReturnCharactersToNorrath = sConfigMgr->GetOption<bool>("EverQuest.Login.ReturnCharactersToNorrath", true);
+
     // Client Version Check
     ConfigClientVersionCheckEnabled = sConfigMgr->GetOption<bool>("EverQuest.ClientVersionCheck.Enabled", false);
     ConfigClientVersionCheckGraceTimeInSeconds = sConfigMgr->GetOption<uint32>("EverQuest.ClientVersionCheck.GraceTimeInSeconds", 30);
@@ -9036,6 +9039,202 @@ void EverQuestMod::EnforceGraveyardDomainForDeath(Player* player, TeamId teamId,
     LOG_WARN("module.EverQuest", "EverQuestMod moved the death of player {} on map {} (area {}) from graveyard {} to graveyard {}, since the first one was not in {}. Check the graveyard_zone rows for that area",
         player->GetName(), deathLocation.GetMapId(), player->GetAreaId(), coreGraveyardID, replacementGraveyardID, isEverQuestDeath == true ? "Norrath" : "Azeroth");
     graveyardOverride = replacementGraveyardID;
+}
+
+void EverQuestMod::EnforceWorldDomainAtLogin(Player* player)
+{
+    if (ConfigLoginReturnCharactersToNorrath == false || player == nullptr)
+        return;
+    if (player->GetSession() == nullptr)
+        return;
+    if (player->IsGameMaster() == true)
+        return;
+
+    // A far teleport started by the login itself (WorldSession::HandlePlayerLogin when Player::CheckInstanceLoginValid fails) has already taken the character off their map, sothe pending destination is where they are really headed
+
+    uint32 arrivalMapID = player->GetMapId();
+    if (player->IsBeingTeleportedFar() == true)
+        arrivalMapID = player->GetTeleportDest().GetMapId();
+
+    // Landing in Norrath is the whole point, so there is nothing to undo
+    if (IsMapIDAnEverQuestMap(arrivalMapID) == true)
+        return;
+
+    // A ghost is handled off its corpse, which needs no lookup at all, and everything else off the row the character was saved in
+    if (TryReturnGhostToNorrathGraveyardAtLogin(player, arrivalMapID) == true)
+        return;
+    TryReturnCharacterToNorrathAtLogin(player, arrivalMapID);
+}
+
+bool EverQuestMod::TryReturnGhostToNorrathGraveyardAtLogin(Player* player, uint32 arrivalMapID)
+{
+    // Only a ghost carries a death that still has to be honored.  A dead character whose corpse row was already gone was resurrected by Player::LoadCorpse before this point
+    if (player->IsAlive() == true || player->HasCorpse() == false)
+        return false;
+
+    // The corpse row records where the character actually fell and it outlives the instance it was left in, so it is the one anchor the login relocation cannot erase
+    WorldLocation corpseLocation = player->GetCorpseLocation();
+    uint32 deathMapID = corpseLocation.GetMapId();
+    if (IsMapIDAnEverQuestMap(deathMapID) == false)
+        return false;
+
+    // Instances have the same geometry as the world version, so it's okay to just move over
+    uint32 searchMapID = GetOpenWorldMapIDForMapID(deathMapID);
+
+    uint32 destinationMapID = 0;
+    float destinationX = 0.0f;
+    float destinationY = 0.0f;
+    float destinationZ = 0.0f;
+
+    // The graveyard for the zone died in comes first
+    uint32 graveyardID = GetNearestEverQuestGraveyardIDForPosition(searchMapID, corpseLocation.GetPositionX(), corpseLocation.GetPositionY(), corpseLocation.GetPositionZ());
+    if (graveyardID != 0)
+    {
+        GraveyardStruct const* nearestGraveyard = sGraveyard->GetGraveyard(graveyardID);
+        if (nearestGraveyard != nullptr)
+        {
+            destinationMapID = nearestGraveyard->Map;
+            destinationX = nearestGraveyard->x;
+            destinationY = nearestGraveyard->y;
+            destinationZ = nearestGraveyard->z;
+        }
+    }
+
+    // Then the character's own bind point in Norrath, which is the last resort a player would expect to be at
+    if (destinationMapID == 0)
+    {
+        uint32 bindMapID = 0;
+        float bindX = 0.0f;
+        float bindY = 0.0f;
+        float bindZ = 0.0f;
+        if (TryGetEQBindHomePosition(player, bindMapID, bindX, bindY, bindZ) == true && IsMapIDAnEverQuestMap(bindMapID) == true)
+        {
+            destinationMapID = bindMapID;
+            destinationX = bindX;
+            destinationY = bindY;
+            destinationZ = bindZ;
+        }
+    }
+
+    // Catch-all graveyard behind that
+    if (destinationMapID == 0)
+    {
+        GraveyardStruct const* fallbackGraveyard = sGraveyard->GetGraveyard(GetFallbackEverQuestGraveyardID());
+        if (fallbackGraveyard != nullptr && IsMapIDAnEverQuestMap(fallbackGraveyard->Map) == true)
+        {
+            destinationMapID = fallbackGraveyard->Map;
+            destinationX = fallbackGraveyard->x;
+            destinationY = fallbackGraveyard->y;
+            destinationZ = fallbackGraveyard->z;
+        }
+    }
+
+    if (destinationMapID == 0)
+    {
+        LOG_ERROR("module.EverQuest", "EverQuestMod could not return the ghost of player {} to Norrath after logging in placed them on map {}, as no graveyard, bind point or fallback graveyard could be found for their corpse on map {}",
+            player->GetName(), arrivalMapID, deathMapID);
+        return false;
+    }
+
+    LOG_WARN("module.EverQuest", "EverQuestMod returned the ghost of player {} to map {} ({}, {}, {}), since logging in placed them on map {} while their corpse is on map {}",
+        player->GetName(), destinationMapID, destinationX, destinationY, destinationZ, arrivalMapID, deathMapID);
+
+    ChatHandler(player->GetSession()).PSendSysMessage("Your spirit drifted out of Norrath while you were away, and has been drawn back to it.");
+    player->TeleportTo(destinationMapID, destinationX, destinationY, destinationZ, player->GetOrientation());
+    return true;
+}
+
+bool EverQuestMod::TryReturnCharacterToNorrathAtLogin(Player* player, uint32 arrivalMapID)
+{
+    QueryResult queryResult = CharacterDatabase.Query("SELECT map, position_x, position_y, position_z FROM characters WHERE guid = {}", player->GetGUID().GetCounter());
+    if (!queryResult || queryResult->GetRowCount() == 0)
+        return false;
+
+    Field* fields = queryResult->Fetch();
+    uint32 loggedOutMapID = fields[0].Get<uint16>();
+    float loggedOutX = fields[1].Get<float>();
+    float loggedOutY = fields[2].Get<float>();
+    float loggedOutZ = fields[3].Get<float>();
+
+    // A character that really was in Azeroth belongs at their home bind, which is exactly where the core already put them
+    if (IsMapIDAnEverQuestMap(loggedOutMapID) == false)
+        return false;
+
+    // The open world copy stands in for an instance copy that is gone, the same substitution TeleportPlayerOutOfInstanceForEviction makes
+    uint32 openWorldMapID = GetOpenWorldMapIDForMapID(loggedOutMapID);
+
+    uint32 destinationMapID = 0;
+    float destinationX = 0.0f;
+    float destinationY = 0.0f;
+    float destinationZ = 0.0f;
+    float destinationOrientation = player->GetOrientation();
+
+    // The zone's own safe point comes first, since the saved position is the one thing already known not to have worked
+    auto zoneSafePointIter = ZoneSafePointByMapID.find(openWorldMapID);
+    if (zoneSafePointIter != ZoneSafePointByMapID.end())
+    {
+        const EverQuestZoneSafePoint& zoneSafePoint = zoneSafePointIter->second;
+        destinationMapID = openWorldMapID;
+        destinationX = zoneSafePoint.X;
+        destinationY = zoneSafePoint.Y;
+        destinationZ = zoneSafePoint.Z;
+        destinationOrientation = zoneSafePoint.Orientation;
+    }
+
+    // An instance copy is a geometry clone of the open world zone, so the same spot over there is a safe stand in when that zone has no safe point of its own
+    if (destinationMapID == 0 && openWorldMapID != loggedOutMapID)
+    {
+        destinationMapID = openWorldMapID;
+        destinationX = loggedOutX;
+        destinationY = loggedOutY;
+        destinationZ = loggedOutZ;
+    }
+
+    // Then the character's own bind point in Norrath
+    if (destinationMapID == 0)
+    {
+        uint32 bindMapID = 0;
+        float bindX = 0.0f;
+        float bindY = 0.0f;
+        float bindZ = 0.0f;
+        if (TryGetEQBindHomePosition(player, bindMapID, bindX, bindY, bindZ) == true && IsMapIDAnEverQuestMap(bindMapID) == true)
+        {
+            destinationMapID = bindMapID;
+            destinationX = bindX;
+            destinationY = bindY;
+            destinationZ = bindZ;
+        }
+    }
+
+    // And where this race and class starts out in Norrath behind that, matching what RelocatePlayerOutOfRestrictedMap falls back on
+    if (destinationMapID == 0 && HasCreatePlayerData(player->getRace(), player->getClass()) == true)
+    {
+        const EverQuestPlayerCreateInfo& createInfo = GetPlayerCreateInfo(player->getRace(), player->getClass());
+        if (IsMapIDAnEverQuestMap(createInfo.MapID) == true)
+        {
+            destinationMapID = createInfo.MapID;
+            destinationX = createInfo.PositionX;
+            destinationY = createInfo.PositionY;
+            destinationZ = createInfo.PositionZ;
+        }
+    }
+
+    if (destinationMapID == 0)
+    {
+        LOG_ERROR("module.EverQuest", "EverQuestMod could not return player {} to Norrath after logging in placed them on map {}, as map {} has no zone safe point and they have no usable bind point or create data",
+            player->GetName(), arrivalMapID, loggedOutMapID);
+        return false;
+    }
+
+    LOG_WARN("module.EverQuest", "EverQuestMod returned player {} to map {} ({}, {}, {}), since logging in placed them on map {} while they logged out on map {}",
+        player->GetName(), destinationMapID, destinationX, destinationY, destinationZ, arrivalMapID, loggedOutMapID);
+
+    if (openWorldMapID != loggedOutMapID)
+        ChatHandler(player->GetSession()).PSendSysMessage("The private copy of the zone you left is no longer there, so you have been returned to the open version of it.");
+    else
+        ChatHandler(player->GetSession()).PSendSysMessage("The spot you left could not be reached again, so you have been returned to a safe place in Norrath.");
+    player->TeleportTo(destinationMapID, destinationX, destinationY, destinationZ, destinationOrientation);
+    return true;
 }
 
 void EverQuestMod::LoadZoneData()
