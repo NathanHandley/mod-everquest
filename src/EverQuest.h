@@ -2150,6 +2150,8 @@ public:
     bool IsPlayerMentorshipLevelAdjusted(Player* player);
     bool TryGetMentorshipRealLevelForPlayer(Player* player, uint8& outRealLevel);
     bool IsQuestBlockedByMentorshipForPlayer(Player* player, Quest const* quest);
+    bool IsTrainerInteractionBlockedByMentorshipForPlayer(Player* player);
+    bool HandleMentorshipTrainerPacketReceive(WorldSession* session, WorldPacket const& packet);
     void RefuseMentorshipBlockedQuestForPlayer(Player* player, Quest const* quest);
     uint32 FindQuestStarterItemEntryForPlayer(Player* player, uint32 questID);
     void ReturnRefusedQuestStarterItemToPlayer(Player* player, uint32 itemEntry);

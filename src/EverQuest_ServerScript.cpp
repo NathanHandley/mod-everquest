@@ -97,6 +97,8 @@ public:
 
     bool CanPacketReceive(WorldSession* session, WorldPacket const& packet) override
     {
+        if (EverQuest->HandleMentorshipTrainerPacketReceive(session, packet) == false)
+            return false;
         if (packet.GetOpcode() == CMSG_SET_FACTION_ATWAR)
             return HandleSetFactionAtWarPacketReceive(session);
         if (packet.GetOpcode() != CMSG_AUCTION_LIST_ITEMS)

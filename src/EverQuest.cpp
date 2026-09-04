@@ -12677,6 +12677,60 @@ bool EverQuestMod::IsQuestBlockedByMentorshipForPlayer(Player* player, Quest con
     return quest->GetMinLevel() > static_cast<uint32>(realLevel);
 }
 
+bool EverQuestMod::IsTrainerInteractionBlockedByMentorshipForPlayer(Player* player)
+{
+    if (player == nullptr || MentorshipStateCount.load() == 0)
+        return false;
+
+    uint8 realLevel = 0;
+    if (TryGetMentorshipRealLevelForPlayer(player, realLevel) == false)
+        return false;
+    return static_cast<uint32>(player->GetLevel()) > static_cast<uint32>(realLevel);
+}
+
+bool EverQuestMod::HandleMentorshipTrainerPacketReceive(WorldSession* session, WorldPacket const& packet)
+{
+    if (IsEnabled == false || session == nullptr)
+        return true;
+
+    uint16 opcode = packet.GetOpcode();
+    if (opcode != CMSG_GOSSIP_HELLO && opcode != CMSG_GOSSIP_SELECT_OPTION && opcode != CMSG_TRAINER_LIST && opcode != CMSG_TRAINER_BUY_SPELL)
+        return true;
+
+    Player* player = session->GetPlayer();
+    if (IsTrainerInteractionBlockedByMentorshipForPlayer(player) == false)
+        return true;
+
+    // The two trainer opcodes can only ever be aimed at a trainer, so they are dropped without looking anything up.
+    // The gossip pair reach every other kind of NPC as well, so those only go if this one really is a trainer
+    if (opcode == CMSG_GOSSIP_HELLO || opcode == CMSG_GOSSIP_SELECT_OPTION)
+    {
+        ObjectGuid targetGUID;
+        WorldPacket packetCopy(packet);
+        packetCopy.rpos(0);
+        try
+        {
+            packetCopy >> targetGUID;
+        }
+        catch (ByteBufferException const&)
+        {
+            return true;
+        }
+
+        Creature* creature = ObjectAccessor::GetCreatureOrPetOrVehicle(*player, targetGUID);
+        if (creature == nullptr || creature->IsTrainer() == false)
+            return true;
+    }
+
+    // Anything the client already has open is dismissed, so a window that was up when the apprenticeship started does not sit there looking usable
+    CloseGossipMenuFor(player);
+
+    // Said only for the two deliberate actions.  A trainer list request is something the client sends on its own
+    if (opcode == CMSG_GOSSIP_HELLO || opcode == CMSG_TRAINER_BUY_SPELL)
+        ChatHandler(session).SendSysMessage("|cffFF0000Trainers are closed to you while you are an apprentice, since the level you are standing at is not your own.|r");
+    return false;
+}
+
 uint32 EverQuestMod::FindQuestStarterItemEntryForPlayer(Player* player, uint32 questID)
 {
     if (player == nullptr || questID == 0)
@@ -13343,6 +13397,9 @@ void EverQuestMod::AcceptMentorshipRequestForPlayer(Player* player)
         adjustedHandler.PSendSysMessage("You are now apprenticed to |cff00FF00{}|r. You stand at level |cff00FF00{}|r until it ends, and everything they earn is banked for your own level |cff00FF00{}|r.", player->GetName(), adjustedLevel, realLevel);
         handler.PSendSysMessage("|cff00FF00{}|r is now your apprentice at level |cff00FF00{}|r.", adjustedPlayer->GetName(), adjustedLevel);
     }
+
+    // A trainer or gossip window that was already open when this started would otherwise stay up looking usable
+    CloseGossipMenuFor(adjustedPlayer);
 
     SendMentorshipStateToPlayer(adjustedPlayer);
     SendMentorshipStateToPlayer(player);
