@@ -86,5 +86,7 @@ class EverQuest_ManaGainSpellPowerAuraScript : public AuraScript
 
 void AddEverQuestManaGainSpellPowerSpellScripts()
 {
-    RegisterSpellAndAuraScriptPair(EverQuest_ManaGainSpellPowerSpellScript, EverQuest_ManaGainSpellPowerAuraScript);
+    // Registered separately rather than as a pair, since a spell either gives its mana in one direct hit or over time and never both
+    RegisterSpellScript(EverQuest_ManaGainSpellPowerSpellScript);
+    RegisterSpellScript(EverQuest_ManaGainSpellPowerAuraScript);
 }
