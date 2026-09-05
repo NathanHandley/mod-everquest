@@ -251,14 +251,24 @@ bool EverQuestMod::LoadConfigurationSystemDataFromDB()
                 ConfigSystemClassAuraEnchanterFocusManaThresholdPercent = (uint32)atoi(value.c_str());
             else if (key == "ClassAuraBardInstrumentMeleeAutoAttackDamagePercent")
                 ConfigSystemClassAuraBardInstrumentMeleeAutoAttackDamagePercent = (uint32)atoi(value.c_str());
-            else if (key == "ClassAuraMonkSelfHealCastTimeReductionPercent")
-                ConfigSystemClassAuraMonkSelfHealCastTimeReductionPercent = (uint32)atoi(value.c_str());
+            else if (key == "ClassAuraMonkChiSurgeCastTimeReductionPercent")
+                ConfigSystemClassAuraMonkChiSurgeCastTimeReductionPercent = (uint32)atoi(value.c_str());
+            else if (key == "ClassAuraMonkChiSurgeMaxBaseCastTimeInMS")
+                ConfigSystemClassAuraMonkChiSurgeMaxBaseCastTimeInMS = (uint32)atoi(value.c_str());
+            else if (key == "ClassAuraMonkChiSurgeReturnInMS")
+                ConfigSystemClassAuraMonkChiSurgeReturnInMS = (uint32)atoi(value.c_str());
+            else if (key == "ClassAuraRogueLuckyStrikeCritPercent")
+                ConfigSystemClassAuraRogueLuckyStrikeCritPercent = (uint32)atoi(value.c_str());
+            else if (key == "ClassAuraRogueLuckyStrikeCooldownInMS")
+                ConfigSystemClassAuraRogueLuckyStrikeCooldownInMS = (uint32)atoi(value.c_str());
             else if (key == "ClassAuraMonkDoubleToTripleAttackChancePercent")
                 ConfigSystemClassAuraMonkDoubleToTripleAttackChancePercent = (uint32)atoi(value.c_str());
             else if (key == "ClassAuraRangerTackShotDamagePercentPerStack")
                 ConfigSystemClassAuraRangerTackShotDamagePercentPerStack = (uint32)atoi(value.c_str());
             else if (key == "ClassAuraPaladinHealSelfPercent")
                 ConfigSystemClassAuraPaladinHealSelfPercent = (uint32)atoi(value.c_str());
+            else if (key == "ClassAuraPaladinBlockDeflectionDamagePercent")
+                ConfigSystemClassAuraPaladinBlockDeflectionDamagePercent = (uint32)atoi(value.c_str());
             else if (key == "ClassAuraPaladinUndeadDemonDoubleDamageChancePercent")
                 ConfigSystemClassAuraPaladinUndeadDemonDoubleDamageChancePercent = (uint32)atoi(value.c_str());
             else if (key == "ClassAuraWarriorRiposteChancePercent")
@@ -3888,7 +3898,7 @@ void EverQuestMod::LoadSpellData()
 {
     SpellDataBySpellID.clear();
     BardSongTickSpellIDs.clear();
-    QueryResult queryResult = WorldDatabase.Query("SELECT SpellID, AuraDurationBaseInMS, AuraDurationAddPerLevelInMS, AuraDurationMaxInMS, AuraDurationCalcMinLevel, AuraDurationCalcMaxLevel, RecourseSpellID, SpellIDCastOnMeleeAttacker, FocusBoostType, PeriodicAuraSpellID, PeriodicAuraSpellRadius, MaleFormSpellID, FemaleFormSpellID, EffectFailChancePercent, EffectFailableType, StunUsesBashKickChance, SpellIDCastOnTargetWhenStunLands, AuraStaysOnSecondaryClassSwitch, MinTargetLevel, MaxCreatureTargetLevel, ResistDiff, HasteType, ModFactionRepValue, IllusionFormAlignment, IllusionFormEQRaceID, PersistOnClassChange, IllusionObjectClass FROM mod_everquest_spell ORDER BY SpellID;");
+    QueryResult queryResult = WorldDatabase.Query("SELECT SpellID, AuraDurationBaseInMS, AuraDurationAddPerLevelInMS, AuraDurationMaxInMS, AuraDurationCalcMinLevel, AuraDurationCalcMaxLevel, RecourseSpellID, SpellIDCastOnMeleeAttacker, FocusBoostType, PeriodicAuraSpellID, PeriodicAuraSpellRadius, MaleFormSpellID, FemaleFormSpellID, EffectFailChancePercent, EffectFailableType, StunUsesBashKickChance, SpellIDCastOnTargetWhenStunLands, AuraStaysOnSecondaryClassSwitch, MinTargetLevel, MaxCreatureTargetLevel, ResistDiff, HasteType, ModFactionRepValue, IllusionFormAlignment, IllusionFormEQRaceID, PersistOnClassChange, IllusionObjectClass, ManaGainSpellPowerCoefficient, DamageIsFixed FROM mod_everquest_spell ORDER BY SpellID;");
     if (queryResult)
     {
         do
@@ -3923,6 +3933,8 @@ void EverQuestMod::LoadSpellData()
             everQuestSpell.IllusionFormEQRaceID = fields[24].Get<uint32>();
             everQuestSpell.PersistOnClassChange = fields[25].Get<bool>();
             everQuestSpell.IllusionObjectClass = fields[26].Get<uint8>();
+            everQuestSpell.ManaGainSpellPowerCoefficient = fields[27].Get<float>();
+            everQuestSpell.DamageIsFixed = fields[28].Get<bool>();
             SpellDataBySpellID[everQuestSpell.SpellID] = everQuestSpell;
             if (everQuestSpell.PeriodicAuraSpellID != 0)
                 BardSongTickSpellIDs.insert(everQuestSpell.PeriodicAuraSpellID);
@@ -11667,6 +11679,14 @@ bool EverQuestMod::IsSpellAnEQSpell(uint32 spellID)
         return true;
     else
         return false;
+}
+
+bool EverQuestMod::IsSpellDamageFixed(uint32 spellID)
+{
+    std::unordered_map<uint32, EverQuestSpell>::const_iterator spellDataItr = SpellDataBySpellID.find(spellID);
+    if (spellDataItr == SpellDataBySpellID.end())
+        return false;
+    return spellDataItr->second.DamageIsFixed;
 }
 
 static thread_local EverQuestPendingSwingTimerRestore PendingSwingTimerRestore;

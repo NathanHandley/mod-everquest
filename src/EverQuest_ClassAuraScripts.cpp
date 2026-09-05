@@ -27,9 +27,36 @@
 using namespace std;
 
 // Rogue "Master Exploiter": any landed attack (autoattack, ability or harmful spell) stacks the momentum, and any attack that is missed, dodged or parried costs half of the stacks (rounded down)
+// A critical of any kind (heals included) can spend the readied Lucky Strike
+static const uint32 EQ_CLASSAURA_ROGUE_ATTACK_PROC_MASK = PROC_FLAG_DONE_MELEE_AUTO_ATTACK | PROC_FLAG_DONE_RANGED_AUTO_ATTACK | PROC_FLAG_DONE_SPELL_MELEE_DMG_CLASS
+    | PROC_FLAG_DONE_SPELL_RANGED_DMG_CLASS | PROC_FLAG_DONE_SPELL_MAGIC_DMG_CLASS_NEG | PROC_FLAG_DONE_SPELL_NONE_DMG_CLASS_NEG;
+
 class EverQuest_ClassAuraRogueAuraScript : public AuraScript
 {
     PrepareAuraScript(EverQuest_ClassAuraRogueAuraScript);
+
+    void HandleLuckyStrike(Player* rogue, ProcEventInfo& eventInfo)
+    {
+        if ((eventInfo.GetHitMask() & PROC_HIT_CRITICAL) == 0)
+            return;
+        if ((eventInfo.GetTypeMask() & (PROC_FLAG_DONE_MELEE_AUTO_ATTACK | PROC_FLAG_DONE_RANGED_AUTO_ATTACK)) != 0)
+            return;
+        SpellInfo const* spellInfo = eventInfo.GetSpellInfo();
+        if (spellInfo == nullptr || spellInfo->HasAttribute(SPELL_ATTR2_AUTO_REPEAT) == true)
+            return;
+        uint32 luckyStrikeSpellID = EverQuest->GetClassAuraSpellID(EQ_CLASSAURA_SPELL_ROGUE_LUCKY_STRIKE);
+        if (luckyStrikeSpellID == 0 || rogue->HasAura(luckyStrikeSpellID) == false)
+            return;
+        DamageInfo* damageInfo = eventInfo.GetDamageInfo();
+        WeaponAttackType attackType = damageInfo != nullptr ? damageInfo->GetAttackType() : BASE_ATTACK;
+        float ownCritChance = rogue->SpellDoneCritChance(eventInfo.GetProcTarget(), spellInfo, eventInfo.GetSchoolMask(), attackType, false);
+        uint32 helperSpellID = EverQuest->GetClassAuraSpellID(EQ_CLASSAURA_SPELL_ROGUE_LUCKY_STRIKE_HELPER);
+        if (helperSpellID != 0 && rogue->HasAura(helperSpellID) == true)
+            ownCritChance -= (float)EverQuest->ConfigSystemClassAuraRogueLuckyStrikeCritPercent;
+        if (ownCritChance > 0.0f && roll_chance_f(ownCritChance) == true)
+            return;
+        EverQuest->SpendClassAuraRogueLuckyStrike(rogue);
+    }
 
     void HandleProc(ProcEventInfo& eventInfo)
     {
@@ -38,6 +65,11 @@ class EverQuest_ClassAuraRogueAuraScript : public AuraScript
             return;
         Unit* rogue = GetTarget();
         if (rogue == nullptr || rogue->IsPlayer() == false || rogue->IsAlive() == false)
+            return;
+        HandleLuckyStrike(rogue->ToPlayer(), eventInfo);
+
+        // Only attacks feed the momentum
+        if ((eventInfo.GetTypeMask() & EQ_CLASSAURA_ROGUE_ATTACK_PROC_MASK) == 0)
             return;
         uint32 exploitSpellID = EverQuest->GetClassAuraSpellID(EQ_CLASSAURA_SPELL_ROGUE_EXPLOIT);
         if (exploitSpellID == 0)
@@ -100,10 +132,28 @@ class EverQuest_ClassAuraRangerAuraScript : public AuraScript
     }
 };
 
-// Paladin "Champion of Light": a share of every heal the paladin lands comes back to them
+static const uint32 EQ_CLASSAURA_PALADIN_TAKEN_ATTACK_PROC_MASK = PROC_FLAG_TAKEN_MELEE_AUTO_ATTACK | PROC_FLAG_TAKEN_SPELL_MELEE_DMG_CLASS
+    | PROC_FLAG_TAKEN_RANGED_AUTO_ATTACK | PROC_FLAG_TAKEN_SPELL_RANGED_DMG_CLASS;
+
 class EverQuest_ClassAuraPaladinAuraScript : public AuraScript
 {
     PrepareAuraScript(EverQuest_ClassAuraPaladinAuraScript);
+
+    void HandleBlockedAttack(Unit* paladin, ProcEventInfo& eventInfo)
+    {
+        if ((eventInfo.GetHitMask() & (PROC_HIT_BLOCK | PROC_HIT_FULL_BLOCK)) == 0)
+            return;
+        DamageInfo* damageInfo = eventInfo.GetDamageInfo();
+        if (damageInfo == nullptr || damageInfo->GetBlock() == 0)
+            return;
+        uint32 deflectionSpellID = EverQuest->GetClassAuraSpellID(EQ_CLASSAURA_SPELL_PALADIN_DEFLECTION);
+        if (deflectionSpellID == 0 || paladin->IsInWorld() == false)
+            return;
+        int32 damageAmount = (int32)(((uint64)damageInfo->GetBlock() * (uint64)EverQuest->ConfigSystemClassAuraPaladinBlockDeflectionDamagePercent) / 100);
+        if (damageAmount <= 0)
+            return;
+        paladin->CastCustomSpell(paladin, deflectionSpellID, &damageAmount, nullptr, nullptr, true);
+    }
 
     void HandleProc(ProcEventInfo& eventInfo)
     {
@@ -113,6 +163,11 @@ class EverQuest_ClassAuraPaladinAuraScript : public AuraScript
         Unit* paladin = GetTarget();
         if (paladin == nullptr || paladin->IsPlayer() == false || paladin->IsAlive() == false)
             return;
+        if ((eventInfo.GetTypeMask() & EQ_CLASSAURA_PALADIN_TAKEN_ATTACK_PROC_MASK) != 0)
+        {
+            HandleBlockedAttack(paladin, eventInfo);
+            return;
+        }
         HealInfo* healInfo = eventInfo.GetHealInfo();
         if (healInfo == nullptr || healInfo->GetHeal() == 0)
             return;

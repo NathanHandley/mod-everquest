@@ -384,6 +384,10 @@ public:
 
         uint32 spellID = spellInfo->Id;
 
+        // A life-for-mana spell takes exactly what its tooltip says off its caster, so none of the adds below may touch it
+        if (EverQuest->IsSpellDamageFixed(spellID) == true)
+            return;
+
         // Class auras: the Ranger's Tack Shot mark, the Paladin's double damage against undead and demons and the Necromancer's marks (any spell, EQ or WoW)
         EverQuest->ApplyClassAuraPeriodicTickMods(target, attacker, damage, spellInfo);
 
@@ -546,6 +550,10 @@ public:
             return;
 
         TryApplyBashKickStunForbearanceOnSuppressedStun(target, attacker, spellInfo);
+
+        // A life-for-mana spell takes exactly what its tooltip says off its caster, so none of the adds below may touch it
+        if (EverQuest->IsSpellDamageFixed(spellInfo->Id) == true)
+            return;
 
         // Class auras: the Ranger's Tack Shot mark, the Paladin's double damage against undead and demons, the Necromancer's marks and the Druid's impaired target bonus (any spell, EQ or WoW)
         EverQuest->ApplyClassAuraDirectSpellDamageMods(target, attacker, damage, spellInfo);

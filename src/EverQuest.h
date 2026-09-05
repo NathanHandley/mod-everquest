@@ -53,7 +53,7 @@ class ByteBuffer;
 struct AreaTrigger;
 struct BuildValuesCachePosPointers;
 
-#define EQ_MOD_VERSION                              97
+#define EQ_MOD_VERSION                              99
 
 #define EQ_MOVEMENT_CAST_SNARE_DURATION_BUFFER_IN_MS 2000 // How much longer than the remaining cast time the casting slow is given, so a pushed-back cast keeps it
 
@@ -347,6 +347,7 @@ struct BuildValuesCachePosPointers;
 #define EQ_CLASS_AURA_MANA_CHECK_INTERVAL_MS        500     // How often the Enchanter mana threshold is checked
 #define EQ_SPELL_ID_AUTO_SHOT                       75
 #define EQ_SPELL_ID_THRASH                          21919   // The Thrash Blade's extra attack proc, cast by the mod for the Monk's double and triple attacks
+#define EQ_SPELL_ID_BLOCK                           107     // The WoW passive that grants the block skill (the only spell with SPELL_EFFECT_BLOCK)
 
 // Vulak`Aerr (Temple of Veeshan) spawns perma-rooted and "locked" (unattackable, non-aggro) until every required dragon is dead, matching Velious-era EQ
 #define EQ_VULAK_CREATURE_TEMPLATE_ID               55045
@@ -397,6 +398,8 @@ public:
     uint32 IllusionFormEQRaceID = 0;
     bool PersistOnClassChange = false;
     uint8 IllusionObjectClass = EQ_ILLUSION_OBJECT_CLASS_NONE;
+    float ManaGainSpellPowerCoefficient = 0.0f;
+    bool DamageIsFixed = false;
 };
 
 class EverQuestIllusionObject
@@ -872,7 +875,12 @@ enum EverQuestClassAuraSpellType : uint32
     EQ_CLASSAURA_SPELL_DRUID_EXPOSURE = 48,
     EQ_CLASSAURA_SPELL_WARRIOR_UNASSAILED = 49,
     EQ_CLASSAURA_SPELL_WARRIOR_RIPOSTE = 50,
-    EQ_CLASSAURA_SPELL_TYPE_COUNT = 51
+    EQ_CLASSAURA_SPELL_BARD_VIGOR = 51,
+    EQ_CLASSAURA_SPELL_MONK_CHI_SURGE = 52,
+    EQ_CLASSAURA_SPELL_PALADIN_DEFLECTION = 53,
+    EQ_CLASSAURA_SPELL_ROGUE_LUCKY_STRIKE = 54,
+    EQ_CLASSAURA_SPELL_ROGUE_LUCKY_STRIKE_HELPER = 55,
+    EQ_CLASSAURA_SPELL_TYPE_COUNT = 56
 };
 
 class EverQuestPlayerClassAuraState : public DataMap::Base
@@ -886,8 +894,12 @@ public:
     uint32 PendingCastAdjustSpellID = 0;        // The spell whose successful cast spends the readied cleric / shadow knight charge
     bool PendingCadenceConsume = false;
     bool PendingEdgeConsume = false;
+    bool PendingChiSurgeConsume = false;
+    uint32 ChiSurgeReadyAtMS = 0;
+    uint32 LuckyStrikeReadyAtMS = 0;
     uint32 LastMeleeAttackedMS = 0;
     ObjectGuid PendingRiposteTargetGUID;
+    bool BlockGrantedByClassAura = false;
 };
 
 class EverQuestPlayerTrackingState : public DataMap::Base
@@ -1400,10 +1412,15 @@ public:
     uint32 ConfigSystemClassAuraPrivateSpellFamilyID = 0;
     uint32 ConfigSystemClassAuraEnchanterFocusManaThresholdPercent = 80;
     uint32 ConfigSystemClassAuraBardInstrumentMeleeAutoAttackDamagePercent = 33;
-    uint32 ConfigSystemClassAuraMonkSelfHealCastTimeReductionPercent = 50;
+    uint32 ConfigSystemClassAuraMonkChiSurgeCastTimeReductionPercent = 50;
+    uint32 ConfigSystemClassAuraMonkChiSurgeMaxBaseCastTimeInMS = 5000;
+    uint32 ConfigSystemClassAuraMonkChiSurgeReturnInMS = 10000;
+    uint32 ConfigSystemClassAuraRogueLuckyStrikeCritPercent = 100;
+    uint32 ConfigSystemClassAuraRogueLuckyStrikeCooldownInMS = 8000;
     uint32 ConfigSystemClassAuraMonkDoubleToTripleAttackChancePercent = 50;
     uint32 ConfigSystemClassAuraRangerTackShotDamagePercentPerStack = 1;
     uint32 ConfigSystemClassAuraPaladinHealSelfPercent = 15;
+    uint32 ConfigSystemClassAuraPaladinBlockDeflectionDamagePercent = 15;
     uint32 ConfigSystemClassAuraPaladinUndeadDemonDoubleDamageChancePercent = 20;
     uint32 ConfigSystemClassAuraWarriorRiposteChancePercent = 5;
     uint32 ConfigSystemClassAuraWarriorUnassailedDelayInMS = 20000;
@@ -1826,10 +1843,16 @@ public:
     void RefreshBardInstrumentAuraForPlayer(Player* player);
     void UpdateEnchanterFocusForPlayer(Player* player);
     void UpdateWarriorClassAuraForPlayer(Player* player);
+    void UpdateMonkChiSurgeForPlayer(Player* player);
+    void UpdateRogueLuckyStrikeForPlayer(Player* player);
+    void SpendClassAuraRogueLuckyStrike(Player* player);
+    void HandleClassAuraRogueLuckyStrikeOnCheckCast(Player* player, Spell* spell, bool strict);
+    void RemoveClassAuraRogueLuckyStrikeHelper(Player* player);
     void HandleClassAuraWarriorMeleeAttackedOnRoll(Player* warrior, Unit const* attacker, int32& missChance, int32& dodgeChance, int32& parryChance, int32& blockChance, int32& critChance);
     void NoteClassAuraWarriorMeleeAttacked(Unit* target, SpellInfo const* spellInfo);
     void UpdateWizardFocusMovementForPlayer(Player* player, uint32 diffInMS);
     void RefreshMagicianPetAuraForPlayer(Player* player);
+    void RefreshPaladinBlockForPlayer(Player* player);
     void ApplyMagicianPetAuraToPet(Pet* pet);
     void HandleClassAuraPetStrike(Unit* attacker, Unit* victim);
     void HandleClassAuraShamanStrike(Unit* attacker, Unit* victim);
@@ -2087,6 +2110,7 @@ public:
     void MakeCreaturesAssaultCreature(uint32 entryID, Map* map, Creature* victim);
     void EngageScriptedAssault(Creature* attacker, Creature* victim);
     bool IsSpellAnEQSpell(uint32 spellID);
+    bool IsSpellDamageFixed(uint32 spellID);
     bool ShouldSpellPreserveSwingTimers(uint32 spellID);
     void StashSwingTimersBeforeSpellCast(Player* player, Spell* spell);
     void RestoreSwingTimersAfterSpellCast(Unit* caster, Spell* spell);
