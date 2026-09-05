@@ -51,7 +51,8 @@ static const char* EQ_CLASSAURA_SPELL_TYPE_NAMES[EQ_CLASSAURA_SPELL_TYPE_COUNT] 
     "ClericPassive", "ClericAura", "ClericCadence", "ClericHaste",
     "DruidPassive", "DruidAura", "DruidRegrowth",
     "ShamanPassive", "ShamanAura", "ShamanSlowMark", "ShamanVigor",
-    "CastSpeedHelper"
+    "CastSpeedHelper",
+    "DruidExposure", "WarriorUnassailed", "WarriorRiposte"
 };
 
 // The (passive, permanent aura) pair for each class
@@ -78,7 +79,7 @@ static const EverQuestClassAuraSpellType EQ_CLASSAURA_MOD_OWNED_TYPES[] =
     EQ_CLASSAURA_SPELL_MONK_AURA, EQ_CLASSAURA_SPELL_MONK_LIGHT_ARMOR, EQ_CLASSAURA_SPELL_MONK_HEAVY_ARMOR, EQ_CLASSAURA_SPELL_RANGER_AURA,
     EQ_CLASSAURA_SPELL_ROGUE_AURA, EQ_CLASSAURA_SPELL_PALADIN_AURA, EQ_CLASSAURA_SPELL_SHADOWKNIGHT_AURA, EQ_CLASSAURA_SPELL_WARRIOR_AURA,
     EQ_CLASSAURA_SPELL_WIZARD_AURA, EQ_CLASSAURA_SPELL_MAGICIAN_AURA, EQ_CLASSAURA_SPELL_NECROMANCER_AURA, EQ_CLASSAURA_SPELL_CLERIC_AURA,
-    EQ_CLASSAURA_SPELL_DRUID_AURA, EQ_CLASSAURA_SPELL_SHAMAN_AURA, EQ_CLASSAURA_SPELL_CAST_SPEED_HELPER
+    EQ_CLASSAURA_SPELL_DRUID_AURA, EQ_CLASSAURA_SPELL_SHAMAN_AURA, EQ_CLASSAURA_SPELL_CAST_SPEED_HELPER, EQ_CLASSAURA_SPELL_WARRIOR_UNASSAILED
 };
 static const size_t EQ_CLASSAURA_MOD_OWNED_COUNT = sizeof(EQ_CLASSAURA_MOD_OWNED_TYPES) / sizeof(EQ_CLASSAURA_MOD_OWNED_TYPES[0]);
 
@@ -214,6 +215,7 @@ void EverQuestMod::UpdateClassAurasForPlayer(Player* player, uint32 diffInMS)
         UpdateEnchanterFocusForPlayer(player);
     }
     UpdateWizardFocusMovementForPlayer(player, diffInMS);
+    UpdateWarriorClassAuraForPlayer(player);
 }
 
 void EverQuestMod::ClearClassAuraStateForPlayer(Player* player)
@@ -222,6 +224,88 @@ void EverQuestMod::ClearClassAuraStateForPlayer(Player* player)
         return;
     ClearClassAuraCastAdjustmentsForPlayer(player);
     player->CustomData.Erase(EQ_PLAYER_CUSTOMDATA_CLASSAURA);
+}
+
+void EverQuestMod::UpdateWarriorClassAuraForPlayer(Player* player)
+{
+    EverQuestPlayerClassAuraState* state = GetClassAuraStateForPlayer(player);
+    bool hasWarriorAura = PlayerHasClassAura(player, EQ_CLASSAURA_SPELL_WARRIOR_AURA);
+
+    // The counter swing runs here, on the warrior's own update, rather than nested inside the attacker's swing that earned it.  It is an
+    // extra attack (no swing timer reset) with the main hand, and the core's own gates (stunned, casting, line of sight) can still refuse it
+    if (state->PendingRiposteTargetGUID.IsEmpty() == false)
+    {
+        ObjectGuid targetGUID = state->PendingRiposteTargetGUID;
+        state->PendingRiposteTargetGUID.Clear();
+        if (hasWarriorAura == true && player->IsAlive() == true)
+        {
+            Unit* target = ObjectAccessor::GetUnit(*player, targetGUID);
+            if (target != nullptr && target->IsAlive() == true && player->IsValidAttackTarget(target) == true && player->IsWithinMeleeRange(target) == true)
+            {
+                uint32 riposteVisualSpellID = GetClassAuraSpellID(EQ_CLASSAURA_SPELL_WARRIOR_RIPOSTE);
+                if (riposteVisualSpellID != 0)
+                    player->CastSpell(player, riposteVisualSpellID, true);
+                player->AttackerStateUpdate(target, BASE_ATTACK, true);
+            }
+        }
+    }
+
+    uint32 unassailedSpellID = GetClassAuraSpellID(EQ_CLASSAURA_SPELL_WARRIOR_UNASSAILED);
+    if (unassailedSpellID == 0)
+        return;
+    uint32 nowMS = GameTime::GetGameTimeMS().count();
+    if (state->LastMeleeAttackedMS == 0)
+        state->LastMeleeAttackedMS = nowMS;
+    bool shouldHave = hasWarriorAura == true && player->IsAlive() == true && (nowMS - state->LastMeleeAttackedMS) >= ConfigSystemClassAuraWarriorUnassailedDelayInMS;
+    bool hasAura = player->HasAura(unassailedSpellID);
+    if (shouldHave == true && hasAura == false)
+        player->AddAura(unassailedSpellID, player);
+    else if (shouldHave == false && hasAura == true)
+        player->RemoveAurasDueToSpell(unassailedSpellID);
+}
+
+void EverQuestMod::HandleClassAuraWarriorMeleeAttackedOnRoll(Player* warrior, Unit const* attacker, int32& missChance, int32& dodgeChance, int32& parryChance, int32& blockChance, int32& critChance)
+{
+    if (IsClassAuraSystemEnabled() == false)
+        return;
+    if (warrior == nullptr || attacker == nullptr || attacker == warrior)
+        return;
+    if (PlayerHasClassAura(warrior, EQ_CLASSAURA_SPELL_WARRIOR_AURA) == false)
+        return;
+    EverQuestPlayerClassAuraState* state = GetClassAuraStateForPlayer(warrior);
+    state->LastMeleeAttackedMS = GameTime::GetGameTimeMS().count();
+
+    if (warrior->IsAlive() == false)
+        return;
+    if (warrior->HasUnitState(UNIT_STATE_CONTROLLED) == true || warrior->IsNonMeleeSpellCast(false, false, true) == true)
+        return;
+    if (roll_chance_i((int32)ConfigSystemClassAuraWarriorRiposteChancePercent) == false)
+        return;
+
+    missChance = 0;
+    dodgeChance = 0;
+    blockChance = 0;
+    critChance = 0;
+    if (warrior->HasInArc(M_PI, attacker) == true)
+        parryChance = 30000; // Always wins the roll
+    else
+    {
+        parryChance = 0;
+        missChance = 30000;
+    }
+    state->PendingRiposteTargetGUID = attacker->GetGUID();
+}
+
+void EverQuestMod::NoteClassAuraWarriorMeleeAttacked(Unit* target, SpellInfo const* spellInfo)
+{
+    if (target == nullptr || spellInfo == nullptr || target->IsPlayer() == false)
+        return;
+    if (spellInfo->DmgClass != SPELL_DAMAGE_CLASS_MELEE)
+        return;
+    Player* warrior = target->ToPlayer();
+    if (PlayerHasClassAura(warrior, EQ_CLASSAURA_SPELL_WARRIOR_AURA) == false)
+        return;
+    GetClassAuraStateForPlayer(warrior)->LastMeleeAttackedMS = GameTime::GetGameTimeMS().count();
 }
 
 void EverQuestMod::RefreshMonkArmorAuraForPlayer(Player* player)
@@ -403,6 +487,11 @@ void EverQuestMod::HandleClassAuraPetStrike(Unit* attacker, Unit* victim)
     uint32 markSpellID = GetClassAuraSpellID(EQ_CLASSAURA_SPELL_NECROMANCER_MARK);
     if (markSpellID != 0 && victim->IsAlive() == true && PlayerHasClassAura(owner, EQ_CLASSAURA_SPELL_NECROMANCER_AURA) == true && owner->IsValidAttackTarget(victim) == true)
         owner->CastSpell(victim, markSpellID, true);
+
+    // Druid: the pet's strikes expose the target the same way the druid's own autoattacks do
+    uint32 exposureSpellID = GetClassAuraSpellID(EQ_CLASSAURA_SPELL_DRUID_EXPOSURE);
+    if (exposureSpellID != 0 && victim->IsAlive() == true && PlayerHasClassAura(owner, EQ_CLASSAURA_SPELL_DRUID_AURA) == true && owner->IsValidAttackTarget(victim) == true)
+        owner->CastSpell(victim, exposureSpellID, true);
 }
 
 static bool IsPeriodicDamageAura(Aura* aura)
@@ -463,13 +552,25 @@ void EverQuestMod::ApplyClassAuraMeleeDamageMods(Unit* attacker, Unit* victim, u
         damage += (damage * ConfigSystemClassAuraBardInstrumentMeleeAutoAttackDamagePercent) / 100;
 
     // Paladin
-    if (victim->IsCreature() == true)
-    {
-        uint32 creatureType = victim->GetCreatureType();
-        if ((creatureType == CREATURE_TYPE_UNDEAD || creatureType == CREATURE_TYPE_DEMON) && PlayerHasClassAura(player, EQ_CLASSAURA_SPELL_PALADIN_AURA) == true)
-            if (roll_chance_i((int32)ConfigSystemClassAuraPaladinUndeadDemonDoubleDamageChancePercent) == true)
-                damage *= 2;
-    }
+    int32 paladinDamage = (int32)damage;
+    ApplyClassAuraPaladinUndeadDemonDamageBonus(player, victim, paladinDamage);
+    damage = (uint32)paladinDamage;
+}
+
+void EverQuestMod::ApplyClassAuraPaladinUndeadDemonDamageBonus(Unit* attacker, Unit* victim, int32& damage)
+{
+    if (attacker == nullptr || victim == nullptr || damage <= 0)
+        return;
+    if (attacker->IsPlayer() == false || victim->IsCreature() == false)
+        return;
+    uint32 creatureType = victim->GetCreatureType();
+    if (creatureType != CREATURE_TYPE_UNDEAD && creatureType != CREATURE_TYPE_DEMON)
+        return;
+    if (PlayerHasClassAura(attacker->ToPlayer(), EQ_CLASSAURA_SPELL_PALADIN_AURA) == false)
+        return;
+    if (roll_chance_i((int32)ConfigSystemClassAuraPaladinUndeadDemonDoubleDamageChancePercent) == false)
+        return;
+    damage *= 2;
 }
 
 static bool HasPeriodicDamageFromCaster(Unit* target, ObjectGuid casterGUID)
@@ -519,12 +620,18 @@ void EverQuestMod::ApplyClassAuraDirectSpellDamageMods(Unit* target, Unit* attac
     if (target == nullptr || attacker == nullptr || spellInfo == nullptr || damage <= 0)
         return;
 
+    // Warrior: a melee ability hitting them counts as being attacked
+    NoteClassAuraWarriorMeleeAttacked(target, spellInfo);
+
     // Rangers and their pets alike
     ApplyClassAuraTackShotDamageBonus(attacker, target, damage);
 
     if (attacker->IsPlayer() == false)
         return;
     Player* player = attacker->ToPlayer();
+
+    // Paladin
+    ApplyClassAuraPaladinUndeadDemonDamageBonus(player, target, damage);
 
     uint32 markSpellID = GetClassAuraSpellID(EQ_CLASSAURA_SPELL_NECROMANCER_MARK);
     if (markSpellID != 0 && PlayerHasClassAura(player, EQ_CLASSAURA_SPELL_NECROMANCER_AURA) == true)
@@ -564,6 +671,11 @@ void EverQuestMod::ApplyClassAuraPeriodicTickMods(Unit* target, Unit* attacker, 
     if (attacker->IsPlayer() == false)
         return;
     Player* player = attacker->ToPlayer();
+
+    // Paladin
+    int32 paladinAmount = (int32)amount;
+    ApplyClassAuraPaladinUndeadDemonDamageBonus(player, target, paladinAmount);
+    amount = (uint32)paladinAmount;
 
     uint32 markSpellID = GetClassAuraSpellID(EQ_CLASSAURA_SPELL_NECROMANCER_MARK);
     if (markSpellID != 0 && target != nullptr && PlayerHasClassAura(player, EQ_CLASSAURA_SPELL_NECROMANCER_AURA) == true)
@@ -734,7 +846,6 @@ void EverQuestMod::ApplyClassAuraCastAdjustmentsOnCheckCast(Player* player, Spel
     bool isDirectHeal = spellInfo->HasEffect(SPELL_EFFECT_HEAL);
     bool isSingleTarget = spellInfo->IsAffectingArea() == false;
     float castTimeMultiplier = 1.0f;
-    int32 costReductionPercent = 0;
 
     // Monk
     if (baseCastTimeInMS > 0 && isDirectHeal == true && isSingleTarget == true && target == player && ConfigSystemClassAuraMonkSelfHealCastTimeReductionPercent > 0
@@ -748,9 +859,9 @@ void EverQuestMod::ApplyClassAuraCastAdjustmentsOnCheckCast(Player* player, Spel
         && ConfigSystemClassAuraClericCadenceReductionPercent > 0 && ConfigSystemClassAuraClericCadenceReductionPercent < 100
         && player->HasAura(cadenceSpellID) == true && PlayerHasClassAura(player, EQ_CLASSAURA_SPELL_CLERIC_AURA) == true)
     {
+        // Only the cast time is adjusted through the helper aura
         if (baseCastTimeInMS > 0)
             castTimeMultiplier *= (100.0f - (float)ConfigSystemClassAuraClericCadenceReductionPercent) / 100.0f;
-        costReductionPercent = (int32)ConfigSystemClassAuraClericCadenceReductionPercent;
         state->PendingCadenceConsume = true;
         state->PendingCastAdjustSpellID = spellInfo->Id;
     }
@@ -767,20 +878,19 @@ void EverQuestMod::ApplyClassAuraCastAdjustmentsOnCheckCast(Player* player, Spel
 
     if (helperSpellID == 0)
         return;
-    if (castTimeMultiplier >= 1.0f && costReductionPercent == 0)
+    if (castTimeMultiplier >= 1.0f || castTimeMultiplier <= 0.0f)
         return;
     SpellInfo const* helperSpellInfo = sSpellMgr->GetSpellInfo(helperSpellID);
     if (helperSpellInfo == nullptr)
         return;
 
-    // The helper's amounts are handed in at creation, found by effect type so the converter's effect order is not assumed
+    // The helper's amounts are handed in at creation, found by effect type so the converter's effect order is not assumed.  Any cost modifier effect the helper carries is left at zero,
+    // since the cast being prepared has already been priced
     int32 baseAmounts[MAX_SPELL_EFFECTS] = { 0, 0, 0 };
     for (uint8 i = 0; i < MAX_SPELL_EFFECTS; ++i)
     {
-        if (helperSpellInfo->Effects[i].ApplyAuraName == SPELL_AURA_MOD_CASTING_SPEED_NOT_STACK && castTimeMultiplier < 1.0f && castTimeMultiplier > 0.0f)
+        if (helperSpellInfo->Effects[i].ApplyAuraName == SPELL_AURA_MOD_CASTING_SPEED_NOT_STACK)
             baseAmounts[i] = (int32)std::lround(100.0f * ((1.0f / castTimeMultiplier) - 1.0f));
-        else if (helperSpellInfo->Effects[i].ApplyAuraName == SPELL_AURA_ADD_PCT_MODIFIER && costReductionPercent > 0)
-            baseAmounts[i] = -costReductionPercent;
     }
     Aura* helperAura = Aura::TryRefreshStackOrCreate(helperSpellInfo, MAX_EFFECT_MASK, player, player, baseAmounts);
     if (helperAura != nullptr)
@@ -877,7 +987,18 @@ void EverQuestMod::HandleClassAuraSpellCast(Player* player, Spell* spell)
             uint32 cadenceSpellID = GetClassAuraSpellID(EQ_CLASSAURA_SPELL_CLERIC_CADENCE);
             Aura* cadenceAura = cadenceSpellID != 0 ? player->GetAura(cadenceSpellID) : nullptr;
             if (cadenceAura != nullptr)
+            {
                 cadenceAura->ModStackAmount(-1);
+
+                // The mana share of the cadence.  Spell::cast has already charged the full price (TakePower runs ahead of this hook), and the price itself was fixed before the check cast
+                // could discount it, so the discount is given back here
+                if (spell->m_CastItem == nullptr && spellInfo->PowerType == POWER_MANA && spell->GetPowerCost() > 0)
+                {
+                    int32 cadenceRefund = (spell->GetPowerCost() * (int32)ConfigSystemClassAuraClericCadenceReductionPercent) / 100;
+                    if (cadenceRefund > 0)
+                        player->ModifyPower(POWER_MANA, cadenceRefund);
+                }
+            }
         }
         if (state->PendingEdgeConsume == true)
         {

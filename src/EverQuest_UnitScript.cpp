@@ -384,7 +384,7 @@ public:
 
         uint32 spellID = spellInfo->Id;
 
-        // Class auras: the Druid's heal over time bonus and the Necromancer's marks (any spell, EQ or WoW)
+        // Class auras: the Ranger's Tack Shot mark, the Paladin's double damage against undead and demons and the Necromancer's marks (any spell, EQ or WoW)
         EverQuest->ApplyClassAuraPeriodicTickMods(target, attacker, damage, spellInfo);
 
         if (EverQuest->IsSpellAnEQSpell(spellID) == false)
@@ -547,7 +547,7 @@ public:
 
         TryApplyBashKickStunForbearanceOnSuppressedStun(target, attacker, spellInfo);
 
-        // Class auras: the Ranger's Tack Shot mark, the Necromancer's marks and the Druid's impaired target bonus (any spell, EQ or WoW)
+        // Class auras: the Ranger's Tack Shot mark, the Paladin's double damage against undead and demons, the Necromancer's marks and the Druid's impaired target bonus (any spell, EQ or WoW)
         EverQuest->ApplyClassAuraDirectSpellDamageMods(target, attacker, damage, spellInfo);
 
         if (EverQuest->ConfigSpellTalentAlignmentEnabled == false)
@@ -633,6 +633,11 @@ public:
 
         if (victim->IsPlayer() == false)
             return;
+
+        // Class auras: a Warrior's riposte (forced through this roll) and unassailed clock.  Only the mod's own per-player state is
+        // written through the const_cast, plus the roll values this hook exists to change
+        if (attType != RANGED_ATTACK)
+            EverQuest->HandleClassAuraWarriorMeleeAttackedOnRoll(const_cast<Unit*>(victim)->ToPlayer(), attacker, miss_chance, dodge_chance, parry_chance, block_chance, crit_chance);
 
         // This is a bit 'hacky', but this logic will fold dodge and parry into 'miss' during the casting of a bard song to
         // somewhat simulate how bard songs don't stop defensive/avoidance during combat. The only exception is that

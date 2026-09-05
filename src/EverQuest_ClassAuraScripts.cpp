@@ -116,6 +116,10 @@ class EverQuest_ClassAuraPaladinAuraScript : public AuraScript
         HealInfo* healInfo = eventInfo.GetHealInfo();
         if (healInfo == nullptr || healInfo->GetHeal() == 0)
             return;
+        // The reward heal itself (or any other class aura heal) never feeds back into another reward
+        SpellInfo const* healSpellInfo = healInfo->GetSpellInfo();
+        if (healSpellInfo != nullptr && EverQuest->IsClassAuraSpell(healSpellInfo->Id) == true)
+            return;
         uint32 healSpellID = EverQuest->GetClassAuraSpellID(EQ_CLASSAURA_SPELL_PALADIN_HEAL);
         if (healSpellID == 0)
             return;
@@ -156,36 +160,56 @@ class EverQuest_ClassAuraShadowKnightAuraScript : public AuraScript
     }
 };
 
-// Warrior "Warmaster": the proc row already rolled the double attack, and half of those become a triple.  The extra swings go
-// through the core's own extra attack queue, and the last-extra-attack marker keeps the extra swings from rolling again
-class EverQuest_ClassAuraWarriorAuraScript : public AuraScript
+// Monk "Agile Fighter": the proc row on the armor aura already rolled the double attack, and in light armor some of those become a triple.
+static void DoClassAuraMonkDoubleAttack(Unit* monk, ProcEventInfo& eventInfo, uint32 tripleChancePercent)
 {
-    PrepareAuraScript(EverQuest_ClassAuraWarriorAuraScript);
+    if (EverQuest->IsClassAuraSystemEnabled() == false)
+        return;
+    if (monk == nullptr || monk->IsPlayer() == false || monk->IsAlive() == false)
+        return;
+    // A swing that is itself an extra attack (ours or any other extra attack effect) never chains
+    if (monk->GetLastExtraAttackSpell() != 0)
+        return;
+    Unit* victim = eventInfo.GetProcTarget();
+    if (victim == nullptr || victim->IsAlive() == false)
+        return;
+    int32 extraAttackCount = 1;
+    if (tripleChancePercent > 0 && roll_chance_i((int32)tripleChancePercent) == true)
+        extraAttackCount = 2;
+    // Thrash has one die side, which the core adds on top of the custom base points, so the base points sit one below the swing count
+    int32 extraAttackBasePoints = extraAttackCount - 1;
+    monk->CastCustomSpell(monk, EQ_SPELL_ID_THRASH, &extraAttackBasePoints, nullptr, nullptr, true);
+}
+
+class EverQuest_ClassAuraMonkLightArmorAuraScript : public AuraScript
+{
+    PrepareAuraScript(EverQuest_ClassAuraMonkLightArmorAuraScript);
 
     void HandleProc(ProcEventInfo& eventInfo)
     {
         PreventDefaultAction();
-        if (EverQuest->IsClassAuraSystemEnabled() == false)
-            return;
-        Unit* warrior = GetTarget();
-        if (warrior == nullptr || warrior->IsPlayer() == false || warrior->IsAlive() == false)
-            return;
-        // A swing that is itself an extra attack (ours or any other extra attack effect) never chains
-        if (warrior->GetLastExtraAttackSpell() != 0)
-            return;
-        Unit* victim = eventInfo.GetProcTarget();
-        if (victim == nullptr || victim->IsAlive() == false)
-            return;
-        uint32 extraAttackCount = 1;
-        if (roll_chance_i((int32)EverQuest->ConfigSystemClassAuraWarriorTripleAttackChancePercent) == true)
-            extraAttackCount = 2;
-        warrior->SetLastExtraAttackSpell(GetId());
-        warrior->AddExtraAttacks(extraAttackCount);
+        DoClassAuraMonkDoubleAttack(GetTarget(), eventInfo, EverQuest->ConfigSystemClassAuraMonkDoubleToTripleAttackChancePercent);
     }
 
     void Register() override
     {
-        OnProc += AuraProcFn(EverQuest_ClassAuraWarriorAuraScript::HandleProc);
+        OnProc += AuraProcFn(EverQuest_ClassAuraMonkLightArmorAuraScript::HandleProc);
+    }
+};
+
+class EverQuest_ClassAuraMonkHeavyArmorAuraScript : public AuraScript
+{
+    PrepareAuraScript(EverQuest_ClassAuraMonkHeavyArmorAuraScript);
+
+    void HandleProc(ProcEventInfo& eventInfo)
+    {
+        PreventDefaultAction();
+        DoClassAuraMonkDoubleAttack(GetTarget(), eventInfo, 0);
+    }
+
+    void Register() override
+    {
+        OnProc += AuraProcFn(EverQuest_ClassAuraMonkHeavyArmorAuraScript::HandleProc);
     }
 };
 
@@ -247,7 +271,8 @@ class EverQuest_ClassAuraMagicianPetAuraScript : public AuraScript
     }
 };
 
-// Druid "Skin of the Wild": a direct heal leaves a regeneration worth a share of it behind (periodic heals are not in the proc flags)
+// Druid "Skin of the Wild": a direct heal leaves a regeneration worth a share of it behind (periodic heals are not in the proc flags), and a
+// landed melee or ranged autoattack exposes the target (the pet's strikes do the same through the mod's landed-swing hook)
 class EverQuest_ClassAuraDruidAuraScript : public AuraScript
 {
     PrepareAuraScript(EverQuest_ClassAuraDruidAuraScript);
@@ -260,6 +285,17 @@ class EverQuest_ClassAuraDruidAuraScript : public AuraScript
         Unit* druid = GetTarget();
         if (druid == nullptr || druid->IsPlayer() == false || druid->IsAlive() == false)
             return;
+
+        if ((eventInfo.GetTypeMask() & (PROC_FLAG_DONE_MELEE_AUTO_ATTACK | PROC_FLAG_DONE_RANGED_AUTO_ATTACK)) != 0)
+        {
+            uint32 exposureSpellID = EverQuest->GetClassAuraSpellID(EQ_CLASSAURA_SPELL_DRUID_EXPOSURE);
+            Unit* target = eventInfo.GetProcTarget();
+            if (exposureSpellID != 0 && target != nullptr && target != druid && target->IsAlive() == true && target->FindMap() == druid->FindMap()
+                && druid->IsValidAttackTarget(target) == true)
+                druid->CastSpell(target, exposureSpellID, true);
+            return;
+        }
+
         HealInfo* healInfo = eventInfo.GetHealInfo();
         if (healInfo == nullptr || healInfo->GetHeal() == 0)
             return;
@@ -324,7 +360,8 @@ void AddEverQuestClassAuraScripts()
     RegisterSpellScript(EverQuest_ClassAuraRangerAuraScript);
     RegisterSpellScript(EverQuest_ClassAuraPaladinAuraScript);
     RegisterSpellScript(EverQuest_ClassAuraShadowKnightAuraScript);
-    RegisterSpellScript(EverQuest_ClassAuraWarriorAuraScript);
+    RegisterSpellScript(EverQuest_ClassAuraMonkLightArmorAuraScript);
+    RegisterSpellScript(EverQuest_ClassAuraMonkHeavyArmorAuraScript);
     RegisterSpellScript(EverQuest_ClassAuraMagicianAuraScript);
     RegisterSpellScript(EverQuest_ClassAuraMagicianPetAuraScript);
     RegisterSpellScript(EverQuest_ClassAuraDruidAuraScript);

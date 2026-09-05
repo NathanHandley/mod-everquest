@@ -253,14 +253,18 @@ bool EverQuestMod::LoadConfigurationSystemDataFromDB()
                 ConfigSystemClassAuraBardInstrumentMeleeAutoAttackDamagePercent = (uint32)atoi(value.c_str());
             else if (key == "ClassAuraMonkSelfHealCastTimeReductionPercent")
                 ConfigSystemClassAuraMonkSelfHealCastTimeReductionPercent = (uint32)atoi(value.c_str());
+            else if (key == "ClassAuraMonkDoubleToTripleAttackChancePercent")
+                ConfigSystemClassAuraMonkDoubleToTripleAttackChancePercent = (uint32)atoi(value.c_str());
             else if (key == "ClassAuraRangerTackShotDamagePercentPerStack")
                 ConfigSystemClassAuraRangerTackShotDamagePercentPerStack = (uint32)atoi(value.c_str());
             else if (key == "ClassAuraPaladinHealSelfPercent")
                 ConfigSystemClassAuraPaladinHealSelfPercent = (uint32)atoi(value.c_str());
             else if (key == "ClassAuraPaladinUndeadDemonDoubleDamageChancePercent")
                 ConfigSystemClassAuraPaladinUndeadDemonDoubleDamageChancePercent = (uint32)atoi(value.c_str());
-            else if (key == "ClassAuraWarriorTripleAttackChancePercent")
-                ConfigSystemClassAuraWarriorTripleAttackChancePercent = (uint32)atoi(value.c_str());
+            else if (key == "ClassAuraWarriorRiposteChancePercent")
+                ConfigSystemClassAuraWarriorRiposteChancePercent = (uint32)atoi(value.c_str());
+            else if (key == "ClassAuraWarriorUnassailedDelayInMS")
+                ConfigSystemClassAuraWarriorUnassailedDelayInMS = (uint32)atoi(value.c_str());
             else if (key == "ClassAuraWizardFocusStacksLostPerMovementEvent")
                 ConfigSystemClassAuraWizardFocusStacksLostPerMovementEvent = (uint32)atoi(value.c_str());
             else if (key == "ClassAuraWizardFocusMovementIntervalInMS")
@@ -2599,6 +2603,7 @@ void EverQuestMod::UpdatePendingArrivalActions(Map* map, uint32 diff)
 {
     vector<EverQuestPendingArrivalAction> arrivedWatchers;
     vector<pair<ObjectGuid, uint32>> npcFlagRestores;
+    vector<EverQuestPendingArrivalAction> stalledWatchers;
     {
         std::lock_guard<std::mutex> lock(PendingArrivalActionsMutex);
         auto watcherIter = PendingArrivalActionsByMapInstanceKey.find(GetMapInstanceKey(map));
@@ -2628,11 +2633,11 @@ void EverQuestMod::UpdatePendingArrivalActions(Map* map, uint32 diff)
                     else
                     {
                         watcher.StallCheckRemainingMS = EQ_REACTION_WALK_STALL_CHECK_MS;
+
+                        // The next leg is built after the lock is released below.  Path building and the motion master are engine calls, and holding this mutex across them stalls every
+                        // creature tick on every map that asks IsCreatureInReactionWalk while a walk is up
                         if (mover->movespline->Finalized() == true)
-                        {
-                            StartTerrainSnappedMoveToPoint(mover, watcher.DestinationX, watcher.DestinationY, watcher.DestinationZ, true);
-                            LOG_DEBUG("module.EverQuest", "EverQuestMod::UpdatePendingArrivalActions creature {} stalled {} yards short of its reaction walk, so the next leg was built", mover->GetEntry(), mover->GetExactDist2d(watcher.DestinationX, watcher.DestinationY));
-                        }
+                            stalledWatchers.push_back(watcher);
                     }
                 }
                 continue;
@@ -2651,6 +2656,16 @@ void EverQuestMod::UpdatePendingArrivalActions(Map* map, uint32 diff)
         }
         if (watchers.empty() == true)
             PendingArrivalActionsByMapInstanceKey.erase(watcherIter);
+    }
+
+    // A walker whose spline ran out short of the destination gets the next leg of its walk, now that nothing is held
+    for (EverQuestPendingArrivalAction& stalledWatcher : stalledWatchers)
+    {
+        Creature* stalledMover = map->GetCreature(stalledWatcher.MoverGUID);
+        if (stalledMover == nullptr || stalledMover->IsInWorld() == false || stalledMover->IsAlive() == false)
+            continue;
+        StartTerrainSnappedMoveToPoint(stalledMover, stalledWatcher.DestinationX, stalledWatcher.DestinationY, stalledWatcher.DestinationZ, true);
+        LOG_DEBUG("module.EverQuest", "EverQuestMod::UpdatePendingArrivalActions creature {} stalled {} yards short of its reaction walk, so the next leg was built", stalledMover->GetEntry(), stalledMover->GetExactDist2d(stalledWatcher.DestinationX, stalledWatcher.DestinationY));
     }
 
     // The walk is over either way, so the creature can be talked to again before anything it has to say fires
@@ -13218,7 +13233,7 @@ bool EverQuestMod::IsPlayerMentorshipLevelAdjusted(Player* player)
     return role == EQ_MENTORSHIP_ROLE_MENTOR || role == EQ_MENTORSHIP_ROLE_APPRENTICE;
 }
 
-bool EverQuestMod::TryGetMentorshipRealLevelForPlayer(Player* player, uint8& outRealLevel)
+bool EverQuestMod::TryGetMentorshipRealLevelForPlayer(Player const* player, uint8& outRealLevel)
 {
     if (player == nullptr || MentorshipStateCount.load() == 0)
         return false;
@@ -13649,15 +13664,20 @@ void EverQuestMod::ReportMentorshipStatusToPlayer(Player* player)
     }
 
     EverQuestMentorshipState state;
+    bool haveState = false;
     {
         std::lock_guard<std::mutex> lock(RuntimeStateMutex);
         unordered_map<ObjectGuid, EverQuestMentorshipState>::const_iterator stateIterator = MentorshipStatesByPlayerGUID.find(player->GetGUID());
-        if (stateIterator == MentorshipStatesByPlayerGUID.end())
+        if (stateIterator != MentorshipStatesByPlayerGUID.end())
         {
-            handler.SendSysMessage("You are not in a mentorship.");
-            return;
+            state = stateIterator->second;
+            haveState = true;
         }
-        state = stateIterator->second;
+    }
+    if (haveState == false)
+    {
+        handler.SendSysMessage("You are not in a mentorship.");
+        return;
     }
 
     if (state.Role == EQ_MENTORSHIP_ROLE_ANCHOR)
@@ -14218,6 +14238,35 @@ bool EverQuestMod::HasPendingMentorshipLevelRestoreForPlayer(Player* player)
     if (controllerData == nullptr)
         return false;
     return controllerData->MentorshipRole != EQ_MENTORSHIP_ROLE_NONE && controllerData->MentorshipRealLevel != 0;
+}
+
+void EverQuestMod::AdjustTalentPointsForMentorship(Player const* player, uint32& talentPointsForLevel)
+{
+    // Talent points should never be borrowed from a mentorship
+    if (player == nullptr)
+        return;
+
+    uint8 realLevel = 0;
+    if (TryGetMentorshipRealLevelForPlayer(player, realLevel) == false)
+    {
+        // No live tether, so the only remaining case is a character still being loaded at a level a crash left it saved at
+        if (player->GetSession() == nullptr || player->GetSession()->PlayerLoading() == false)
+            return;
+        EverQuestPlayerControllerData* controllerData = GetOrLoadActivePlayerClassControllerData(const_cast<Player*>(player));
+        if (controllerData == nullptr || controllerData->MentorshipRole == EQ_MENTORSHIP_ROLE_NONE || controllerData->MentorshipRealLevel == 0)
+            return;
+        realLevel = controllerData->MentorshipRealLevel;
+    }
+
+    uint8 standingLevel = player->GetLevel();
+    if (standingLevel == realLevel)
+        return;
+
+    // Mirrors the base talent formula in Player::CalculateTalentsPoints, applied as a difference so any bonus points the core added on top are kept
+    int32 realBasePoints = realLevel < 10 ? 0 : (int32)realLevel - 9;
+    int32 standingBasePoints = standingLevel < 10 ? 0 : (int32)standingLevel - 9;
+    int32 adjustedPoints = (int32)talentPointsForLevel + (realBasePoints - standingBasePoints);
+    talentPointsForLevel = adjustedPoints < 0 ? 0 : (uint32)adjustedPoints;
 }
 
 uint8 EverQuestMod::GetEarnedLevelForPlayer(Player* player)

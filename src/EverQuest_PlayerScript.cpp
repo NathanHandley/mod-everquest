@@ -409,6 +409,15 @@ public:
         return EverQuest->HandleLevelCapOnCanGiveLevel(player, newLevel);
     }
 
+    void OnPlayerCalculateTalentsPoints(Player const* player, uint32& talentPointsForLevel) override
+    {
+        if (EverQuest->IsEnabled == false)
+            return;
+
+        // Keep own talent level during a mentorship
+        EverQuest->AdjustTalentPointsForMentorship(player, talentPointsForLevel);
+    }
+
     void OnPlayerEquip(Player* player, Item* /*it*/, uint8 /*bag*/, uint8 /*slot*/, bool /*update*/) override
     {
         if (EverQuest->IsEnabled == false)

@@ -53,7 +53,7 @@ class ByteBuffer;
 struct AreaTrigger;
 struct BuildValuesCachePosPointers;
 
-#define EQ_MOD_VERSION                              94
+#define EQ_MOD_VERSION                              97
 
 #define EQ_MOVEMENT_CAST_SNARE_DURATION_BUFFER_IN_MS 2000 // How much longer than the remaining cast time the casting slow is given, so a pushed-back cast keeps it
 
@@ -346,6 +346,7 @@ struct BuildValuesCachePosPointers;
 #define EQ_CLASS_AURA_GEAR_REFRESH_INTERVAL_MS      2000    // Gear and pet based class auras rescan on this interval since some ways they change have no hook
 #define EQ_CLASS_AURA_MANA_CHECK_INTERVAL_MS        500     // How often the Enchanter mana threshold is checked
 #define EQ_SPELL_ID_AUTO_SHOT                       75
+#define EQ_SPELL_ID_THRASH                          21919   // The Thrash Blade's extra attack proc, cast by the mod for the Monk's double and triple attacks
 
 // Vulak`Aerr (Temple of Veeshan) spawns perma-rooted and "locked" (unattackable, non-aggro) until every required dragon is dead, matching Velious-era EQ
 #define EQ_VULAK_CREATURE_TEMPLATE_ID               55045
@@ -868,7 +869,10 @@ enum EverQuestClassAuraSpellType : uint32
     EQ_CLASSAURA_SPELL_SHAMAN_SLOW_MARK = 45,
     EQ_CLASSAURA_SPELL_SHAMAN_VIGOR = 46,
     EQ_CLASSAURA_SPELL_CAST_SPEED_HELPER = 47,
-    EQ_CLASSAURA_SPELL_TYPE_COUNT = 48
+    EQ_CLASSAURA_SPELL_DRUID_EXPOSURE = 48,
+    EQ_CLASSAURA_SPELL_WARRIOR_UNASSAILED = 49,
+    EQ_CLASSAURA_SPELL_WARRIOR_RIPOSTE = 50,
+    EQ_CLASSAURA_SPELL_TYPE_COUNT = 51
 };
 
 class EverQuestPlayerClassAuraState : public DataMap::Base
@@ -882,6 +886,8 @@ public:
     uint32 PendingCastAdjustSpellID = 0;        // The spell whose successful cast spends the readied cleric / shadow knight charge
     bool PendingCadenceConsume = false;
     bool PendingEdgeConsume = false;
+    uint32 LastMeleeAttackedMS = 0;
+    ObjectGuid PendingRiposteTargetGUID;
 };
 
 class EverQuestPlayerTrackingState : public DataMap::Base
@@ -1395,10 +1401,12 @@ public:
     uint32 ConfigSystemClassAuraEnchanterFocusManaThresholdPercent = 80;
     uint32 ConfigSystemClassAuraBardInstrumentMeleeAutoAttackDamagePercent = 33;
     uint32 ConfigSystemClassAuraMonkSelfHealCastTimeReductionPercent = 50;
+    uint32 ConfigSystemClassAuraMonkDoubleToTripleAttackChancePercent = 50;
     uint32 ConfigSystemClassAuraRangerTackShotDamagePercentPerStack = 1;
     uint32 ConfigSystemClassAuraPaladinHealSelfPercent = 15;
     uint32 ConfigSystemClassAuraPaladinUndeadDemonDoubleDamageChancePercent = 20;
-    uint32 ConfigSystemClassAuraWarriorTripleAttackChancePercent = 50;
+    uint32 ConfigSystemClassAuraWarriorRiposteChancePercent = 5;
+    uint32 ConfigSystemClassAuraWarriorUnassailedDelayInMS = 20000;
     uint32 ConfigSystemClassAuraWizardFocusStacksLostPerMovementEvent = 1;
     uint32 ConfigSystemClassAuraWizardFocusMovementIntervalInMS = 1000;
     uint32 ConfigSystemClassAuraNecromancerDebuffTransferCooldownInMS = 20000;
@@ -1817,6 +1825,9 @@ public:
     void RefreshMonkArmorAuraForPlayer(Player* player);
     void RefreshBardInstrumentAuraForPlayer(Player* player);
     void UpdateEnchanterFocusForPlayer(Player* player);
+    void UpdateWarriorClassAuraForPlayer(Player* player);
+    void HandleClassAuraWarriorMeleeAttackedOnRoll(Player* warrior, Unit const* attacker, int32& missChance, int32& dodgeChance, int32& parryChance, int32& blockChance, int32& critChance);
+    void NoteClassAuraWarriorMeleeAttacked(Unit* target, SpellInfo const* spellInfo);
     void UpdateWizardFocusMovementForPlayer(Player* player, uint32 diffInMS);
     void RefreshMagicianPetAuraForPlayer(Player* player);
     void ApplyMagicianPetAuraToPet(Pet* pet);
@@ -1825,6 +1836,7 @@ public:
     void ApplyClassAuraMeleeDamageMods(Unit* attacker, Unit* victim, uint32& damage);
     void ApplyClassAuraDirectSpellDamageMods(Unit* target, Unit* attacker, int32& damage, SpellInfo const* spellInfo);
     void ApplyClassAuraTackShotDamageBonus(Unit* attacker, Unit* victim, int32& damage);
+    void ApplyClassAuraPaladinUndeadDemonDamageBonus(Unit* attacker, Unit* victim, int32& damage);
     void ApplyClassAuraPeriodicTickMods(Unit* target, Unit* attacker, uint32& amount, SpellInfo const* spellInfo);
     bool TryTransferDebuffToNecromancerPet(Player* player, Aura* aura);
     void HandleClassAuraSlowAuraApply(Unit* target, Aura* aura);
@@ -2169,7 +2181,8 @@ public:
     bool IsMentorshipEnabled();
     uint8 GetMentorshipRoleForPlayerGUID(ObjectGuid playerGUID);
     bool IsPlayerMentorshipLevelAdjusted(Player* player);
-    bool TryGetMentorshipRealLevelForPlayer(Player* player, uint8& outRealLevel);
+    bool TryGetMentorshipRealLevelForPlayer(Player const* player, uint8& outRealLevel);
+    void AdjustTalentPointsForMentorship(Player const* player, uint32& talentPointsForLevel);
     bool IsQuestBlockedByMentorshipForPlayer(Player* player, Quest const* quest);
     bool IsTrainerInteractionBlockedByMentorshipForPlayer(Player* player);
     bool HandleMentorshipTrainerPacketReceive(WorldSession* session, WorldPacket const& packet);
