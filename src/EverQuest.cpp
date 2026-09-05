@@ -12892,6 +12892,8 @@ void EverQuestMod::ApplyDruidFormDisplayForPlayerOnDisplayChange(Unit* unit, uin
     // No graphic at all, so back to the look from just before the form took hold, which keeps an illusion already being worn
     if (wantedDisplayID == 0)
     {
+        if (displayID != GetActiveShapeshiftModelIDForPlayer(player))
+            return;
         wantedDisplayID = (EQPreShapeshiftDisplayUnitGUIDValue == player->GetGUID().GetRawValue() && EQPreShapeshiftDisplayID != 0)
             ? EQPreShapeshiftDisplayID
             : player->GetNativeDisplayId();
@@ -13426,7 +13428,13 @@ bool EverQuestMod::IsPlayerReportingLevelCap(Player const* player)
     uint32 nextLevelExperience = player->GetUInt32Value(PLAYER_NEXT_LEVEL_XP);
     if (nextLevelExperience == 0)
         return false;
-    return player->GetUInt32Value(PLAYER_XP) >= nextLevelExperience - 1;
+    if (player->GetUInt32Value(PLAYER_XP) < nextLevelExperience - 1)
+        return false;
+
+    // A max character carrying an apprentice keeps reporting their real level
+    if (GetMentorshipRoleForPlayerGUID(player->GetGUID()) == EQ_MENTORSHIP_ROLE_ANCHOR)
+        return false;
+    return true;
 }
 
 uint8 EverQuestMod::GetGroupExperienceLevelForPlayer(Player const* player)

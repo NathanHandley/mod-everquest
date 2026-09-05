@@ -371,10 +371,20 @@ public:
         if (EverQuest->IsEnabled == false)
             return;
 
-        // At cap, no bar to move
-        if (EverQuest->IsPlayerExperienceBarCapped(player) == true)
+        // At cap, no bar to move.  A capped anchor still reaches here with a real amount (they are exempt from the level cap sentinel while tethered), which the apprentice banks
+        bool experienceBarCapped = EverQuest->IsPlayerExperienceBarCapped(player);
+        if (experienceBarCapped == true)
             EverQuest->AddCappedAnchorExperienceForPlayer(player, amount);
 
+        AddSecondaryExpPoolForKill(player, amount, victim, xpSource);
+
+        // Nothing is left for Player::GiveXP to apply to a capped bar, and handing it the real amount would only print an experience line for nothing
+        if (experienceBarCapped == true)
+            amount = 0;
+    }
+
+    void AddSecondaryExpPoolForKill(Player* player, uint32 amount, Unit* victim, uint8 xpSource)
+    {
         if (EverQuest->ConfigSecondaryExpPoolGainPercent <= 0.0f)
             return;
 
