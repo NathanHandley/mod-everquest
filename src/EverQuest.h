@@ -59,6 +59,37 @@ struct BuildValuesCachePosPointers;
 
 #define EQ_DISPEL_MESSAGE_DEFAULT_COLOR             0xFFAA00
 
+#define EQ_DRUID_FORM_TYPE_BEAR                     1 // Covers both Bear Form and Dire Bear Form
+#define EQ_DRUID_FORM_TYPE_CAT                      2
+#define EQ_DRUID_FORM_TYPE_TRAVEL                   3
+#define EQ_DRUID_FORM_TYPE_TREE                     4 // Tree of Life
+#define EQ_DRUID_FORM_TYPE_MOONKIN                  5
+
+#define EQ_DRUID_FORM_BEAR_FACTION_DEFAULT          0
+#define EQ_DRUID_FORM_BEAR_ALLIANCE                 1
+#define EQ_DRUID_FORM_BEAR_HORDE                    2
+#define EQ_DRUID_FORM_BEAR_NORRATH_GRIZZLY          3
+#define EQ_DRUID_FORM_BEAR_MAX                      3
+
+#define EQ_DRUID_FORM_CAT_FACTION_DEFAULT           0
+#define EQ_DRUID_FORM_CAT_ALLIANCE                  1
+#define EQ_DRUID_FORM_CAT_HORDE                     2
+#define EQ_DRUID_FORM_CAT_NORRATH_PANTHER           3
+#define EQ_DRUID_FORM_CAT_NORRATH_SABERTOOTH        4
+#define EQ_DRUID_FORM_CAT_MAX                       4
+
+#define EQ_DRUID_FORM_TRAVEL_AZEROTH_CHEETAH        0
+#define EQ_DRUID_FORM_TRAVEL_NORRATH_LEOPARD        1
+#define EQ_DRUID_FORM_TRAVEL_MAX                    1
+
+#define EQ_DRUID_FORM_TREE_AZEROTH_TREANT           0
+#define EQ_DRUID_FORM_TREE_NORRATH_TREANT           1
+#define EQ_DRUID_FORM_TREE_MAX                      1
+
+#define EQ_DRUID_FORM_MOONKIN_ON                    0
+#define EQ_DRUID_FORM_MOONKIN_OFF                   1
+#define EQ_DRUID_FORM_MOONKIN_MAX                   1
+
 #define EQ_MENTORSHIP_ROLE_NONE                     0
 #define EQ_MENTORSHIP_ROLE_MENTOR                   1
 #define EQ_MENTORSHIP_ROLE_APPRENTICE               2
@@ -1245,6 +1276,12 @@ public:
     uint32 RecheckTimerMS = 0;
 };
 
+struct EverQuestDruidFormDisplay
+{
+    uint32 DisplayID = 0;
+    float DisplayScale = 1.0f;
+};
+
 struct EverQuestPlayerControllerData
 {
     uint32 GUID = 0;
@@ -1264,6 +1301,11 @@ struct EverQuestPlayerControllerData
     uint32 DeathExpRestGranted = 0;
     uint8 DeathExpLostSecondaryClass = 0;
     uint8 PendingStartItemEQClass = 0;
+    uint8 DruidFormBear = EQ_DRUID_FORM_BEAR_FACTION_DEFAULT;
+    uint8 DruidFormCat = EQ_DRUID_FORM_CAT_FACTION_DEFAULT;
+    uint8 DruidFormTravel = EQ_DRUID_FORM_TRAVEL_AZEROTH_CHEETAH;
+    uint8 DruidFormTree = EQ_DRUID_FORM_TREE_AZEROTH_TREANT;
+    uint8 DruidFormMoonkin = EQ_DRUID_FORM_MOONKIN_ON;
     uint8 MentorshipRole = EQ_MENTORSHIP_ROLE_NONE;
     uint8 MentorshipRealLevel = 0;
     uint32 MentorshipRealExperience = 0;
@@ -1576,6 +1618,7 @@ public:
     unordered_map<uint32, vector<EverQuestCreatureEmote>> CreatureEmotesByCreatureTemplateID;
     unordered_map<uint32, EverQuestCreatureMovementSound> CreatureMovementSoundsByDisplayID;
     unordered_map<uint32, uint32> SilentFidgetDisplayIDsByDisplayID;
+    unordered_map<uint32, EverQuestDruidFormDisplay> DruidFormDisplaysByFormTypeAndOptionKey; // Key is (formType << 8) | optionID
 
     std::mutex PendingKillSpawnActionsMutex;
     unordered_map<uint64, vector<EverQuestPendingKillSpawnAction>> PendingKillSpawnActionsByMapInstanceKey;
@@ -1889,6 +1932,8 @@ public:
     void LoadPetData();
     void LoadPetSilentDisplayData();
     void RemoveInvalidPetSilentDisplays();
+    void LoadDruidFormDisplayData();
+    void RemoveInvalidDruidFormDisplays();
     uint32 GetSilentFidgetDisplayIDForDisplayID(uint32 displayID) const;
     void UpdatePetFidgetSilence(Creature* creature);
     bool HasPetDataForCreatureTemplateID(uint32 creatureTemplateID);
@@ -2172,6 +2217,17 @@ public:
     void SetDispelMessageColorForPlayer(Player* player, uint32 dispelMessageColor);
     void SaveDispelMessageColorForPlayer(Player* player);
     bool TryGetDispelMessageSettingsForPlayer(Player* player, bool& showDispelMessage, uint32& dispelMessageColor);
+    uint8 GetDruidFormOptionForPlayer(Player* player, uint8 formType);
+    void SetDruidFormOptionForPlayer(Player* player, uint8 formType, uint8 optionID);
+    void SaveDruidFormOptionsForPlayer(Player* player);
+    bool TryGetDruidFormOptionForPlayer(Player* player, uint8 formType, uint8& optionID);
+    bool TryGetDruidFormDisplayForPlayer(Player* player, uint8 formType, uint32& displayID, float& displayScale);
+    static uint8 GetDruidFormTypeForShapeshiftForm(uint8 shapeshiftForm);
+    static uint8 GetDruidFormFactionDefaultOption(Player const* player, uint8 formType);
+    static uint8 GetMaxDruidFormOption(uint8 formType);
+    void ApplyDruidFormDisplayForPlayerOnDisplayChange(Unit* unit, uint32 displayID);
+    void RecordPreShapeshiftDisplayIDForUnit(Unit* unit, uint8 shapeshiftForm);
+    void RefreshDruidFormDisplayForPlayer(Player* player, uint8 formType);
     void NotifyPlayerOfDispelledAura(Player* player, AuraApplication* auraApplication);
     bool IsAuraASpentAbsorb(Aura* aura);
     void SendPlayerOptionsToPlayer(Player* player);

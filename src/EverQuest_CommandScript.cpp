@@ -137,6 +137,7 @@ public:
             { "eqhailwindow", HandleEQHailWindowCommand,        SEC_PLAYER, Console::No },
             { "eqdispelmessage", HandleEQDispelMessageCommand,  SEC_PLAYER, Console::No },
             { "eqoptions", HandleEQOptionsCommand,              SEC_PLAYER, Console::No },
+            { "eqdruidform", HandleEQDruidFormCommand,          SEC_PLAYER, Console::No },
             { "eqauctionfilter", HandleEQAuctionFilterCommand,  SEC_PLAYER, Console::No },
             { "eqmentorship", HandleEQMentorshipCommand,        SEC_PLAYER, Console::No },
             { "class",  classCommandTable                                               },
@@ -603,6 +604,154 @@ public:
         return true;
     }
 
+    struct EverQuestDruidFormChoice
+    {
+        uint8 FormType;
+        uint8 OptionID;
+        char const* Keyword;
+        char const* Description;
+    };
+
+    static std::vector<EverQuestDruidFormChoice> const& GetDruidFormChoices()
+    {
+        static std::vector<EverQuestDruidFormChoice> const druidFormChoices =
+        {
+            { EQ_DRUID_FORM_TYPE_BEAR,    EQ_DRUID_FORM_BEAR_ALLIANCE,          "alliance",   "Alliance Bear" },
+            { EQ_DRUID_FORM_TYPE_BEAR,    EQ_DRUID_FORM_BEAR_HORDE,             "horde",      "Horde Bear" },
+            { EQ_DRUID_FORM_TYPE_BEAR,    EQ_DRUID_FORM_BEAR_NORRATH_GRIZZLY,   "grizzly",    "Norrath Grizzly" },
+            { EQ_DRUID_FORM_TYPE_CAT,     EQ_DRUID_FORM_CAT_ALLIANCE,           "alliance",   "Alliance Cat" },
+            { EQ_DRUID_FORM_TYPE_CAT,     EQ_DRUID_FORM_CAT_HORDE,              "horde",      "Horde Cat" },
+            { EQ_DRUID_FORM_TYPE_CAT,     EQ_DRUID_FORM_CAT_NORRATH_PANTHER,    "panther",    "Norrath Panther" },
+            { EQ_DRUID_FORM_TYPE_CAT,     EQ_DRUID_FORM_CAT_NORRATH_SABERTOOTH, "sabertooth", "Norrath Sabertooth" },
+            { EQ_DRUID_FORM_TYPE_TRAVEL,  EQ_DRUID_FORM_TRAVEL_AZEROTH_CHEETAH, "cheetah",    "Azeroth Cheetah" },
+            { EQ_DRUID_FORM_TYPE_TRAVEL,  EQ_DRUID_FORM_TRAVEL_NORRATH_LEOPARD, "leopard",    "Norrath Leopard" },
+            { EQ_DRUID_FORM_TYPE_TREE,    EQ_DRUID_FORM_TREE_AZEROTH_TREANT,    "azeroth",    "Azeroth Treant" },
+            { EQ_DRUID_FORM_TYPE_TREE,    EQ_DRUID_FORM_TREE_NORRATH_TREANT,    "norrath",    "Norrath Treant" },
+            { EQ_DRUID_FORM_TYPE_MOONKIN, EQ_DRUID_FORM_MOONKIN_ON,             "on",         "shown" },
+            { EQ_DRUID_FORM_TYPE_MOONKIN, EQ_DRUID_FORM_MOONKIN_OFF,            "off",        "hidden" },
+        };
+        return druidFormChoices;
+    }
+
+    static char const* GetDruidFormTypeKeyword(uint8 formType)
+    {
+        switch (formType)
+        {
+            case EQ_DRUID_FORM_TYPE_BEAR:    return "bear";
+            case EQ_DRUID_FORM_TYPE_CAT:     return "cat";
+            case EQ_DRUID_FORM_TYPE_TRAVEL:  return "travel";
+            case EQ_DRUID_FORM_TYPE_TREE:    return "tree";
+            case EQ_DRUID_FORM_TYPE_MOONKIN: return "moonkin";
+            default:                         return "";
+        }
+    }
+
+    static uint8 GetDruidFormTypeForKeyword(const std::string& keyword)
+    {
+        if (keyword == "bear")
+            return EQ_DRUID_FORM_TYPE_BEAR;
+        if (keyword == "cat")
+            return EQ_DRUID_FORM_TYPE_CAT;
+        if (keyword == "travel")
+            return EQ_DRUID_FORM_TYPE_TRAVEL;
+        if (keyword == "tree")
+            return EQ_DRUID_FORM_TYPE_TREE;
+        if (keyword == "moonkin")
+            return EQ_DRUID_FORM_TYPE_MOONKIN;
+        return 0;
+    }
+
+    static std::string GetDruidFormChoiceListText(uint8 formType)
+    {
+        std::string choiceListText;
+        for (EverQuestDruidFormChoice const& druidFormChoice : GetDruidFormChoices())
+        {
+            if (druidFormChoice.FormType != formType)
+                continue;
+            if (choiceListText.empty() == false)
+                choiceListText.append(", ");
+            choiceListText.append(druidFormChoice.Keyword);
+        }
+        return choiceListText;
+    }
+
+    static char const* GetDruidFormChoiceDescription(uint8 formType, uint8 optionID)
+    {
+        for (EverQuestDruidFormChoice const& druidFormChoice : GetDruidFormChoices())
+            if (druidFormChoice.FormType == formType && druidFormChoice.OptionID == optionID)
+                return druidFormChoice.Description;
+        return "unknown";
+    }
+
+    static void PrintDruidFormSettingsToPlayer(ChatHandler* handler, Player* player)
+    {
+        static uint8 const druidFormTypes[] = { EQ_DRUID_FORM_TYPE_BEAR, EQ_DRUID_FORM_TYPE_CAT, EQ_DRUID_FORM_TYPE_TRAVEL, EQ_DRUID_FORM_TYPE_TREE, EQ_DRUID_FORM_TYPE_MOONKIN };
+        for (uint8 formType : druidFormTypes)
+        {
+            uint8 optionID = EverQuest->GetDruidFormOptionForPlayer(player, formType);
+            if (formType == EQ_DRUID_FORM_TYPE_MOONKIN)
+                handler->PSendSysMessage("  moonkin: the moonkin look is |cff4CFF00{}|r", GetDruidFormChoiceDescription(formType, optionID));
+            else
+                handler->PSendSysMessage("  {}: |cff4CFF00{}|r", GetDruidFormTypeKeyword(formType), GetDruidFormChoiceDescription(formType, optionID));
+        }
+    }
+
+    // Picks what each of a WoW druid's shapeshift forms looks like for this character
+    static bool HandleEQDruidFormCommand(ChatHandler* handler, const char* args)
+    {
+        if (EverQuest->IsEnabled == false)
+            return true;
+
+        Player* player = handler->GetPlayer();
+        if (player == nullptr)
+            return true;
+
+        std::vector<std::string> tokens = SplitCommandArgs(args, 2);
+        std::string formString = tokens.empty() == true ? std::string() : tokens[0];
+        boost::algorithm::to_lower(formString);
+
+        uint8 formType = GetDruidFormTypeForKeyword(formString);
+        if (formType == 0 || tokens.size() < 2)
+        {
+            handler->PSendSysMessage(".eqdruidform 'bear', 'cat', 'travel', 'tree' or 'moonkin' followed by a look");
+            handler->PSendSysMessage("Sets what your druid shapeshift forms look like. Example: '.eqdruidform bear grizzly' turns your bear and dire bear forms into a Norrath grizzly");
+            handler->PSendSysMessage("bear: {} | cat: {}", GetDruidFormChoiceListText(EQ_DRUID_FORM_TYPE_BEAR), GetDruidFormChoiceListText(EQ_DRUID_FORM_TYPE_CAT));
+            handler->PSendSysMessage("travel: {} | tree: {} | moonkin: {}", GetDruidFormChoiceListText(EQ_DRUID_FORM_TYPE_TRAVEL),
+                GetDruidFormChoiceListText(EQ_DRUID_FORM_TYPE_TREE), GetDruidFormChoiceListText(EQ_DRUID_FORM_TYPE_MOONKIN));
+            handler->PSendSysMessage("Your druid forms are currently:");
+            PrintDruidFormSettingsToPlayer(handler, player);
+            return true;
+        }
+
+        std::string optionString = tokens[1];
+        boost::algorithm::to_lower(optionString);
+        bool isValidOption = false;
+        uint8 optionID = 0;
+        for (EverQuestDruidFormChoice const& druidFormChoice : GetDruidFormChoices())
+        {
+            if (druidFormChoice.FormType != formType || optionString != druidFormChoice.Keyword)
+                continue;
+            optionID = druidFormChoice.OptionID;
+            isValidOption = true;
+            break;
+        }
+        if (isValidOption == false)
+        {
+            handler->PSendSysMessage(".eqdruidform {} can be: {}", GetDruidFormTypeKeyword(formType), GetDruidFormChoiceListText(formType));
+            return true;
+        }
+
+        // Store it, push it to the options page, and put it onto the character right away if they are standing in that form
+        EverQuest->SetDruidFormOptionForPlayer(player, formType, optionID);
+        EverQuest->SendPlayerOptionsToPlayer(player);
+        EverQuest->RefreshDruidFormDisplayForPlayer(player, formType);
+        if (formType == EQ_DRUID_FORM_TYPE_MOONKIN)
+            handler->PSendSysMessage("Your moonkin look is now |cff4CFF00{}|r.", GetDruidFormChoiceDescription(formType, optionID));
+        else
+            handler->PSendSysMessage("Your {} form is now a |cff4CFF00{}|r.", GetDruidFormTypeKeyword(formType), GetDruidFormChoiceDescription(formType, optionID));
+        return true;
+    }
+
     // Backs the in game options page.  "sync" pushes the current values to it, and no argument prints the same values as text
     static bool HandleEQOptionsCommand(ChatHandler* handler, const char* args)
     {
@@ -627,6 +776,12 @@ public:
         handler->PSendSysMessage("Hide WoW gear on other players (.eqhidewowgear): |cff4CFF00{}|r", EverQuest->GetHideWoWGearForPlayer(player) == true ? "on" : "off");
         handler->PSendSysMessage("Open hail replies on right click (.eqhailwindow): |cff4CFF00{}|r", EverQuest->GetHailWindowOnRightClickForPlayer(player) == true ? "on" : "off");
         handler->PSendSysMessage("Dispel messages (.eqdispelmessage): |cff4CFF00{}|r, in |cff{:06X}this color|r", EverQuest->GetShowDispelMessageForPlayer(player) == true ? "on" : "off", EverQuest->GetDispelMessageColorForPlayer(player));
+        // Shapeshift forms only belong to WoW druids, so nobody else is shown a list of looks they can never wear
+        if (player->getClass() == CLASS_DRUID)
+        {
+            handler->PSendSysMessage("Druid form looks (.eqdruidform):");
+            PrintDruidFormSettingsToPlayer(handler, player);
+        }
         handler->PSendSysMessage("These can also be set in the Interface Options window, under the EverQuest category.");
         return true;
     }

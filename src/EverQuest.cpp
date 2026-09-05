@@ -4235,9 +4235,24 @@ void EverQuestMod::ApplyIllusionGearDisplayIfChanged(Player* player, EverQuestPl
     uint32 shapeshiftModelID = GetActiveShapeshiftModelIDForPlayer(player);
     if (shapeshiftModelID != 0)
     {
-        if (player->GetDisplayId() != shapeshiftModelID)
-            player->SetDisplayId(shapeshiftModelID);
-        return;
+        // A druid who picked a different look for this form wears that instead
+        uint32 druidFormDisplayID = 0;
+        float druidFormDisplayScale = 1.0f;
+        bool showFormModel = true;
+        if (TryGetDruidFormDisplayForPlayer(player, GetDruidFormTypeForShapeshiftForm(player->GetShapeshiftForm()), druidFormDisplayID, druidFormDisplayScale) == true)
+        {
+            if (druidFormDisplayID == 0)
+                showFormModel = false;
+            else
+                shapeshiftModelID = druidFormDisplayID;
+        }
+
+        if (showFormModel == true)
+        {
+            if (player->GetDisplayId() != shapeshiftModelID)
+                player->SetDisplayId(shapeshiftModelID, druidFormDisplayScale);
+            return;
+        }
     }
 
     // A zero result means no one doesn't exist, so leave the core's transform display alone
@@ -6054,6 +6069,51 @@ void EverQuestMod::RemoveInvalidPetSilentDisplays()
         {
             LOG_ERROR("module.EverQuest", "EverQuestMod::RemoveInvalidPetSilentDisplays dropped display ID {} as its silent display ID {} is missing from CreatureDisplayInfo.dbc.  Deploy the current DBC files.", displayIter->first, displayIter->second);
             displayIter = SilentFidgetDisplayIDsByDisplayID.erase(displayIter);
+        }
+        else
+            ++displayIter;
+    }
+}
+
+void EverQuestMod::LoadDruidFormDisplayData()
+{
+    DruidFormDisplaysByFormTypeAndOptionKey.clear();
+    QueryResult queryResult = WorldDatabase.Query("SELECT FormType, OptionID, DisplayID, DisplayScale FROM mod_everquest_druid_form_display;");
+    if (queryResult)
+    {
+        do
+        {
+            Field* fields = queryResult->Fetch();
+            uint8 formType = fields[0].Get<uint8>();
+            uint8 optionID = fields[1].Get<uint8>();
+
+            // Option zero always means leave the display the core picked alone
+            if (optionID == 0)
+            {
+                LOG_ERROR("module.EverQuest", "EverQuestMod::LoadDruidFormDisplayData skipped form type {} option 0, which is reserved for the core's own display.", formType);
+                continue;
+            }
+
+            EverQuestDruidFormDisplay druidFormDisplay;
+            druidFormDisplay.DisplayID = fields[2].Get<uint32>();
+            druidFormDisplay.DisplayScale = fields[3].Get<float>();
+            if (druidFormDisplay.DisplayScale <= 0.0f)
+                druidFormDisplay.DisplayScale = 1.0f;
+            DruidFormDisplaysByFormTypeAndOptionKey[(uint32(formType) << 8) | uint32(optionID)] = druidFormDisplay;
+        } while (queryResult->NextRow());
+    }
+}
+
+void EverQuestMod::RemoveInvalidDruidFormDisplays()
+{
+    unordered_map<uint32, EverQuestDruidFormDisplay>::iterator displayIter = DruidFormDisplaysByFormTypeAndOptionKey.begin();
+    while (displayIter != DruidFormDisplaysByFormTypeAndOptionKey.end())
+    {
+        if (sCreatureDisplayInfoStore.LookupEntry(displayIter->second.DisplayID) == nullptr)
+        {
+            LOG_ERROR("module.EverQuest", "EverQuestMod::RemoveInvalidDruidFormDisplays dropped druid form type {} option {} as its display ID {} is missing from CreatureDisplayInfo.dbc.  Deploy the current DBC files.",
+                (displayIter->first >> 8) & 0xFF, displayIter->first & 0xFF, displayIter->second.DisplayID);
+            displayIter = DruidFormDisplaysByFormTypeAndOptionKey.erase(displayIter);
         }
         else
             ++displayIter;
@@ -12211,7 +12271,7 @@ EverQuestPlayerControllerData EverQuestMod::GetPlayerControllerData(Player* play
 {
     EverQuestPlayerControllerData controllerData;
     controllerData.GUID = player->GetGUID().GetCounter();
-    QueryResult queryResult = CharacterDatabase.Query("SELECT nextSecondaryClass, currentSecondaryClass, secondaryExpPool, illusionFaceId, showBardPulse, issuedIllusionItemId, hideWoWGear, dungeonMode, adventurerDisqualified, deathExpLost, deathExpRestGranted, deathExpLostClass, hailWindowOnRightClick, showDispelMessage, dispelMessageColor, pendingStartItemEQClass, mentorshipRole, mentorshipRealLevel, mentorshipRealExp, mentorshipBankedProgress FROM mod_everquest_character_settings WHERE guid = {}", player->GetGUID().GetCounter());
+    QueryResult queryResult = CharacterDatabase.Query("SELECT nextSecondaryClass, currentSecondaryClass, secondaryExpPool, illusionFaceId, showBardPulse, issuedIllusionItemId, hideWoWGear, dungeonMode, adventurerDisqualified, deathExpLost, deathExpRestGranted, deathExpLostClass, hailWindowOnRightClick, showDispelMessage, dispelMessageColor, pendingStartItemEQClass, mentorshipRole, mentorshipRealLevel, mentorshipRealExp, mentorshipBankedProgress, druidFormBear, druidFormCat, druidFormTravel, druidFormTree, druidFormMoonkin FROM mod_everquest_character_settings WHERE guid = {}", player->GetGUID().GetCounter());
     if (!queryResult || queryResult->GetRowCount() == 0)
     {
         const EverQuestClassMap classMap = GetClassMapForWOWClassID(player->getClass());
@@ -12235,6 +12295,11 @@ EverQuestPlayerControllerData EverQuestMod::GetPlayerControllerData(Player* play
         controllerData.MentorshipRealLevel = 0;
         controllerData.MentorshipRealExperience = 0;
         controllerData.MentorshipBankedProgress = 0.0f;
+        controllerData.DruidFormBear = EQ_DRUID_FORM_BEAR_FACTION_DEFAULT;
+        controllerData.DruidFormCat = EQ_DRUID_FORM_CAT_FACTION_DEFAULT;
+        controllerData.DruidFormTravel = EQ_DRUID_FORM_TRAVEL_AZEROTH_CHEETAH;
+        controllerData.DruidFormTree = EQ_DRUID_FORM_TREE_AZEROTH_TREANT;
+        controllerData.DruidFormMoonkin = EQ_DRUID_FORM_MOONKIN_ON;
     }
     else
     {
@@ -12259,6 +12324,13 @@ EverQuestPlayerControllerData EverQuestMod::GetPlayerControllerData(Player* play
         controllerData.MentorshipRealLevel = fields[17].Get<uint8>();
         controllerData.MentorshipRealExperience = fields[18].Get<uint32>();
         controllerData.MentorshipBankedProgress = fields[19].Get<float>();
+
+        // A value that no longer names one of the options (an option removed since it was saved) falls back to the default look
+        controllerData.DruidFormBear = std::min<uint8>(fields[20].Get<uint8>(), EQ_DRUID_FORM_BEAR_MAX);
+        controllerData.DruidFormCat = std::min<uint8>(fields[21].Get<uint8>(), EQ_DRUID_FORM_CAT_MAX);
+        controllerData.DruidFormTravel = std::min<uint8>(fields[22].Get<uint8>(), EQ_DRUID_FORM_TRAVEL_MAX);
+        controllerData.DruidFormTree = std::min<uint8>(fields[23].Get<uint8>(), EQ_DRUID_FORM_TREE_MAX);
+        controllerData.DruidFormMoonkin = std::min<uint8>(fields[24].Get<uint8>(), EQ_DRUID_FORM_MOONKIN_MAX);
     }
     return controllerData;
 }
@@ -12610,6 +12682,239 @@ bool EverQuestMod::TryGetDispelMessageSettingsForPlayer(Player* player, bool& sh
     return true;
 }
 
+// Which of the five settings a shapeshift form reads, or zero for a form that is not one of them
+uint8 EverQuestMod::GetDruidFormTypeForShapeshiftForm(uint8 shapeshiftForm)
+{
+    switch (shapeshiftForm)
+    {
+        case FORM_BEAR:
+        case FORM_DIREBEAR:
+            return EQ_DRUID_FORM_TYPE_BEAR;
+        case FORM_CAT:
+            return EQ_DRUID_FORM_TYPE_CAT;
+        case FORM_TRAVEL:
+            return EQ_DRUID_FORM_TYPE_TRAVEL;
+        case FORM_TREE:
+            return EQ_DRUID_FORM_TYPE_TREE;
+        case FORM_MOONKIN:
+            return EQ_DRUID_FORM_TYPE_MOONKIN;
+        default:
+            return 0;
+    }
+}
+
+uint8 EverQuestMod::GetMaxDruidFormOption(uint8 formType)
+{
+    switch (formType)
+    {
+        case EQ_DRUID_FORM_TYPE_BEAR:    return EQ_DRUID_FORM_BEAR_MAX;
+        case EQ_DRUID_FORM_TYPE_CAT:     return EQ_DRUID_FORM_CAT_MAX;
+        case EQ_DRUID_FORM_TYPE_TRAVEL:  return EQ_DRUID_FORM_TRAVEL_MAX;
+        case EQ_DRUID_FORM_TYPE_TREE:    return EQ_DRUID_FORM_TREE_MAX;
+        case EQ_DRUID_FORM_TYPE_MOONKIN: return EQ_DRUID_FORM_MOONKIN_MAX;
+        default:                         return 0;
+    }
+}
+
+uint8 EverQuestMod::GetDruidFormFactionDefaultOption(Player const* player, uint8 formType)
+{
+    if (player == nullptr)
+        return 0;
+    bool isAlliance = (player->GetTeamId() == TEAM_ALLIANCE);
+    switch (formType)
+    {
+        case EQ_DRUID_FORM_TYPE_BEAR:
+            return isAlliance == true ? EQ_DRUID_FORM_BEAR_ALLIANCE : EQ_DRUID_FORM_BEAR_HORDE;
+        case EQ_DRUID_FORM_TYPE_CAT:
+            return isAlliance == true ? EQ_DRUID_FORM_CAT_ALLIANCE : EQ_DRUID_FORM_CAT_HORDE;
+        default:
+            return 0;
+    }
+}
+
+uint8 EverQuestMod::GetDruidFormOptionForPlayer(Player* player, uint8 formType)
+{
+    EverQuestPlayerControllerData* controllerData = GetOrLoadActivePlayerClassControllerData(player);
+    uint8 optionID = 0;
+    switch (formType)
+    {
+        case EQ_DRUID_FORM_TYPE_BEAR:    optionID = controllerData->DruidFormBear; break;
+        case EQ_DRUID_FORM_TYPE_CAT:     optionID = controllerData->DruidFormCat; break;
+        case EQ_DRUID_FORM_TYPE_TRAVEL:  optionID = controllerData->DruidFormTravel; break;
+        case EQ_DRUID_FORM_TYPE_TREE:    optionID = controllerData->DruidFormTree; break;
+        case EQ_DRUID_FORM_TYPE_MOONKIN: optionID = controllerData->DruidFormMoonkin; break;
+        default: return 0;
+    }
+    if (optionID == 0)
+        return GetDruidFormFactionDefaultOption(player, formType);
+    return optionID;
+}
+
+void EverQuestMod::SetDruidFormOptionForPlayer(Player* player, uint8 formType, uint8 optionID)
+{
+    if (optionID > GetMaxDruidFormOption(formType))
+        return;
+
+    // Picking the look this character would have had anyway stores as zero
+    if (optionID != 0 && optionID == GetDruidFormFactionDefaultOption(player, formType))
+        optionID = 0;
+
+    EverQuestPlayerControllerData* controllerData = GetOrLoadActivePlayerClassControllerData(player);
+    switch (formType)
+    {
+        case EQ_DRUID_FORM_TYPE_BEAR:    controllerData->DruidFormBear = optionID; break;
+        case EQ_DRUID_FORM_TYPE_CAT:     controllerData->DruidFormCat = optionID; break;
+        case EQ_DRUID_FORM_TYPE_TRAVEL:  controllerData->DruidFormTravel = optionID; break;
+        case EQ_DRUID_FORM_TYPE_TREE:    controllerData->DruidFormTree = optionID; break;
+        case EQ_DRUID_FORM_TYPE_MOONKIN: controllerData->DruidFormMoonkin = optionID; break;
+        default: return;
+    }
+    SaveDruidFormOptionsForPlayer(player);
+}
+
+void EverQuestMod::SaveDruidFormOptionsForPlayer(Player* player)
+{
+    EverQuestPlayerControllerData controllerData;
+    {
+        std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+        auto controllerDataIt = ActivePlayerClassControllerDataByGUID.find(player->GetGUID());
+        if (controllerDataIt == ActivePlayerClassControllerDataByGUID.end())
+            return;
+        controllerData = controllerDataIt->second;
+    }
+
+    CharacterDatabase.Execute("INSERT INTO `mod_everquest_character_settings` (`guid`, `currentSecondaryClass`, `nextSecondaryClass`, `secondaryExpPool`, `druidFormBear`, `druidFormCat`, `druidFormTravel`, `druidFormTree`, `druidFormMoonkin`) VALUES ({}, {}, {}, {}, {}, {}, {}, {}, {}) "
+        "ON DUPLICATE KEY UPDATE `druidFormBear` = {}, `druidFormCat` = {}, `druidFormTravel` = {}, `druidFormTree` = {}, `druidFormMoonkin` = {}",
+        player->GetGUID().GetCounter(),
+        controllerData.CurrentSecondClass,
+        controllerData.NextSecondClass,
+        controllerData.SecondaryExpPool,
+        controllerData.DruidFormBear,
+        controllerData.DruidFormCat,
+        controllerData.DruidFormTravel,
+        controllerData.DruidFormTree,
+        controllerData.DruidFormMoonkin,
+        controllerData.DruidFormBear,
+        controllerData.DruidFormCat,
+        controllerData.DruidFormTravel,
+        controllerData.DruidFormTree,
+        controllerData.DruidFormMoonkin);
+}
+
+bool EverQuestMod::TryGetDruidFormOptionForPlayer(Player* player, uint8 formType, uint8& optionID)
+{
+    std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+    auto controllerDataIt = ActivePlayerClassControllerDataByGUID.find(player->GetGUID());
+    if (controllerDataIt == ActivePlayerClassControllerDataByGUID.end())
+        return false;
+    switch (formType)
+    {
+        case EQ_DRUID_FORM_TYPE_BEAR:    optionID = controllerDataIt->second.DruidFormBear; return true;
+        case EQ_DRUID_FORM_TYPE_CAT:     optionID = controllerDataIt->second.DruidFormCat; return true;
+        case EQ_DRUID_FORM_TYPE_TRAVEL:  optionID = controllerDataIt->second.DruidFormTravel; return true;
+        case EQ_DRUID_FORM_TYPE_TREE:    optionID = controllerDataIt->second.DruidFormTree; return true;
+        case EQ_DRUID_FORM_TYPE_MOONKIN: optionID = controllerDataIt->second.DruidFormMoonkin; return true;
+        default: return false;
+    }
+}
+
+static thread_local uint64 EQPreShapeshiftDisplayUnitGUIDValue = 0;
+static thread_local uint32 EQPreShapeshiftDisplayID = 0;
+
+// Guards against the SetDisplayId below coming straight back through OnDisplayIdChange
+static thread_local bool EQApplyingDruidFormDisplay = false;
+
+void EverQuestMod::RecordPreShapeshiftDisplayIDForUnit(Unit* unit, uint8 shapeshiftForm)
+{
+    if (unit == nullptr || unit->IsPlayer() == false)
+        return;
+    if (GetDruidFormTypeForShapeshiftForm(shapeshiftForm) == 0)
+        return;
+    EQPreShapeshiftDisplayUnitGUIDValue = unit->GetGUID().GetRawValue();
+    EQPreShapeshiftDisplayID = unit->GetDisplayId();
+}
+
+bool EverQuestMod::TryGetDruidFormDisplayForPlayer(Player* player, uint8 formType, uint32& displayID, float& displayScale)
+{
+    if (player == nullptr || formType == 0)
+        return false;
+
+    // A player whose settings are not cached yet (still logging in) sees the untouched form rather than blocking a map thread on a load
+    uint8 optionID = 0;
+    if (TryGetDruidFormOptionForPlayer(player, formType, optionID) == false)
+        return false;
+    if (optionID == 0)
+        return false;
+
+    if (formType == EQ_DRUID_FORM_TYPE_MOONKIN)
+    {
+        // Moonkin is the one form whose only choice is whether the graphic happens at all, so it has no display rows of its own
+        if (optionID != EQ_DRUID_FORM_MOONKIN_OFF)
+            return false;
+        displayID = 0;
+        displayScale = 1.0f;
+        return true;
+    }
+
+    unordered_map<uint32, EverQuestDruidFormDisplay>::const_iterator displayIter = DruidFormDisplaysByFormTypeAndOptionKey.find((uint32(formType) << 8) | uint32(optionID));
+    if (displayIter == DruidFormDisplaysByFormTypeAndOptionKey.end())
+        return false;
+    displayID = displayIter->second.DisplayID;
+    displayScale = displayIter->second.DisplayScale;
+    if (displayID == 0)
+        return false;
+    return true;
+}
+
+struct EverQuestDruidFormDisplayApplyScope
+{
+    EverQuestDruidFormDisplayApplyScope() { EQApplyingDruidFormDisplay = true; }
+    ~EverQuestDruidFormDisplayApplyScope() { EQApplyingDruidFormDisplay = false; }
+};
+
+void EverQuestMod::ApplyDruidFormDisplayForPlayerOnDisplayChange(Unit* unit, uint32 displayID)
+{
+    if (EQApplyingDruidFormDisplay == true)
+        return;
+    if (unit == nullptr || unit->IsPlayer() == false)
+        return;
+
+    uint8 formType = GetDruidFormTypeForShapeshiftForm(unit->GetShapeshiftForm());
+    if (formType == 0)
+        return;
+
+    Player* player = unit->ToPlayer();
+    uint32 wantedDisplayID = 0;
+    float wantedDisplayScale = 1.0f;
+    if (TryGetDruidFormDisplayForPlayer(player, formType, wantedDisplayID, wantedDisplayScale) == false)
+        return;
+
+    // No graphic at all, so back to the look from just before the form took hold, which keeps an illusion already being worn
+    if (wantedDisplayID == 0)
+    {
+        wantedDisplayID = (EQPreShapeshiftDisplayUnitGUIDValue == player->GetGUID().GetRawValue() && EQPreShapeshiftDisplayID != 0)
+            ? EQPreShapeshiftDisplayID
+            : player->GetNativeDisplayId();
+        wantedDisplayScale = 1.0f;
+    }
+
+    if (wantedDisplayID == 0 || wantedDisplayID == displayID)
+        return;
+
+    EverQuestDruidFormDisplayApplyScope applyScope;
+    unit->SetDisplayId(wantedDisplayID, wantedDisplayScale);
+}
+
+void EverQuestMod::RefreshDruidFormDisplayForPlayer(Player* player, uint8 formType)
+{
+    if (player == nullptr || player->IsInWorld() == false)
+        return;
+    if (GetDruidFormTypeForShapeshiftForm(player->GetShapeshiftForm()) != formType)
+        return;
+    player->RestoreDisplayId();
+    RefreshIllusionGearDisplayForPlayer(player);
+}
+
 void EverQuestMod::NotifyPlayerOfDispelledAura(Player* player, AuraApplication* auraApplication)
 {
     if (player == nullptr || player->GetSession() == nullptr || auraApplication == nullptr)
@@ -12684,14 +12989,19 @@ void EverQuestMod::SendPlayerOptionsToPlayer(Player* player)
         controllerData = controllerDataIt->second;
     }
 
-    std::string addonMessage = fmt::format("EQOPTIONS\t{}\t{}\t{}\t{}\t{}\t{}\t{:06X}",
+    std::string addonMessage = fmt::format("EQOPTIONS\t{}\t{}\t{}\t{}\t{}\t{}\t{:06X}\t{}\t{}\t{}\t{}\t{}",
         controllerData.IllusionFaceID,
         IllusionMaxFaceIndex,
         controllerData.ShowBardPulse == true ? 1 : 0,
         controllerData.HideWoWGear == true ? 1 : 0,
         controllerData.HailWindowOnRightClick == true ? 1 : 0,
         controllerData.ShowDispelMessage == true ? 1 : 0,
-        controllerData.DispelMessageColor & 0xFFFFFF);
+        controllerData.DispelMessageColor & 0xFFFFFF,
+        controllerData.DruidFormBear == 0 ? GetDruidFormFactionDefaultOption(player, EQ_DRUID_FORM_TYPE_BEAR) : controllerData.DruidFormBear,
+        controllerData.DruidFormCat == 0 ? GetDruidFormFactionDefaultOption(player, EQ_DRUID_FORM_TYPE_CAT) : controllerData.DruidFormCat,
+        controllerData.DruidFormTravel,
+        controllerData.DruidFormTree,
+        controllerData.DruidFormMoonkin);
     WorldPacket data;
     ChatHandler::BuildChatPacket(data, CHAT_MSG_SYSTEM, LANG_ADDON, nullptr, nullptr, addonMessage);
     player->GetSession()->SendPacket(&data);

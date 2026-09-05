@@ -671,15 +671,26 @@ public:
         }
     }
 
-    void OnUnitSetShapeshiftForm(Unit* unit, uint8 /*form*/) override
+    void OnUnitSetShapeshiftForm(Unit* unit, uint8 form) override
     {
         if (EverQuest->IsEnabled == false)
             return;
         if (unit == nullptr || unit->IsPlayer() == false)
             return;
 
+        // This runs from Unit::SetShapeshiftForm, immediately ahead of the SetDisplayId that puts the form's own model on
+        EverQuest->RecordPreShapeshiftDisplayIDForUnit(unit, form);
+
         // Entering or leaving bear/dire bear form changes whether equipped shield, mail and plate armor gets multiplied by the form
         EverQuest->RefreshBearFormArmorShiftForPlayer(unit->ToPlayer());
+    }
+
+    // A druid can pick what each of their shapeshift forms looks like, and this is where the core's pick gets replaced with theirs
+    void OnDisplayIdChange(Unit* unit, uint32 displayId) override
+    {
+        if (EverQuest->IsEnabled == false)
+            return;
+        EverQuest->ApplyDruidFormDisplayForPlayerOnDisplayChange(unit, displayId);
     }
 
     // Records the buffer positions of player visible item fields when value update packets build, so that OnPatchValuesUpdate below can

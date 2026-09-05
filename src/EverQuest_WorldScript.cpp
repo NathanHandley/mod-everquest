@@ -70,6 +70,7 @@ public:
         EverQuest->LoadGossipReactions();
         EverQuest->LoadPetData();
         EverQuest->LoadPetSilentDisplayData();
+        EverQuest->LoadDruidFormDisplayData();
         EverQuest->LoadCreatePlayerData();
         EverQuest->LoadCreatureLootData();
         EverQuest->LoadShipTriggerData();
@@ -138,6 +139,9 @@ public:
 
         // The silent pet displays validate against CreatureDisplayInfo.dbc, which isn't loaded when the pet silent display data loads with the config
         EverQuest->RemoveInvalidPetSilentDisplays();
+
+        // Same for the druid form displays
+        EverQuest->RemoveInvalidDruidFormDisplays();
 
         // Defend combat faction templates validate against FactionTemplate.dbc, which isn't loaded when the faction data loads with the config
         EverQuest->ResolveDefendCombatFactionTemplates();
