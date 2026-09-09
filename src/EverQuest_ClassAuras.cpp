@@ -949,6 +949,17 @@ static SpellInfo const* FindClassAuraDirectHealSpellInfo(SpellInfo const* spellI
     return nullptr;
 }
 
+static bool IsClassAuraCastInstantForPlayer(Player* player, SpellInfo const* spellInfo, Spell* spell)
+{
+    if (spellInfo->CastTimeEntry == nullptr || spellInfo->CastTimeEntry->CastTime <= 0)
+        return true;
+    if (player->CanInstantCast() == true)
+        return true;
+    if (spellInfo->CalcCastTime(player, spell) == 0)
+        return true;
+    return false;
+}
+
 void EverQuestMod::ApplyClassAuraCastAdjustmentsOnCheckCast(Player* player, Spell* spell, bool strict)
 {
     if (player == nullptr || spell == nullptr)
@@ -994,10 +1005,22 @@ void EverQuestMod::ApplyClassAuraCastAdjustmentsOnCheckCast(Player* player, Spel
             castTimeMultiplier = (float)baseCastTimeInMS / (float)currentCastTimeInMS;
     }
 
-    // Monk, a ready surge speeds up one non-channeled spell whose base cast time is under the limit, and is spent when that cast succeeds
+    // Shadow Knight
+    // Note: This needs to go before Chi Surge because otherwise the instant from SK will get consumed by it (but at time of writing this, no class can be SK and Monk)
+    uint32 edgeSpellID = GetClassAuraSpellID(EQ_CLASSAURA_SPELL_SHADOWKNIGHT_EDGE);
+    if (isBardSong == false && edgeSpellID != 0 && baseCastTimeInMS > 0 && spellInfo->IsPositive() == false && spellInfo->DmgClass == SPELL_DAMAGE_CLASS_MAGIC
+        && player->HasAura(edgeSpellID) == true && PlayerHasClassAura(player, EQ_CLASSAURA_SPELL_SHADOWKNIGHT_AURA) == true)
+    {
+        player->SetInstantCast(true);
+        state->PendingEdgeConsume = true;
+        state->PendingCastAdjustSpellID = spellInfo->Id;
+    }
+
+    // Monk
     uint32 chiSurgeSpellID = GetClassAuraSpellID(EQ_CLASSAURA_SPELL_MONK_CHI_SURGE);
     if (isBardSong == false && chiSurgeSpellID != 0 && baseCastTimeInMS > 0 && baseCastTimeInMS < ConfigSystemClassAuraMonkChiSurgeMaxBaseCastTimeInMS
-        && spellInfo->IsChanneled() == false && ConfigSystemClassAuraMonkChiSurgeCastTimeReductionPercent > 0 && ConfigSystemClassAuraMonkChiSurgeCastTimeReductionPercent < 100
+        && spellInfo->DmgClass == SPELL_DAMAGE_CLASS_MAGIC && spellInfo->IsChanneled() == false && IsClassAuraCastInstantForPlayer(player, spellInfo, spell) == false
+        && ConfigSystemClassAuraMonkChiSurgeCastTimeReductionPercent > 0 && ConfigSystemClassAuraMonkChiSurgeCastTimeReductionPercent < 100
         && player->HasAura(chiSurgeSpellID) == true && PlayerHasClassAura(player, EQ_CLASSAURA_SPELL_MONK_AURA) == true)
     {
         castTimeReductionPercent += ConfigSystemClassAuraMonkChiSurgeCastTimeReductionPercent;
@@ -1016,16 +1039,6 @@ void EverQuestMod::ApplyClassAuraCastAdjustmentsOnCheckCast(Player* player, Spel
         if (baseCastTimeInMS > 0)
             castTimeReductionPercent += ConfigSystemClassAuraClericCadenceReductionPercent;
         state->PendingCadenceConsume = true;
-        state->PendingCastAdjustSpellID = spellInfo->Id;
-    }
-
-    // Shadow Knight
-    uint32 edgeSpellID = GetClassAuraSpellID(EQ_CLASSAURA_SPELL_SHADOWKNIGHT_EDGE);
-    if (isBardSong == false && edgeSpellID != 0 && baseCastTimeInMS > 0 && spellInfo->IsPositive() == false && spellInfo->DmgClass == SPELL_DAMAGE_CLASS_MAGIC
-        && player->HasAura(edgeSpellID) == true && PlayerHasClassAura(player, EQ_CLASSAURA_SPELL_SHADOWKNIGHT_AURA) == true)
-    {
-        player->SetInstantCast(true);
-        state->PendingEdgeConsume = true;
         state->PendingCastAdjustSpellID = spellInfo->Id;
     }
 
