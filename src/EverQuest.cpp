@@ -12271,7 +12271,7 @@ EverQuestPlayerControllerData EverQuestMod::GetPlayerControllerData(Player* play
 {
     EverQuestPlayerControllerData controllerData;
     controllerData.GUID = player->GetGUID().GetCounter();
-    QueryResult queryResult = CharacterDatabase.Query("SELECT nextSecondaryClass, currentSecondaryClass, secondaryExpPool, illusionFaceId, showBardPulse, issuedIllusionItemId, hideWoWGear, dungeonMode, adventurerDisqualified, deathExpLost, deathExpRestGranted, deathExpLostClass, hailWindowOnRightClick, showDispelMessage, dispelMessageColor, pendingStartItemEQClass, mentorshipRole, mentorshipRealLevel, mentorshipRealExp, mentorshipBankedProgress, druidFormBear, druidFormCat, druidFormTravel, druidFormTree, druidFormMoonkin FROM mod_everquest_character_settings WHERE guid = {}", player->GetGUID().GetCounter());
+    QueryResult queryResult = CharacterDatabase.Query("SELECT nextSecondaryClass, currentSecondaryClass, secondaryExpPool, illusionFaceId, showBardPulse, issuedIllusionItemId, hideWoWGear, dungeonMode, adventurerDisqualified, deathExpLost, deathExpRestGranted, deathExpLostClass, hailWindowOnRightClick, showDispelMessage, dispelMessageColor, pendingStartItemEQClass, mentorshipRole, mentorshipRealLevel, mentorshipRealExp, mentorshipBankedProgress, druidFormBear, druidFormCat, druidFormTravel, druidFormTree, druidFormMoonkin, mentorshipPetNumber, mentorshipPetLevel FROM mod_everquest_character_settings WHERE guid = {}", player->GetGUID().GetCounter());
     if (!queryResult || queryResult->GetRowCount() == 0)
     {
         const EverQuestClassMap classMap = GetClassMapForWOWClassID(player->getClass());
@@ -12295,6 +12295,8 @@ EverQuestPlayerControllerData EverQuestMod::GetPlayerControllerData(Player* play
         controllerData.MentorshipRealLevel = 0;
         controllerData.MentorshipRealExperience = 0;
         controllerData.MentorshipBankedProgress = 0.0f;
+        controllerData.MentorshipPetNumber = 0;
+        controllerData.MentorshipPetRealLevel = 0;
         controllerData.DruidFormBear = EQ_DRUID_FORM_BEAR_FACTION_DEFAULT;
         controllerData.DruidFormCat = EQ_DRUID_FORM_CAT_FACTION_DEFAULT;
         controllerData.DruidFormTravel = EQ_DRUID_FORM_TRAVEL_AZEROTH_CHEETAH;
@@ -12331,6 +12333,9 @@ EverQuestPlayerControllerData EverQuestMod::GetPlayerControllerData(Player* play
         controllerData.DruidFormTravel = std::min<uint8>(fields[22].Get<uint8>(), EQ_DRUID_FORM_TRAVEL_MAX);
         controllerData.DruidFormTree = std::min<uint8>(fields[23].Get<uint8>(), EQ_DRUID_FORM_TREE_MAX);
         controllerData.DruidFormMoonkin = std::min<uint8>(fields[24].Get<uint8>(), EQ_DRUID_FORM_MOONKIN_MAX);
+
+        controllerData.MentorshipPetNumber = fields[25].Get<uint32>();
+        controllerData.MentorshipPetRealLevel = fields[26].Get<uint8>();
     }
     return controllerData;
 }
@@ -13653,6 +13658,55 @@ bool EverQuestMod::HandleMentorshipTrainerPacketReceive(WorldSession* session, W
     return false;
 }
 
+bool EverQuestMod::IsStableInteractionBlockedByMentorshipForPlayer(Player* player)
+{
+    if (player == nullptr || MentorshipStateCount.load() == 0)
+        return false;
+    return IsPlayerMentorshipLevelAdjusted(player);
+}
+
+void EverQuestMod::SendMentorshipStableBlockedMessageToPlayer(Player* player)
+{
+    if (player == nullptr || player->GetSession() == nullptr)
+        return;
+    ChatHandler(player->GetSession()).SendSysMessage("|cffFF0000The stable is closed to you while a mentorship has you standing at a level that is not your own, since a pet brought out now would be stuck at it.|r");
+}
+
+bool EverQuestMod::HandleMentorshipStablePacketReceive(WorldSession* session, WorldPacket const& packet)
+{
+    if (IsEnabled == false || session == nullptr)
+        return true;
+
+    // Every one of these can only ever be aimed at a stable master (or the stable opening spell), so they are dropped without looking anything up
+    uint16 opcode = packet.GetOpcode();
+    if (opcode != MSG_LIST_STABLED_PETS && opcode != CMSG_STABLE_PET && opcode != CMSG_UNSTABLE_PET && opcode != CMSG_BUY_STABLE_SLOT
+        && opcode != CMSG_STABLE_REVIVE_PET && opcode != CMSG_STABLE_SWAP_PET)
+        return true;
+
+    Player* player = session->GetPlayer();
+    if (IsStableInteractionBlockedByMentorshipForPlayer(player) == false)
+        return true;
+
+    SendMentorshipStableBlockedMessageToPlayer(player);
+    return false;
+}
+
+bool EverQuestMod::HandleMentorshipStablePacketSend(WorldSession* session, WorldPacket const& packet)
+{
+    if (IsEnabled == false || session == nullptr)
+        return true;
+
+    if (packet.GetOpcode() != MSG_LIST_STABLED_PETS)
+        return true;
+
+    Player* player = session->GetPlayer();
+    if (IsStableInteractionBlockedByMentorshipForPlayer(player) == false)
+        return true;
+
+    SendMentorshipStableBlockedMessageToPlayer(player);
+    return false;
+}
+
 uint32 EverQuestMod::FindQuestStarterItemEntryForPlayer(Player* player, uint32 questID)
 {
     if (player == nullptr || questID == 0)
@@ -13843,7 +13897,107 @@ void EverQuestMod::ApplyMentorshipLevelForPlayer(Player* player, uint8 newLevel)
         guild->UpdateMemberData(player, GUILD_MEMBER_DATA_LEVEL, newLevel);
 }
 
-void EverQuestMod::SaveMentorshipStateForPlayer(Player* player, uint8 role, uint8 realLevel, uint32 realExperience, float bankedProgress)
+void EverQuestMod::GetHunterPetToRestoreAfterMentorshipForPlayer(Player* player, uint32& outPetNumber, uint8& outPetLevel)
+{
+    outPetNumber = 0;
+    outPetLevel = 0;
+    if (player == nullptr)
+        return;
+
+    // A summoned pet is the one about to be dragged down, so it is the one to remember.  Only a hunter pet carries a level of its own, since a summoned pet is always handed the owner's
+    Pet* pet = player->GetPet();
+    if (pet != nullptr && pet->getPetType() == HUNTER_PET && pet->GetCharmInfo() != nullptr && pet->GetCharmInfo()->GetPetNumber() != 0)
+    {
+        outPetNumber = pet->GetCharmInfo()->GetPetNumber();
+        outPetLevel = pet->GetLevel();
+        return;
+    }
+
+    // Nothing out, so the pet a call would bring back is the one that gets dragged down the moment it is summoned
+    PetStable* petStable = player->GetPetStable();
+    if (petStable == nullptr)
+        return;
+    if (petStable->CurrentPet.has_value() == true && petStable->CurrentPet->Type == HUNTER_PET && petStable->CurrentPet->PetNumber != 0)
+    {
+        outPetNumber = petStable->CurrentPet->PetNumber;
+        outPetLevel = petStable->CurrentPet->Level;
+        return;
+    }
+    PetStable::PetInfo const* unslottedHunterPet = petStable->GetUnslottedHunterPet();
+    if (unslottedHunterPet != nullptr && unslottedHunterPet->PetNumber != 0)
+    {
+        outPetNumber = unslottedHunterPet->PetNumber;
+        outPetLevel = unslottedHunterPet->Level;
+    }
+}
+
+void EverQuestMod::RestorePetLevelAfterMentorshipForPlayer(Player* player, uint32 petNumber, uint8 petRealLevel)
+{
+    if (player == nullptr || petNumber == 0 || petRealLevel == 0)
+        return;
+
+    // Pet::SynchronizeLevelWithOwner only ever pulls a hunter pet up to within five levels of its owner, so a pet that came down from 60 to 20 with a mentorship would otherwise stop at 55 on the way back up.
+    // A pet that was already standing below its owner keeps that gap, since the level it came in at is the one that goes back
+    uint8 ownerLevel = player->GetLevel();
+    uint8 targetLevel = petRealLevel > ownerLevel ? ownerLevel : petRealLevel;
+    if (targetLevel == 0)
+        return;
+
+    // Out right now, so the live pet is what has to move.  Pet::SavePetToDB writes both the row and the stable entry
+    Pet* pet = player->GetPet();
+    if (pet != nullptr && pet->GetCharmInfo() != nullptr && pet->GetCharmInfo()->GetPetNumber() == petNumber)
+    {
+        if (pet->GetLevel() >= targetLevel)
+            return;
+        pet->GivePetLevel(targetLevel);
+        pet->SavePetToDB(PET_SAVE_AS_CURRENT);
+        return;
+    }
+
+    // Dismissed or temporarily unsummoned, so what has to move is the level it will come back at.  The stable this session is holding is what a resummon reads, and the row is what the next session loads
+    PetStable* petStable = player->GetPetStable();
+    if (petStable != nullptr)
+    {
+        PetStable::PetInfo* petInfo = nullptr;
+        if (petStable->CurrentPet.has_value() == true && petStable->CurrentPet->PetNumber == petNumber)
+            petInfo = &petStable->CurrentPet.value();
+        if (petInfo == nullptr)
+        {
+            for (uint8 stableSlotIndex = 0; stableSlotIndex < MAX_PET_STABLES; ++stableSlotIndex)
+            {
+                if (petStable->StabledPets[stableSlotIndex].has_value() == true && petStable->StabledPets[stableSlotIndex]->PetNumber == petNumber)
+                {
+                    petInfo = &petStable->StabledPets[stableSlotIndex].value();
+                    break;
+                }
+            }
+        }
+        if (petInfo == nullptr)
+        {
+            for (PetStable::PetInfo& unslottedPetInfo : petStable->UnslottedPets)
+            {
+                if (unslottedPetInfo.PetNumber != petNumber)
+                    continue;
+                petInfo = &unslottedPetInfo;
+                break;
+            }
+        }
+        if (petInfo != nullptr && petInfo->Level < targetLevel)
+        {
+            petInfo->Level = targetLevel;
+            petInfo->Experience = 0;
+        }
+    }
+
+    // The level check leaves a pet that never came down with the mentorship exactly where it is
+    CharacterDatabase.Execute("UPDATE `character_pet` SET `level` = {}, `exp` = 0 WHERE `id` = {} AND `owner` = {} AND `level` < {}",
+        targetLevel,
+        petNumber,
+        player->GetGUID().GetCounter(),
+        targetLevel);
+}
+
+void EverQuestMod::SaveMentorshipStateForPlayer(Player* player, uint8 role, uint8 realLevel, uint32 realExperience, float bankedProgress, uint32 petNumber, uint8 petRealLevel)
 {
     if (player == nullptr)
         return;
@@ -13855,6 +14009,8 @@ void EverQuestMod::SaveMentorshipStateForPlayer(Player* player, uint8 role, uint
     liveControllerData->MentorshipRealLevel = realLevel;
     liveControllerData->MentorshipRealExperience = realExperience;
     liveControllerData->MentorshipBankedProgress = bankedProgress;
+    liveControllerData->MentorshipPetNumber = petNumber;
+    liveControllerData->MentorshipPetRealLevel = petRealLevel;
 
     EverQuestPlayerControllerData controllerData;
     {
@@ -13865,7 +14021,7 @@ void EverQuestMod::SaveMentorshipStateForPlayer(Player* player, uint8 role, uint
         controllerData = controllerDataIterator->second;
     }
 
-    CharacterDatabase.Execute("INSERT INTO `mod_everquest_character_settings` (`guid`, `currentSecondaryClass`, `nextSecondaryClass`, `secondaryExpPool`, `mentorshipRole`, `mentorshipRealLevel`, `mentorshipRealExp`, `mentorshipBankedProgress`) VALUES ({}, {}, {}, {}, {}, {}, {}, {}) ON DUPLICATE KEY UPDATE `mentorshipRole` = {}, `mentorshipRealLevel` = {}, `mentorshipRealExp` = {}, `mentorshipBankedProgress` = {}",
+    CharacterDatabase.Execute("INSERT INTO `mod_everquest_character_settings` (`guid`, `currentSecondaryClass`, `nextSecondaryClass`, `secondaryExpPool`, `mentorshipRole`, `mentorshipRealLevel`, `mentorshipRealExp`, `mentorshipBankedProgress`, `mentorshipPetNumber`, `mentorshipPetLevel`) VALUES ({}, {}, {}, {}, {}, {}, {}, {}, {}, {}) ON DUPLICATE KEY UPDATE `mentorshipRole` = {}, `mentorshipRealLevel` = {}, `mentorshipRealExp` = {}, `mentorshipBankedProgress` = {}, `mentorshipPetNumber` = {}, `mentorshipPetLevel` = {}",
         player->GetGUID().GetCounter(),
         controllerData.CurrentSecondClass,
         controllerData.NextSecondClass,
@@ -13874,10 +14030,14 @@ void EverQuestMod::SaveMentorshipStateForPlayer(Player* player, uint8 role, uint
         controllerData.MentorshipRealLevel,
         controllerData.MentorshipRealExperience,
         controllerData.MentorshipBankedProgress,
+        controllerData.MentorshipPetNumber,
+        controllerData.MentorshipPetRealLevel,
         controllerData.MentorshipRole,
         controllerData.MentorshipRealLevel,
         controllerData.MentorshipRealExperience,
-        controllerData.MentorshipBankedProgress);
+        controllerData.MentorshipBankedProgress,
+        controllerData.MentorshipPetNumber,
+        controllerData.MentorshipPetRealLevel);
 }
 
 void EverQuestMod::AwardBankedMentorshipProgressToPlayer(Player* player, float bankedProgress)
@@ -14290,6 +14450,7 @@ void EverQuestMod::AcceptMentorshipRequestForPlayer(Player* player)
     adjustedState.AnchorLevel = static_cast<uint8>(anchorLevel);
     adjustedState.AnchorExperience = anchorExperience;
     adjustedState.RestoreNoExperienceFlag = adjustedPlayer->HasPlayerFlag(PLAYER_FLAGS_NO_XP_GAIN);
+    GetHunterPetToRestoreAfterMentorshipForPlayer(adjustedPlayer, adjustedState.PetNumber, adjustedState.PetRealLevel);
 
     EverQuestMentorshipState anchorState;
     anchorState.PartnerGUID = adjustedPlayer->GetGUID();
@@ -14307,7 +14468,7 @@ void EverQuestMod::AcceptMentorshipRequestForPlayer(Player* player)
     }
 
     // Written before the level actually moves, so a server that goes down in between still knows what to put back
-    SaveMentorshipStateForPlayer(adjustedPlayer, adjustedRole, static_cast<uint8>(realLevel), realExperience, 0.0f);
+    SaveMentorshipStateForPlayer(adjustedPlayer, adjustedRole, static_cast<uint8>(realLevel), realExperience, 0.0f, adjustedState.PetNumber, adjustedState.PetRealLevel);
 
     adjustedPlayer->SetPlayerFlag(PLAYER_FLAGS_NO_XP_GAIN);
     ApplyMentorshipLevelForPlayer(adjustedPlayer, static_cast<uint8>(adjustedLevel));
@@ -14382,8 +14543,11 @@ void EverQuestMod::EndMentorshipForPlayer(Player* player, const string& reason, 
         ApplyMentorshipLevelForPlayer(player, state.RealLevel);
         player->SetUInt32Value(PLAYER_XP, state.RealExperience);
         RebuildLevelDerivedStateAfterMentorshipForPlayer(player);
+
+        // The owner is back, so the pet that came down with them has to be put back too
+        RestorePetLevelAfterMentorshipForPlayer(player, state.PetNumber, state.PetRealLevel);
     }
-    SaveMentorshipStateForPlayer(player, EQ_MENTORSHIP_ROLE_NONE, 0, 0, 0.0f);
+    SaveMentorshipStateForPlayer(player, EQ_MENTORSHIP_ROLE_NONE, 0, 0, 0.0f, 0, 0);
 
     if (player->GetSession() != nullptr)
         ChatHandler(player->GetSession()).PSendSysMessage("Your mentorship with |cff00FF00{}|r has ended{} You are back to level |cff00FF00{}|r.", state.PartnerName, reasonSuffix, player->GetLevel());
@@ -14565,7 +14729,7 @@ void EverQuestMod::UpdateMentorshipForPlayer(Player* player, uint32 diffInMS)
         }
     }
     if (saveBankedProgress == true)
-        SaveMentorshipStateForPlayer(player, state.Role, state.RealLevel, state.RealExperience, bankedProgress);
+        SaveMentorshipStateForPlayer(player, state.Role, state.RealLevel, state.RealExperience, bankedProgress, state.PetNumber, state.PetRealLevel);
 }
 
 bool EverQuestMod::HasPendingMentorshipLevelRestoreForPlayer(Player* player)
@@ -14664,6 +14828,8 @@ void EverQuestMod::RestoreMentorshipStateOnLoginForPlayer(Player* player)
     uint8 realLevel = controllerData->MentorshipRealLevel;
     uint32 realExperience = controllerData->MentorshipRealExperience;
     float bankedProgress = controllerData->MentorshipBankedProgress;
+    uint32 petNumber = controllerData->MentorshipPetNumber;
+    uint8 petRealLevel = controllerData->MentorshipPetRealLevel;
 
     RemoveMentorshipAurasFromPlayer(player);
     player->RemovePlayerFlag(PLAYER_FLAGS_NO_XP_GAIN);
@@ -14674,8 +14840,11 @@ void EverQuestMod::RestoreMentorshipStateOnLoginForPlayer(Player* player)
 
         // Player::LoadFromDB already rebuilt talents, glyph slots, taxi nodes and skill caps from the borrowed level this character was saved at, so all four have to be rebuilt again now that the real level is back
         RebuildLevelDerivedStateAfterMentorshipForPlayer(player);
+
+        // Player::LoadPet runs before this, so a pet that was out is already loaded and standing at the borrowed level it was saved at.  One that is not out is put back in the stable entry and the row instead
+        RestorePetLevelAfterMentorshipForPlayer(player, petNumber, petRealLevel);
     }
-    SaveMentorshipStateForPlayer(player, EQ_MENTORSHIP_ROLE_NONE, 0, 0, 0.0f);
+    SaveMentorshipStateForPlayer(player, EQ_MENTORSHIP_ROLE_NONE, 0, 0, 0.0f, 0, 0);
 
     if (player->GetSession() != nullptr)
         ChatHandler(player->GetSession()).PSendSysMessage("Your mentorship did not end cleanly, so you have been put back to level |cff00FF00{}|r.", realLevel);

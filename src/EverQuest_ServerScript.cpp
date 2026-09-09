@@ -99,6 +99,8 @@ public:
     {
         if (EverQuest->HandleMentorshipTrainerPacketReceive(session, packet) == false)
             return false;
+        if (EverQuest->HandleMentorshipStablePacketReceive(session, packet) == false)
+            return false;
         if (packet.GetOpcode() == CMSG_SET_FACTION_ATWAR)
             return HandleSetFactionAtWarPacketReceive(session);
         if (packet.GetOpcode() != CMSG_AUCTION_LIST_ITEMS)
@@ -142,6 +144,8 @@ public:
     bool CanPacketSend(WorldSession* session, WorldPacket const& packet) override
     {
         uint16 opcode = packet.GetOpcode();
+        if (opcode == MSG_LIST_STABLED_PETS)
+            return EverQuest->HandleMentorshipStablePacketSend(session, packet);
         if (opcode == SMSG_AUCTION_LIST_RESULT)
             return HandleAuctionListResultPacketSend(session, packet);
         if (opcode != SMSG_SPELL_GO && opcode != SMSG_SPELL_START)

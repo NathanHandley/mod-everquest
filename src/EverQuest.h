@@ -1310,6 +1310,8 @@ struct EverQuestPlayerControllerData
     uint8 MentorshipRealLevel = 0;
     uint32 MentorshipRealExperience = 0;
     float MentorshipBankedProgress = 0.0f;
+    uint32 MentorshipPetNumber = 0;
+    uint8 MentorshipPetRealLevel = 0;
 };
 
 // Each side of a mentorship relatiorship have a record
@@ -1322,6 +1324,10 @@ struct EverQuestMentorshipState
     // Only the level adjusted side fills these in
     uint8 RealLevel = 0;
     uint32 RealExperience = 0;
+
+    // A hunter pet is dragged down to the borrowed level with its owner, and the core only ever puts it back to within five levels of them, so which pet it was and the level it came in at are kept here
+    uint32 PetNumber = 0;
+    uint8 PetRealLevel = 0;
 
     // Only an apprentice fills these in.  Progress is a level plus how far into it the experience bar is
     float AnchorStartProgress = 0.0f;
@@ -2266,6 +2272,10 @@ public:
     bool IsQuestBlockedByMentorshipForPlayer(Player* player, Quest const* quest);
     bool IsTrainerInteractionBlockedByMentorshipForPlayer(Player* player);
     bool HandleMentorshipTrainerPacketReceive(WorldSession* session, WorldPacket const& packet);
+    bool IsStableInteractionBlockedByMentorshipForPlayer(Player* player);
+    bool HandleMentorshipStablePacketReceive(WorldSession* session, WorldPacket const& packet);
+    bool HandleMentorshipStablePacketSend(WorldSession* session, WorldPacket const& packet);
+    void SendMentorshipStableBlockedMessageToPlayer(Player* player);
     void RefuseMentorshipBlockedQuestForPlayer(Player* player, Quest const* quest);
     uint32 FindQuestStarterItemEntryForPlayer(Player* player, uint32 questID);
     void ReturnRefusedQuestStarterItemToPlayer(Player* player, uint32 itemEntry);
@@ -2284,10 +2294,12 @@ public:
     void SendMentorshipStateToPlayer(Player* player);
     void SendMentorshipRequestPromptToPlayer(Player* player, const EverQuestMentorshipRequest& request);
     void ApplyMentorshipLevelForPlayer(Player* player, uint8 newLevel);
+    void GetHunterPetToRestoreAfterMentorshipForPlayer(Player* player, uint32& outPetNumber, uint8& outPetLevel);
+    void RestorePetLevelAfterMentorshipForPlayer(Player* player, uint32 petNumber, uint8 petRealLevel);
     void ApplyMentorshipAuraForPlayer(Player* player, uint8 role);
     void RemoveMentorshipAurasFromPlayer(Player* player);
     void AwardBankedMentorshipProgressToPlayer(Player* player, float bankedProgress);
-    void SaveMentorshipStateForPlayer(Player* player, uint8 role, uint8 realLevel, uint32 realExperience, float bankedProgress);
+    void SaveMentorshipStateForPlayer(Player* player, uint8 role, uint8 realLevel, uint32 realExperience, float bankedProgress, uint32 petNumber, uint8 petRealLevel);
 
     void SendExpPoolAddonMessageToPlayer(Player* player, uint32 gainedExp);
     void SetInitialEQClassesForPlayer(Player* player);
