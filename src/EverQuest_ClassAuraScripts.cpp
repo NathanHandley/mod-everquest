@@ -95,7 +95,7 @@ class EverQuest_ClassAuraRogueAuraScript : public AuraScript
     }
 };
 
-// Ranger "Swift Reactions": every landed melee or ranged autoattack quickens the ranger's stride, and every landed ranged autoattack (bow, gun, thrown), ranged ability or harmful spell tacks its target
+// Ranger "Swift Reactions": every landed ranged autoattack (bow, gun, thrown), ranged ability or harmful spell tacks its target
 class EverQuest_ClassAuraRangerAuraScript : public AuraScript
 {
     PrepareAuraScript(EverQuest_ClassAuraRangerAuraScript);
@@ -109,10 +109,6 @@ class EverQuest_ClassAuraRangerAuraScript : public AuraScript
         if (ranger == nullptr || ranger->IsPlayer() == false || ranger->IsAlive() == false)
             return;
         uint32 typeMask = eventInfo.GetTypeMask();
-        uint32 speedSpellID = EverQuest->GetClassAuraSpellID(EQ_CLASSAURA_SPELL_RANGER_SPEED);
-        if (speedSpellID != 0 && (typeMask & (PROC_FLAG_DONE_MELEE_AUTO_ATTACK | PROC_FLAG_DONE_RANGED_AUTO_ATTACK)) != 0)
-            ranger->CastSpell(ranger, speedSpellID, true);
-
         if ((typeMask & (PROC_FLAG_DONE_RANGED_AUTO_ATTACK | PROC_FLAG_DONE_SPELL_RANGED_DMG_CLASS | PROC_FLAG_DONE_SPELL_MAGIC_DMG_CLASS_NEG | PROC_FLAG_DONE_SPELL_NONE_DMG_CLASS_NEG)) == 0)
             return;
         uint32 tackShotSpellID = EverQuest->GetClassAuraSpellID(EQ_CLASSAURA_SPELL_RANGER_TACK_SHOT);

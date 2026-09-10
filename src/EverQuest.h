@@ -53,7 +53,7 @@ class ByteBuffer;
 struct AreaTrigger;
 struct BuildValuesCachePosPointers;
 
-#define EQ_MOD_VERSION                              101
+#define EQ_MOD_VERSION                              102
 
 #define EQ_MOVEMENT_CAST_SNARE_DURATION_BUFFER_IN_MS 2000 // How much longer than the remaining cast time the casting slow is given, so a pushed-back cast keeps it
 
@@ -868,7 +868,7 @@ enum EverQuestClassAuraSpellType : uint32
     EQ_CLASSAURA_SPELL_MONK_HEAVY_ARMOR = 9,
     EQ_CLASSAURA_SPELL_RANGER_PASSIVE = 10,
     EQ_CLASSAURA_SPELL_RANGER_AURA = 11,
-    EQ_CLASSAURA_SPELL_RANGER_SPEED = 12,
+    EQ_CLASSAURA_SPELL_RANGER_ENDLESS_QUIVER = 12,
     EQ_CLASSAURA_SPELL_RANGER_TACK_SHOT = 13,
     EQ_CLASSAURA_SPELL_ROGUE_PASSIVE = 14,
     EQ_CLASSAURA_SPELL_ROGUE_AURA = 15,
@@ -1468,6 +1468,8 @@ public:
     uint32 ConfigSystemClassAuraRogueLuckyStrikeCooldownInMS = 8000;
     uint32 ConfigSystemClassAuraMonkDoubleToTripleAttackChancePercent = 50;
     uint32 ConfigSystemClassAuraRangerTackShotDamagePercentPerStack = 1;
+    uint32 ConfigSystemClassAuraRangerEndlessQuiverBaseManaCostPercent = 1;
+    std::unordered_set<uint32> ClassAuraRangerChannelAmmoSpellIDs; // Need to track these because channeled attacks (like Volley) didn't have a good hook to stop the ammo consumption
     uint32 ConfigSystemClassAuraPaladinHealSelfPercent = 15;
     uint32 ConfigSystemClassAuraPaladinBlockDeflectionDamagePercent = 15;
     uint32 ConfigSystemClassAuraPaladinUndeadDemonDoubleDamageChancePercent = 20;
@@ -1923,6 +1925,10 @@ public:
     void ClearClassAuraCastAdjustmentsForPlayer(Player* player);
     void HandleClassAuraSpellCast(Player* player, Spell* spell);
     bool IsMovementCastSnareExemptForPlayer(Player* player);
+    void RefreshRangerEndlessQuiverForPlayer(Player* player);
+    bool HandleClassAuraRangerEndlessQuiverOnCheckCast(Player* player, Spell* spell, SpellCastResult& result);
+    void RegisterClassAuraRangerChannelAmmoSpell(SpellInfo* spellInfo);
+    void HandleClassAuraRangerAmmoOnSpellCast(Player* player, Spell* spell);
 
     void LoadQuestCompletionReputations();
     const list<EverQuestQuestCompletionReputation>& GetQuestCompletionReputationsForQuestTemplate(uint32 questTemplateID);

@@ -74,6 +74,10 @@ public:
         if (spell->GetCaster()->IsPlayer() == true)
             EverQuest->ApplyClassAuraCastAdjustmentsOnCheckCast(spell->GetCaster()->ToPlayer(), spell, strict);
 
+        // Class auras: the Ranger's Endless Quiver is a toggle, so casting it while it is up turns it off
+        if (spell->GetCaster()->IsPlayer() == true && EverQuest->HandleClassAuraRangerEndlessQuiverOnCheckCast(spell->GetCaster()->ToPlayer(), spell, res) == true)
+            return;
+
         // Creature-cast charms follow extra limit rules
         Unit* target = spell->m_targets.GetUnitTarget();
         if (EverQuest->IsCreatureCharmBlockedByCharmLimits(spell->GetSpellInfo()->Id, target, spell->GetCaster()) == true)
@@ -335,6 +339,11 @@ public:
         // This was added to fix a crash associated with consuming the last stack of a throwing weapon when a throwing skillup occurred. The actual issue is upstream in
         // the AzerothCore code specifically Player::UpdateWeaponSkill which was referencing an invalid pointer.
         spell->m_weaponItem = nullptr;
+
+        // Class auras: settle the ammo for shots the Ranger's Endless Quiver spared, and for the channeled ranged spells whose ammo was handed to the mod at load.
+        // Ahead of the enabled check, since those channeled spells no longer take ammo on their own
+        if (caster != nullptr && caster->IsPlayer() == true)
+            EverQuest->HandleClassAuraRangerAmmoOnSpellCast(caster->ToPlayer(), spell);
 
         if (EverQuest->IsEnabled == false)
             return;

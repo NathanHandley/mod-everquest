@@ -80,6 +80,10 @@ public:
                 spell->SpellFamilyName = SPELLFAMILY_GENERIC;
         }
 
+        // Endless Quiver: a channeled ranged spell (Volley) takes its ammo too late for the toggle to step in, so the mod takes that ammo itself
+        if (EverQuest->GetClassAuraSpellID(EQ_CLASSAURA_SPELL_RANGER_ENDLESS_QUIVER) != 0)
+            EverQuest->RegisterClassAuraRangerChannelAmmoSpell(spell);
+
         // Only adjust EQ-generated spells
         if (spell->Id < EverQuest->ConfigSystemSpellDBCIDMin || spell->Id > EverQuest->ConfigSystemSpellDBCIDMax)
             return;
