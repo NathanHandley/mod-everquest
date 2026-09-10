@@ -414,13 +414,15 @@ public:
             if (soulSiphonPercent > 0)
                 damage += (damage * uint32(soulSiphonPercent)) / 100;
 
-            // Priest "Mind Melt" lets EverQuest Shadow damage over time spells critically tick.  A family 0 spell can never satisfy the aura that normally enables periodic crits, so the roll happens here (spell crit + the talent bonus)
-            if ((spellInfo->SchoolMask & SPELL_SCHOOL_MASK_SHADOW) != 0)
+            // Priest "Mind Melt" lets EverQuest Holy and Shadow damage over time spells critically tick (priest talents align to Holy, the Cleric school, and Shadow).  A family 0 spell can never satisfy the aura that normally enables
+            // periodic crits, so the roll happens here (the spell school's crit + the talent bonus).  Spells that can not crit (damage a caster deals to itself) never roll
+            if ((spellInfo->SchoolMask & (SPELL_SCHOOL_MASK_HOLY | SPELL_SCHOOL_MASK_SHADOW)) != 0 && spellInfo->HasAttribute(SPELL_ATTR2_CANT_CRIT) == false)
             {
                 AuraEffect const* mindMeltEffect = attacker->GetAuraEffectOfRankedSpell(EQ_SPELL_ID_PRIEST_MIND_MELT_RANK1, EFFECT_1);
                 if (mindMeltEffect != nullptr)
                 {
-                    float critChance = attacker->ToPlayer()->GetFloatValue(static_cast<uint16>(PLAYER_SPELL_CRIT_PERCENTAGE1) + SPELL_SCHOOL_SHADOW)
+                    uint32 critSchool = (spellInfo->SchoolMask & SPELL_SCHOOL_MASK_SHADOW) != 0 ? uint32(SPELL_SCHOOL_SHADOW) : uint32(SPELL_SCHOOL_HOLY);
+                    float critChance = attacker->ToPlayer()->GetFloatValue(static_cast<uint16>(PLAYER_SPELL_CRIT_PERCENTAGE1 + critSchool))
                         + float(mindMeltEffect->GetAmount());
                     if (roll_chance_f(critChance) == true)
                         damage += damage / 2;
@@ -428,8 +430,8 @@ public:
             }
 
             // Warlock "Pandemic" grants EverQuest Shadow damage over time spells the same manual critical ticks, at the player's Shadow crit plus "Malediction"'s bonus, with Pandemic's increased critical damage (the base spell
-            // critical bonus of half the damage, raised by Pandemic's percent)
-            if ((spellInfo->SchoolMask & SPELL_SCHOOL_MASK_SHADOW) != 0)
+            // critical bonus of half the damage, raised by Pandemic's percent).  Spells that can not crit never roll
+            if ((spellInfo->SchoolMask & SPELL_SCHOOL_MASK_SHADOW) != 0 && spellInfo->HasAttribute(SPELL_ATTR2_CANT_CRIT) == false)
             {
                 AuraEffect const* pandemicEffect = attacker->GetAuraEffect(EQ_SPELL_ID_WARLOCK_PANDEMIC, EFFECT_0);
                 if (pandemicEffect != nullptr)
@@ -456,6 +458,10 @@ public:
         if (target == nullptr || healer == nullptr || spellInfo == nullptr || heal == 0)
             return;
         if (EverQuest->IsSpellAnEQSpell(spellInfo->Id) == false)
+            return;
+
+        // A fixed heal (Mark of Karn's copy of the Judgement of Light heal) hands back exactly its share of health, so no talent may grow it
+        if (EverQuest->IsSpellDamageFixed(spellInfo->Id) == true)
             return;
 
         // Priest "Improved Vampiric Embrace" also boosts the health returned by EverQuest lifetap spells with only the healing side is boosted here
@@ -522,6 +528,9 @@ public:
     int32 GetDeathsEmbraceDamagePercent(Unit* target, Unit* attacker, SpellInfo const* spellInfo)
     {
         if ((spellInfo->SchoolMask & SPELL_SCHOOL_MASK_SHADOW) == 0)
+            return 0;
+        // Damage a caster deals to itself (Harmshield, life-for-mana spells) is never boosted
+        if (target == attacker)
             return 0;
         if (target->HealthBelowPct(35) == false)
             return 0;

@@ -36,6 +36,13 @@ static bool IsEQTalentInteractionEnabled()
     return EverQuest->IsEnabled == true && EverQuest->ConfigSpellTalentAlignmentEnabled == true;
 }
 
+// Damage a caster deals to itself (Cannibalize, the Lich line, Harmshield) is a cost rather than an attack, so it never feeds
+// the school-keyed offensive talents below, whatever school the spell is in
+static bool IsSelfInflictedProc(ProcEventInfo& eventInfo)
+{
+    return eventInfo.GetActor() != nullptr && eventInfo.GetActor() == eventInfo.GetActionTarget();
+}
+
 // Replaces spell_mage_cold_snap in part: the core script only resets mage frost school cooldowns, this addition also
 // resets the cooldowns of the player's EverQuest Frost spells.  The core binding stays, this script runs alongside it.
 class EverQuest_ColdSnapSpellScript : public SpellScript
@@ -101,6 +108,8 @@ class EverQuest_HotStreakAuraScript : public AuraScript
             return false;
         if ((procSpellInfo->SchoolMask & SPELL_SCHOOL_MASK_FIRE) == 0)
             return false;
+        if (IsSelfInflictedProc(eventInfo) == true)
+            return false;
         return EverQuestSpellTalentAlignment::DoesSpellInfoDealDirectDamage(procSpellInfo);
     }
 
@@ -165,6 +174,8 @@ class EverQuest_BrainFreezeAuraScript : public AuraScript
             return false;
         if ((procSpellInfo->SchoolMask & SPELL_SCHOOL_MASK_FROST) == 0)
             return false;
+        if (IsSelfInflictedProc(eventInfo) == true)
+            return false;
         if (EverQuestSpellTalentAlignment::DoesSpellInfoDealDirectDamage(procSpellInfo) == false)
             return false;
         Unit* auraHolder = GetTarget();
@@ -203,6 +214,8 @@ class EverQuest_NightfallAuraScript : public AuraScript
         if (EverQuest->IsSpellAnEQSpell(procSpellInfo->Id) == false)
             return false;
         if ((procSpellInfo->SchoolMask & SPELL_SCHOOL_MASK_SHADOW) == 0)
+            return false;
+        if (IsSelfInflictedProc(eventInfo) == true)
             return false;
         return EverQuestSpellTalentAlignment::DoesSpellInfoDamage(procSpellInfo);
     }
@@ -265,6 +278,8 @@ class EverQuest_EradicationAuraScript : public AuraScript
         if (EverQuest->IsSpellAnEQSpell(procSpellInfo->Id) == false)
             return false;
         if ((procSpellInfo->SchoolMask & SPELL_SCHOOL_MASK_SHADOW) == 0)
+            return false;
+        if (IsSelfInflictedProc(eventInfo) == true)
             return false;
         return EverQuestSpellTalentAlignment::DoesSpellInfoDealPeriodicDamage(procSpellInfo);
     }
@@ -414,7 +429,7 @@ class EverQuest_ImprovedSpiritTapAuraScript : public AuraScript
 };
 
 // Priest Shadow Weaving uses an "add target trigger" aura the proc system never sees, and its family mask gate has no
-// hook.  The converter attaches this script to every EQ spell block dealing shadow damage, and it rolls the talent's
+// hook.  The converter attaches this script to every EQ spell block dealing holy or shadow damage (priest talents align to Holy, the Cleric school, and Shadow), and it rolls the talent's
 // chance to stack the school-wide shadow damage buff, just like casting the priest's own shadow spells would
 class EverQuest_ShadowWeavingSpellScript : public SpellScript
 {
