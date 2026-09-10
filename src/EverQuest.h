@@ -1703,6 +1703,7 @@ public:
     unordered_set<uint32> InstanceDungeonMapIDs;
     unordered_map<uint32, uint32> OpenWorldMapIDByInstanceMapID;
     unordered_map<ObjectGuid, EverQuestPlayerRaidLowInstanceState> RaidLowInstanceStateByPlayerGUID;
+    unordered_map<ObjectGuid, unordered_map<uint32, uint32>> InstanceDungeonIDByMapIDByPlayerGUID;
     unordered_map<uint32, EverQuestFaction> FactionsByFactionTemplateID;
     unordered_set<uint32> DefendCombatFactionTemplateIDs;
     unordered_map<uint32, EverQuestReputationFactionInfo> EQReputationFactionInfoByFactionID;
@@ -2083,6 +2084,11 @@ public:
     bool TryZoneLineIntoInstanceRaidLow(Player* player, AreaTrigger const* trigger);
     uint32 GetInstanceDungeonMapIDForMap(uint32 mapID);
     bool IsMapInstanceDungeon(uint32 mapID);
+    void UpdateInstanceDungeonStateForPlayer(Player* player);
+    void ClearInstanceDungeonStateForPlayer(ObjectGuid playerGUID);
+    void ForgetInstanceDungeonForPlayer(ObjectGuid playerGUID, uint32 dungeonMapID);
+    uint32 GetLastInstanceDungeonIDForPlayer(ObjectGuid playerGUID, uint32 dungeonMapID);
+    void TryRestoreInstanceDungeonBindForPlayer(Player* player, uint32 dungeonMapID);
     bool IsCreatureBlockedFromInstanceMap(uint32 creatureTemplateID, Map* map);
     bool TryZoneLineIntoInstanceDungeon(Player* player, AreaTrigger const* trigger);
     void SendInstanceDungeonEntryMessageToPlayer(Player* player);

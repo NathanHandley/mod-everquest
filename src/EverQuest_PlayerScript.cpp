@@ -779,6 +779,9 @@ public:
         // Pick up a character that logged out inside a raid instance
         EverQuest->UpdateRaidLowInstanceStateForPlayer(player);
 
+        // Same for a dungeon instance, so a relog inside one doesn't lose track of which copy it is
+        EverQuest->UpdateInstanceDungeonStateForPlayer(player);
+
         // A mentorship that never ended cleanly is undone before anything else looks at this character's level
         EverQuest->RestoreMentorshipStateOnLoginForPlayer(player);
         EverQuest->SendMentorshipStateToPlayer(player);
@@ -959,6 +962,7 @@ public:
 
         // Stop counting the character as being inside a raid instance
         EverQuest->ClearRaidLowInstanceStateForPlayer(player->GetGUID());
+        EverQuest->ClearInstanceDungeonStateForPlayer(player->GetGUID());
 
         // A gate tether cancelled on the very tick the character logged out has nothing left to teleport
         EverQuest->ClearPendingGateReturnForPlayer(player->GetGUID());
@@ -1042,6 +1046,9 @@ public:
             return false;
         }
 
+        // Heading into a dungeon instance the character already has a copy of, so put back the bind the core dropped when their group went away
+        EverQuest->TryRestoreInstanceDungeonBindForPlayer(player, mapid);
+
         // A converted teleport into a zone that has a private copy is aimed at the open world version, so point it at the copy when the character belongs in one
         if (EverQuest->TryRerouteZoneTeleportIntoInstance(player, mapid, x, y, z, orientation, options) == true)
             return false;
@@ -1060,6 +1067,9 @@ public:
 
         // Track entering and leaving raid instances, which drives whether a zone line back in should return the player to theirs
         EverQuest->UpdateRaidLowInstanceStateForPlayer(player);
+
+        // Remember which copy of a dungeon this is, since the core throws its own temporary bind away when the group goes
+        EverQuest->UpdateInstanceDungeonStateForPlayer(player);
 
         // Announce arriving in a private dungeon copy
         if (player->GetSession() != nullptr && player->GetSession()->PlayerLoading() == false)

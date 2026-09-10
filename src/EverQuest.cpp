@@ -9798,6 +9798,78 @@ bool EverQuestMod::IsMapInstanceDungeon(uint32 mapID)
     return InstanceDungeonMapIDs.find(mapID) != InstanceDungeonMapIDs.end();
 }
 
+void EverQuestMod::UpdateInstanceDungeonStateForPlayer(Player* player)
+{
+    if (player == nullptr)
+        return;
+
+    uint32 mapID = player->GetMapId();
+    uint32 instanceID = player->GetInstanceId();
+    if (instanceID == 0 || IsMapInstanceDungeon(mapID) == false)
+        return;
+
+    std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+    InstanceDungeonIDByMapIDByPlayerGUID[player->GetGUID()][mapID] = instanceID;
+}
+
+void EverQuestMod::ClearInstanceDungeonStateForPlayer(ObjectGuid playerGUID)
+{
+    std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+    InstanceDungeonIDByMapIDByPlayerGUID.erase(playerGUID);
+}
+
+void EverQuestMod::ForgetInstanceDungeonForPlayer(ObjectGuid playerGUID, uint32 dungeonMapID)
+{
+    std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+    auto playerIt = InstanceDungeonIDByMapIDByPlayerGUID.find(playerGUID);
+    if (playerIt == InstanceDungeonIDByMapIDByPlayerGUID.end())
+        return;
+    playerIt->second.erase(dungeonMapID);
+    if (playerIt->second.empty() == true)
+        InstanceDungeonIDByMapIDByPlayerGUID.erase(playerIt);
+}
+
+uint32 EverQuestMod::GetLastInstanceDungeonIDForPlayer(ObjectGuid playerGUID, uint32 dungeonMapID)
+{
+    std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+    auto playerIt = InstanceDungeonIDByMapIDByPlayerGUID.find(playerGUID);
+    if (playerIt == InstanceDungeonIDByMapIDByPlayerGUID.end())
+        return 0;
+    auto instanceIt = playerIt->second.find(dungeonMapID);
+    if (instanceIt == playerIt->second.end())
+        return 0;
+    return instanceIt->second;
+}
+
+void EverQuestMod::TryRestoreInstanceDungeonBindForPlayer(Player* player, uint32 dungeonMapID)
+{
+    if (player == nullptr || dungeonMapID == 0)
+        return;
+    if (IsMapInstanceDungeon(dungeonMapID) == false)
+        return;
+    if (player->GetMapId() == dungeonMapID)
+        return;
+
+    uint32 instanceID = GetLastInstanceDungeonIDForPlayer(player->GetGUID(), dungeonMapID);
+    if (instanceID == 0)
+        return;
+
+    Difficulty dungeonDifficulty = player->GetDifficulty(false);
+    if (sInstanceSaveMgr->PlayerGetBoundInstance(player->GetGUID(), dungeonMapID, dungeonDifficulty) != nullptr)
+        return;
+
+    // The copy is gone (it emptied out and unloaded, or the character used "Reset all instances"), so a fresh one is correct
+    InstanceSave* instanceSave = sInstanceSaveMgr->GetInstanceSave(instanceID);
+    if (instanceSave == nullptr || instanceSave->GetMapId() != dungeonMapID || instanceSave->GetDifficulty() != dungeonDifficulty)
+    {
+        ForgetInstanceDungeonForPlayer(player->GetGUID(), dungeonMapID);
+        return;
+    }
+
+    sInstanceSaveMgr->PlayerCreateBoundInstancesMaps(player->GetGUID());
+    sInstanceSaveMgr->PlayerBindToInstance(player->GetGUID(), instanceSave, false, player);
+}
+
 bool EverQuestMod::IsCreatureBlockedFromInstanceMap(uint32 creatureTemplateID, Map* map)
 {
     if (map == nullptr)
