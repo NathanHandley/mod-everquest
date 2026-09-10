@@ -4686,6 +4686,19 @@ bool EverQuestMod::IsHealingSpell(SpellInfo const* spellInfo)
     return hasHealEffect;
 }
 
+bool EverQuestMod::IsGateSpell(SpellInfo const* spellInfo)
+{
+    // The converted EQ gate is an EQ spell carrying the gate dummy type in the first effect slot, as a plain dummy or a dummy aura
+    if (spellInfo == nullptr)
+        return false;
+    if (IsSpellAnEQSpell(spellInfo->Id) == false)
+        return false;
+    if (spellInfo->Effects[EFFECT_0].Effect != SPELL_EFFECT_DUMMY
+        && (spellInfo->Effects[EFFECT_0].Effect != SPELL_EFFECT_APPLY_AURA || spellInfo->Effects[EFFECT_0].ApplyAuraName != SPELL_AURA_DUMMY))
+        return false;
+    return spellInfo->Effects[EFFECT_0].MiscValue == EQ_SPELLDUMMYTYPE_GATE;
+}
+
 bool EverQuestMod::IsUnitCastingHealingSpell(Unit* unit)
 {
     if (unit == nullptr)
@@ -4700,6 +4713,25 @@ bool EverQuestMod::IsUnitCastingHealingSpell(Unit* unit)
         if (currentSpell->getState() != SPELL_STATE_CASTING && currentSpell->getState() != SPELL_STATE_PREPARING)
             continue;
         if (IsHealingSpell(currentSpell->GetSpellInfo()) == true)
+            return true;
+    }
+    return false;
+}
+
+bool EverQuestMod::IsUnitCastingGateSpell(Unit* unit)
+{
+    if (unit == nullptr)
+        return false;
+
+    // Same slots as the healing check, since those are the ones the core interrupt effect can actually stop
+    for (uint32 i = CURRENT_FIRST_NON_MELEE_SPELL; i < CURRENT_AUTOREPEAT_SPELL; ++i)
+    {
+        Spell* currentSpell = unit->GetCurrentSpell(CurrentSpellTypes(i));
+        if (currentSpell == nullptr)
+            continue;
+        if (currentSpell->getState() != SPELL_STATE_CASTING && currentSpell->getState() != SPELL_STATE_PREPARING)
+            continue;
+        if (IsGateSpell(currentSpell->GetSpellInfo()) == true)
             return true;
     }
     return false;
@@ -4735,8 +4767,8 @@ uint8 EverQuestMod::GetBossInterruptProtectedEffectMaskForTarget(SpellInfo const
     if (interruptEffectMask == 0)
         return 0;
 
-    // A heal is the one cast that can still be stopped, so a boss caught mid heal is interrupted normally
-    if (IsUnitCastingHealingSpell(target) == true)
+    // A heal or a gate are the casts that can still be stopped, so a boss caught mid heal or mid gate is interrupted normally
+    if (IsUnitCastingHealingSpell(target) == true || IsUnitCastingGateSpell(target) == true)
         return 0;
 
     return interruptEffectMask;
