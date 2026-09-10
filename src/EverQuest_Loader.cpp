@@ -35,6 +35,7 @@ void AddEverQuestDamageShieldMarkScripts();
 void AddEverQuestIntenseHealingExhaustionScripts();
 void AddEverQuestClassAuraScripts();
 void AddEverQuestRainWaveAreaCapSpellScripts();
+void AddEverQuestIntensifyingPeriodicAuraScripts();
 void AddEverQuestTalentInteractionScripts();
 void AddEverQuestItemScripts();
 void AddEverQuestPetScripts();
@@ -70,6 +71,7 @@ void Addmod_everquestScripts()
     AddEverQuestIntenseHealingExhaustionScripts();
     AddEverQuestClassAuraScripts();
     AddEverQuestRainWaveAreaCapSpellScripts();
+    AddEverQuestIntensifyingPeriodicAuraScripts();
     AddEverQuestTalentInteractionScripts();
     AddEverQuestItemScripts();
     AddEverQuestPetScripts();

@@ -53,7 +53,7 @@ class ByteBuffer;
 struct AreaTrigger;
 struct BuildValuesCachePosPointers;
 
-#define EQ_MOD_VERSION                              100
+#define EQ_MOD_VERSION                              101
 
 #define EQ_MOVEMENT_CAST_SNARE_DURATION_BUFFER_IN_MS 2000 // How much longer than the remaining cast time the casting slow is given, so a pushed-back cast keeps it
 
@@ -431,6 +431,7 @@ public:
     uint8 IllusionObjectClass = EQ_ILLUSION_OBJECT_CLASS_NONE;
     float ManaGainSpellPowerCoefficient = 0.0f;
     bool DamageIsFixed = false;
+    float IntensifyingRampStartMultipliers[3] = { 0.0f, 0.0f, 0.0f }; // Per spell effect index.  First tick as a fraction of the average tick for an EQ intensifying ("Splurt") formula, 0 = no ramp
 };
 
 class EverQuestIllusionObject
@@ -1852,7 +1853,9 @@ public:
     bool IsCreatureCharmBlockedByCharmLimits(uint32 spellID, Unit* target, Unit* caster);
     uint8 GetCharmProtectedDispelEffectMaskForTarget(SpellInfo const* spellInfo, Unit* target);
     bool IsHealingSpell(SpellInfo const* spellInfo);
+    bool IsGateSpell(SpellInfo const* spellInfo);
     bool IsUnitCastingHealingSpell(Unit* unit);
+    bool IsUnitCastingGateSpell(Unit* unit);
     bool IsEQBossTierCreature(Unit* unit);
     uint8 GetBossInterruptProtectedEffectMaskForTarget(SpellInfo const* spellInfo, Unit* target);
     uint8 GetBossSilenceProtectedEffectMaskForTarget(SpellInfo const* spellInfo, Unit* target);
@@ -2168,6 +2171,7 @@ public:
     void EngageScriptedAssault(Creature* attacker, Creature* victim);
     bool IsSpellAnEQSpell(uint32 spellID);
     bool IsSpellDamageFixed(uint32 spellID);
+    float GetSpellIntensifyingRampStartMultiplier(uint32 spellID, uint8 effectIndex);
     bool ShouldSpellPreserveSwingTimers(uint32 spellID);
     void StashSwingTimersBeforeSpellCast(Player* player, Spell* spell);
     void RestoreSwingTimersAfterSpellCast(Unit* caster, Spell* spell);

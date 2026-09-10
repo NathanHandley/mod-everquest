@@ -3898,7 +3898,7 @@ void EverQuestMod::LoadSpellData()
 {
     SpellDataBySpellID.clear();
     BardSongTickSpellIDs.clear();
-    QueryResult queryResult = WorldDatabase.Query("SELECT SpellID, AuraDurationBaseInMS, AuraDurationAddPerLevelInMS, AuraDurationMaxInMS, AuraDurationCalcMinLevel, AuraDurationCalcMaxLevel, RecourseSpellID, SpellIDCastOnMeleeAttacker, FocusBoostType, PeriodicAuraSpellID, PeriodicAuraSpellRadius, MaleFormSpellID, FemaleFormSpellID, EffectFailChancePercent, EffectFailableType, StunUsesBashKickChance, SpellIDCastOnTargetWhenStunLands, AuraStaysOnSecondaryClassSwitch, MinTargetLevel, MaxCreatureTargetLevel, ResistDiff, HasteType, ModFactionRepValue, IllusionFormAlignment, IllusionFormEQRaceID, PersistOnClassChange, IllusionObjectClass, ManaGainSpellPowerCoefficient, DamageIsFixed FROM mod_everquest_spell ORDER BY SpellID;");
+    QueryResult queryResult = WorldDatabase.Query("SELECT SpellID, AuraDurationBaseInMS, AuraDurationAddPerLevelInMS, AuraDurationMaxInMS, AuraDurationCalcMinLevel, AuraDurationCalcMaxLevel, RecourseSpellID, SpellIDCastOnMeleeAttacker, FocusBoostType, PeriodicAuraSpellID, PeriodicAuraSpellRadius, MaleFormSpellID, FemaleFormSpellID, EffectFailChancePercent, EffectFailableType, StunUsesBashKickChance, SpellIDCastOnTargetWhenStunLands, AuraStaysOnSecondaryClassSwitch, MinTargetLevel, MaxCreatureTargetLevel, ResistDiff, HasteType, ModFactionRepValue, IllusionFormAlignment, IllusionFormEQRaceID, PersistOnClassChange, IllusionObjectClass, ManaGainSpellPowerCoefficient, DamageIsFixed, IntensifyingRampStartMultiplier1, IntensifyingRampStartMultiplier2, IntensifyingRampStartMultiplier3 FROM mod_everquest_spell ORDER BY SpellID;");
     if (queryResult)
     {
         do
@@ -3935,6 +3935,9 @@ void EverQuestMod::LoadSpellData()
             everQuestSpell.IllusionObjectClass = fields[26].Get<uint8>();
             everQuestSpell.ManaGainSpellPowerCoefficient = fields[27].Get<float>();
             everQuestSpell.DamageIsFixed = fields[28].Get<bool>();
+            everQuestSpell.IntensifyingRampStartMultipliers[0] = fields[29].Get<float>();
+            everQuestSpell.IntensifyingRampStartMultipliers[1] = fields[30].Get<float>();
+            everQuestSpell.IntensifyingRampStartMultipliers[2] = fields[31].Get<float>();
             SpellDataBySpellID[everQuestSpell.SpellID] = everQuestSpell;
             if (everQuestSpell.PeriodicAuraSpellID != 0)
                 BardSongTickSpellIDs.insert(everQuestSpell.PeriodicAuraSpellID);
@@ -11821,6 +11824,16 @@ bool EverQuestMod::IsSpellDamageFixed(uint32 spellID)
     return spellDataItr->second.DamageIsFixed;
 }
 
+float EverQuestMod::GetSpellIntensifyingRampStartMultiplier(uint32 spellID, uint8 effectIndex)
+{
+    if (effectIndex >= 3)
+        return 0.0f;
+    std::unordered_map<uint32, EverQuestSpell>::const_iterator spellDataItr = SpellDataBySpellID.find(spellID);
+    if (spellDataItr == SpellDataBySpellID.end())
+        return 0.0f;
+    return spellDataItr->second.IntensifyingRampStartMultipliers[effectIndex];
+}
+
 static thread_local EverQuestPendingSwingTimerRestore PendingSwingTimerRestore;
 
 bool EverQuestMod::ShouldSpellPreserveSwingTimers(uint32 spellID)
@@ -14009,7 +14022,6 @@ void EverQuestMod::RestorePetLevelAfterMentorshipForPlayer(Player* player, uint3
         return;
 
     // Pet::SynchronizeLevelWithOwner only ever pulls a hunter pet up to within five levels of its owner, so a pet that came down from 60 to 20 with a mentorship would otherwise stop at 55 on the way back up.
-    // A pet that was already standing below its owner keeps that gap, since the level it came in at is the one that goes back
     uint8 ownerLevel = player->GetLevel();
     uint8 targetLevel = petRealLevel > ownerLevel ? ownerLevel : petRealLevel;
     if (targetLevel == 0)
