@@ -128,6 +128,8 @@ public:
         if (unit == nullptr)
             return;
 
+        EverQuest->ClearPvPSnareDiminishingReturnState(unit);
+
         // The killer is only knowable here, and the corpse flag the core leaves behind cannot tell a real player kill from a self inflicted one, so record which it was before the experience loss at spirit release has to decide
         if (Player* deadPlayer = unit->ToPlayer())
         {
@@ -203,6 +205,20 @@ public:
 
         if (TryHandleBashKickStunChance(unit, aura) == true)
             return;
+
+        // Chained crowd control should fall off if it's at limit
+        if (EverQuest->HandlePvPChainedCrowdControlDiminishingReturnsOnAuraApply(unit, aura) == true)
+        {
+            unit->RemoveAura(aura);
+            return;
+        }
+
+        // Same for snare
+        if (EverQuest->HandlePvPSnareDiminishingReturnsOnAuraApply(unit, aura) == true)
+        {
+            unit->RemoveAura(aura);
+            return;
+        }
 
         EverQuest->TrackEQHasteAurasAndEnforceCapOnAuraApply(unit, aura);
 

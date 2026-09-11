@@ -122,6 +122,9 @@ EverQuestMod::EverQuestMod() :
     ConfigSpellCreatureWoWStunImmunityEnabled(true),
     ConfigSpellBardFearDiminishingReturnsEnabled(true),
     ConfigSpellBardFearDiminishingReturnsResetTimeInMS(15000),
+    ConfigSpellPvPChainedCrowdControlDiminishingReturnsEnabled(true),
+    ConfigSpellPvPCrowdControlMaxDurationInMS(10000),
+    ConfigSpellPvPSnareDiminishingReturnsEnabled(true),
     ConfigSpellNoSwingTimerResetForEQSpells(true),
     ConfigSpellNoSwingTimerResetForWoWSpells(false),
     ConfigSpellMovementCastSnareEnabled(true),
@@ -422,6 +425,9 @@ void EverQuestMod::LoadConfigurationFile()
     ConfigSpellCreatureWoWStunImmunityEnabled = sConfigMgr->GetOption<bool>("EverQuest.Spells.CreatureWoWStunImmunityEnabled", true);
     ConfigSpellBardFearDiminishingReturnsEnabled = sConfigMgr->GetOption<bool>("EverQuest.Spells.BardFearDiminishingReturnsEnabled", true);
     ConfigSpellBardFearDiminishingReturnsResetTimeInMS = sConfigMgr->GetOption<uint32>("EverQuest.Spells.BardFearDiminishingReturnsResetTimeInMS", 15000);
+    ConfigSpellPvPChainedCrowdControlDiminishingReturnsEnabled = sConfigMgr->GetOption<bool>("EverQuest.Spells.PvPChainedCrowdControlDiminishingReturnsEnabled", true);
+    ConfigSpellPvPCrowdControlMaxDurationInMS = sConfigMgr->GetOption<uint32>("EverQuest.Spells.PvPCrowdControlMaxDurationInMS", 10000);
+    ConfigSpellPvPSnareDiminishingReturnsEnabled = sConfigMgr->GetOption<bool>("EverQuest.Spells.PvPSnareDiminishingReturnsEnabled", true);
     ConfigSpellNoSwingTimerResetForEQSpells = sConfigMgr->GetOption<bool>("EverQuest.Spells.NoSwingTimerResetForEQSpells", true);
     ConfigSpellNoSwingTimerResetForWoWSpells = sConfigMgr->GetOption<bool>("EverQuest.Spells.NoSwingTimerResetForWoWSpells", false);
 
@@ -4886,6 +4892,11 @@ bool EverQuestMod::ApplyBardSongFearDiminishingReturnsOnAuraApply(Unit* target, 
         return false;
     if (BardSongTickSpellIDs.find(aura->GetId()) == BardSongTickSpellIDs.end())
         return false;
+
+    // The core already diminishes fear on a player's pet (and on anything flagged to diminish), so this would diminish it a second time
+    Unit* creatureOwner = creature->GetOwner();
+    if ((creatureOwner != nullptr && creatureOwner->IsPlayer() == true) || creature->HasFlagsExtra(CREATURE_FLAG_EXTRA_ALL_DIMINISH) == true)
+        return false;
     SpellInfo const* spellInfo = aura->GetSpellInfo();
     if (spellInfo == nullptr || spellInfo->HasAura(SPELL_AURA_MOD_FEAR) == false)
         return false;
@@ -4933,6 +4944,241 @@ bool EverQuestMod::ApplyBardSongFearDiminishingReturnsOnAuraApply(Unit* target, 
 void EverQuestMod::RemoveCreatureFearDiminishingReturnState(Creature* creature)
 {
     creature->CustomData.Erase(EQ_CREATURE_CUSTOMDATA_FEARDIMINISH);
+}
+
+DiminishingGroup EverQuestMod::GetEQCrowdControlDiminishingGroup(SpellInfo const* spellInfo)
+{
+    // Crowd control is anything the core puts in a diminishing returns group, other than taunts
+    if (spellInfo == nullptr)
+        return DIMINISHING_NONE;
+    if (spellInfo->Id < ConfigSystemSpellDBCIDMin || spellInfo->Id > ConfigSystemSpellDBCIDMax)
+        return DIMINISHING_NONE;
+    if (IsSpellAnEQSpell(spellInfo->Id) == false)
+        return DIMINISHING_NONE;
+    DiminishingGroup group = GetDiminishingReturnsGroupForSpell(spellInfo, false);
+    if (group == DIMINISHING_TAUNT || GetDiminishingReturnsGroupType(group) == DRTYPE_NONE)
+        return DIMINISHING_NONE;
+    return group;
+}
+
+bool EverQuestMod::IsPvPCrowdControlDurationCappedForTarget(Unit* target, Unit* caster)
+{
+    // Target players or their pets
+    Unit const* targetOwner = target->GetOwner();
+    Unit const* cappedTarget = (targetOwner != nullptr) ? targetOwner : target;
+    return cappedTarget->IsPlayer() == true && caster->IsCharmedOwnedByPlayerOrPlayer() == true;
+}
+
+bool EverQuestMod::IsCrowdControlAppliedPastCoreDiminishingReturns(SpellInfo const* spellInfo, DiminishingGroup group, Unit* target, Unit* caster)
+{
+    if (ConfigSpellPvPChainedCrowdControlDiminishingReturnsEnabled == false)
+        return false;
+    if (spellInfo == nullptr || group == DIMINISHING_NONE || target == nullptr || caster == nullptr || target == caster)
+        return false;
+    if (target->IsCharmedOwnedByPlayerOrPlayer() == false || caster->IsCharmedOwnedByPlayerOrPlayer() == false)
+        return false;
+    bool hasAuraEffect = false;
+    for (uint8 i = 0; i < MAX_SPELL_EFFECTS; ++i)
+    {
+        if (spellInfo->Effects[i].IsUnitOwnedAuraEffect() == false)
+            continue;
+        if (spellInfo->Effects[i].TargetA.GetTarget() != TARGET_UNIT_CASTER)
+            return false;
+        uint32 targetB = spellInfo->Effects[i].TargetB.GetTarget();
+        if (targetB != 0 && targetB != TARGET_UNIT_CASTER)
+            return false;
+        hasAuraEffect = true;
+    }
+    return hasAuraEffect;
+}
+
+void EverQuestMod::ApplyPvPCrowdControlRulesToAuraMaxDuration(Aura const* aura, int32& maxDuration)
+{
+    if (aura == nullptr || maxDuration <= 0)
+        return;
+    if (ConfigSpellPvPCrowdControlMaxDurationInMS == 0 && ConfigSpellPvPChainedCrowdControlDiminishingReturnsEnabled == false && ConfigSpellPvPSnareDiminishingReturnsEnabled == false)
+        return;
+    if (aura->GetType() != UNIT_AURA_TYPE)
+        return;
+
+    // A player's saved auras are rebuilt before they are in the world
+    Unit* target = aura->GetUnitOwner();
+    if (target == nullptr || target->IsInWorld() == false)
+        return;
+    SpellInfo const* spellInfo = aura->GetSpellInfo();
+    DiminishingGroup group = GetEQCrowdControlDiminishingGroup(spellInfo);
+    if (group == DIMINISHING_NONE)
+    {
+        // The core has no diminishing returns group for snares, so they keep their own (a spell that also has crowd control counts as that alone)
+        if (IsEQSnareSpell(spellInfo) == true)
+            ApplyPvPSnareRulesToAuraMaxDuration(target, aura->GetCaster(), maxDuration);
+        return;
+    }
+    Unit* caster = aura->GetCaster();
+    if (caster == nullptr || caster == target)
+        return;
+
+    // EverQuest crowd control runs far longer than WoW pvp is built around
+    if (ConfigSpellPvPCrowdControlMaxDurationInMS > 0 && uint32(maxDuration) > ConfigSpellPvPCrowdControlMaxDurationInMS && IsPvPCrowdControlDurationCappedForTarget(target, caster) == true)
+        maxDuration = int32(ConfigSpellPvPCrowdControlMaxDurationInMS);
+
+    if (IsCrowdControlAppliedPastCoreDiminishingReturns(spellInfo, group, target, caster) == false)
+        return;
+
+    // Apply diminish
+    DiminishingLevels diminishLevel = target->GetDiminishing(group);
+    int32 limitDurationInMS = GetDiminishingReturnsLimitDuration(group, spellInfo);
+    if (target->ApplyDiminishingToDuration(group, maxDuration, caster, diminishLevel, limitDurationInMS) == 0.0f)
+    {
+        // Immune, and no duration left is how the aura apply side knows to take it back off
+        maxDuration = 0;
+        return;
+    }
+    target->IncrDiminishing(group);
+}
+
+uint8 EverQuestMod::GetPvPChainedCrowdControlImmuneEffectMaskForTarget(Spell* spell, Unit* target)
+{
+    if (ConfigSpellPvPChainedCrowdControlDiminishingReturnsEnabled == false)
+        return 0;
+    if (spell == nullptr || target == nullptr)
+        return 0;
+
+    // A hit linked chain spell is cast by the unit it lands on
+    if (spell->GetCaster() != target)
+        return 0;
+    SpellInfo const* spellInfo = spell->GetSpellInfo();
+    DiminishingGroup group = GetEQCrowdControlDiminishingGroup(spellInfo);
+    if (group == DIMINISHING_NONE)
+        return 0;
+    Unit* originalCaster = spell->GetOriginalCaster();
+    if (IsCrowdControlAppliedPastCoreDiminishingReturns(spellInfo, group, target, originalCaster) == false)
+        return 0;
+
+    int32 probeDurationInMS = 1;
+    if (target->ApplyDiminishingToDuration(group, probeDurationInMS, originalCaster, target->GetDiminishing(group), 0) != 0.0f)
+        return 0;
+
+    uint8 immuneEffectMask = 0;
+    for (uint8 i = 0; i < MAX_SPELL_EFFECTS; ++i)
+        if (spellInfo->Effects[i].IsUnitOwnedAuraEffect() == true)
+            immuneEffectMask |= (uint8)(1 << i);
+    return immuneEffectMask;
+}
+
+bool EverQuestMod::HandlePvPChainedCrowdControlDiminishingReturnsOnAuraApply(Unit* target, Aura* aura)
+{
+    // Returns true when the aura should come back off
+    if (ConfigSpellPvPChainedCrowdControlDiminishingReturnsEnabled == false)
+        return false;
+    if (target == nullptr || aura == nullptr || aura->GetType() != UNIT_AURA_TYPE)
+        return false;
+    SpellInfo const* spellInfo = aura->GetSpellInfo();
+    DiminishingGroup group = GetEQCrowdControlDiminishingGroup(spellInfo);
+    if (group == DIMINISHING_NONE)
+        return false;
+    Unit* caster = aura->GetCaster();
+    if (IsCrowdControlAppliedPastCoreDiminishingReturns(spellInfo, group, target, caster) == false)
+        return false;
+    if (aura->GetMaxDuration() == 0)
+    {
+        caster->SendSpellMiss(target, spellInfo->Id, SPELL_MISS_IMMUNE);
+        return true;
+    }
+    UnitAura* unitAura = static_cast<UnitAura*>(aura);
+    if (unitAura->GetDiminishGroup() != DIMINISHING_NONE)
+        return false;
+    unitAura->SetDiminishGroup(group);
+    target->ApplyDiminishingAura(group, true);
+    return false;
+}
+
+bool EverQuestMod::IsEQSnareSpell(SpellInfo const* spellInfo)
+{
+    if (spellInfo == nullptr)
+        return false;
+    if (spellInfo->Id < ConfigSystemSpellDBCIDMin || spellInfo->Id > ConfigSystemSpellDBCIDMax)
+        return false;
+    if (IsSpellAnEQSpell(spellInfo->Id) == false)
+        return false;
+    for (uint8 i = 0; i < MAX_SPELL_EFFECTS; ++i)
+        if (spellInfo->Effects[i].IsUnitOwnedAuraEffect() == true && spellInfo->Effects[i].ApplyAuraName == SPELL_AURA_MOD_DECREASE_SPEED && spellInfo->Effects[i].Mechanic == MECHANIC_SNARE)
+            return true;
+    return false;
+}
+
+bool EverQuestMod::IsPvPSnareAuraApplication(Unit* target, Unit* caster)
+{
+    // Only a hostile snare counts, since spells like Torpor put a movement reduction on a friendly target too
+    if (target == nullptr || caster == nullptr || target == caster)
+        return false;
+    if (IsPvPCrowdControlDurationCappedForTarget(target, caster) == false)
+        return false;
+    return caster->IsHostileTo(target);
+}
+
+void EverQuestMod::ApplyPvPSnareRulesToAuraMaxDuration(Unit* target, Unit* caster, int32& maxDuration)
+{
+    if (IsPvPSnareAuraApplication(target, caster) == false)
+        return;
+
+    // Snares are held to the same pvp cap as crowd control, before diminishing returns
+    if (ConfigSpellPvPCrowdControlMaxDurationInMS > 0 && uint32(maxDuration) > ConfigSpellPvPCrowdControlMaxDurationInMS)
+        maxDuration = int32(ConfigSpellPvPCrowdControlMaxDurationInMS);
+
+    if (ConfigSpellPvPSnareDiminishingReturnsEnabled == false)
+        return;
+
+    // There's no core group, attack the chain (100/50/25/imm) to the target
+    uint32 nowMS = GameTime::GetGameTimeMS().count();
+    EverQuestUnitSnareDiminishingReturnState* state = target->CustomData.GetDefault<EverQuestUnitSnareDiminishingReturnState>(EQ_UNIT_CUSTOMDATA_SNAREDIMINISH);
+    uint32 curLevel = state->Level;
+    if (curLevel > 0 && getMSTimeDiff(state->LastApplyTimeMS, nowMS) > state->ResetWindowInMS)
+        curLevel = 0;
+
+    float durationMod;
+    switch (curLevel)
+    {
+        case 0: durationMod = 1.0f; break;
+        case 1: durationMod = 0.5f; break;
+        case 2: durationMod = 0.25f; break;
+        default: durationMod = 0.0f; break;
+    }
+    if (durationMod == 0.0f)
+    {
+        // Immune, and no duration left is how the aura apply side knows to take it back off
+        state->Level = 3;
+        maxDuration = 0;
+        return;
+    }
+
+    maxDuration = int32(float(maxDuration) * durationMod);
+    state->Level = curLevel + 1;
+    state->LastApplyTimeMS = nowMS;
+    state->ResetWindowInMS = uint32(maxDuration) + EQ_SNARE_DIMINISHING_RETURNS_RESET_TIME_IN_MS;
+}
+
+bool EverQuestMod::HandlePvPSnareDiminishingReturnsOnAuraApply(Unit* target, Aura* aura)
+{
+    // Returns true when the snare was diminished to immun
+    if (ConfigSpellPvPSnareDiminishingReturnsEnabled == false)
+        return false;
+    if (target == nullptr || aura == nullptr || aura->GetType() != UNIT_AURA_TYPE || aura->GetMaxDuration() != 0)
+        return false;
+    SpellInfo const* spellInfo = aura->GetSpellInfo();
+    if (GetEQCrowdControlDiminishingGroup(spellInfo) != DIMINISHING_NONE || IsEQSnareSpell(spellInfo) == false)
+        return false;
+    Unit* caster = aura->GetCaster();
+    if (IsPvPSnareAuraApplication(target, caster) == false)
+        return false;
+    caster->SendSpellMiss(target, spellInfo->Id, SPELL_MISS_IMMUNE);
+    return true;
+}
+
+void EverQuestMod::ClearPvPSnareDiminishingReturnState(Unit* unit)
+{
+    // Dying clears diminishing returns, the same as the core clears its own groups
+    unit->CustomData.Erase(EQ_UNIT_CUSTOMDATA_SNAREDIMINISH);
 }
 
 static const uint64 EQ_AURA_EFFECT_TRACKING_KEY_PLAYERS = UINT64_MAX;

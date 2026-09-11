@@ -816,7 +816,7 @@ bool EverQuestMod::TryTransferDebuffToNecromancerPet(Player* player, Aura* aura)
 
     // A pet that is immune gets no copy, and then the necromancer keeps the effect and the cooldown is not spent
     Aura* petAura = caster->AddAura(spellInfo, MAX_EFFECT_MASK, pet);
-    if (petAura == nullptr)
+    if (petAura == nullptr || petAura->IsRemoved() == true)
         return false;
     petAura->SetMaxDuration(aura->GetMaxDuration());
     petAura->SetDuration(aura->GetDuration());

@@ -134,7 +134,7 @@ public:
             res = SPELL_FAILED_HIGHLEVEL;
     }
 
-    void OnScaleAuraUnitAdd(Spell* spell, Unit* target, uint32 /*effectMask*/, bool /*checkIfValid*/, bool /*implicit*/, uint8 /*auraScaleMask*/, TargetInfo& targetInfo) override
+    void OnScaleAuraUnitAdd(Spell* spell, Unit* target, uint32 effectMask, bool /*checkIfValid*/, bool /*implicit*/, uint8 /*auraScaleMask*/, TargetInfo& targetInfo) override
     {
         if (EverQuest->IsEnabled == false)
             return;
@@ -180,6 +180,17 @@ public:
         uint8 creatureStunProtectedEffectMask = EverQuest->GetCreatureStunProtectedEffectMaskForTarget(spellInfo, target, spell->GetCaster());
         if (creatureStunProtectedEffectMask != 0)
             targetInfo.effectMask = targetInfo.effectMask & (uint8)(~creatureStunProtectedEffectMask);
+
+        // Chained crowd control a player is already diminished to immune against never lands, so it cannot interrupt a cast
+        uint8 pvpImmuneEffectMask = EverQuest->GetPvPChainedCrowdControlImmuneEffectMaskForTarget(spell, target);
+        if (pvpImmuneEffectMask != 0)
+        {
+            // Every effect adds the target on its own, so only the call carrying the first aura effect reports
+            uint8 firstImmuneEffectBit = (uint8)(pvpImmuneEffectMask & (uint8)(~pvpImmuneEffectMask + 1));
+            if ((effectMask & firstImmuneEffectBit) != 0 && spell->GetOriginalCaster() != nullptr)
+                spell->GetOriginalCaster()->SendSpellMiss(target, spellInfo->Id, SPELL_MISS_IMMUNE);
+            targetInfo.effectMask = targetInfo.effectMask & (uint8)(~pvpImmuneEffectMask);
+        }
 
         if (EverQuest->ShouldStripBashKickStunBeforeItLands(spellInfo->Id, target) == false)
             return;
@@ -291,6 +302,14 @@ public:
         if (aura == nullptr)
             return;
 
+        CalculateEQSpellMaxDuration(aura, maxDuration);
+
+        // Crowd control between players is capped
+        EverQuest->ApplyPvPCrowdControlRulesToAuraMaxDuration(aura, maxDuration);
+    }
+
+    void CalculateEQSpellMaxDuration(Aura const* aura, int32& maxDuration)
+    {
         // Skip any non EQ spells
         uint32 spellID = aura->GetId();
         if (spellID < EverQuest->ConfigSystemSpellDBCIDMin || spellID > EverQuest->ConfigSystemSpellDBCIDMax)

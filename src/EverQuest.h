@@ -359,6 +359,9 @@ struct BuildValuesCachePosPointers;
 #define EQ_CREATURE_CUSTOMDATA_AGGROPOSITION        "EQAggroPos"
 #define EQ_CREATURE_CUSTOMDATA_AGROZBLOCK           "EQAgroZBlock"
 #define EQ_CREATURE_CUSTOMDATA_FEARDIMINISH         "EQFearDiminish"
+#define EQ_UNIT_CUSTOMDATA_SNAREDIMINISH            "EQSnareDiminish"
+
+#define EQ_SNARE_DIMINISHING_RETURNS_RESET_TIME_IN_MS   15000   // Same reset the core uses for diminishing return
 
 #define EQ_AGRO_Z_BLOCK_SUPPRESS_MS                 2000
 
@@ -704,6 +707,14 @@ public:
 };
 
 class EverQuestCreatureFearDiminishingReturnState : public DataMap::Base
+{
+public:
+    uint32 Level = 0;                 // 0 = full duration, 1 = half, 2 = quarter, 3 = immune
+    uint32 LastApplyTimeMS = 0;
+    uint32 ResetWindowInMS = 0;
+};
+
+class EverQuestUnitSnareDiminishingReturnState : public DataMap::Base
 {
 public:
     uint32 Level = 0;                 // 0 = full duration, 1 = half, 2 = quarter, 3 = immune
@@ -1544,6 +1555,9 @@ public:
     bool ConfigSpellCreatureWoWStunImmunityEnabled;
     bool ConfigSpellBardFearDiminishingReturnsEnabled;
     uint32 ConfigSpellBardFearDiminishingReturnsResetTimeInMS;
+    bool ConfigSpellPvPChainedCrowdControlDiminishingReturnsEnabled;
+    uint32 ConfigSpellPvPCrowdControlMaxDurationInMS;
+    bool ConfigSpellPvPSnareDiminishingReturnsEnabled;
     bool ConfigSpellNoSwingTimerResetForEQSpells;
     bool ConfigSpellNoSwingTimerResetForWoWSpells;
     bool ConfigSpellMovementCastSnareEnabled;
@@ -1876,6 +1890,17 @@ public:
     uint8 GetCreatureStunProtectedEffectMaskForTarget(SpellInfo const* spellInfo, Unit* target, Unit* caster);
     bool ApplyBardSongFearDiminishingReturnsOnAuraApply(Unit* target, Aura* aura);
     void RemoveCreatureFearDiminishingReturnState(Creature* creature);
+    DiminishingGroup GetEQCrowdControlDiminishingGroup(SpellInfo const* spellInfo);
+    bool IsPvPCrowdControlDurationCappedForTarget(Unit* target, Unit* caster);
+    bool IsCrowdControlAppliedPastCoreDiminishingReturns(SpellInfo const* spellInfo, DiminishingGroup group, Unit* target, Unit* caster);
+    void ApplyPvPCrowdControlRulesToAuraMaxDuration(Aura const* aura, int32& maxDuration);
+    uint8 GetPvPChainedCrowdControlImmuneEffectMaskForTarget(Spell* spell, Unit* target);
+    bool HandlePvPChainedCrowdControlDiminishingReturnsOnAuraApply(Unit* target, Aura* aura);
+    bool IsEQSnareSpell(SpellInfo const* spellInfo);
+    bool IsPvPSnareAuraApplication(Unit* target, Unit* caster);
+    void ApplyPvPSnareRulesToAuraMaxDuration(Unit* target, Unit* caster, int32& maxDuration);
+    bool HandlePvPSnareDiminishingReturnsOnAuraApply(Unit* target, Aura* aura);
+    void ClearPvPSnareDiminishingReturnState(Unit* unit);
     uint64 GetAuraEffectTrackingKeyForUnit(Unit* unit);
     void TrackEQHasteAurasAndEnforceCapOnAuraApply(Unit* unit, Aura* aura);
     void UntrackEQHasteAurasAndEnforceCapOnAuraRemove(Unit* unit, Aura* aura);

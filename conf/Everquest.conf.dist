@@ -375,6 +375,43 @@ EverQuest.Spells.BardFearDiminishingReturnsResetTimeInMS = 15000
 
 ###################################################################################################
 #
+# 	EverQuest.Spells.PvPChainedCrowdControlDiminishingReturnsEnabled
+#		If true, EverQuest crowd control that lands through a chained spell diminishes on players and
+#		their pets the same way directly cast crowd control already does.  That covers every stun
+#		spell, and the root, fear, silence or mesmerize part of a spell that also does something else.
+#		The core never diminishes those chained spells because the target casts them on itself (or
+#		they are added with no spell at all), so without this they never diminish in pvp.  Only
+#		applies when the caster and the target are both player controlled
+#	Default: True
+#
+# 	EverQuest.Spells.PvPCrowdControlMaxDurationInMS
+#		Longest any EverQuest crowd control spell (stun, mesmerize, charm, fear, root, silence, and
+#		anything else WoW puts in a diminishing returns group except taunts) or hostile EverQuest
+#		snare can last on a player, or a player's pet, when anything a player controls lands it
+#		(their pets and charmed creatures included).  This is applied before diminishing returns,
+#		which then shortens it further.  WoW already limits most crowd control from a player or
+#		their pet to 10 seconds, so a value above 10000 mostly just lengthens snares, silences and
+#		crowd control from charmed creatures.  0 turns the limit off
+#	Default: 10000 (10 seconds)
+#
+# 	EverQuest.Spells.PvPSnareDiminishingReturnsEnabled
+#		If true, hostile EverQuest snares (movement speed reductions) landed by anything a player
+#		controls on a player or a player's pet get their own diminishing returns category that works
+#		like WoW's: the first lasts its full (capped) duration, the next half, then a quarter, and
+#		then the target is immune until 15 seconds after the last one that landed would have run
+#		out.  The whole spell is shortened, so a snare that shares its spell with a damage over time
+#		or an attack speed slow shortens those too.  Dying resets it.  WoW class snares are not
+#		affected, and a spell that also has stun, root or other crowd control counts only as that
+#	Default: True
+#
+###################################################################################################
+
+EverQuest.Spells.PvPChainedCrowdControlDiminishingReturnsEnabled = True
+EverQuest.Spells.PvPCrowdControlMaxDurationInMS = 10000
+EverQuest.Spells.PvPSnareDiminishingReturnsEnabled = True
+
+###################################################################################################
+#
 # 	EverQuest.Spells.NoSwingTimerResetForEQSpells
 #		If true, casting an EverQuest spell no longer restarts the caster's auto attack swing
 #		timers.  Auto attacks still do not swing during a cast, but the swing timer keeps
