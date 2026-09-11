@@ -373,6 +373,7 @@ struct BuildValuesCachePosPointers;
 
 #define EQ_PLAYER_CUSTOMDATA_CLASSAURA              "EQClassAura"
 #define EQ_PLAYER_CUSTOMDATA_QUESTFACTION           "EQQuestFaction"
+#define EQ_PLAYER_CUSTOMDATA_MOVEWHILECASTING       "EQMoveWhileCasting"
 #define EQ_QUEST_FACTION_RECHECK_INTERVAL_IN_MS     1000
 #define EQ_CLASS_AURA_GEAR_REFRESH_INTERVAL_MS      2000    // Gear and pet based class auras rescan on this interval since some ways they change have no hook
 #define EQ_CLASS_AURA_MANA_CHECK_INTERVAL_MS        500     // How often the Enchanter mana threshold is checked
@@ -915,6 +916,12 @@ enum EverQuestClassAuraSpellType : uint32
     EQ_CLASSAURA_SPELL_TYPE_COUNT = 56
 };
 
+class EverQuestPlayerMoveWhileCastingState : public DataMap::Base
+{
+public:
+    bool Enabled = true;
+};
+
 class EverQuestPlayerClassAuraState : public DataMap::Base
 {
 public:
@@ -1298,6 +1305,7 @@ struct EverQuestPlayerControllerData
     bool HailWindowOnRightClick = false;
     bool ShowDispelMessage = false;
     uint32 DispelMessageColor = EQ_DISPEL_MESSAGE_DEFAULT_COLOR;
+    bool MoveWhileCasting = true;
     bool AdventurerDisqualified = false;
     uint32 DeathExpLost = 0;
     uint32 DeathExpRestGranted = 0;
@@ -1817,7 +1825,10 @@ public:
     void LoadSpellMovementCastSnareData();
     bool IsMovementCastSpell(uint32 spellID);
     bool IsMovementCastSnareSpell(uint32 spellID);
+    Spell* GetActiveMovementCastSpellForPlayer(Player* player);
+    bool IsMovementCastStartBlockedForPlayer(Player* player, Spell* spell);
     void CancelMovementCastForJumpingPlayer(Player* player);
+    void CancelMovementCastForMovingPlayer(Player* player, bool isMoving);
     void ApplyMovementCastSnareForPlayer(Player* player, Spell* spell);
     void ApplyMovementCastSnareForPlayerCurrentCast(Player* player);
     void ClearMovementCastSnareForPlayer(Player* player);
@@ -2233,6 +2244,11 @@ public:
     void SetHailWindowOnRightClickForPlayer(Player* player, bool hailWindowOnRightClick);
     void SaveHailWindowOnRightClickForPlayer(Player* player);
     bool TryGetHailWindowOnRightClickForPlayer(Player* player, bool& hailWindowOnRightClick);
+    bool GetMoveWhileCastingForPlayer(Player* player);
+    void SetMoveWhileCastingForPlayer(Player* player, bool moveWhileCasting);
+    void SaveMoveWhileCastingForPlayer(Player* player);
+    void RefreshMoveWhileCastingStateForPlayer(Player* player);
+    bool IsMoveWhileCastingEnabledForPlayer(Player* player);
     bool GetShowDispelMessageForPlayer(Player* player);
     void SetShowDispelMessageForPlayer(Player* player, bool showDispelMessage);
     void SaveShowDispelMessageForPlayer(Player* player);

@@ -78,6 +78,13 @@ public:
         if (spell->GetCaster()->IsPlayer() == true && EverQuest->HandleClassAuraRangerEndlessQuiverOnCheckCast(spell->GetCaster()->ToPlayer(), spell, res) == true)
             return;
 
+        // A character that turned casting on the move off cannot start one of those casts while moving
+        if (strict == true && spell->GetCaster()->IsPlayer() == true && EverQuest->IsMovementCastStartBlockedForPlayer(spell->GetCaster()->ToPlayer(), spell) == true)
+        {
+            res = SPELL_FAILED_MOVING;
+            return;
+        }
+
         // Creature-cast charms follow extra limit rules
         Unit* target = spell->m_targets.GetUnitTarget();
         if (EverQuest->IsCreatureCharmBlockedByCharmLimits(spell->GetSpellInfo()->Id, target, spell->GetCaster()) == true)

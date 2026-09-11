@@ -3987,19 +3987,55 @@ bool EverQuestMod::IsMovementCastSnareSpell(uint32 spellID)
     return IsMovementCastSpell(spellID);
 }
 
-void EverQuestMod::CancelMovementCastForJumpingPlayer(Player* player)
+Spell* EverQuestMod::GetActiveMovementCastSpellForPlayer(Player* player)
 {
-    if (player == nullptr || ConfigSpellMovementCastJumpCancelEnabled == false || MovementCastSnareSpellIDs.empty() == true)
-        return;
+    if (player == nullptr || MovementCastSnareSpellIDs.empty() == true)
+        return nullptr;
     Spell* spell = player->GetCurrentSpell(CURRENT_GENERIC_SPELL);
     if (spell == nullptr || spell->getState() != SPELL_STATE_PREPARING || spell->GetCastTimeRemaining() <= 0)
-        return;
+        return nullptr;
     if (spell->IsTriggered() == true || spell->IsAutoRepeat() == true || spell->IsNextMeleeSwingSpell() == true)
-        return;
+        return nullptr;
     if (IsMovementCastSpell(spell->GetSpellInfo()->Id) == false)
+        return nullptr;
+    return spell;
+}
+
+bool EverQuestMod::IsMovementCastStartBlockedForPlayer(Player* player, Spell* spell)
+{
+    if (player == nullptr || spell == nullptr || MovementCastSnareSpellIDs.empty() == true)
+        return false;
+    if (player->isMoving() == false || spell->IsTriggered() == true || spell->IsAutoRepeat() == true)
+        return false;
+    SpellInfo const* spellInfo = spell->GetSpellInfo();
+    if (spellInfo == nullptr || IsMovementCastSpell(spellInfo->Id) == false)
+        return false;
+    if (IsMoveWhileCastingEnabledForPlayer(player) == true)
+        return false;
+    if (player->GetCommandStatus(CHEAT_CASTTIME) == true)
+        return false;
+    return spellInfo->CalcCastTime(player, spell) > 0;
+}
+
+void EverQuestMod::CancelMovementCastForJumpingPlayer(Player* player)
+{
+    if (player == nullptr || ConfigSpellMovementCastJumpCancelEnabled == false)
+        return;
+    Spell* spell = GetActiveMovementCastSpellForPlayer(player);
+    if (spell == nullptr)
         return;
 
     // The cancel runs the module's own OnSpellCastCancel hook, which is what lifts the casting slow
+    spell->cancel(true);
+}
+
+void EverQuestMod::CancelMovementCastForMovingPlayer(Player* player, bool isMoving)
+{
+    if (isMoving == false)
+        return;
+    Spell* spell = GetActiveMovementCastSpellForPlayer(player);
+    if (spell == nullptr || IsMoveWhileCastingEnabledForPlayer(player) == true)
+        return;
     spell->cancel(true);
 }
 
@@ -4017,6 +4053,9 @@ void EverQuestMod::ApplyMovementCastSnareForPlayer(Player* player, Spell* spell)
         return;
     // The Wizard class aura casts on the move at full speed
     if (IsMovementCastSnareExemptForPlayer(player) == true)
+        return;
+    // A character that turned casting on the move off has the cast broken instead
+    if (IsMoveWhileCastingEnabledForPlayer(player) == false)
         return;
 
     // Everything needed off the spell is read before the aura goes on, so nothing here touches a spell that is mid-prepare
@@ -12394,10 +12433,11 @@ EverQuestPlayerControllerData EverQuestMod::GetPlayerControllerData(Player* play
 {
     EverQuestPlayerControllerData controllerData;
     controllerData.GUID = player->GetGUID().GetCounter();
-    QueryResult queryResult = CharacterDatabase.Query("SELECT nextSecondaryClass, currentSecondaryClass, secondaryExpPool, illusionFaceId, showBardPulse, issuedIllusionItemId, hideWoWGear, dungeonMode, adventurerDisqualified, deathExpLost, deathExpRestGranted, deathExpLostClass, hailWindowOnRightClick, showDispelMessage, dispelMessageColor, pendingStartItemEQClass, mentorshipRole, mentorshipRealLevel, mentorshipRealExp, mentorshipBankedProgress, druidFormBear, druidFormCat, druidFormTravel, druidFormTree, druidFormMoonkin, mentorshipPetNumber, mentorshipPetLevel FROM mod_everquest_character_settings WHERE guid = {}", player->GetGUID().GetCounter());
+    QueryResult queryResult = CharacterDatabase.Query("SELECT nextSecondaryClass, currentSecondaryClass, secondaryExpPool, illusionFaceId, showBardPulse, issuedIllusionItemId, hideWoWGear, dungeonMode, adventurerDisqualified, deathExpLost, deathExpRestGranted, deathExpLostClass, hailWindowOnRightClick, showDispelMessage, dispelMessageColor, pendingStartItemEQClass, mentorshipRole, mentorshipRealLevel, mentorshipRealExp, mentorshipBankedProgress, druidFormBear, druidFormCat, druidFormTravel, druidFormTree, druidFormMoonkin, mentorshipPetNumber, mentorshipPetLevel, moveWhileCasting FROM mod_everquest_character_settings WHERE guid = {}", player->GetGUID().GetCounter());
     if (!queryResult || queryResult->GetRowCount() == 0)
     {
         const EverQuestClassMap classMap = GetClassMapForWOWClassID(player->getClass());
+        controllerData.MoveWhileCasting = true;
         controllerData.CurrentSecondClass = classMap.EQClassIDDefaultSecond;
         controllerData.NextSecondClass = classMap.EQClassIDDefaultSecond;
         controllerData.SecondaryExpPool = 0;
@@ -12459,6 +12499,7 @@ EverQuestPlayerControllerData EverQuestMod::GetPlayerControllerData(Player* play
 
         controllerData.MentorshipPetNumber = fields[25].Get<uint32>();
         controllerData.MentorshipPetRealLevel = fields[26].Get<uint8>();
+        controllerData.MoveWhileCasting = fields[27].Get<bool>();
     }
     return controllerData;
 }
@@ -12735,6 +12776,54 @@ bool EverQuestMod::TryGetHailWindowOnRightClickForPlayer(Player* player, bool& h
         return false;
     hailWindowOnRightClick = controllerDataIt->second.HailWindowOnRightClick;
     return true;
+}
+
+bool EverQuestMod::GetMoveWhileCastingForPlayer(Player* player)
+{
+    return GetOrLoadActivePlayerClassControllerData(player)->MoveWhileCasting;
+}
+
+void EverQuestMod::SetMoveWhileCastingForPlayer(Player* player, bool moveWhileCasting)
+{
+    GetOrLoadActivePlayerClassControllerData(player)->MoveWhileCasting = moveWhileCasting;
+    SaveMoveWhileCastingForPlayer(player);
+    RefreshMoveWhileCastingStateForPlayer(player);
+}
+
+void EverQuestMod::RefreshMoveWhileCastingStateForPlayer(Player* player)
+{
+    if (player == nullptr)
+        return;
+    bool moveWhileCasting = GetMoveWhileCastingForPlayer(player);
+    player->CustomData.GetDefault<EverQuestPlayerMoveWhileCastingState>(EQ_PLAYER_CUSTOMDATA_MOVEWHILECASTING)->Enabled = moveWhileCasting;
+}
+
+void EverQuestMod::SaveMoveWhileCastingForPlayer(Player* player)
+{
+    EverQuestPlayerControllerData controllerData;
+    {
+        std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+        auto controllerDataIt = ActivePlayerClassControllerDataByGUID.find(player->GetGUID());
+        if (controllerDataIt == ActivePlayerClassControllerDataByGUID.end())
+            return;
+        controllerData = controllerDataIt->second;
+    }
+
+    CharacterDatabase.Execute("INSERT INTO `mod_everquest_character_settings` (`guid`, `currentSecondaryClass`, `nextSecondaryClass`, `secondaryExpPool`, `moveWhileCasting`) VALUES ({}, {}, {}, {}, {}) ON DUPLICATE KEY UPDATE `moveWhileCasting` = {}",
+        player->GetGUID().GetCounter(),
+        controllerData.CurrentSecondClass,
+        controllerData.NextSecondClass,
+        controllerData.SecondaryExpPool,
+        controllerData.MoveWhileCasting == true ? 1 : 0,
+        controllerData.MoveWhileCasting == true ? 1 : 0);
+}
+
+bool EverQuestMod::IsMoveWhileCastingEnabledForPlayer(Player* player)
+{
+    EverQuestPlayerMoveWhileCastingState* state = player->CustomData.Get<EverQuestPlayerMoveWhileCastingState>(EQ_PLAYER_CUSTOMDATA_MOVEWHILECASTING);
+    if (state == nullptr)
+        return true;
+    return state->Enabled;
 }
 
 bool EverQuestMod::GetShowDispelMessageForPlayer(Player* player)
@@ -13119,7 +13208,8 @@ void EverQuestMod::SendPlayerOptionsToPlayer(Player* player)
         controllerData = controllerDataIt->second;
     }
 
-    std::string addonMessage = fmt::format("EQOPTIONS\t{}\t{}\t{}\t{}\t{}\t{}\t{:06X}\t{}\t{}\t{}\t{}\t{}",
+    // Move while casting went on the end, so an options page from before it existed still reads every field ahead of it
+    std::string addonMessage = fmt::format("EQOPTIONS\t{}\t{}\t{}\t{}\t{}\t{}\t{:06X}\t{}\t{}\t{}\t{}\t{}\t{}",
         controllerData.IllusionFaceID,
         IllusionMaxFaceIndex,
         controllerData.ShowBardPulse == true ? 1 : 0,
@@ -13131,7 +13221,8 @@ void EverQuestMod::SendPlayerOptionsToPlayer(Player* player)
         controllerData.DruidFormCat == 0 ? GetDruidFormFactionDefaultOption(player, EQ_DRUID_FORM_TYPE_CAT) : controllerData.DruidFormCat,
         controllerData.DruidFormTravel,
         controllerData.DruidFormTree,
-        controllerData.DruidFormMoonkin);
+        controllerData.DruidFormMoonkin,
+        controllerData.MoveWhileCasting == true ? 1 : 0);
     WorldPacket data;
     ChatHandler::BuildChatPacket(data, CHAT_MSG_SYSTEM, LANG_ADDON, nullptr, nullptr, addonMessage);
     player->GetSession()->SendPacket(&data);

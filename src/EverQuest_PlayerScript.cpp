@@ -465,6 +465,7 @@ public:
         EverQuest->UpdateFactionGatedQuestsForPlayer(player, p_time);
         EverQuest->UpdatePlayerTracking(player, p_time);
         EverQuest->UpdateClassAurasForPlayer(player, p_time);
+        EverQuest->CancelMovementCastForMovingPlayer(player, player->isMoving());
         EverQuest->UpdateMovementCastSnareForPlayer(player);
         if (EverQuest->ConfigSpellSummonPlayerAcrossZones == true)
             EverQuest->ConsumePendingSummonRequest(player);
@@ -793,7 +794,8 @@ public:
         EverQuest->LoadAuctionRealmFilterForPlayer(player);
         EverQuest->SendAuctionRealmFilterToPlayer(player);
 
-        // Set the in game options page with what this character is actually set to
+        // Copy the move while casting setting onto the player for the map thread, and set the in game options page with what this character is actually set to
+        EverQuest->RefreshMoveWhileCastingStateForPlayer(player);
         EverQuest->SendPlayerOptionsToPlayer(player);
 
         // A character that logged out inside a private dungeon copy is still in it, and the map entry announcement could not be sent while loading

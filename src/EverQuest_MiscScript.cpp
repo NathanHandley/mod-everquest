@@ -41,7 +41,7 @@ class EverQuest_MovementHandlerScript : public MovementHandlerScript
 public:
     EverQuest_MovementHandlerScript() : MovementHandlerScript("EverQuest_MovementHandlerScript") {}
 
-    void OnPlayerMove(Player* player, MovementInfo /*movementInfo*/, uint32 opcode) override
+    void OnPlayerMove(Player* player, MovementInfo movementInfo, uint32 opcode) override
     {
         if (EverQuest->IsEnabled == false)
             return;
@@ -52,6 +52,9 @@ public:
             EverQuest->CancelMovementCastForJumpingPlayer(player);
             return;
         }
+
+        // A character that turned casting on the move off has the cast broken instead
+        EverQuest->CancelMovementCastForMovingPlayer(player, movementInfo.HasMovementFlag(MOVEMENTFLAG_MASK_MOVING));
 
         EverQuest->ApplyMovementCastSnareForPlayerCurrentCast(player);
     }

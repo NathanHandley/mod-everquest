@@ -131,6 +131,7 @@ public:
             { "eqgps",  HandleEQGPSCommand,                     SEC_PLAYER, Console::No },
             { "eqver",  HandleEQVerCommand,                     SEC_PLAYER, Console::No },
             { "eqface", HandleEQFaceCommand,                    SEC_PLAYER, Console::No },
+            { "eqmovecast", HandleEQMoveCastCommand,            SEC_PLAYER, Console::No },
             { "eqshowbardpulse", HandleEQShowBardPulseCommand,  SEC_PLAYER, Console::No },
             { "eqhidewowgear", HandleEQHideWoWGearCommand,      SEC_PLAYER, Console::No },
             { "eqdungeonmode", HandleEQDungeonModeCommand,      SEC_PLAYER, Console::No },
@@ -456,6 +457,52 @@ public:
         return true;
     }
 
+    static bool HandleEQMoveCastCommand(ChatHandler* handler, const char* args)
+    {
+        if (EverQuest->IsEnabled == false)
+            return true;
+
+        Player* player = handler->GetPlayer();
+        if (player == nullptr)
+            return true;
+
+        // Validate the passed value is either "on" or "off"
+        bool isValidValue = false;
+        bool moveWhileCasting = true;
+        if (*args)
+        {
+            std::string valueString = GetFirstCommandArg(args);
+            boost::algorithm::to_lower(valueString);
+            if (valueString == "on")
+            {
+                moveWhileCasting = true;
+                isValidValue = true;
+            }
+            else if (valueString == "off")
+            {
+                moveWhileCasting = false;
+                isValidValue = true;
+            }
+        }
+        if (isValidValue == false)
+        {
+            string currentStateString = EverQuest->GetMoveWhileCastingForPlayer(player) == true ? "on" : "off";
+            handler->PSendSysMessage(".eqmovecast 'on' or 'off'");
+            handler->PSendSysMessage("When on, you keep casting your spells while you move, though moving may slow you until the cast ends. When off, moving breaks those casts the way it normally does. Example: '.eqmovecast off'");
+            handler->PSendSysMessage("Moving while casting is currently |cff4CFF00{}|r for you.", currentStateString);
+            return true;
+        }
+
+        // Store the setting and push it to the options page.  It is read fresh at every cast and every movement, so nothing else needs refreshing
+        EverQuest->SetMoveWhileCastingForPlayer(player, moveWhileCasting);
+        EverQuest->SendPlayerOptionsToPlayer(player);
+        if (moveWhileCasting == true)
+            handler->PSendSysMessage("You can now |cff4CFF00move while casting|r.");
+        else
+            handler->PSendSysMessage("Moving now |cff4CFF00breaks your casts|r.");
+        return true;
+    }
+
     // Named colors the dispel message accepts, so a raw hex value is never the only way to pick one
     struct EverQuestNamedChatColor
     {
@@ -771,6 +818,7 @@ public:
         }
 
         handler->PSendSysMessage("=== EverQuest Options ===");
+        handler->PSendSysMessage("Move while casting (.eqmovecast): |cff4CFF00{}|r", EverQuest->GetMoveWhileCastingForPlayer(player) == true ? "on" : "off");
         handler->PSendSysMessage("Illusion face (.eqface): |cff4CFF00{}|r (0 - {})", EverQuest->GetIllusionFaceIDForPlayer(player), EverQuest->IllusionMaxFaceIndex);
         handler->PSendSysMessage("Bard song pulse graphics (.eqshowbardpulse): |cff4CFF00{}|r", EverQuest->GetShowBardPulseForPlayer(player) == true ? "shown" : "hidden");
         handler->PSendSysMessage("Hide WoW gear on other players (.eqhidewowgear): |cff4CFF00{}|r", EverQuest->GetHideWoWGearForPlayer(player) == true ? "on" : "off");
