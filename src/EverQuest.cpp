@@ -6388,7 +6388,7 @@ const list<uint32>& EverQuestMod::GetAutoLearnSkillsForClass(uint8 classID)
 void EverQuestMod::LoadAutoLearnSpellsData()
 {
     PlayerAutoLearnSpellsByClassID.clear();
-    QueryResult queryResult = WorldDatabase.Query("SELECT eqclass, race, spell, level FROM mod_everquest_playerautolearnspells;");
+    QueryResult queryResult = WorldDatabase.Query("SELECT eqclass, race, wowclass, spell, level FROM mod_everquest_playerautolearnspells;");
     if (queryResult)
     {
         do
@@ -6397,8 +6397,9 @@ void EverQuestMod::LoadAutoLearnSpellsData()
             Field* fields = queryResult->Fetch();
             autoLearnSpell.EQClassID = fields[0].Get<uint8>();
             autoLearnSpell.RaceID = fields[1].Get<uint8>();
-            autoLearnSpell.SpellID = fields[2].Get<uint32>();
-            autoLearnSpell.Level = fields[3].Get<uint8>();
+            autoLearnSpell.WOWClassID = fields[2].Get<uint8>();
+            autoLearnSpell.SpellID = fields[3].Get<uint32>();
+            autoLearnSpell.Level = fields[4].Get<uint8>();
             PlayerAutoLearnSpellsByClassID[autoLearnSpell.EQClassID].push_back(autoLearnSpell);
         } while (queryResult->NextRow());
     }
@@ -6513,6 +6514,9 @@ void EverQuestMod::ApplyAutoLearnedClassSkillsAndSpells(Player* player)
         {
             // A race of 0 means the spell is learned regardless of race
             if (autoLearnSpell.RaceID != 0 && autoLearnSpell.RaceID != player->getRace())
+                continue;
+            // A WoW class of 0 means the spell is learned regardless of WoW class (Piercing Backstab (Feral) is WoW Druid only)
+            if (autoLearnSpell.WOWClassID != 0 && autoLearnSpell.WOWClassID != player->getClass())
                 continue;
             // Only learn once the player has reached the spell's required level
             if (autoLearnLevel < autoLearnSpell.Level)
