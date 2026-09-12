@@ -2903,6 +2903,41 @@ void EverQuestMod::RemoveOrphanedItemEquipAurasForPlayer(Player* player)
     }
 }
 
+bool EverQuestMod::IsSlotshiftSpell(SpellInfo const* spellInfo)
+{
+    if (spellInfo == nullptr)
+        return false;
+    if (spellInfo->SpellName[0] == nullptr || strcmp(spellInfo->SpellName[0], EQ_SLOTSHIFT_SPELL_NAME) != 0)
+        return false;
+
+    // Every slotshift spell creates the next version of the item in its ring
+    return spellInfo->HasEffect(SPELL_EFFECT_CREATE_ITEM);
+}
+
+void EverQuestMod::RechargeSlotshiftItemForPlayer(Player* player, Item* item)
+{
+    if (player == nullptr || item == nullptr)
+        return;
+    ItemTemplate const* itemTemplate = item->GetTemplate();
+    if (itemTemplate == nullptr)
+        return;
+
+    // An item created before slotshift was added to its template was saved with no charges, which the core reads as spent and refuses to cast
+    for (uint8 spellIndex = 0; spellIndex < MAX_ITEM_PROTO_SPELLS; ++spellIndex)
+    {
+        _Spell const& itemSpell = itemTemplate->Spells[spellIndex];
+        if (itemSpell.SpellId <= 0 || itemSpell.SpellCharges == 0 || itemSpell.SpellTrigger != ITEM_SPELLTRIGGER_ON_USE)
+            continue;
+        if (item->GetSpellCharges(spellIndex) == itemSpell.SpellCharges)
+            continue;
+        if (IsSlotshiftSpell(sSpellMgr->GetSpellInfo(itemSpell.SpellId)) == false)
+            continue;
+
+        item->SetSpellCharges(spellIndex, itemSpell.SpellCharges);
+        item->SetState(ITEM_CHANGED, player);
+    }
+}
+
 void EverQuestMod::RegisterEQWeaponPoisonProcSpells(SpellInfo* spellInfo)
 {
     // Tracking is used for poison based talents

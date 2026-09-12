@@ -121,6 +121,8 @@ struct BuildValuesCachePosPointers;
 
 #define EQ_STUN_NPC_IMMUNE_ABOVE_LEVEL              55 // TODO: Consider changing this for 61+ content
 
+#define EQ_SLOTSHIFT_SPELL_NAME                     "Slotshift" // Name the converter gives every slotshift spell
+
 // Pre-defined by the WoW core
 #define EQ_DAZE_SPELL_ID                            1604
 #define EQ_DEATHKNIGHT_DEATHGATE_SPELL_ID           50977
@@ -1846,6 +1848,8 @@ public:
     bool IsWornEffectSpell(uint32 spellID);
     bool IsItemEquipAuraSpell(SpellInfo const* spellInfo);
     void RemoveOrphanedItemEquipAurasForPlayer(Player* player);
+    bool IsSlotshiftSpell(SpellInfo const* spellInfo);
+    void RechargeSlotshiftItemForPlayer(Player* player, Item* item);
     void RegisterEQWeaponPoisonProcSpells(SpellInfo* spellInfo);
     bool IsSpellAnEQWeaponPoisonProc(uint32 spellID);
     void LoadSpellData();

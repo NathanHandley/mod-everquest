@@ -42,7 +42,26 @@ public:
     }
 };
 
+class EverQuest_AllItemScript : public AllItemScript
+{
+public:
+    EverQuest_AllItemScript() : AllItemScript("EverQuest_AllItemScript") {}
+
+    bool CanItemUse(Player* player, Item* item, SpellCastTargets const& /*targets*/) override
+    {
+        if (EverQuest->IsEnabled == false)
+            return false;
+
+        // This runs before the cast checks charges, so a slotshift item that is out of charges gets them back here
+        EverQuest->RechargeSlotshiftItemForPlayer(player, item);
+
+        // Returning false lets the core carry on and cast the item's spell
+        return false;
+    }
+};
+
 void AddEverQuestItemScripts()
 {
     new EverQuest_ItemScript();
+    new EverQuest_AllItemScript();
 }
