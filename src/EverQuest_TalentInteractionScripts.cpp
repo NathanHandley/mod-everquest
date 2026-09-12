@@ -15,6 +15,7 @@
 //  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #include "Player.h"
+#include "Random.h"
 #include "ScriptMgr.h"
 #include "SpellAuraEffects.h"
 #include "SpellAuras.h"
@@ -496,6 +497,56 @@ class EverQuest_EmpoweredRenewSpellScript : public AuraScript
     }
 };
 
+// The rogue poison talents reach EQ weapon poisons through this script, which the converter attaches to every spell an EQ rogue
+// poison procs.  Master Poisoner is built here rather than aligned because the spell its own talent triggers (45176) does not
+// exist in 3.3.5 at all, so its critical hit bonus never worked for WOW poisons either, and Deadly Brew's core script only ever
+// sees spells in the rogue poison family
+static constexpr uint32 EQ_SPELL_ID_ROGUE_MASTER_POISONER_RANK1 = 31226;
+static constexpr uint32 EQ_SPELL_ID_ROGUE_DEADLY_BREW_RANK1 = 51625;
+static constexpr uint32 EQ_SPELL_ID_ROGUE_CRIPPLING_POISON = 3409;
+
+class EverQuest_RoguePoisonSpellScript : public SpellScript
+{
+    PrepareSpellScript(EverQuest_RoguePoisonSpellScript);
+
+    void HandleAfterHit()
+    {
+        if (IsEQTalentInteractionEnabled() == false)
+            return;
+
+        Unit* caster = GetCaster();
+        Unit* target = GetHitUnit();
+        if (caster == nullptr || target == nullptr || target->IsAlive() == false)
+            return;
+        Player* player = caster->ToPlayer();
+        if (player == nullptr)
+            return;
+
+        // Mark the target as poisoned, carrying whatever critical hit bonus Master Poisoner grants this rogue.  The mark lands
+        // for every poison, talented or not, so that a direct damage poison still leaves something behind that reads as a poison
+        if (EverQuest->ConfigSystemRoguePoisonMarkerSpellID != 0)
+        {
+            int32 criticalHitPercent = 0;
+            if (AuraEffect const* masterPoisonerEffect = player->GetAuraEffectOfRankedSpell(EQ_SPELL_ID_ROGUE_MASTER_POISONER_RANK1, EFFECT_0))
+                criticalHitPercent = masterPoisonerEffect->GetAmount();
+            player->CastCustomSpell(target, EverQuest->ConfigSystemRoguePoisonMarkerSpellID, &criticalHitPercent, nullptr, nullptr, true);
+        }
+
+        // Deadly Brew gives a poison application its chance to also apply Crippling Poison, the same chance the talent carries
+        if (AuraEffect const* deadlyBrewEffect = player->GetAuraEffectOfRankedSpell(EQ_SPELL_ID_ROGUE_DEADLY_BREW_RANK1, EFFECT_0))
+        {
+            SpellInfo const* deadlyBrewSpellInfo = deadlyBrewEffect->GetSpellInfo();
+            if (deadlyBrewSpellInfo != nullptr && roll_chance_i(int32(deadlyBrewSpellInfo->ProcChance)) == true)
+                player->CastSpell(target, EQ_SPELL_ID_ROGUE_CRIPPLING_POISON, true);
+        }
+    }
+
+    void Register() override
+    {
+        AfterHit += SpellHitFn(EverQuest_RoguePoisonSpellScript::HandleAfterHit);
+    }
+};
+
 void AddEverQuestTalentInteractionScripts()
 {
     RegisterSpellScript(EverQuest_ColdSnapSpellScript);
@@ -510,4 +561,5 @@ void AddEverQuestTalentInteractionScripts()
     RegisterSpellScript(EverQuest_ImprovedSpiritTapAuraScript);
     RegisterSpellScript(EverQuest_ShadowWeavingSpellScript);
     RegisterSpellScript(EverQuest_EmpoweredRenewSpellScript);
+    RegisterSpellScript(EverQuest_RoguePoisonSpellScript);
 }

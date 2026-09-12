@@ -94,6 +94,9 @@ public:
         if (EverQuest->IsSpellAnEQSpell(spell->Id) == false)
             return;
 
+        // Remember which spells an EQ rogue weapon poison actually procs, so the rogue poison talents can recognize one
+        EverQuest->RegisterEQWeaponPoisonProcSpells(spell);
+
         bool hasHarmfulPeriodic = false;
         bool hasAuraEffect = false;
         bool allSelfTargeted = true;
@@ -136,8 +139,9 @@ public:
                 spell->AttributesCu |= SPELL_ATTR0_CU_SINGLE_AURA_STACK;
         }
 
-        // In EQ, a recast of the same spell should refresh it
-        if (hasAuraEffect == true && EverQuest->IsWornEffectSpell(spell->Id) == false)
+        // In EQ, a recast of the same spell should refresh it with the rogue poison as an exception in that in can carry the critical hit bonus
+        // for the rogue that applied it, so a second rogue can have their own copy instead of refreshing
+        if (hasAuraEffect == true && EverQuest->IsWornEffectSpell(spell->Id) == false && (EverQuest->ConfigSystemRoguePoisonMarkerSpellID == 0 || spell->Id != EverQuest->ConfigSystemRoguePoisonMarkerSpellID))
             spell->AttributesCu |= SPELL_ATTR0_CU_SINGLE_AURA_STACK;
 
         // EQ class aura effects can keep one shared copy per target no matter who applied it

@@ -53,7 +53,7 @@ class ByteBuffer;
 struct AreaTrigger;
 struct BuildValuesCachePosPointers;
 
-#define EQ_MOD_VERSION                              104
+#define EQ_MOD_VERSION                              105
 
 #define EQ_MOVEMENT_CAST_SNARE_DURATION_BUFFER_IN_MS 2000 // How much longer than the remaining cast time the casting slow is given, so a pushed-back cast keeps it
 
@@ -1466,6 +1466,7 @@ public:
     uint32 ConfigSystemInvisVsUndeadDetectSpellID;
     uint32 ConfigSystemRangedAttackSpellID;
     uint32 ConfigSystemResistAdjustmentSpellID;
+    uint32 ConfigSystemRoguePoisonMarkerSpellID;
     uint32 ConfigSystemLegacyAchievementID;
     string ConfigSystemLegacyAchievementAccountCreatedBefore;
     uint32 ConfigSystemItemTemplateIDMin;
@@ -1670,6 +1671,7 @@ public:
     unordered_map<uint32, EverQuestItemTemplate> ItemTemplatesByEntryID;
     unordered_map<uint64, vector<EverQuestGearSwapCandidate>> GearSwapCandidatesByLookupKey;
     unordered_set<uint32> WornEffectSpellIDs;
+    unordered_set<uint32> EQWeaponPoisonProcSpellIDs;
     unordered_map<uint32, EverQuestSpell> SpellDataBySpellID;
     unordered_set<uint32> BardSongTickSpellIDs;
     unordered_set<uint32> MovementCastSnareSpellIDs;
@@ -1837,6 +1839,8 @@ public:
     bool IsWornEffectSpell(uint32 spellID);
     bool IsItemEquipAuraSpell(SpellInfo const* spellInfo);
     void RemoveOrphanedItemEquipAurasForPlayer(Player* player);
+    void RegisterEQWeaponPoisonProcSpells(SpellInfo* spellInfo);
+    bool IsSpellAnEQWeaponPoisonProc(uint32 spellID);
     void LoadSpellData();
     const EverQuestSpell& GetSpellDataForSpellID(uint32 spellID);
     void LoadSpellMovementCastSnareData();

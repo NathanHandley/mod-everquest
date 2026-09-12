@@ -88,6 +88,7 @@ EverQuestMod::EverQuestMod() :
     ConfigDeathKnightsStartLikeOtherClasses(false),
     ConfigSystemInvisVsUndeadDetectSpellID(0),
     ConfigSystemResistAdjustmentSpellID(0),
+    ConfigSystemRoguePoisonMarkerSpellID(0),
     ConfigSystemLegacyAchievementID(0),
     ConfigSystemItemTemplateIDMin(0),
     ConfigSystemItemTemplateIDMax(0),
@@ -339,6 +340,8 @@ bool EverQuestMod::LoadConfigurationSystemDataFromDB()
                 ConfigSystemRangedAttackSpellID = (uint32)atoi(value.c_str());
             else if (key == "ResistAdjustmentSpellID")
                 ConfigSystemResistAdjustmentSpellID = (uint32)atoi(value.c_str());
+            else if (key == "RoguePoisonMarkerSpellID")
+                ConfigSystemRoguePoisonMarkerSpellID = (uint32)atoi(value.c_str());
             else if (key == "QuestSQLIDMin")
                 ConfigSystemQuestSQLIDMin = (uint32)atoi(value.c_str());
             else if (key == "QuestSQLIDMax")
@@ -2898,6 +2901,34 @@ void EverQuestMod::RemoveOrphanedItemEquipAurasForPlayer(Player* player)
             orphanedSpellIDAndCastItemGUID.first, player->GetName(), player->GetGUID().GetCounter(), orphanedSpellIDAndCastItemGUID.second.ToString());
         player->RemoveAurasDueToItemSpell(orphanedSpellIDAndCastItemGUID.first, orphanedSpellIDAndCastItemGUID.second);
     }
+}
+
+void EverQuestMod::RegisterEQWeaponPoisonProcSpells(SpellInfo* spellInfo)
+{
+    // Tracking is used for poison based talents
+    if (spellInfo == nullptr)
+        return;
+    for (uint8 effectIndex = 0; effectIndex < MAX_SPELL_EFFECTS; ++effectIndex)
+    {
+        if (spellInfo->Effects[effectIndex].Effect != SPELL_EFFECT_ENCHANT_ITEM_TEMPORARY)
+            continue;
+        SpellItemEnchantmentEntry const* enchantEntry = sSpellItemEnchantmentStore.LookupEntry(spellInfo->Effects[effectIndex].MiscValue);
+        if (enchantEntry == nullptr)
+            continue;
+        for (uint8 enchantEffectIndex = 0; enchantEffectIndex < MAX_SPELL_ITEM_ENCHANTMENT_EFFECTS; ++enchantEffectIndex)
+        {
+            if (enchantEntry->type[enchantEffectIndex] != ITEM_ENCHANTMENT_TYPE_COMBAT_SPELL)
+                continue;
+            if (enchantEntry->spellid[enchantEffectIndex] == 0)
+                continue;
+            EQWeaponPoisonProcSpellIDs.insert(enchantEntry->spellid[enchantEffectIndex]);
+        }
+    }
+}
+
+bool EverQuestMod::IsSpellAnEQWeaponPoisonProc(uint32 spellID)
+{
+    return EQWeaponPoisonProcSpellIDs.find(spellID) != EQWeaponPoisonProcSpellIDs.end();
 }
 
 bool EverQuestMod::IsItemTemplateIDAnEQItemTemplateID(uint32 itemTemplateID)
@@ -15849,7 +15880,7 @@ void EverQuestMod::MoveAuraToModAuraTable(Player* player, CharacterDatabaseTrans
         keptSpellsList = "0"; // No spell uses id 0, so NOT IN (0) keeps nothing
 
     transaction->Append("DELETE FROM `mod_everquest_character_class_aura` WHERE guid = {} and eqclass = {}", player->GetGUID().GetCounter(), curEQClass);
-    transaction->Append("INSERT IGNORE INTO mod_everquest_character_class_aura (guid, class, eqclass, casterGuid, itemGuid, spell, effectMask, recalculateMask, stackCount, amount0, amount1, amount2, base_amount0, base_amount1, base_amount2, maxDuration, remainTime, remainCharges) SELECT guid, {}, {}, casterGuid, itemGuid, spell, effectMask, recalculateMask, stackCount, amount0, amount1, amount2, base_amount0, base_amount1, base_amount2, maxDuration, remainTime, remainCharges FROM character_aura WHERE guid = {} AND spell NOT IN ({})", player->getClass(), curEQClass, player->GetGUID().GetCounter(), keptSpellsList);
+    transaction->Append("INSERT IGNORE INTO mod_everquest_character_class_aura (guid, class, eqclass, casterGuid, itemGuid, spell, effectMask, recalculateMask, stackCount, amount0, amount1, amount2, base_amount0, base_amount1, base_amount2, maxDuration, remainTime, remainCharges) SELECT guid, {}, {}, casterGuid, itemGuid, spell, effectMask, recalculateMask, stackCount, amount0, amount1, amount2, base_amount0, base_amount1, base_amount2, maxDuration, remainTime, remainCharges FROM character_aura WHERE guid = {} AND itemGuid = 0 AND spell NOT IN ({})", player->getClass(), curEQClass, player->GetGUID().GetCounter(), keptSpellsList);
     transaction->Append("DELETE FROM `character_aura` WHERE guid = {} AND spell NOT IN ({})", player->GetGUID().GetCounter(), keptSpellsList);
 }
 

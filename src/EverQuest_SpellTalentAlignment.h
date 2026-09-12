@@ -44,7 +44,8 @@ enum EverQuestTalentAlignmentRestriction : uint8
     EQTALENTRESTRICTION_PERIODIC_DAMAGE = 8,         // Only EQ spells with a damage over time effect
     EQTALENTRESTRICTION_CURE = 9,                    // EQ dispel / cure spells, reached regardless of the damage and healing flags
     EQTALENTRESTRICTION_STRENGTH_DEBUFF = 10,        // The effect the modifier targets is a strength reduction, reached regardless of the damage and healing flags
-    EQTALENTRESTRICTION_PET_SUMMON = 11              // EQ pet summoning spells, reached regardless of the damage and healing flags
+    EQTALENTRESTRICTION_PET_SUMMON = 11,             // EQ pet summoning spells, reached regardless of the damage and healing flags
+    EQTALENTRESTRICTION_WEAPON_POISON = 12           // Spells that an EQ rogue weapon poison procs, reached regardless of the damage and healing flags
 };
 
 struct EverQuestTalentModAlignment

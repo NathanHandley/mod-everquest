@@ -491,6 +491,11 @@ bool EverQuestSpellTalentAlignment::DoesAlignmentReachEQSpell(EverQuestTalentMod
         if (DoesSpellInfoSummonAPet(eqSpellInfo) == false)
             return false;
     }
+    else if (alignment.SpellRestriction == EQTALENTRESTRICTION_WEAPON_POISON)
+    {
+        if (EverQuest->IsSpellAnEQWeaponPoisonProc(eqSpellInfo->Id) == false)
+            return false;
+    }
     else
     {
         bool reaches = false;
