@@ -471,6 +471,7 @@ public:
         EverQuest->UpdateClassAurasForPlayer(player, p_time);
         EverQuest->CancelMovementCastForMovingPlayer(player, player->isMoving());
         EverQuest->UpdateMovementCastSnareForPlayer(player);
+        EverQuest->TeachPetOverflowTemplateSpells(player);
         if (EverQuest->ConfigSpellSummonPlayerAcrossZones == true)
             EverQuest->ConsumePendingSummonRequest(player);
 

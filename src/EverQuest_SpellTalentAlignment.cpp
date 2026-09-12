@@ -136,7 +136,7 @@ void EverQuestSpellTalentAlignment::LoadExplicitAlignments()
         alignment.AffectsHealing = fields[4].Get<uint8>() != 0;
         alignment.SpellRestriction = fields[5].Get<uint8>();
         alignment.MaxBaseCastTimeInMS = fields[6].Get<uint32>();
-        if (alignment.SpellRestriction > EQTALENTRESTRICTION_PET_SUMMON)
+        if (alignment.SpellRestriction > EQTALENTRESTRICTION_WEAPON_POISON)
         {
             LOG_ERROR("module", "EverQuest: Talent alignment row for spell ID {} has an invalid SpellRestriction of {}", spellID, alignment.SpellRestriction);
             continue;

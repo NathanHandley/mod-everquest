@@ -6677,7 +6677,7 @@ bool EverQuestMod::CanPetCreatureTemplateTeachSpell(uint32 creatureTemplateID, u
     if (creatureTemplate == nullptr)
         return true; // Without a creature template the pet can't be summoned at all, so leave its saved rows alone
 
-    // creature_template_spell.  The core only reads the first MAX_CREATURE_SPELL_DATA_SLOT of these into a pet's default spells, but a spell in any slot was put there deliberately and shouldn't be called stale
+    // creature_template_spell.  The core only reads the first MAX_CREATURE_SPELL_DATA_SLOT of these into a pet's default spells, and TeachPetOverflowTemplateSpells teaches the rest, so every slot is live
     for (uint8 spellIndex = 0; spellIndex < MAX_CREATURE_SPELLS; ++spellIndex)
         if (creatureTemplate->spells[spellIndex] == spellID)
             return true;
@@ -6711,6 +6711,44 @@ bool EverQuestMod::CanPetCreatureTemplateTeachSpell(uint32 creatureTemplateID, u
         return true;
 
     return false;
+}
+
+void EverQuestMod::TeachPetOverflowTemplateSpells(Player* player)
+{
+    if (player->GetPetGUID().IsEmpty() == true)
+        return;
+    Pet* pet = player->GetPet();
+    if (pet == nullptr || pet->IsInWorld() == false || pet->isBeingLoaded() == true)
+        return;
+    CreatureTemplate const* creatureTemplate = pet->GetCreatureTemplate();
+    if (creatureTemplate == nullptr || HasPetDataForCreatureTemplateID(creatureTemplate->Entry) == false)
+        return;
+
+    // Only walk the slots for a new pet object or after its level moves, since a slot spell can carry a SpellLevel gate
+    EverQuestPetOverflowSpellState* overflowState = pet->CustomData.GetDefault<EverQuestPetOverflowSpellState>(EQ_CREATURE_CUSTOMDATA_PETOVERFLOWSPELLS);
+    uint8 petLevel = pet->GetLevel();
+    if (overflowState->LastAppliedLevel == petLevel)
+        return;
+    overflowState->LastAppliedLevel = petLevel;
+
+    for (uint8 spellIndex = MAX_CREATURE_SPELL_DATA_SLOT; spellIndex < MAX_CREATURE_SPELLS; ++spellIndex)
+    {
+        uint32 spellID = creatureTemplate->spells[spellIndex];
+        if (spellID == 0)
+            continue;
+        SpellInfo const* spellInfo = sSpellMgr->GetSpellInfo(spellID);
+        if (spellInfo == nullptr)
+            continue;
+
+        // The same level gate Pet::InitLevelupSpellsForLevel applies to the first four slots
+        if (spellInfo->SpellLevel > petLevel)
+        {
+            if (pet->HasSpell(spellID) == true)
+                pet->unlearnSpell(spellID, false);
+        }
+        else
+            pet->learnSpell(spellID);
+    }
 }
 
 bool EverQuestMod::HasPetDataForCreatureTemplateID(uint32 creatureTemplateID)

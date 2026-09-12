@@ -358,6 +358,7 @@ struct BuildValuesCachePosPointers;
 #define EQ_CREATURE_CUSTOMDATA_DEFENDPLAYERWATCH    "EQDefendPlayerWatch"
 #define EQ_CREATURE_CUSTOMDATA_AGGROPOSITION        "EQAggroPos"
 #define EQ_CREATURE_CUSTOMDATA_AGROZBLOCK           "EQAgroZBlock"
+#define EQ_CREATURE_CUSTOMDATA_PETOVERFLOWSPELLS    "EQPetOverflowSpells"
 #define EQ_CREATURE_CUSTOMDATA_FEARDIMINISH         "EQFearDiminish"
 #define EQ_UNIT_CUSTOMDATA_SNAREDIMINISH            "EQSnareDiminish"
 
@@ -768,6 +769,12 @@ public:
     uint32 RandomTimerRemainingMS = 0;
     uint32 ProximityCheckRemainingMS = 0;
     uint32 ProximityCooldownRemainingMS = 0;
+};
+
+class EverQuestPetOverflowSpellState : public DataMap::Base
+{
+public:
+    uint8 LastAppliedLevel = 0;
 };
 
 class EverQuestCreatureKillSpawnWatchState : public DataMap::Base
@@ -2004,6 +2011,7 @@ public:
     void FixInvalidCharacterPetModelIDs();
     void RemoveStaleSavedPetSpells();
     bool CanPetCreatureTemplateTeachSpell(uint32 creatureTemplateID, uint32 spellID);
+    void TeachPetOverflowTemplateSpells(Player* player);
     void LoadCreatePlayerData();
     bool HasCreatePlayerData(uint8 raceID, uint8 classID);
     const EverQuestPlayerCreateInfo& GetPlayerCreateInfo(uint8 raceID, uint8 classID);
