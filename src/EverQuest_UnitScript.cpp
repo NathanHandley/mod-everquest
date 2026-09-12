@@ -279,6 +279,9 @@ public:
         if (EverQuest->TryTransferDebuffToNecromancerPet(player, aura) == true)
             return;
 
+        // A silence landed by another player, or their pet, stops the songs this player already has running
+        EverQuest->CancelBardSongsOnPvPSilenceAuraApply(player, aura);
+
         if (EverQuest->IsSpellAnEQBardSong(spellID) == true && EverQuest->ConfigBardMaxConcurrentSongs != 0)
         {
             // Only the lookup needs the lock; the queue itself is only touched by this player's own thread

@@ -125,6 +125,7 @@ EverQuestMod::EverQuestMod() :
     ConfigSpellPvPChainedCrowdControlDiminishingReturnsEnabled(true),
     ConfigSpellPvPCrowdControlMaxDurationInMS(10000),
     ConfigSpellPvPSnareDiminishingReturnsEnabled(true),
+    ConfigSpellPvPSilenceCancelsBardSongsEnabled(true),
     ConfigSpellNoSwingTimerResetForEQSpells(true),
     ConfigSpellNoSwingTimerResetForWoWSpells(false),
     ConfigSpellMovementCastSnareEnabled(true),
@@ -428,6 +429,7 @@ void EverQuestMod::LoadConfigurationFile()
     ConfigSpellPvPChainedCrowdControlDiminishingReturnsEnabled = sConfigMgr->GetOption<bool>("EverQuest.Spells.PvPChainedCrowdControlDiminishingReturnsEnabled", true);
     ConfigSpellPvPCrowdControlMaxDurationInMS = sConfigMgr->GetOption<uint32>("EverQuest.Spells.PvPCrowdControlMaxDurationInMS", 10000);
     ConfigSpellPvPSnareDiminishingReturnsEnabled = sConfigMgr->GetOption<bool>("EverQuest.Spells.PvPSnareDiminishingReturnsEnabled", true);
+    ConfigSpellPvPSilenceCancelsBardSongsEnabled = sConfigMgr->GetOption<bool>("EverQuest.Spells.PvPSilenceCancelsBardSongsEnabled", true);
     ConfigSpellNoSwingTimerResetForEQSpells = sConfigMgr->GetOption<bool>("EverQuest.Spells.NoSwingTimerResetForEQSpells", true);
     ConfigSpellNoSwingTimerResetForWoWSpells = sConfigMgr->GetOption<bool>("EverQuest.Spells.NoSwingTimerResetForWoWSpells", false);
 
@@ -5179,6 +5181,56 @@ void EverQuestMod::ClearPvPSnareDiminishingReturnState(Unit* unit)
 {
     // Dying clears diminishing returns, the same as the core clears its own groups
     unit->CustomData.Erase(EQ_UNIT_CUSTOMDATA_SNAREDIMINISH);
+}
+
+void EverQuestMod::CancelBardSongsOnPvPSilenceAuraApply(Unit* target, Aura* aura)
+{
+    if (ConfigSpellPvPSilenceCancelsBardSongsEnabled == false)
+        return;
+    if (target == nullptr || aura == nullptr)
+        return;
+    Player* targetPlayer = target->ToPlayer();
+    if (targetPlayer == nullptr)
+        return;
+    Unit* caster = aura->GetCaster();
+    if (caster == nullptr || caster == target || caster->IsCharmedOwnedByPlayerOrPlayer() == false)
+        return;
+
+    // Only the effects that actually landed on this target count, since silence can be stripped before it applies
+    AuraApplication const* auraApplication = aura->GetApplicationOfTarget(target->GetGUID());
+    if (auraApplication == nullptr)
+        return;
+    uint8 appliedEffectMask = auraApplication->GetEffectMask();
+    SpellInfo const* spellInfo = aura->GetSpellInfo();
+    if (spellInfo == nullptr)
+        return;
+    bool isSilence = false;
+    for (uint8 i = 0; i < MAX_SPELL_EFFECTS; ++i)
+    {
+        if ((appliedEffectMask & (uint8)(1 << i)) == 0)
+            continue;
+
+        // The mechanic catches the converted EQ silences (which are tagged Silenced) and the aura types catch everything else
+        if (spellInfo->Effects[i].IsAura(SPELL_AURA_MOD_SILENCE) == true || spellInfo->Effects[i].IsAura(SPELL_AURA_MOD_PACIFY_SILENCE) == true || spellInfo->Effects[i].Mechanic == MECHANIC_SILENCE)
+        {
+            isSilence = true;
+            break;
+        }
+    }
+    if (isSilence == false)
+        return;
+
+    vector<uint32> bardSongSpellIDs;
+    for (auto const& ownedAuraIter : targetPlayer->GetOwnedAuras())
+    {
+        uint32 curSpellID = ownedAuraIter.first;
+        if (IsSpellAnEQBardSong(curSpellID) == false)
+            continue;
+        if (std::find(bardSongSpellIDs.begin(), bardSongSpellIDs.end(), curSpellID) == bardSongSpellIDs.end())
+            bardSongSpellIDs.push_back(curSpellID);
+    }
+    for (uint32 curSpellID : bardSongSpellIDs)
+        targetPlayer->RemoveAurasDueToSpell(curSpellID);
 }
 
 static const uint64 EQ_AURA_EFFECT_TRACKING_KEY_PLAYERS = UINT64_MAX;

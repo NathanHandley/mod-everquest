@@ -1558,6 +1558,7 @@ public:
     bool ConfigSpellPvPChainedCrowdControlDiminishingReturnsEnabled;
     uint32 ConfigSpellPvPCrowdControlMaxDurationInMS;
     bool ConfigSpellPvPSnareDiminishingReturnsEnabled;
+    bool ConfigSpellPvPSilenceCancelsBardSongsEnabled;
     bool ConfigSpellNoSwingTimerResetForEQSpells;
     bool ConfigSpellNoSwingTimerResetForWoWSpells;
     bool ConfigSpellMovementCastSnareEnabled;
@@ -1901,6 +1902,7 @@ public:
     void ApplyPvPSnareRulesToAuraMaxDuration(Unit* target, Unit* caster, int32& maxDuration);
     bool HandlePvPSnareDiminishingReturnsOnAuraApply(Unit* target, Aura* aura);
     void ClearPvPSnareDiminishingReturnState(Unit* unit);
+    void CancelBardSongsOnPvPSilenceAuraApply(Unit* target, Aura* aura);
     uint64 GetAuraEffectTrackingKeyForUnit(Unit* unit);
     void TrackEQHasteAurasAndEnforceCapOnAuraApply(Unit* unit, Aura* aura);
     void UntrackEQHasteAurasAndEnforceCapOnAuraRemove(Unit* unit, Aura* aura);
