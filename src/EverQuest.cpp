@@ -4741,6 +4741,29 @@ bool EverQuestMod::IsSpellBlockedByMaxCreatureTargetLevel(uint32 spellID, Unit* 
     return true;
 }
 
+static thread_local bool IsCastingWeaponProc = false;
+
+class EverQuestWeaponProcCastGuard
+{
+public:
+    EverQuestWeaponProcCastGuard() : PreviousValue(IsCastingWeaponProc) { IsCastingWeaponProc = true; }
+    ~EverQuestWeaponProcCastGuard() { IsCastingWeaponProc = PreviousValue; }
+private:
+    bool PreviousValue;
+};
+
+void EverQuestMod::CastWeaponProcSpell(Player* player, Unit* victim, uint32 spellID)
+{
+    // In EverQuest, a proc buff outlives the weapon that trigger it, so needs to cast in WoW without linking to the item Triggered casts resolve inside this call (all EQ spells have a missile speed of 0), including chained spells, so the flag covers the whole chain
+    EverQuestWeaponProcCastGuard weaponProcCastGuard;
+    player->CastSpell(victim, spellID, TriggerCastFlags(TRIGGERED_FULL_MASK & ~TRIGGERED_IGNORE_SPELL_AND_CATEGORY_CD));
+}
+
+bool EverQuestMod::IsCastingWeaponProcSpell()
+{
+    return IsCastingWeaponProc;
+}
+
 bool EverQuestMod::IsCreatureCharmBlockedByCharmLimits(uint32 spellID, Unit* target, Unit* caster)
 {
     if (ConfigCharmCreatureCharmLimitsEnabled == false)

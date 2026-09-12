@@ -1896,6 +1896,8 @@ public:
     bool IsIllusionObjectFormBlockedByLevitation(uint32 spellID, Unit* target);
     bool IsSpellBlockedByMinTargetLevel(uint32 spellID, Unit* target, Unit* caster, bool isCastFromItem);
     bool IsSpellBlockedByMaxCreatureTargetLevel(uint32 spellID, Unit* target, Unit* caster);
+    void CastWeaponProcSpell(Player* player, Unit* victim, uint32 spellID);
+    bool IsCastingWeaponProcSpell();
     bool IsCreatureCharmBlockedByCharmLimits(uint32 spellID, Unit* target, Unit* caster);
     uint8 GetCharmProtectedDispelEffectMaskForTarget(SpellInfo const* spellInfo, Unit* target);
     bool IsHealingSpell(SpellInfo const* spellInfo);

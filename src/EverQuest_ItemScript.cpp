@@ -36,8 +36,7 @@ public:
         if (spellInfo->Id < EverQuest->ConfigSystemSpellDBCIDMin || spellInfo->Id > EverQuest->ConfigSystemSpellDBCIDMax)
             return true;
 
-        // In EverQuest, a proc buff outlives the weapon that trigger it, so needs to cast in WoW without linking to the item
-        player->CastSpell(victim, spellInfo->Id, TriggerCastFlags(TRIGGERED_FULL_MASK & ~TRIGGERED_IGNORE_SPELL_AND_CATEGORY_CD));
+        EverQuest->CastWeaponProcSpell(player, victim, spellInfo->Id);
         return false;
     }
 };
