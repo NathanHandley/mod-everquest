@@ -2839,6 +2839,67 @@ bool EverQuestMod::IsWornEffectSpell(uint32 spellID)
     return WornEffectSpellIDs.find(spellID) != WornEffectSpellIDs.end();
 }
 
+bool EverQuestMod::IsItemEquipAuraSpell(SpellInfo const* spellInfo)
+{
+    if (spellInfo == nullptr)
+        return false;
+    if (IsWornEffectSpell(spellInfo->Id) == true)
+        return true;
+
+    // Instrument focus spells are a generated dummy aura, and the focus dummy types belong to nothing else
+    for (uint8 i = 0; i < MAX_SPELL_EFFECTS; ++i)
+    {
+        if (spellInfo->Effects[i].ApplyAuraName != SPELL_AURA_DUMMY)
+            continue;
+        int32 spellDummyType = spellInfo->Effects[i].MiscValue;
+        if (spellDummyType >= EQ_SPELLDUMMYTYPE_BARDFOCUSBRASS && spellDummyType <= EQ_SPELLDUMMYTYPE_BARDFOCUSALL)
+            return true;
+    }
+    return false;
+}
+
+void EverQuestMod::RemoveOrphanedItemEquipAurasForPlayer(Player* player)
+{
+    if (player == nullptr)
+        return;
+
+    // Consider held first
+    vector<ObjectGuid> equippedItemGUIDs;
+    for (uint8 equipSlotIndex = EQUIPMENT_SLOT_START; equipSlotIndex < INVENTORY_SLOT_BAG_END; ++equipSlotIndex)
+    {
+        Item* equippedItem = player->GetItemByPos(INVENTORY_SLOT_BAG_0, equipSlotIndex);
+        if (equippedItem != nullptr)
+            equippedItemGUIDs.push_back(equippedItem->GetGUID());
+    }
+
+    // Removing an aura invalidates the aura map iterators, so the orphans get identified before any of them are taken off
+    vector<pair<uint32, ObjectGuid>> orphanedSpellIDsAndCastItemGUIDs;
+    Unit::AuraMap const& ownedAuras = player->GetOwnedAuras();
+    for (auto const& auraIter : ownedAuras)
+    {
+        Aura* aura = auraIter.second;
+        if (aura == nullptr)
+            continue;
+        if (IsItemEquipAuraSpell(aura->GetSpellInfo()) == false)
+            continue;
+
+        // An empty cast item guid never matches which is correct (the core always names the item when it applies an equip spell)
+        ObjectGuid castItemGUID = aura->GetCastItemGUID();
+        if (std::find(equippedItemGUIDs.begin(), equippedItemGUIDs.end(), castItemGUID) != equippedItemGUIDs.end())
+            continue;
+
+        orphanedSpellIDsAndCastItemGUIDs.push_back(make_pair(aura->GetId(), castItemGUID));
+    }
+
+    // RemoveAurasDueToItemSpell is the same call the core's unequip path uses so this leaves any legitimate copy from a held item alone
+    for (auto const& orphanedSpellIDAndCastItemGUID : orphanedSpellIDsAndCastItemGUIDs)
+    {
+        LOG_INFO("module.EverQuest", "EverQuestMod Removing orphaned item equip aura (spell {}) from player {} with GUID {}, since the item that granted it ({}) is not equipped",
+            orphanedSpellIDAndCastItemGUID.first, player->GetName(), player->GetGUID().GetCounter(), orphanedSpellIDAndCastItemGUID.second.ToString());
+        player->RemoveAurasDueToItemSpell(orphanedSpellIDAndCastItemGUID.first, orphanedSpellIDAndCastItemGUID.second);
+    }
+}
+
 bool EverQuestMod::IsItemTemplateIDAnEQItemTemplateID(uint32 itemTemplateID)
 {
     return itemTemplateID >= ConfigSystemItemTemplateIDMin && itemTemplateID <= ConfigSystemItemTemplateIDMax;

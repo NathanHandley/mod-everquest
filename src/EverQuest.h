@@ -1835,6 +1835,8 @@ public:
     void BuildAuctionScanResultPacket(EverQuestAuctionSearchScan& scan, WorldPacket& resultPacket);
     void SendAuctionScanResultPacket(WorldSession* session, WorldPacket& resultPacket);
     bool IsWornEffectSpell(uint32 spellID);
+    bool IsItemEquipAuraSpell(SpellInfo const* spellInfo);
+    void RemoveOrphanedItemEquipAurasForPlayer(Player* player);
     void LoadSpellData();
     const EverQuestSpell& GetSpellDataForSpellID(uint32 spellID);
     void LoadSpellMovementCastSnareData();

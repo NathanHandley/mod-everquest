@@ -441,6 +441,9 @@ public:
 
         // Armor type, shield and held instruments drive the Monk and Bard class auras
         EverQuest->RefreshClassAuraGearAurasForPlayer(player);
+
+        // Prevent any left over buffs from other gear
+        EverQuest->RemoveOrphanedItemEquipAurasForPlayer(player);
     }
 
     void OnPlayerUnequip(Player* player, Item* /*it*/) override
@@ -450,6 +453,7 @@ public:
 
         EverQuest->RefreshBearFormArmorShiftForPlayer(player);
         EverQuest->RefreshClassAuraGearAurasForPlayer(player);
+        EverQuest->RemoveOrphanedItemEquipAurasForPlayer(player);
     }
 
     void OnPlayerUpdate(Player* player, uint32 p_time) override
@@ -776,6 +780,9 @@ public:
 
         // Handle odd edge cases where a player logs in but the server doesn't know where to put them
         EverQuest->EnforceWorldDomainAtLogin(player);
+
+        // Inventory is now loaded, so clean up other auras
+        EverQuest->RemoveOrphanedItemEquipAurasForPlayer(player);
 
         // Pick up a character that logged out inside a raid instance
         EverQuest->UpdateRaidLowInstanceStateForPlayer(player);

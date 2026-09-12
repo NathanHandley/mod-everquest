@@ -55,6 +55,10 @@ public:
             spell->AttributesEx3 |= SPELL_ATTR3_ALLOW_AURA_WHILE_DEAD;
         }
 
+        // Since _ApplyAllItemMods runs at login, setting not save here prevest auras from hanging over and duplicating up
+        if (EverQuest->IsItemEquipAuraSpell(spell) == true)
+            spell->AttributesCu |= SPELL_ATTR0_CU_AURA_CANNOT_BE_SAVED;
+
         // A few WOW talent auras hide behind AuraEffect::IsAffectedOnSpell, which has no runtime hook the way spell modifiers do (see EverQuest_SpellTalentAlignment),
         // so the only way to let them reach EverQuest spells is to adjust their loaded spell data
         if (EverQuest->ConfigSpellTalentAlignmentEnabled == true)
