@@ -233,9 +233,12 @@ public:
 
         if (EverQuest->IsSpellBlockedByMaxCreatureTargetLevel(aura->GetId(), unit, aura->GetCaster()) == true)
         {
+            // Stuns (like Holy Shock procs) fail on nearly every high level creature, so only mez and charm report it
+            bool isStun = (aura->GetSpellInfo()->GetAllEffectsMechanicMask() & (1ULL << MECHANIC_STUN)) != 0;
+
             Unit* ccAuraCaster = aura->GetCaster();
             unit->RemoveAura(aura);
-            if (ccAuraCaster != nullptr && ccAuraCaster->IsPlayer() == true)
+            if (isStun == false && ccAuraCaster != nullptr && ccAuraCaster->IsPlayer() == true)
                 ChatHandler(ccAuraCaster->ToPlayer()->GetSession()).PSendSysMessage("Your target is too high of a level for your spell to affect.");
             return;
         }
