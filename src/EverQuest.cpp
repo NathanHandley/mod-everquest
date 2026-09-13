@@ -15378,6 +15378,11 @@ void EverQuestMod::UpdateMentorshipForPlayer(Player* player, uint32 diffInMS)
     if (static_cast<uint32>(player->GetLevel()) != desiredLevel)
     {
         ApplyMentorshipLevelForPlayer(player, static_cast<uint8>(desiredLevel));
+
+        // Restore HP on level up
+        if (state.Role == EQ_MENTORSHIP_ROLE_MENTOR && player->IsAlive() == true)
+            player->SetFullHealth();
+
         if (player->GetSession() != nullptr)
             ChatHandler(player->GetSession()).PSendSysMessage("Keeping pace with |cff00FF00{}|r, you now stand at level |cff00FF00{}|r.", state.PartnerName, desiredLevel);
         SendMentorshipStateToPlayer(player);
