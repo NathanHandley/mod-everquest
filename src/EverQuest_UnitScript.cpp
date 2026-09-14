@@ -193,6 +193,9 @@ public:
         if (unit == nullptr || aura == nullptr)
             return;
 
+        // Keep caster snapshotted amounts (spell power, focus, caster level) from being wiped when the character logs out and back in
+        EverQuest->PreserveEQAuraAmountsThroughSaveAndLoadOnAuraApply(aura);
+
         if (EverQuest->ConfigDazeEnabledInEQZones == false && aura->GetId() == EQ_DAZE_SPELL_ID)
         {
             uint32 mapID = unit->GetMapId();

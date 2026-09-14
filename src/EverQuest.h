@@ -1933,6 +1933,7 @@ public:
     void UntrackAttackPowerAurasAndEnforceHighestOnlyOnAuraRemove(Unit* unit, Aura* aura);
     void EnforceHighestOnlyAttackPowerOnUnit(Unit* unit, vector<EverQuestUnitAttackPowerAuraEffect>& trackedAttackPowerAuraEffects);
     void ApplyEQSlowBossReductionOnAuraApply(Unit* unit, Aura* aura);
+    void PreserveEQAuraAmountsThroughSaveAndLoadOnAuraApply(Aura* aura);
     bool IsItemArmorExcludedFromBearFormMultiplier(ItemTemplate const* itemTemplate);
     uint32 GetEquippedItemBaseArmorExcludedFromBearFormMultiplier(Item* item);
     uint32 GetEquippedBaseArmorExcludedFromBearFormMultiplierForPlayer(Player* player);

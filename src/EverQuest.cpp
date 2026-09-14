@@ -5865,6 +5865,41 @@ void EverQuestMod::ApplyEQSlowBossReductionOnAuraApply(Unit* unit, Aura* aura)
     }
 }
 
+void EverQuestMod::PreserveEQAuraAmountsThroughSaveAndLoadOnAuraApply(Aura* aura)
+{
+    // Without this, spells will lose their spell power in an aura on relog
+    if (aura->GetType() != UNIT_AURA_TYPE || aura->IsPassive() == true)
+        return;
+    uint32 spellID = aura->GetId();
+    if (spellID < ConfigSystemSpellDBCIDMin || spellID > ConfigSystemSpellDBCIDMax)
+        return;
+    if (IsSpellAnEQSpell(spellID) == false || IsWornEffectSpell(spellID) == true)
+        return;
+
+    for (uint8 i = 0; i < MAX_SPELL_EFFECTS; ++i)
+    {
+        AuraEffect* auraEffect = aura->GetEffect(i);
+        if (auraEffect == nullptr || auraEffect->CanBeRecalculated() == false)
+            continue;
+
+        // The haste cap, highest only attack power, boss slow reduction and class aura cast speed handling rewrite these amounts and count on the load recalculation to hand back the natural amount
+        switch (auraEffect->GetAuraType())
+        {
+            case SPELL_AURA_MOD_MELEE_HASTE:
+            case SPELL_AURA_MOD_RANGED_HASTE:
+            case SPELL_AURA_MOD_MELEE_RANGED_HASTE:
+            case SPELL_AURA_MELEE_SLOW:
+            case SPELL_AURA_MOD_ATTACK_POWER:
+            case SPELL_AURA_MOD_RANGED_ATTACK_POWER:
+            case SPELL_AURA_MOD_CASTING_SPEED_NOT_STACK:
+                continue;
+            default:
+                break;
+        }
+        auraEffect->SetCanBeRecalculated(false);
+    }
+}
+
 bool EverQuestMod::IsItemArmorExcludedFromBearFormMultiplier(ItemTemplate const* itemTemplate)
 {
     // Bear and dire bear form are meant to multiply only cloth and leather armor.  Druids in EQ can wear shields, mail and plate, so those keep their face value
