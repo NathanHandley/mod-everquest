@@ -53,7 +53,8 @@ static const char* EQ_CLASSAURA_SPELL_TYPE_NAMES[EQ_CLASSAURA_SPELL_TYPE_COUNT] 
     "DruidPassive", "DruidAura", "DruidRegrowth",
     "ShamanPassive", "ShamanAura", "ShamanSlowMark", "ShamanVigor",
     "CastSpeedHelper",
-    "DruidExposure", "WarriorUnassailed", "WarriorRiposte", "BardVigor", "MonkChiSurge", "PaladinDeflection", "RogueLuckyStrike", "RogueLuckyStrikeHelper"
+    "DruidNaturesBalanceFire", "WarriorUnassailed", "WarriorRiposte", "BardVigor", "MonkChiSurge", "PaladinDeflection", "RogueLuckyStrike", "RogueLuckyStrikeHelper",
+    "DruidNaturesBalanceCold", "DruidNaturesBalanceNature", "DruidEntangleStrike"
 };
 
 // The (passive, permanent aura) pair for each class
@@ -584,11 +585,6 @@ void EverQuestMod::HandleClassAuraPetStrike(Unit* attacker, Unit* victim)
     uint32 markSpellID = GetClassAuraSpellID(EQ_CLASSAURA_SPELL_NECROMANCER_MARK);
     if (markSpellID != 0 && victim->IsAlive() == true && PlayerHasClassAura(owner, EQ_CLASSAURA_SPELL_NECROMANCER_AURA) == true && owner->IsValidAttackTarget(victim) == true)
         owner->CastSpell(victim, markSpellID, true);
-
-    // Druid: the pet's strikes expose the target the same way the druid's own autoattacks do
-    uint32 exposureSpellID = GetClassAuraSpellID(EQ_CLASSAURA_SPELL_DRUID_EXPOSURE);
-    if (exposureSpellID != 0 && victim->IsAlive() == true && PlayerHasClassAura(owner, EQ_CLASSAURA_SPELL_DRUID_AURA) == true && owner->IsValidAttackTarget(victim) == true)
-        owner->CastSpell(victim, exposureSpellID, true);
 }
 
 static bool IsPeriodicDamageAura(Aura* aura)
@@ -639,6 +635,11 @@ void EverQuestMod::ApplyClassAuraMeleeDamageMods(Unit* attacker, Unit* victim, u
     ApplyClassAuraTackShotDamageBonus(attacker, victim, tackShotDamage);
     damage = (uint32)tackShotDamage;
 
+    // Druid
+    int32 entangleDamage = (int32)damage;
+    ApplyClassAuraEntangleStrikeDamageMods(attacker, victim, entangleDamage, true, true);
+    damage = (uint32)entangleDamage;
+
     if (attacker->IsPlayer() == false)
         return;
     Player* player = attacker->ToPlayer();
@@ -670,17 +671,160 @@ void EverQuestMod::ApplyClassAuraPaladinUndeadDemonDamageBonus(Unit* attacker, U
     damage *= 2;
 }
 
-static bool HasPeriodicDamageFromCaster(Unit* target, ObjectGuid casterGUID)
+// How long after a cast is 'priced' its damage can still be paid that bonus
+static const uint32 EQ_CLASSAURA_DRUID_NATURES_BALANCE_PAYOUT_WINDOW_IN_MS = 5000;
+
+static uint32 GetClassAuraDruidNaturesBalanceTypeForSpell(SpellInfo const* spellInfo)
 {
-    AuraType periodicTypes[3] = { SPELL_AURA_PERIODIC_DAMAGE, SPELL_AURA_PERIODIC_LEECH, SPELL_AURA_PERIODIC_DAMAGE_PERCENT };
-    for (AuraType periodicType : periodicTypes)
+    uint32 elementMask = spellInfo->GetSchoolMask() & (SPELL_SCHOOL_MASK_FIRE | SPELL_SCHOOL_MASK_FROST | SPELL_SCHOOL_MASK_NATURE);
+    if (elementMask == SPELL_SCHOOL_MASK_FIRE)
+        return EQ_CLASSAURA_SPELL_DRUID_NATURES_BALANCE_FIRE;
+    if (elementMask == SPELL_SCHOOL_MASK_FROST)
+        return EQ_CLASSAURA_SPELL_DRUID_NATURES_BALANCE_COLD;
+    if (elementMask == SPELL_SCHOOL_MASK_NATURE)
+        return EQ_CLASSAURA_SPELL_DRUID_NATURES_BALANCE_NATURE;
+    return EQ_CLASSAURA_SPELL_TYPE_COUNT;
+}
+
+uint32 EverQuestMod::GetClassAuraDruidNaturesBalanceBonusPercent(Player* druid, uint32 castBalanceType)
+{
+    uint32 balanceTypes[3] = { EQ_CLASSAURA_SPELL_DRUID_NATURES_BALANCE_FIRE, EQ_CLASSAURA_SPELL_DRUID_NATURES_BALANCE_COLD, EQ_CLASSAURA_SPELL_DRUID_NATURES_BALANCE_NATURE };
+    uint32 stackCount = 0;
+    for (uint32 balanceType : balanceTypes)
     {
-        Unit::AuraEffectList const& effects = target->GetAuraEffectsByType(periodicType);
-        for (AuraEffect* effect : effects)
-            if (effect != nullptr && effect->GetCasterGUID() == casterGUID)
-                return true;
+        if (balanceType == castBalanceType)
+            continue;
+        uint32 balanceSpellID = GetClassAuraSpellID((EverQuestClassAuraSpellType)balanceType);
+        if (balanceSpellID == 0)
+            continue;
+        Aura* balance = druid->GetAura(balanceSpellID, druid->GetGUID());
+        if (balance != nullptr)
+            stackCount += balance->GetStackAmount();
     }
-    return false;
+    return stackCount * ConfigSystemClassAuraDruidNaturesBalanceDamagePercentPerStack;
+}
+
+void EverQuestMod::RemoveClassAuraDruidNaturesBalanceStacks(Player* druid, uint32 castBalanceType)
+{
+    uint32 balanceTypes[3] = { EQ_CLASSAURA_SPELL_DRUID_NATURES_BALANCE_FIRE, EQ_CLASSAURA_SPELL_DRUID_NATURES_BALANCE_COLD, EQ_CLASSAURA_SPELL_DRUID_NATURES_BALANCE_NATURE };
+    for (uint32 balanceType : balanceTypes)
+    {
+        if (balanceType == castBalanceType)
+            continue;
+        uint32 balanceSpellID = GetClassAuraSpellID((EverQuestClassAuraSpellType)balanceType);
+        if (balanceSpellID != 0 && druid->HasAura(balanceSpellID) == true)
+            druid->RemoveAurasDueToSpell(balanceSpellID);
+    }
+}
+
+void EverQuestMod::ApplyClassAuraDruidNaturesBalanceDamageBonus(Unit* attacker, int32& damage, SpellInfo const* spellInfo)
+{
+    // Read only, since the check cast priced this spell and the cast hook is what spends the stacks
+    if (attacker == nullptr || spellInfo == nullptr || damage <= 0 || attacker->IsPlayer() == false)
+        return;
+    Player* druid = attacker->ToPlayer();
+    EverQuestPlayerClassAuraState* state = druid->CustomData.Get<EverQuestPlayerClassAuraState>(EQ_PLAYER_CUSTOMDATA_CLASSAURA);
+    if (state == nullptr || state->NaturesBalancePendingPercent == 0 || state->NaturesBalancePendingSpellID != spellInfo->Id)
+        return;
+    if (GameTime::GetGameTimeMS().count() - state->NaturesBalancePendingAtMS > EQ_CLASSAURA_DRUID_NATURES_BALANCE_PAYOUT_WINDOW_IN_MS)
+        return;
+    if (PlayerHasClassAura(druid, EQ_CLASSAURA_SPELL_DRUID_AURA) == false)
+        return;
+    damage += (damage * (int32)state->NaturesBalancePendingPercent) / 100;
+}
+
+void EverQuestMod::HandleClassAuraDruidNaturesBalanceOnCheckCast(Player* druid, SpellInfo const* spellInfo)
+{
+    // What the cast is worth is settled before it resolves, because an instant spell has already dealt its damage by the time the cast hook runs.  A spell
+    // that does not take part leaves the last pricing alone, so one that is still flying to its target can pay out when it lands
+    if (druid == nullptr || spellInfo == nullptr)
+        return;
+    if (spellInfo->HasEffect(SPELL_EFFECT_SCHOOL_DAMAGE) == false)
+        return;
+    if (PlayerHasClassAura(druid, EQ_CLASSAURA_SPELL_DRUID_AURA) == false)
+        return;
+    uint32 castBalanceType = GetClassAuraDruidNaturesBalanceTypeForSpell(spellInfo);
+    if (castBalanceType == EQ_CLASSAURA_SPELL_TYPE_COUNT)
+        return;
+
+    EverQuestPlayerClassAuraState* state = GetClassAuraStateForPlayer(druid);
+    state->NaturesBalancePendingSpellID = spellInfo->Id;
+    state->NaturesBalancePendingPercent = GetClassAuraDruidNaturesBalanceBonusPercent(druid, castBalanceType);
+    state->NaturesBalancePendingAtMS = GameTime::GetGameTimeMS().count();
+
+    // Only a slow enough spell builds a stack of its own element
+    if (spellInfo->CalcCastTime() > ConfigSystemClassAuraDruidNaturesBalanceMinBaseCastTimeInMS)
+        state->NaturesBalancePendingGrantType = castBalanceType;
+    else
+        state->NaturesBalancePendingGrantType = EQ_CLASSAURA_SPELL_TYPE_COUNT;
+}
+
+void EverQuestMod::HandleClassAuraDruidNaturesBalanceOnSpellCast(Player* druid, SpellInfo const* spellInfo)
+{
+    if (druid == nullptr || spellInfo == nullptr)
+        return;
+    EverQuestPlayerClassAuraState* state = druid->CustomData.Get<EverQuestPlayerClassAuraState>(EQ_PLAYER_CUSTOMDATA_CLASSAURA);
+    if (state == nullptr || state->NaturesBalancePendingSpellID != spellInfo->Id)
+        return;
+    if (PlayerHasClassAura(druid, EQ_CLASSAURA_SPELL_DRUID_AURA) == false)
+        return;
+    uint32 castBalanceType = GetClassAuraDruidNaturesBalanceTypeForSpell(spellInfo);
+    if (castBalanceType == EQ_CLASSAURA_SPELL_TYPE_COUNT)
+        return;
+
+    // The cast went through, so what it was priced against is spent now.  Its own damage is paid from the priced amount, which is what lets a spell
+    // that flies to its target still collect when it lands
+    RemoveClassAuraDruidNaturesBalanceStacks(druid, castBalanceType);
+    if (state->NaturesBalancePendingGrantType != castBalanceType)
+        return;
+    state->NaturesBalancePendingGrantType = EQ_CLASSAURA_SPELL_TYPE_COUNT;
+    uint32 balanceSpellID = GetClassAuraSpellID((EverQuestClassAuraSpellType)castBalanceType);
+    if (balanceSpellID != 0)
+        druid->CastSpell(druid, balanceSpellID, true);
+}
+
+void EverQuestMod::ApplyClassAuraEntangleStrikeDamageMods(Unit* attacker, Unit* victim, int32& damage, bool isMeleeDamage, bool isPhysicalDamage)
+{
+    if (attacker == nullptr || victim == nullptr || damage <= 0 || isPhysicalDamage == false)
+        return;
+    uint32 entangleSpellID = GetClassAuraSpellID(EQ_CLASSAURA_SPELL_DRUID_ENTANGLE_STRIKE);
+    if (entangleSpellID == 0)
+        return;
+
+    // The druid or their pet striking an entangled target from behind
+    if (isMeleeDamage == true && victim->HasAura(entangleSpellID) == true)
+    {
+        Player* druid = attacker->GetCharmerOrOwnerPlayerOrPlayerItself();
+        bool isDruidReachable = druid != nullptr && (druid == attacker || (druid->FindMap() != nullptr && druid->FindMap() == attacker->FindMap()));
+        if (isDruidReachable == true && PlayerHasClassAura(druid, EQ_CLASSAURA_SPELL_DRUID_AURA) == true && victim->HasInArc(M_PI, attacker) == false)
+        {
+            Aura* entangle = victim->GetAura(entangleSpellID, druid->GetGUID());
+            if (entangle != nullptr)
+            {
+                int32 bonusPercent = (int32)ConfigSystemClassAuraDruidEntangleStrikeBehindDamagePercentPerStack * (int32)entangle->GetStackAmount();
+                if (bonusPercent > 0)
+                    damage += (damage * bonusPercent) / 100;
+            }
+        }
+    }
+
+    // An entangled target striking the druid or their pet
+    if (attacker->HasAura(entangleSpellID) == false)
+        return;
+    Player* druid = victim->GetCharmerOrOwnerPlayerOrPlayerItself();
+    if (druid == nullptr || (druid != victim && (druid->FindMap() == nullptr || druid->FindMap() != victim->FindMap())))
+        return;
+    if (PlayerHasClassAura(druid, EQ_CLASSAURA_SPELL_DRUID_AURA) == false)
+        return;
+    Aura* entangle = attacker->GetAura(entangleSpellID, druid->GetGUID());
+    if (entangle == nullptr)
+        return;
+    int32 reductionPercent = (int32)ConfigSystemClassAuraDruidEntangleStrikeDamageTakenPercentPerStack * (int32)entangle->GetStackAmount();
+    if (reductionPercent <= 0)
+        return;
+    if (reductionPercent > 99)
+        reductionPercent = 99;
+    damage -= (damage * reductionPercent) / 100;
 }
 
 void EverQuestMod::ApplyClassAuraTackShotDamageBonus(Unit* attacker, Unit* victim, int32& damage)
@@ -717,11 +861,16 @@ void EverQuestMod::ApplyClassAuraDirectSpellDamageMods(Unit* target, Unit* attac
     if (target == nullptr || attacker == nullptr || spellInfo == nullptr || damage <= 0)
         return;
 
-    // Warrior: a melee ability hitting them counts as being attacked
+    // Warrior, a melee ability hitting them counts as being attacked
     NoteClassAuraWarriorMeleeAttacked(target, spellInfo);
 
     // Rangers and their pets alike
     ApplyClassAuraTackShotDamageBonus(attacker, target, damage);
+
+    // Druid, an entangled target trading physical damage with the druid or their pet (only a melee ability earns the bonus from behind)
+    bool isMeleeSpell = spellInfo->DmgClass == SPELL_DAMAGE_CLASS_MELEE;
+    bool isPhysicalSpell = (spellInfo->GetSchoolMask() & SPELL_SCHOOL_MASK_NORMAL) != 0;
+    ApplyClassAuraEntangleStrikeDamageMods(attacker, target, damage, isMeleeSpell, isPhysicalSpell);
 
     if (attacker->IsPlayer() == false)
         return;
@@ -738,13 +887,8 @@ void EverQuestMod::ApplyClassAuraDirectSpellDamageMods(Unit* target, Unit* attac
             damage += (damage * (int32)ConfigSystemClassAuraNecromancerMarkDirectDamagePercentPerStack * (int32)mark->GetStackAmount()) / 100;
     }
 
-    if (PlayerHasClassAura(player, EQ_CLASSAURA_SPELL_DRUID_AURA) == true)
-    {
-        bool isImpaired = target->HasAuraType(SPELL_AURA_MOD_ROOT) == true || target->HasAuraType(SPELL_AURA_MOD_DECREASE_SPEED) == true
-            || target->HasAuraWithMechanic((1ULL << MECHANIC_SNARE) | (1ULL << MECHANIC_ROOT)) == true || HasPeriodicDamageFromCaster(target, player->GetGUID()) == true;
-        if (isImpaired == true)
-            damage += (damage * (int32)ConfigSystemClassAuraDruidImpairedTargetDamagePercent) / 100;
-    }
+    // Druid, a spell of one element spends the balance the other two built
+    ApplyClassAuraDruidNaturesBalanceDamageBonus(player, damage, spellInfo);
 }
 
 void EverQuestMod::ApplyClassAuraPeriodicTickMods(Unit* target, Unit* attacker, uint32& amount, SpellInfo const* spellInfo)
@@ -993,6 +1137,9 @@ void EverQuestMod::ApplyClassAuraCastAdjustmentsOnCheckCast(Player* player, Spel
     if (IsClassAuraSpell(spellInfo->Id) == true)
         return;
 
+    // Druid, what the balance pays this cast is settled here, ahead of the damage
+    HandleClassAuraDruidNaturesBalanceOnCheckCast(player, spellInfo);
+
     uint32 baseCastTimeInMS = spellInfo->CalcCastTime();
     Unit* target = spell->m_targets.GetUnitTarget();
     SpellInfo const* healSpellInfo = FindClassAuraDirectHealSpellInfo(spellInfo, 0);
@@ -1215,6 +1362,9 @@ void EverQuestMod::HandleClassAuraSpellCast(Player* player, Spell* spell)
     uint32 bardVigorSpellID = GetClassAuraSpellID(EQ_CLASSAURA_SPELL_BARD_VIGOR);
     if (bardVigorSpellID != 0 && IsSpellAnEQBardSong(spellInfo->Id) == true && PlayerHasClassAura(player, EQ_CLASSAURA_SPELL_BARD_AURA) == true)
         player->CastSpell(player, bardVigorSpellID, true);
+
+    // Druid, a slow enough fire, cold, or nature nuke builds the balance for its element
+    HandleClassAuraDruidNaturesBalanceOnSpellCast(player, spellInfo);
 
     // Wizard
     uint32 wizardFocusSpellID = GetClassAuraSpellID(EQ_CLASSAURA_SPELL_WIZARD_FOCUS);

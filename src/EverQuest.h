@@ -925,7 +925,7 @@ enum EverQuestClassAuraSpellType : uint32
     EQ_CLASSAURA_SPELL_SHAMAN_SLOW_MARK = 45,
     EQ_CLASSAURA_SPELL_SHAMAN_VIGOR = 46,
     EQ_CLASSAURA_SPELL_CAST_SPEED_HELPER = 47,
-    EQ_CLASSAURA_SPELL_DRUID_EXPOSURE = 48,
+    EQ_CLASSAURA_SPELL_DRUID_NATURES_BALANCE_FIRE = 48,
     EQ_CLASSAURA_SPELL_WARRIOR_UNASSAILED = 49,
     EQ_CLASSAURA_SPELL_WARRIOR_RIPOSTE = 50,
     EQ_CLASSAURA_SPELL_BARD_VIGOR = 51,
@@ -933,7 +933,10 @@ enum EverQuestClassAuraSpellType : uint32
     EQ_CLASSAURA_SPELL_PALADIN_DEFLECTION = 53,
     EQ_CLASSAURA_SPELL_ROGUE_LUCKY_STRIKE = 54,
     EQ_CLASSAURA_SPELL_ROGUE_LUCKY_STRIKE_HELPER = 55,
-    EQ_CLASSAURA_SPELL_TYPE_COUNT = 56
+    EQ_CLASSAURA_SPELL_DRUID_NATURES_BALANCE_COLD = 56,
+    EQ_CLASSAURA_SPELL_DRUID_NATURES_BALANCE_NATURE = 57,
+    EQ_CLASSAURA_SPELL_DRUID_ENTANGLE_STRIKE = 58,
+    EQ_CLASSAURA_SPELL_TYPE_COUNT = 59
 };
 
 class EverQuestPlayerMoveWhileCastingState : public DataMap::Base
@@ -959,6 +962,10 @@ public:
     uint32 LastMeleeAttackedMS = 0;
     ObjectGuid PendingRiposteTargetGUID;
     bool BlockGrantedByClassAura = false;
+    uint32 NaturesBalancePendingSpellID = 0;
+    uint32 NaturesBalancePendingPercent = 0;
+    uint32 NaturesBalancePendingAtMS = 0;
+    uint32 NaturesBalancePendingGrantType = EQ_CLASSAURA_SPELL_TYPE_COUNT;
 };
 
 class EverQuestPlayerTrackingState : public DataMap::Base
@@ -1525,7 +1532,10 @@ public:
     uint32 ConfigSystemClassAuraClericCadenceReductionPercent = 33;
     uint32 ConfigSystemClassAuraDruidDirectHealRegenPercent = 20;
     uint32 ConfigSystemClassAuraDruidDirectHealRegenTickCount = 4;
-    uint32 ConfigSystemClassAuraDruidImpairedTargetDamagePercent = 8;
+    uint32 ConfigSystemClassAuraDruidNaturesBalanceDamagePercentPerStack = 10;
+    uint32 ConfigSystemClassAuraDruidNaturesBalanceMinBaseCastTimeInMS = 500;
+    uint32 ConfigSystemClassAuraDruidEntangleStrikeDamageTakenPercentPerStack = 1;
+    uint32 ConfigSystemClassAuraDruidEntangleStrikeBehindDamagePercentPerStack = 2;
     uint32 ConfigSystemClassAuraShamanDotExtendChancePercent = 33;
     uint32 ConfigSystemClassAuraShamanDotExtendInMS = 3000;
     float ConfigSystemSlowBossEffectivenessMod = 0.5f;
@@ -1986,6 +1996,12 @@ public:
     void ApplyClassAuraDirectSpellDamageMods(Unit* target, Unit* attacker, int32& damage, SpellInfo const* spellInfo);
     void ApplyClassAuraTackShotDamageBonus(Unit* attacker, Unit* victim, int32& damage);
     void ApplyClassAuraPaladinUndeadDemonDamageBonus(Unit* attacker, Unit* victim, int32& damage);
+    void ApplyClassAuraEntangleStrikeDamageMods(Unit* attacker, Unit* victim, int32& damage, bool isMeleeDamage, bool isPhysicalDamage);
+    uint32 GetClassAuraDruidNaturesBalanceBonusPercent(Player* druid, uint32 castBalanceType);
+    void RemoveClassAuraDruidNaturesBalanceStacks(Player* druid, uint32 castBalanceType);
+    void ApplyClassAuraDruidNaturesBalanceDamageBonus(Unit* attacker, int32& damage, SpellInfo const* spellInfo);
+    void HandleClassAuraDruidNaturesBalanceOnCheckCast(Player* druid, SpellInfo const* spellInfo);
+    void HandleClassAuraDruidNaturesBalanceOnSpellCast(Player* druid, SpellInfo const* spellInfo);
     void ApplyClassAuraPeriodicTickMods(Unit* target, Unit* attacker, uint32& amount, SpellInfo const* spellInfo);
     bool TryTransferDebuffToNecromancerPet(Player* player, Aura* aura);
     void HandleClassAuraSlowAuraApply(Unit* target, Aura* aura);

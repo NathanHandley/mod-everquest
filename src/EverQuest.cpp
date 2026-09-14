@@ -298,8 +298,14 @@ bool EverQuestMod::LoadConfigurationSystemDataFromDB()
                 ConfigSystemClassAuraDruidDirectHealRegenPercent = (uint32)atoi(value.c_str());
             else if (key == "ClassAuraDruidDirectHealRegenTickCount")
                 ConfigSystemClassAuraDruidDirectHealRegenTickCount = (uint32)atoi(value.c_str());
-            else if (key == "ClassAuraDruidImpairedTargetDamagePercent")
-                ConfigSystemClassAuraDruidImpairedTargetDamagePercent = (uint32)atoi(value.c_str());
+            else if (key == "ClassAuraDruidNaturesBalanceDamagePercentPerStack")
+                ConfigSystemClassAuraDruidNaturesBalanceDamagePercentPerStack = (uint32)atoi(value.c_str());
+            else if (key == "ClassAuraDruidNaturesBalanceMinBaseCastTimeInMS")
+                ConfigSystemClassAuraDruidNaturesBalanceMinBaseCastTimeInMS = (uint32)atoi(value.c_str());
+            else if (key == "ClassAuraDruidEntangleStrikeDamageTakenPercentPerStack")
+                ConfigSystemClassAuraDruidEntangleStrikeDamageTakenPercentPerStack = (uint32)atoi(value.c_str());
+            else if (key == "ClassAuraDruidEntangleStrikeBehindDamagePercentPerStack")
+                ConfigSystemClassAuraDruidEntangleStrikeBehindDamagePercentPerStack = (uint32)atoi(value.c_str());
             else if (key == "ClassAuraShamanDotExtendChancePercent")
                 ConfigSystemClassAuraShamanDotExtendChancePercent = (uint32)atoi(value.c_str());
             else if (key == "ClassAuraShamanDotExtendInMS")

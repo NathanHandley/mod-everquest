@@ -327,8 +327,7 @@ class EverQuest_ClassAuraMagicianPetAuraScript : public AuraScript
     }
 };
 
-// Druid "Skin of the Wild": a direct heal leaves a regeneration worth a share of it behind (periodic heals are not in the proc flags), and a
-// landed melee or ranged autoattack exposes the target (the pet's strikes do the same through the mod's landed-swing hook)
+// Druid "One With Nature": a direct heal leaves a regeneration worth a share of it behind (periodic heals are not in the proc flags), and a landed physical attack entangles the target
 class EverQuest_ClassAuraDruidAuraScript : public AuraScript
 {
     PrepareAuraScript(EverQuest_ClassAuraDruidAuraScript);
@@ -342,13 +341,17 @@ class EverQuest_ClassAuraDruidAuraScript : public AuraScript
         if (druid == nullptr || druid->IsPlayer() == false || druid->IsAlive() == false)
             return;
 
-        if ((eventInfo.GetTypeMask() & (PROC_FLAG_DONE_MELEE_AUTO_ATTACK | PROC_FLAG_DONE_RANGED_AUTO_ATTACK)) != 0)
+        if ((eventInfo.GetTypeMask() & (PROC_FLAG_DONE_MELEE_AUTO_ATTACK | PROC_FLAG_DONE_RANGED_AUTO_ATTACK | PROC_FLAG_DONE_SPELL_MELEE_DMG_CLASS | PROC_FLAG_DONE_SPELL_RANGED_DMG_CLASS)) != 0)
         {
-            uint32 exposureSpellID = EverQuest->GetClassAuraSpellID(EQ_CLASSAURA_SPELL_DRUID_EXPOSURE);
+            // Physical attacks only, so a melee or ranged ability that lands as fire, cold, or nature damage does not entangle
+            DamageInfo* damageInfo = eventInfo.GetDamageInfo();
+            if (damageInfo == nullptr || (damageInfo->GetSchoolMask() & SPELL_SCHOOL_MASK_NORMAL) == 0)
+                return;
+            uint32 entangleSpellID = EverQuest->GetClassAuraSpellID(EQ_CLASSAURA_SPELL_DRUID_ENTANGLE_STRIKE);
             Unit* target = eventInfo.GetProcTarget();
-            if (exposureSpellID != 0 && target != nullptr && target != druid && target->IsAlive() == true && target->FindMap() == druid->FindMap()
+            if (entangleSpellID != 0 && target != nullptr && target != druid && target->IsAlive() == true && target->FindMap() == druid->FindMap()
                 && druid->IsValidAttackTarget(target) == true)
-                druid->CastSpell(target, exposureSpellID, true);
+                druid->CastSpell(target, entangleSpellID, true);
             return;
         }
 
