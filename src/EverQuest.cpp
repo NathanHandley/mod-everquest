@@ -13119,7 +13119,7 @@ EverQuestPlayerControllerData EverQuestMod::GetPlayerControllerData(Player* play
 {
     EverQuestPlayerControllerData controllerData;
     controllerData.GUID = player->GetGUID().GetCounter();
-    QueryResult queryResult = CharacterDatabase.Query("SELECT nextSecondaryClass, currentSecondaryClass, secondaryExpPool, illusionFaceId, showBardPulse, issuedIllusionItemId, hideWoWGear, dungeonMode, adventurerDisqualified, deathExpLost, deathExpRestGranted, deathExpLostClass, hailWindowOnRightClick, showDispelMessage, dispelMessageColor, pendingStartItemEQClass, mentorshipRole, mentorshipRealLevel, mentorshipRealExp, mentorshipBankedProgress, druidFormBear, druidFormCat, druidFormTravel, druidFormTree, druidFormMoonkin, mentorshipPetNumber, mentorshipPetLevel, moveWhileCasting FROM mod_everquest_character_settings WHERE guid = {}", player->GetGUID().GetCounter());
+    QueryResult queryResult = CharacterDatabase.Query("SELECT nextSecondaryClass, currentSecondaryClass, secondaryExpPool, illusionFaceId, showBardPulse, issuedIllusionItemId, hideWoWGear, dungeonMode, adventurerDisqualified, deathExpLost, deathExpRestGranted, deathExpLostClass, hailWindowOnRightClick, showDispelMessage, dispelMessageColor, pendingStartItemEQClass, mentorshipRole, mentorshipRealLevel, mentorshipRealExp, mentorshipBankedProgress, druidFormBear, druidFormCat, druidFormTravel, druidFormTree, druidFormMoonkin, mentorshipPetNumber, mentorshipPetLevel, moveWhileCasting, showMezBreakMessage FROM mod_everquest_character_settings WHERE guid = {}", player->GetGUID().GetCounter());
     if (!queryResult || queryResult->GetRowCount() == 0)
     {
         const EverQuestClassMap classMap = GetClassMapForWOWClassID(player->getClass());
@@ -13135,6 +13135,7 @@ EverQuestPlayerControllerData EverQuestMod::GetPlayerControllerData(Player* play
         controllerData.HailWindowOnRightClick = false;
         controllerData.ShowDispelMessage = false;
         controllerData.DispelMessageColor = EQ_DISPEL_MESSAGE_DEFAULT_COLOR;
+        controllerData.ShowMezBreakMessage = true;
         controllerData.AdventurerDisqualified = false;
         controllerData.DeathExpLost = 0;
         controllerData.DeathExpRestGranted = 0;
@@ -13186,6 +13187,7 @@ EverQuestPlayerControllerData EverQuestMod::GetPlayerControllerData(Player* play
         controllerData.MentorshipPetNumber = fields[25].Get<uint32>();
         controllerData.MentorshipPetRealLevel = fields[26].Get<uint8>();
         controllerData.MoveWhileCasting = fields[27].Get<bool>();
+        controllerData.ShowMezBreakMessage = fields[28].Get<bool>();
     }
     return controllerData;
 }
@@ -13585,6 +13587,47 @@ bool EverQuestMod::TryGetDispelMessageSettingsForPlayer(Player* player, bool& sh
     return true;
 }
 
+bool EverQuestMod::GetShowMezBreakMessageForPlayer(Player* player)
+{
+    return GetOrLoadActivePlayerClassControllerData(player)->ShowMezBreakMessage;
+}
+
+void EverQuestMod::SetShowMezBreakMessageForPlayer(Player* player, bool showMezBreakMessage)
+{
+    GetOrLoadActivePlayerClassControllerData(player)->ShowMezBreakMessage = showMezBreakMessage;
+    SaveShowMezBreakMessageForPlayer(player);
+}
+
+void EverQuestMod::SaveShowMezBreakMessageForPlayer(Player* player)
+{
+    EverQuestPlayerControllerData controllerData;
+    {
+        std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+        auto controllerDataIt = ActivePlayerClassControllerDataByGUID.find(player->GetGUID());
+        if (controllerDataIt == ActivePlayerClassControllerDataByGUID.end())
+            return;
+        controllerData = controllerDataIt->second;
+    }
+
+    CharacterDatabase.Execute("INSERT INTO `mod_everquest_character_settings` (`guid`, `currentSecondaryClass`, `nextSecondaryClass`, `secondaryExpPool`, `showMezBreakMessage`) VALUES ({}, {}, {}, {}, {}) ON DUPLICATE KEY UPDATE `showMezBreakMessage` = {}",
+        player->GetGUID().GetCounter(),
+        controllerData.CurrentSecondClass,
+        controllerData.NextSecondClass,
+        controllerData.SecondaryExpPool,
+        controllerData.ShowMezBreakMessage == true ? 1 : 0,
+        controllerData.ShowMezBreakMessage == true ? 1 : 0);
+}
+
+bool EverQuestMod::TryGetShowMezBreakMessageForPlayer(Player* player, bool& showMezBreakMessage)
+{
+    std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+    auto controllerDataIt = ActivePlayerClassControllerDataByGUID.find(player->GetGUID());
+    if (controllerDataIt == ActivePlayerClassControllerDataByGUID.end())
+        return false;
+    showMezBreakMessage = controllerDataIt->second.ShowMezBreakMessage;
+    return true;
+}
+
 // Which of the five settings a shapeshift form reads, or zero for a form that is not one of them
 uint8 EverQuestMod::GetDruidFormTypeForShapeshiftForm(uint8 shapeshiftForm)
 {
@@ -13879,6 +13922,458 @@ bool EverQuestMod::IsAuraASpentAbsorb(Aura* aura)
     return hasAbsorbEffect;
 }
 
+enum EverQuestMesmerizeBreakType : uint8
+{
+    EQ_MESMERIZE_BREAK_DAMAGE,
+    EQ_MESMERIZE_BREAK_DRAIN,
+    EQ_MESMERIZE_BREAK_DISPEL,
+    EQ_MESMERIZE_BREAK_IMMUNITY
+};
+
+struct EverQuestMesmerizeBreaker
+{
+    ObjectGuid GUID;
+    ObjectGuid OwnerGUID;
+    std::string Name;
+    std::string OwnerName;
+};
+
+struct EverQuestMesmerizeAuraKey
+{
+    uint32 SpellID = 0;
+    ObjectGuid CasterGUID;
+};
+
+struct EverQuestMesmerizeBreakRecord
+{
+    ObjectGuid VictimGUID;
+    EverQuestMesmerizeBreakType BreakType = EQ_MESMERIZE_BREAK_DAMAGE;
+    EverQuestMesmerizeBreaker Breaker;
+    uint32 BreakingSpellID = 0;
+
+    // The mesmerizes the unit held when this was noted, so one that lands afterward is never blamed on it
+    std::vector<EverQuestMesmerizeAuraKey> Mesmerizes;
+};
+
+struct EverQuestMesmerizeDrainTick
+{
+    uint32 SpellID = 0;
+    ObjectGuid CasterGUID;
+    uint8 EffectIndex = 0;
+    uint32 TickNumber = 0;
+};
+
+struct EverQuestPendingMesmerizeRemoval
+{
+    ObjectGuid VictimGUID;
+    EverQuestMesmerizeAuraKey Mesmerize;
+};
+
+struct EverQuestMesmerizeBreakState
+{
+    uint64 GameTimeMS = 0;
+    std::vector<EverQuestMesmerizeBreakRecord> Records;
+    std::vector<EverQuestPendingMesmerizeRemoval> PendingRemovals;
+
+    // Only ever describes the unit this thread is updating right now
+    ObjectGuid DrainSnapshotUnitGUID;
+    std::vector<EverQuestMesmerizeDrainTick> DrainSnapshot;
+};
+static thread_local EverQuestMesmerizeBreakState MesmerizeBreakState;
+
+static EverQuestMesmerizeBreakState& GetMesmerizeBreakStateForCurrentTick()
+{
+    uint64 nowMS = static_cast<uint64>(GameTime::GetGameTimeMS().count());
+    if (MesmerizeBreakState.GameTimeMS != nowMS)
+    {
+        MesmerizeBreakState.GameTimeMS = nowMS;
+        MesmerizeBreakState.Records.clear();
+        MesmerizeBreakState.PendingRemovals.clear();
+        MesmerizeBreakState.DrainSnapshotUnitGUID = ObjectGuid::Empty;
+        MesmerizeBreakState.DrainSnapshot.clear();
+    }
+    return MesmerizeBreakState;
+}
+
+static void FillMesmerizeBreakerFromUnit(Unit* unit, EverQuestMesmerizeBreaker& breaker)
+{
+    breaker = EverQuestMesmerizeBreaker();
+    if (unit == nullptr)
+        return;
+    breaker.GUID = unit->GetGUID();
+    breaker.Name = unit->GetName();
+
+    // A pet, totem or charmed creature is named along with whoever controls it
+    Unit* owner = unit->GetCharmerOrOwner();
+    if (owner != nullptr && owner != unit)
+    {
+        breaker.OwnerGUID = owner->GetGUID();
+        breaker.OwnerName = owner->GetName();
+    }
+}
+
+static void CollectEQMesmerizesOnUnit(Unit* unit, std::vector<EverQuestMesmerizeAuraKey>& mesmerizes)
+{
+    mesmerizes.clear();
+    Unit::AuraEffectList const& stunAuraEffects = unit->GetAuraEffectsByType(SPELL_AURA_MOD_STUN);
+    for (AuraEffect const* stunAuraEffect : stunAuraEffects)
+    {
+        if (EverQuest->IsSpellAnEQMesmerize(stunAuraEffect->GetSpellInfo()) == false)
+            continue;
+        EverQuestMesmerizeAuraKey mesmerize;
+        mesmerize.SpellID = stunAuraEffect->GetId();
+        mesmerize.CasterGUID = stunAuraEffect->GetBase()->GetCasterGUID();
+        mesmerizes.push_back(mesmerize);
+    }
+}
+
+static bool DoesMesmerizeListHoldAura(std::vector<EverQuestMesmerizeAuraKey> const& mesmerizes, EverQuestMesmerizeAuraKey const& mesmerize)
+{
+    for (EverQuestMesmerizeAuraKey const& heldMesmerize : mesmerizes)
+        if (heldMesmerize.SpellID == mesmerize.SpellID && heldMesmerize.CasterGUID == mesmerize.CasterGUID)
+            return true;
+    return false;
+}
+
+static EverQuestMesmerizeBreakRecord* FindMesmerizeBreakRecord(EverQuestMesmerizeBreakState& state, ObjectGuid const& victimGUID, EverQuestMesmerizeBreakType breakType, EverQuestMesmerizeAuraKey const& mesmerize)
+{
+    for (EverQuestMesmerizeBreakRecord& record : state.Records)
+        if (record.VictimGUID == victimGUID && record.BreakType == breakType && DoesMesmerizeListHoldAura(record.Mesmerizes, mesmerize) == true)
+            return &record;
+    return nullptr;
+}
+
+static EverQuestMesmerizeBreakRecord& GetOrAddMesmerizeBreakRecord(EverQuestMesmerizeBreakState& state, ObjectGuid const& victimGUID, EverQuestMesmerizeBreakType breakType)
+{
+    for (EverQuestMesmerizeBreakRecord& record : state.Records)
+        if (record.VictimGUID == victimGUID && record.BreakType == breakType)
+            return record;
+    state.Records.emplace_back();
+    EverQuestMesmerizeBreakRecord& record = state.Records.back();
+    record.VictimGUID = victimGUID;
+    record.BreakType = breakType;
+    return record;
+}
+
+static bool TryFindMesmerizeDrainThatJustTicked(EverQuestMesmerizeBreakState& state, Unit* target, EverQuestMesmerizeBreaker& drainer, uint32& drainSpellID)
+{
+    if (state.DrainSnapshot.empty() == true || state.DrainSnapshotUnitGUID != target->GetGUID())
+        return false;
+
+    Unit::AuraEffectList const& drainAuraEffects = target->GetAuraEffectsByType(SPELL_AURA_PERIODIC_MANA_LEECH);
+    for (AuraEffect const* drainAuraEffect : drainAuraEffects)
+    {
+        bool hasTickedSinceSnapshot = false;
+        for (EverQuestMesmerizeDrainTick const& drainTick : state.DrainSnapshot)
+        {
+            if (drainTick.SpellID != drainAuraEffect->GetId() || drainTick.CasterGUID != drainAuraEffect->GetBase()->GetCasterGUID() || drainTick.EffectIndex != drainAuraEffect->GetEffIndex())
+                continue;
+            hasTickedSinceSnapshot = drainTick.TickNumber != drainAuraEffect->GetTickNumber();
+            break;
+        }
+        if (hasTickedSinceSnapshot == false)
+            continue;
+
+        Unit* drainCaster = drainAuraEffect->GetCaster();
+        if (drainCaster == nullptr || drainCaster->IsAlive() == false)
+            continue;
+        if (target->HasActivePowerType(Powers(drainAuraEffect->GetMiscValue())) == false)
+            continue;
+
+        FillMesmerizeBreakerFromUnit(drainCaster, drainer);
+        drainSpellID = drainAuraEffect->GetId();
+        return true;
+    }
+    return false;
+}
+
+static bool DoesAuraPurgeMesmerize(Aura* aura, SpellInfo const* mesmerizeSpellInfo)
+{
+    SpellInfo const* spellInfo = aura->GetSpellInfo();
+    if (spellInfo == nullptr || spellInfo->HasAttribute(SPELL_ATTR1_IMMUNITY_PURGES_EFFECT) == false)
+        return false;
+
+    uint64 mesmerizeMechanicMask = mesmerizeSpellInfo->GetAllEffectsMechanicMask();
+    uint32 mesmerizeSchoolMask = mesmerizeSpellInfo->GetSchoolMask();
+    uint32 mesmerizeDispelMask = mesmerizeSpellInfo->GetDispelMask();
+    for (uint8 effectIndex = 0; effectIndex < MAX_SPELL_EFFECTS; ++effectIndex)
+    {
+        if (aura->HasEffect(effectIndex) == false)
+            continue;
+        ImmunityInfo const* immunityInfo = spellInfo->GetImmunityInfo(effectIndex);
+        if (immunityInfo == nullptr)
+            continue;
+        if ((immunityInfo->MechanicImmuneMask & mesmerizeMechanicMask) != 0 || (immunityInfo->SchoolImmuneMask & mesmerizeSchoolMask) != 0 || (immunityInfo->DispelImmuneMask & mesmerizeDispelMask) != 0)
+            return true;
+    }
+    return false;
+}
+
+static const char* GetLocalizedSpellNameForMesmerizeMessage(SpellInfo const* spellInfo, uint8 localeIndex)
+{
+    if (spellInfo == nullptr)
+        return nullptr;
+    const char* spellName = spellInfo->SpellName[localeIndex];
+    if (spellName == nullptr || spellName[0] == '\0')
+        spellName = spellInfo->SpellName[0];
+    if (spellName == nullptr || spellName[0] == '\0')
+        return nullptr;
+    return spellName;
+}
+
+static std::string GetMesmerizeBreakerSubject(EverQuestMesmerizeBreaker const& breaker, ObjectGuid const& casterGUID)
+{
+    if (breaker.GUID == casterGUID)
+        return "You";
+    if (breaker.OwnerGUID == casterGUID)
+        return fmt::format("Your pet {}", breaker.Name);
+    if (breaker.OwnerGUID.IsEmpty() == false)
+        return fmt::format("{} ({}'s pet)", breaker.Name, breaker.OwnerName);
+    return breaker.Name;
+}
+
+static void SendMesmerizeBreakMessage(Unit* target, EverQuestMesmerizeAuraKey const& mesmerize, EverQuestMesmerizeBreakType breakType, EverQuestMesmerizeBreaker const& breaker, uint32 breakingSpellID)
+{
+    if (mesmerize.CasterGUID.IsPlayer() == false)
+        return;
+    Player* caster = ObjectAccessor::GetPlayer(*target, mesmerize.CasterGUID);
+    if (caster == nullptr || caster->GetSession() == nullptr)
+        return;
+
+    bool showMezBreakMessage = true;
+    if (EverQuest->TryGetShowMezBreakMessageForPlayer(caster, showMezBreakMessage) == false)
+        return;
+    if (showMezBreakMessage == false)
+        return;
+
+    uint8 localeIndex = static_cast<uint8>(caster->GetSession()->GetSessionDbcLocale());
+    const char* mesmerizeName = GetLocalizedSpellNameForMesmerizeMessage(sSpellMgr->GetSpellInfo(mesmerize.SpellID), localeIndex);
+    if (mesmerizeName == nullptr)
+        return;
+    const char* breakingSpellName = nullptr;
+    if (breakingSpellID != 0)
+        breakingSpellName = GetLocalizedSpellNameForMesmerizeMessage(sSpellMgr->GetSpellInfo(breakingSpellID), localeIndex);
+
+    std::string const& targetName = target->GetName();
+    bool hasBreaker = breaker.GUID.IsEmpty() == false;
+    bool breakerIsTarget = hasBreaker == true && breaker.GUID == target->GetGUID();
+    std::string subject;
+    if (hasBreaker == true)
+        subject = GetMesmerizeBreakerSubject(breaker, mesmerize.CasterGUID);
+    std::string withSpell;
+    if (breakingSpellName != nullptr)
+        withSpell = fmt::format(" with {}", breakingSpellName);
+
+    std::string line;
+    switch (breakType)
+    {
+        case EQ_MESMERIZE_BREAK_DAMAGE:
+            if (hasBreaker == false)
+                line = fmt::format("Your {} on {} was broken by damage.", mesmerizeName, targetName);
+            else if (breakerIsTarget == true)
+                line = fmt::format("{} broke your {} on themselves.", targetName, mesmerizeName);
+            else
+                line = fmt::format("{} broke your {} on {}.", subject, mesmerizeName, targetName);
+            break;
+        case EQ_MESMERIZE_BREAK_DRAIN:
+            if (hasBreaker == false)
+                line = fmt::format("Your {} on {} was broken by a mana drain{}.", mesmerizeName, targetName, withSpell);
+            else if (breakerIsTarget == true)
+                line = fmt::format("{} broke your {} on themselves{}.", targetName, mesmerizeName, withSpell);
+            else
+                line = fmt::format("{} broke your {} on {}{}.", subject, mesmerizeName, targetName, withSpell);
+            break;
+        case EQ_MESMERIZE_BREAK_DISPEL:
+            if (hasBreaker == false)
+                line = fmt::format("Your {} on {} was dispelled.", mesmerizeName, targetName);
+            else if (breakerIsTarget == true)
+                line = fmt::format("{} dispelled your {} from themselves{}.", targetName, mesmerizeName, withSpell);
+            else
+                line = fmt::format("{} dispelled your {} from {}{}.", subject, mesmerizeName, targetName, withSpell);
+            break;
+        case EQ_MESMERIZE_BREAK_IMMUNITY:
+            if (hasBreaker == false)
+                line = fmt::format("{} was freed from your {}{}.", targetName, mesmerizeName, withSpell);
+            else if (breakerIsTarget == true)
+                line = fmt::format("{} broke free of your {}{}.", targetName, mesmerizeName, withSpell);
+            else
+                line = fmt::format("{} freed {} from your {}{}.", subject, targetName, mesmerizeName, withSpell);
+            break;
+        default:
+            return;
+    }
+    ChatHandler(caster->GetSession()).PSendSysMessage("|cff{:06X}{}|r", EQ_MEZ_BREAK_MESSAGE_COLOR, line);
+}
+
+bool EverQuestMod::IsSpellAnEQMesmerize(SpellInfo const* spellInfo)
+{
+    if (spellInfo == nullptr)
+        return false;
+    if (spellInfo->Id < ConfigSystemSpellDBCIDMin || spellInfo->Id > ConfigSystemSpellDBCIDMax)
+        return false;
+
+    // A converted mesmerize is a stun aura that damage breaks, carrying the incapacitated mechanic so it reads apart from a real stun
+    if ((spellInfo->AuraInterruptFlags & AURA_INTERRUPT_FLAG_TAKE_DAMAGE) == 0)
+        return false;
+    if (spellInfo->HasAura(SPELL_AURA_MOD_STUN) == false)
+        return false;
+    return (spellInfo->GetAllEffectsMechanicMask() & (1ULL << MECHANIC_KNOCKOUT)) != 0;
+}
+
+bool EverQuestMod::HasEQMesmerizeAura(Unit* unit)
+{
+    if (unit == nullptr)
+        return false;
+    Unit::AuraEffectList const& stunAuraEffects = unit->GetAuraEffectsByType(SPELL_AURA_MOD_STUN);
+    for (AuraEffect const* stunAuraEffect : stunAuraEffects)
+        if (IsSpellAnEQMesmerize(stunAuraEffect->GetSpellInfo()) == true)
+            return true;
+    return false;
+}
+
+void EverQuestMod::RecordMesmerizeBreakerOnDamage(Unit* attacker, Unit* victim, DamageEffectType damageType)
+{
+    // A no-damage call never reaches the aura strip, and almost nothing that takes damage is mesmerized, so both leave before anything is copied
+    if (damageType == NODAMAGE || victim == nullptr || HasEQMesmerizeAura(victim) == false)
+        return;
+
+    EverQuestMesmerizeBreakRecord& record = GetOrAddMesmerizeBreakRecord(GetMesmerizeBreakStateForCurrentTick(), victim->GetGUID(), EQ_MESMERIZE_BREAK_DAMAGE);
+    FillMesmerizeBreakerFromUnit(attacker, record.Breaker);
+    record.BreakingSpellID = 0;
+    CollectEQMesmerizesOnUnit(victim, record.Mesmerizes);
+}
+
+void EverQuestMod::RecordMesmerizeDispeller(Unit* victim, Aura const* mesmerizeAura, Unit* dispeller, uint32 dispellerSpellID)
+{
+    if (victim == nullptr || mesmerizeAura == nullptr)
+        return;
+
+    EverQuestMesmerizeBreakRecord& record = GetOrAddMesmerizeBreakRecord(GetMesmerizeBreakStateForCurrentTick(), victim->GetGUID(), EQ_MESMERIZE_BREAK_DISPEL);
+    FillMesmerizeBreakerFromUnit(dispeller, record.Breaker);
+    record.BreakingSpellID = dispellerSpellID;
+    record.Mesmerizes.clear();
+    EverQuestMesmerizeAuraKey mesmerize;
+    mesmerize.SpellID = mesmerizeAura->GetId();
+    mesmerize.CasterGUID = mesmerizeAura->GetCasterGUID();
+    record.Mesmerizes.push_back(mesmerize);
+}
+
+void EverQuestMod::SnapshotMesmerizeDrainTicksOnUnitUpdate(Unit* unit)
+{
+    // The snapshot only ever describes the unit updating right now, so whatever the last unit left behind goes first
+    if (MesmerizeBreakState.DrainSnapshot.empty() == false)
+    {
+        MesmerizeBreakState.DrainSnapshot.clear();
+        MesmerizeBreakState.DrainSnapshotUnitGUID = ObjectGuid::Empty;
+    }
+
+    // Almost no unit carries a mana drain, so everything else leaves on the first check
+    if (unit == nullptr)
+        return;
+    Unit::AuraEffectList const& drainAuraEffects = unit->GetAuraEffectsByType(SPELL_AURA_PERIODIC_MANA_LEECH);
+    if (drainAuraEffects.empty() == true)
+        return;
+    if (HasEQMesmerizeAura(unit) == false)
+        return;
+
+    EverQuestMesmerizeBreakState& state = GetMesmerizeBreakStateForCurrentTick();
+    state.DrainSnapshotUnitGUID = unit->GetGUID();
+    for (AuraEffect const* drainAuraEffect : drainAuraEffects)
+    {
+        EverQuestMesmerizeDrainTick drainTick;
+        drainTick.SpellID = drainAuraEffect->GetId();
+        drainTick.CasterGUID = drainAuraEffect->GetBase()->GetCasterGUID();
+        drainTick.EffectIndex = drainAuraEffect->GetEffIndex();
+        drainTick.TickNumber = drainAuraEffect->GetTickNumber();
+        state.DrainSnapshot.push_back(drainTick);
+    }
+}
+
+void EverQuestMod::ResolvePendingMesmerizeRemovalsOnAuraApply(Unit* unit, Aura* aura)
+{
+    // Nearly every aura lands with nothing waiting, so this leaves before it even reads the clock
+    if (MesmerizeBreakState.PendingRemovals.empty() == true)
+        return;
+    if (unit == nullptr || aura == nullptr)
+        return;
+
+    EverQuestMesmerizeBreakState& state = GetMesmerizeBreakStateForCurrentTick();
+    size_t pendingIndex = 0;
+    while (pendingIndex < state.PendingRemovals.size())
+    {
+        EverQuestPendingMesmerizeRemoval pendingRemoval = state.PendingRemovals[pendingIndex];
+        SpellInfo const* mesmerizeSpellInfo = sSpellMgr->GetSpellInfo(pendingRemoval.Mesmerize.SpellID);
+        if (pendingRemoval.VictimGUID != unit->GetGUID() || mesmerizeSpellInfo == nullptr || DoesAuraPurgeMesmerize(aura, mesmerizeSpellInfo) == false)
+        {
+            ++pendingIndex;
+            continue;
+        }
+
+        // Taken off the list before the message goes out, so nothing it touches can see it twice
+        state.PendingRemovals.erase(state.PendingRemovals.begin() + pendingIndex);
+        EverQuestMesmerizeBreaker freer;
+        FillMesmerizeBreakerFromUnit(aura->GetCaster(), freer);
+        SendMesmerizeBreakMessage(unit, pendingRemoval.Mesmerize, EQ_MESMERIZE_BREAK_IMMUNITY, freer, aura->GetId());
+    }
+}
+
+void EverQuestMod::NotifyCasterOfBrokenMesmerize(Unit* target, AuraApplication* auraApplication, AuraRemoveMode removeMode)
+{
+    // Damage, mana drains and purging immunities remove with the default reason and dispels with the enemy spell reason, while running out, death and clicking it off each carry their own
+    if (removeMode != AURA_REMOVE_BY_DEFAULT && removeMode != AURA_REMOVE_BY_ENEMY_SPELL)
+        return;
+    if (target == nullptr || auraApplication == nullptr)
+        return;
+    Aura* aura = auraApplication->GetBase();
+    if (aura == nullptr || IsSpellAnEQMesmerize(aura->GetSpellInfo()) == false)
+        return;
+
+    // Only a player has anyone to tell, which also spares the bookkeeping for every creature cast mesmerize
+    EverQuestMesmerizeAuraKey mesmerize;
+    mesmerize.SpellID = aura->GetId();
+    mesmerize.CasterGUID = aura->GetCasterGUID();
+    if (mesmerize.CasterGUID.IsPlayer() == false)
+        return;
+
+    EverQuestMesmerizeBreakState& state = GetMesmerizeBreakStateForCurrentTick();
+    if (removeMode == AURA_REMOVE_BY_ENEMY_SPELL)
+    {
+        // A dispel the aura script heard names the dispeller.  One it never heard (a mechanic dispel) is still a dispel, only an unnamed one
+        EverQuestMesmerizeBreakRecord* dispelRecord = FindMesmerizeBreakRecord(state, target->GetGUID(), EQ_MESMERIZE_BREAK_DISPEL, mesmerize);
+        if (dispelRecord != nullptr)
+            SendMesmerizeBreakMessage(target, mesmerize, EQ_MESMERIZE_BREAK_DISPEL, dispelRecord->Breaker, dispelRecord->BreakingSpellID);
+        else
+            SendMesmerizeBreakMessage(target, mesmerize, EQ_MESMERIZE_BREAK_DISPEL, EverQuestMesmerizeBreaker(), 0);
+        return;
+    }
+
+    // A hit noted against this unit while it already held this very mesmerize is what just stripped it
+    EverQuestMesmerizeBreakRecord* damageRecord = FindMesmerizeBreakRecord(state, target->GetGUID(), EQ_MESMERIZE_BREAK_DAMAGE, mesmerize);
+    if (damageRecord != nullptr)
+    {
+        SendMesmerizeBreakMessage(target, mesmerize, EQ_MESMERIZE_BREAK_DAMAGE, damageRecord->Breaker, 0);
+        return;
+    }
+
+    // Any other default removal of a mesmerize that has not counted down at all yet is the mod or the core turning down one that only just landed (level caps, diminishing returns, a stronger one taking its place), which is nobody breaking it
+    if (aura->GetDuration() == aura->GetMaxDuration())
+        return;
+
+    EverQuestMesmerizeBreaker drainer;
+    uint32 drainSpellID = 0;
+    if (TryFindMesmerizeDrainThatJustTicked(state, target, drainer, drainSpellID) == true)
+    {
+        SendMesmerizeBreakMessage(target, mesmerize, EQ_MESMERIZE_BREAK_DRAIN, drainer, drainSpellID);
+        return;
+    }
+
+    // A purging immunity strips it while that immunity's own aura is still being applied, so it gets named once that aura's apply hook arrives. A removal nothing claims by the end of the tick was none of these, and is dropped without a word
+    EverQuestPendingMesmerizeRemoval pendingRemoval;
+    pendingRemoval.VictimGUID = target->GetGUID();
+    pendingRemoval.Mesmerize = mesmerize;
+    state.PendingRemovals.push_back(pendingRemoval);
+}
+
 void EverQuestMod::SendPlayerOptionsToPlayer(Player* player)
 {
     if (player == nullptr || player->GetSession() == nullptr)
@@ -13894,8 +14389,8 @@ void EverQuestMod::SendPlayerOptionsToPlayer(Player* player)
         controllerData = controllerDataIt->second;
     }
 
-    // Move while casting went on the end, so an options page from before it existed still reads every field ahead of it
-    std::string addonMessage = fmt::format("EQOPTIONS\t{}\t{}\t{}\t{}\t{}\t{}\t{:06X}\t{}\t{}\t{}\t{}\t{}\t{}",
+    // Newer settings go on the end (move while casting, then the mesmerize break message), so an options page from before them still reads every field ahead
+    std::string addonMessage = fmt::format("EQOPTIONS\t{}\t{}\t{}\t{}\t{}\t{}\t{:06X}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
         controllerData.IllusionFaceID,
         IllusionMaxFaceIndex,
         controllerData.ShowBardPulse == true ? 1 : 0,
@@ -13908,7 +14403,8 @@ void EverQuestMod::SendPlayerOptionsToPlayer(Player* player)
         controllerData.DruidFormTravel,
         controllerData.DruidFormTree,
         controllerData.DruidFormMoonkin,
-        controllerData.MoveWhileCasting == true ? 1 : 0);
+        controllerData.MoveWhileCasting == true ? 1 : 0,
+        controllerData.ShowMezBreakMessage == true ? 1 : 0);
     WorldPacket data;
     ChatHandler::BuildChatPacket(data, CHAT_MSG_SYSTEM, LANG_ADDON, nullptr, nullptr, addonMessage);
     player->GetSession()->SendPacket(&data);

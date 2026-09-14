@@ -137,6 +137,7 @@ public:
             { "eqdungeonmode", HandleEQDungeonModeCommand,      SEC_PLAYER, Console::No },
             { "eqhailwindow", HandleEQHailWindowCommand,        SEC_PLAYER, Console::No },
             { "eqdispelmessage", HandleEQDispelMessageCommand,  SEC_PLAYER, Console::No },
+            { "eqmezbreakmessage", HandleEQMezBreakMessageCommand, SEC_PLAYER, Console::No },
             { "eqoptions", HandleEQOptionsCommand,              SEC_PLAYER, Console::No },
             { "eqdruidform", HandleEQDruidFormCommand,          SEC_PLAYER, Console::No },
             { "eqauctionfilter", HandleEQAuctionFilterCommand,  SEC_PLAYER, Console::No },
@@ -651,6 +652,52 @@ public:
         return true;
     }
 
+    static bool HandleEQMezBreakMessageCommand(ChatHandler* handler, const char* args)
+    {
+        if (EverQuest->IsEnabled == false)
+            return true;
+
+        Player* player = handler->GetPlayer();
+        if (player == nullptr)
+            return true;
+
+        // Validate the passed value is either "on" or "off"
+        bool isValidValue = false;
+        bool showMezBreakMessage = true;
+        if (*args)
+        {
+            std::string valueString = GetFirstCommandArg(args);
+            boost::algorithm::to_lower(valueString);
+            if (valueString == "on")
+            {
+                showMezBreakMessage = true;
+                isValidValue = true;
+            }
+            else if (valueString == "off")
+            {
+                showMezBreakMessage = false;
+                isValidValue = true;
+            }
+        }
+        if (isValidValue == false)
+        {
+            string currentStateString = EverQuest->GetShowMezBreakMessageForPlayer(player) == true ? "on" : "off";
+            handler->PSendSysMessage(".eqmezbreakmessage 'on' or 'off'");
+            handler->PSendSysMessage("When on, a chat line tells you who broke a mesmerize you cast, including when the mesmerized target broke it themselves. Example: '.eqmezbreakmessage off'");
+            handler->PSendSysMessage("Mesmerize break messages are currently |cff4CFF00{}|r for you.", currentStateString);
+            return true;
+        }
+
+        // Store the setting, which the aura removal hook reads the next time one of this player's mesmerizes breaks
+        EverQuest->SetShowMezBreakMessageForPlayer(player, showMezBreakMessage);
+        EverQuest->SendPlayerOptionsToPlayer(player);
+        if (showMezBreakMessage == true)
+            handler->PSendSysMessage("Mesmerize break messages are now |cff4CFF00on|r for you.");
+        else
+            handler->PSendSysMessage("Mesmerize break messages are now |cff4CFF00off|r for you.");
+        return true;
+    }
+
     struct EverQuestDruidFormChoice
     {
         uint8 FormType;
@@ -824,6 +871,7 @@ public:
         handler->PSendSysMessage("Hide WoW gear on other players (.eqhidewowgear): |cff4CFF00{}|r", EverQuest->GetHideWoWGearForPlayer(player) == true ? "on" : "off");
         handler->PSendSysMessage("Open hail replies on right click (.eqhailwindow): |cff4CFF00{}|r", EverQuest->GetHailWindowOnRightClickForPlayer(player) == true ? "on" : "off");
         handler->PSendSysMessage("Dispel messages (.eqdispelmessage): |cff4CFF00{}|r, in |cff{:06X}this color|r", EverQuest->GetShowDispelMessageForPlayer(player) == true ? "on" : "off", EverQuest->GetDispelMessageColorForPlayer(player));
+        handler->PSendSysMessage("Mesmerize break messages (.eqmezbreakmessage): |cff4CFF00{}|r", EverQuest->GetShowMezBreakMessageForPlayer(player) == true ? "on" : "off");
         // Shapeshift forms only belong to WoW druids, so nobody else is shown a list of looks they can never wear
         if (player->getClass() == CLASS_DRUID)
         {

@@ -94,6 +94,15 @@ public:
         EverQuest->ProcessCreatureRetaliationOnDamage(attacker, victim);
     }
 
+    void OnUnitUpdate(Unit* unit, uint32 /*diff*/) override
+    {
+        if (EverQuest->IsEnabled == false)
+            return;
+
+        // A mana drain tick strips a mesmerize with no hook of its own, so note where the drains on a mesmerized unit stand before they tick
+        EverQuest->SnapshotMesmerizeDrainTicksOnUnitUpdate(unit);
+    }
+
     void OnUnitEnterCombat(Unit* unit, Unit* victim) override
     {
         if (EverQuest->IsEnabled == false)
@@ -127,6 +136,9 @@ public:
             return;
         if (unit == nullptr)
             return;
+
+        // Unit::Kill calls this last, after every kill reward has been paid, so the last rewarded member's reputation watch ends here
+        EverQuest->DisarmAdventurerKillReputationWatch();
 
         EverQuest->ClearPvPSnareDiminishingReturnState(unit);
 
@@ -195,6 +207,9 @@ public:
 
         // Keep caster snapshotted amounts (spell power, focus, caster level) from being wiped when the character logs out and back in
         EverQuest->PreserveEQAuraAmountsThroughSaveAndLoadOnAuraApply(aura);
+
+        // A purging immunity (PvP trinket, Divine Shield) has already stripped any mesmerize by the time this runs, so this is where it gets named
+        EverQuest->ResolvePendingMesmerizeRemovalsOnAuraApply(unit, aura);
 
         if (EverQuest->ConfigDazeEnabledInEQZones == false && aura->GetId() == EQ_DAZE_SPELL_ID)
         {
@@ -328,6 +343,8 @@ public:
 
             // The last slow from a Shaman class aura holder takes its burden mark with it
             EverQuest->HandleClassAuraSlowAuraRemove(unit, aurApp->GetBase());
+            // Tell whoever cast a mesmerize who broke it, whether by damage, a mana drain, a dispel or a purging immunity
+            EverQuest->NotifyCasterOfBrokenMesmerize(unit, aurApp, mode);
         }
 
         // A fading ModFaction (Alliance line) aura takes the caster's temporary reputation bonus with it
@@ -644,6 +661,10 @@ public:
     {
         if (EverQuest->IsEnabled == false)
             return damage;
+
+        // Further into Unit::DealDamage the core strips damage-breakable auras without saying who did it, so note the attacker of a mesmerized unit for that removal to read
+        EverQuest->RecordMesmerizeBreakerOnDamage(attacker, victim, damagetype);
+
         if (damagetype != DIRECT_DAMAGE || damage == 0 || attacker == nullptr || victim == nullptr)
             return damage;
 

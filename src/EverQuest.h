@@ -58,6 +58,7 @@ struct BuildValuesCachePosPointers;
 #define EQ_MOVEMENT_CAST_SNARE_DURATION_BUFFER_IN_MS 2000 // How much longer than the remaining cast time the casting slow is given, so a pushed-back cast keeps it
 
 #define EQ_DISPEL_MESSAGE_DEFAULT_COLOR             0xFFAA00
+#define EQ_MEZ_BREAK_MESSAGE_COLOR                  0xFF8040
 
 #define EQ_DRUID_FORM_TYPE_BEAR                     1 // Covers both Bear Form and Dire Bear Form
 #define EQ_DRUID_FORM_TYPE_CAT                      2
@@ -1344,6 +1345,7 @@ struct EverQuestPlayerControllerData
     bool HailWindowOnRightClick = false;
     bool ShowDispelMessage = false;
     uint32 DispelMessageColor = EQ_DISPEL_MESSAGE_DEFAULT_COLOR;
+    bool ShowMezBreakMessage = true;
     bool MoveWhileCasting = true;
     bool AdventurerDisqualified = false;
     uint32 DeathExpLost = 0;
@@ -2342,6 +2344,17 @@ public:
     void SetDispelMessageColorForPlayer(Player* player, uint32 dispelMessageColor);
     void SaveDispelMessageColorForPlayer(Player* player);
     bool TryGetDispelMessageSettingsForPlayer(Player* player, bool& showDispelMessage, uint32& dispelMessageColor);
+    bool GetShowMezBreakMessageForPlayer(Player* player);
+    void SetShowMezBreakMessageForPlayer(Player* player, bool showMezBreakMessage);
+    void SaveShowMezBreakMessageForPlayer(Player* player);
+    bool TryGetShowMezBreakMessageForPlayer(Player* player, bool& showMezBreakMessage);
+    bool IsSpellAnEQMesmerize(SpellInfo const* spellInfo);
+    bool HasEQMesmerizeAura(Unit* unit);
+    void RecordMesmerizeBreakerOnDamage(Unit* attacker, Unit* victim, DamageEffectType damageType);
+    void RecordMesmerizeDispeller(Unit* victim, Aura const* mesmerizeAura, Unit* dispeller, uint32 dispellerSpellID);
+    void SnapshotMesmerizeDrainTicksOnUnitUpdate(Unit* unit);
+    void ResolvePendingMesmerizeRemovalsOnAuraApply(Unit* unit, Aura* aura);
+    void NotifyCasterOfBrokenMesmerize(Unit* target, AuraApplication* auraApplication, AuraRemoveMode removeMode);
     uint8 GetDruidFormOptionForPlayer(Player* player, uint8 formType);
     void SetDruidFormOptionForPlayer(Player* player, uint8 formType, uint8 optionID);
     void SaveDruidFormOptionsForPlayer(Player* player);
