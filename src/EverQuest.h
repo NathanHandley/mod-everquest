@@ -53,7 +53,7 @@ class ByteBuffer;
 struct AreaTrigger;
 struct BuildValuesCachePosPointers;
 
-#define EQ_MOD_VERSION                              105
+#define EQ_MOD_VERSION                              106
 
 #define EQ_MOVEMENT_CAST_SNARE_DURATION_BUFFER_IN_MS 2000 // How much longer than the remaining cast time the casting slow is given, so a pushed-back cast keeps it
 
@@ -1546,6 +1546,7 @@ public:
     uint32 ConfigSystemIntenseHealingExhaustionManaCostPercentPerStack = 0;
     float ConfigSystemIllusionObjectMaxDistance = 0;
     float ConfigSystemIllusionObjectTreeMaxDistance = 0;
+    uint32 ConfigSystemHarmTouchPlayerPvPDamagePercent = 50;
     uint32 ConfigSystemClientDataVersion = 0;
     string ConfigSystemClientDataVersionMismatchMessage;
     uint32 ConfigSystemFactionGoodClassMask;

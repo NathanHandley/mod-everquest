@@ -326,6 +326,8 @@ bool EverQuestMod::LoadConfigurationSystemDataFromDB()
                 ConfigSystemIllusionObjectMaxDistance = (float)atof(value.c_str());
             else if (key == "IllusionObjectTreeMaxDistance")
                 ConfigSystemIllusionObjectTreeMaxDistance = (float)atof(value.c_str());
+            else if (key == "HarmTouchPlayerPvPDamagePercent")
+                ConfigSystemHarmTouchPlayerPvPDamagePercent = (uint32)atoi(value.c_str());
             else if (key == "ClientDataVersion")
                 ConfigSystemClientDataVersion = (uint32)atoi(value.c_str());
             else if (key == "ClientDataVersionMismatchMessage")
