@@ -7338,12 +7338,104 @@ bool EverQuestMod::IsInZoneWideGroupRewardRange(Player* member, WorldObject* rew
     return member->IsInMap(rewardSource);
 }
 
-// Mirrors KillRewarder::_GetPlayerLevel so the level cap hook still gets a say in what counts for experience
-uint8 EverQuestMod::GetPlayerLevelForExperienceGain(Player* player)
+static thread_local bool IsReadingRealLevelForExperienceGain = false;
+
+class EverQuestRealExperienceLevelReadGuard
 {
-    uint8 level = player->GetLevel();
-    sScriptMgr->OnPlayerBeforeGetLevelForXPGain(player, level);
-    return level;
+public:
+    EverQuestRealExperienceLevelReadGuard() : PreviousValue(IsReadingRealLevelForExperienceGain) { IsReadingRealLevelForExperienceGain = true; }
+    ~EverQuestRealExperienceLevelReadGuard() { IsReadingRealLevelForExperienceGain = PreviousValue; }
+private:
+    bool PreviousValue;
+};
+
+uint32 EverQuestMod::GetExperienceGainAtRealLevel(Player* player, Unit* victim, bool isBattleGround)
+{
+    EverQuestRealExperienceLevelReadGuard realLevelReadGuard;
+    return Acore::XP::Gain(player, victim, isBattleGround);
+}
+
+bool EverQuestMod::CanPetGainExperienceFromOwner(Player* owner)
+{
+    if (owner == nullptr)
+        return false;
+
+    // Mirrors outs in Pet::GivePetXP
+    Pet* pet = owner->GetPet();
+    if (pet == nullptr || pet->getPetType() != HUNTER_PET || pet->IsAlive() == false)
+        return false;
+    uint8 maxPetLevel = min(static_cast<uint8>(sWorld->getIntConfig(CONFIG_MAX_PLAYER_LEVEL)), owner->GetLevel());
+    return pet->GetLevel() < maxPetLevel;
+}
+
+void EverQuestMod::GiveKillExperienceToPetOfPlayer(Player* owner, uint32 ownerExperience)
+{
+    if (ownerExperience == 0 || CanPetGainExperienceFromOwner(owner) == false)
+        return;
+
+    // A mentor or an apprentice takes no share of a kill, so their pet takes none either
+    if (IsPlayerExcludedFromGroupExperienceShare(owner) == true)
+        return;
+
+    // Same split as the core: all of it alone, half of it in a group
+    owner->GetPet()->GivePetXP(owner->GetGroup() != nullptr ? ownerExperience / 2 : ownerExperience);
+}
+
+uint32 EverQuestMod::GetKillExperienceForLevelCappedPlayer(Player* player, Player* killer, Unit* victim, float shareRate)
+{
+    if (player == nullptr || killer == nullptr || victim == nullptr)
+        return 0;
+
+    bool isBattleGround = victim->IsPlayer() == true || (victim->GetCharmerOrOwnerGUID().IsPlayer() == true && victim->IsVehicle() == false);
+
+    // Mirrors KillRewarder::_InitXP
+    if (isBattleGround == false && killer->GetVehicle() != nullptr)
+        return 0;
+
+    Group* group = killer->GetGroup();
+    EverQuestGroupKillLevels levels;
+    Player* gainReferenceMember = player;
+    if (group != nullptr)
+    {
+        // Mirrors the gray member rule in KillRewarder::_RewardXP
+        BuildGroupKillLevels(killer, victim, levels);
+        if (player->IsAlive() == false || levels.IntendedReferenceMember == nullptr || levels.IntendedReferenceLevel < GetGroupExperienceLevelForPlayer(player))
+            return 0;
+        gainReferenceMember = levels.IntendedReferenceMember;
+    }
+
+    uint32 experience = GetExperienceGainAtRealLevel(gainReferenceMember, victim, isBattleGround);
+    if (experience > 0 && isBattleGround == false && victim->IsCreature() == true)
+    {
+        CreatureTemplate const* creatureTemplate = victim->ToCreature()->GetCreatureTemplate();
+        if (creatureTemplate != nullptr && creatureTemplate->ModHealth <= 0.75f && creatureTemplate->ModHealth >= 0.0f)
+            experience = static_cast<uint32>(experience * creatureTemplate->ModHealth);
+    }
+    if (experience == 0)
+        return 0;
+
+    // Mirrors KillRewarder::_RewardXP
+    uint8 powerLevelingReferenceLevel = GetGroupExperienceLevelForPlayer(player);
+    if (group != nullptr)
+    {
+        bool isFullExperience = victim->GetLevel() > Acore::XP::GetGrayLevel(levels.IntendedMaxLevel);
+        if (isFullExperience == true)
+            experience = static_cast<uint32>(experience * shareRate);
+        else
+            experience = static_cast<uint32>(experience * shareRate / 2) + 1;
+        powerLevelingReferenceLevel = levels.MaxLevelIncludingTethered;
+    }
+    if (experience == 0)
+        return 0;
+
+    if (victim->IsCreature() == true)
+    {
+        uint8 highestAttackerLevel = victim->ToCreature()->GetHighestPlayerAttackerLevel();
+        if (highestAttackerLevel > powerLevelingReferenceLevel && victim->GetLevel() <= Acore::XP::GetGrayLevel(highestAttackerLevel))
+            experience = experience / 2 + 1;
+    }
+
+    return static_cast<uint32>(experience * player->GetTotalAuraMultiplier(SPELL_AURA_MOD_XP_PCT));
 }
 
 // Rebuilds the totals KillRewarder::_InitGroupData produces, over every group member in the zone rather than only those within the core's group reward distance
@@ -7381,15 +7473,10 @@ void EverQuestMod::BuildZoneWideKillReward(Group* group, Player* killer, Unit* v
 
             // Reward is based on highest one the victim is not gray too
             uint32 grayLevel = Acore::XP::GetGrayLevel(memberLevel);
-            if (victim->GetLevel() > grayLevel)
+            if (victim->GetLevel() > grayLevel && (outReward.MaxNotGrayMember == nullptr || outReward.MaxNotGrayMemberLevel < memberLevel))
             {
-                if (outReward.MaxNotGrayMemberLevel < memberLevel)
-                    outReward.MaxNotGrayMemberLevel = memberLevel;
-                if (IsPlayerReportingLevelCap(member) == false && (outReward.MaxNotGrayMember == nullptr || outReward.GainReferenceLevel < memberLevel))
-                {
-                    outReward.MaxNotGrayMember = member;
-                    outReward.GainReferenceLevel = memberLevel;
-                }
+                outReward.MaxNotGrayMember = member;
+                outReward.MaxNotGrayMemberLevel = memberLevel;
             }
         }
     }
@@ -7404,15 +7491,7 @@ void EverQuestMod::BuildZoneWideKillReward(Group* group, Player* killer, Unit* v
     // Base experience comes from the highest level member the victim is not gray to, matching KillRewarder::_InitXP
     if (outReward.MaxNotGrayMember != nullptr)
     {
-        outReward.BaseExperience = Acore::XP::Gain(outReward.MaxNotGrayMember, victim, false);
-        if (outReward.GainReferenceLevel != outReward.MaxNotGrayMemberLevel && outReward.BaseExperience > 0)
-        {
-            ContentLevels victimContentLevels = GetContentLevelsForMapAndZone(victim->GetMapId(), victim->GetZoneId());
-            uint32 gainReferenceBase = Acore::XP::BaseGain(outReward.GainReferenceLevel, victim->GetLevel(), victimContentLevels);
-            uint32 intendedBase = Acore::XP::BaseGain(outReward.MaxNotGrayMemberLevel, victim->GetLevel(), victimContentLevels);
-            if (gainReferenceBase > 0)
-                outReward.BaseExperience = static_cast<uint32>(static_cast<float>(outReward.BaseExperience) * static_cast<float>(intendedBase) / static_cast<float>(gainReferenceBase));
-        }
+        outReward.BaseExperience = GetExperienceGainAtRealLevel(outReward.MaxNotGrayMember, victim, false);
         if (outReward.BaseExperience > 0 && victim->IsCreature() == true)
         {
             CreatureTemplate const* creatureTemplate = victim->ToCreature()->GetCreatureTemplate();
@@ -7451,28 +7530,15 @@ bool EverQuestMod::IsAlternateGroupExperienceFormulaActive(uint32 aliveMemberCou
     return aliveMemberCount >= 2 && aliveMemberCount <= 5;
 }
 
-float EverQuestMod::GetGroupExperienceCorrectionForKill(Player* killer, Unit* victim)
+// Mirrors KillRewarder::_InitGroupData
+void EverQuestMod::BuildGroupKillLevels(Player* killer, Unit* victim, EverQuestGroupKillLevels& outLevels)
 {
     if (killer == nullptr || victim == nullptr)
-        return 1.0f;
-
-    // Nothing can differ unless one of the two systems that distort the levels is in play at all
-    if (MentorshipStateCount.load() == 0 && ConfigPlayerLevelCap == 0)
-        return 1.0f;
-
+        return;
     Group* group = killer->GetGroup();
     if (group == nullptr)
-        return 1.0f;
+        return;
 
-    bool haveCoreReference = false;
-    bool haveIntendedReference = false;
-    bool anythingDiffers = false;
-    uint8 coreMaxLevel = 0;
-    uint8 coreReferenceLevel = 0;
-    uint8 intendedMaxLevel = 0;
-    uint8 intendedReferenceLevel = 0;
-
-    // Mirrors KillRewarder::_InitGroupData
     for (GroupReference* itr = group->GetFirstMember(); itr != nullptr; itr = itr->next())
     {
         Player* member = itr->GetSource();
@@ -7488,43 +7554,60 @@ float EverQuestMod::GetGroupExperienceCorrectionForKill(Player* killer, Unit* vi
         bool isTethered = IsPlayerExcludedFromGroupExperienceShare(member);
         uint8 reportedLevel = isCapped == true ? static_cast<uint8>(255) : realLevel;
         if (isCapped == true || isTethered == true)
-            anythingDiffers = true;
-        if (coreMaxLevel < reportedLevel)
-            coreMaxLevel = reportedLevel;
-        if (victim->GetLevel() > Acore::XP::GetGrayLevel(reportedLevel) && (haveCoreReference == false || coreReferenceLevel < reportedLevel))
+            outLevels.AnythingDiffers = true;
+        if (outLevels.MaxLevelIncludingTethered < realLevel)
+            outLevels.MaxLevelIncludingTethered = realLevel;
+        if (outLevels.CoreMaxLevel < reportedLevel)
+            outLevels.CoreMaxLevel = reportedLevel;
+        if (victim->GetLevel() > Acore::XP::GetGrayLevel(reportedLevel) && (outLevels.HaveCoreReference == false || outLevels.CoreReferenceLevel < reportedLevel))
         {
-            haveCoreReference = true;
-            coreReferenceLevel = reportedLevel;
+            outLevels.HaveCoreReference = true;
+            outLevels.CoreReferenceLevel = reportedLevel;
         }
         if (isTethered == true)
             continue;
-        if (intendedMaxLevel < realLevel)
-            intendedMaxLevel = realLevel;
-        if (victim->GetLevel() > Acore::XP::GetGrayLevel(realLevel) && (haveIntendedReference == false || intendedReferenceLevel < realLevel))
+        if (outLevels.IntendedMaxLevel < realLevel)
+            outLevels.IntendedMaxLevel = realLevel;
+        if (victim->GetLevel() > Acore::XP::GetGrayLevel(realLevel) && (outLevels.IntendedReferenceMember == nullptr || outLevels.IntendedReferenceLevel < realLevel))
         {
-            haveIntendedReference = true;
-            intendedReferenceLevel = realLevel;
+            outLevels.IntendedReferenceMember = member;
+            outLevels.IntendedReferenceLevel = realLevel;
         }
     }
+}
 
-    if (anythingDiffers == false)
+float EverQuestMod::GetGroupExperienceCorrectionForKill(Player* killer, Unit* victim)
+{
+    if (killer == nullptr || victim == nullptr)
+        return 1.0f;
+
+    // Nothing can differ unless one of the two systems that distort the levels is in play at all
+    if (MentorshipStateCount.load() == 0 && ConfigPlayerLevelCap == 0)
+        return 1.0f;
+
+    if (killer->GetGroup() == nullptr)
+        return 1.0f;
+
+    EverQuestGroupKillLevels levels;
+    BuildGroupKillLevels(killer, victim, levels);
+    if (levels.AnythingDiffers == false)
         return 1.0f;
 
     // The core is already handing out nothing, and a rate cannot bring that back
-    if (haveCoreReference == false)
+    if (levels.HaveCoreReference == false)
         return 1.0f;
 
-    // Acore::XP::Gain is deliberately not used here.  It fires OnPlayerBeforeGetLevelForXPGain, which this module itself overrides with something that takes a lock and records the
-    // player as being inside Player::GiveXP, and it would run a maxed player as "255" through BaseGain and come back with nothing
+    // Acore::XP::Gain is deliberately not used here.  Only the ratio of the two bases matters, and the creature multipliers Gain adds cancel out of it
     ContentLevels victimContentLevels = GetContentLevelsForMapAndZone(victim->GetMapId(), victim->GetZoneId());
-    uint32 coreBaseExperience = Acore::XP::BaseGain(coreReferenceLevel, victim->GetLevel(), victimContentLevels);
+    uint32 coreBaseExperience = Acore::XP::BaseGain(levels.CoreReferenceLevel, victim->GetLevel(), victimContentLevels);
     if (coreBaseExperience == 0)
         return 1.0f;
 
     // No member the victim is worth anything to once the tethered ones are set aside, so nobody should be earning from it
-    uint32 intendedBaseExperience = haveIntendedReference == false ? 0 : Acore::XP::BaseGain(intendedReferenceLevel, victim->GetLevel(), victimContentLevels);
-    float coreHalfFactor = (coreMaxLevel == coreReferenceLevel) ? 1.0f : 0.5f;
-    float intendedHalfFactor = (haveIntendedReference == true && victim->GetLevel() > Acore::XP::GetGrayLevel(intendedMaxLevel)) ? 1.0f : 0.5f;
+    bool haveIntendedReference = levels.IntendedReferenceMember != nullptr;
+    uint32 intendedBaseExperience = haveIntendedReference == false ? 0 : Acore::XP::BaseGain(levels.IntendedReferenceLevel, victim->GetLevel(), victimContentLevels);
+    float coreHalfFactor = (levels.CoreMaxLevel == levels.CoreReferenceLevel) ? 1.0f : 0.5f;
+    float intendedHalfFactor = (haveIntendedReference == true && victim->GetLevel() > Acore::XP::GetGrayLevel(levels.IntendedMaxLevel)) ? 1.0f : 0.5f;
 
     return (static_cast<float>(intendedBaseExperience) * intendedHalfFactor) / (static_cast<float>(coreBaseExperience) * coreHalfFactor);
 }
@@ -7606,9 +7689,9 @@ void EverQuestMod::GrantZoneWideGroupRewardsForKill(Player* killer, Unit* victim
         if (reward.BaseExperience == 0)
             continue;
 
-        // Mirrors KillRewarder::_RewardXP: gray members earn nothing and a partly gray group is only worth half
+        // Mirrors KillRewarder::_RewardXP: gray members earn nothing and a partly gray group is only worth half.  A max member is measured at their real level here, since their pet is still owed a share
         uint32 experience = 0;
-        if (member->IsAlive() == true && reward.MaxNotGrayMemberLevel >= GetPlayerLevelForExperienceGain(member))
+        if (member->IsAlive() == true && reward.MaxNotGrayMemberLevel >= GetGroupExperienceLevelForPlayer(member))
         {
             float memberRate = GetGroupExperienceRateForMember(member, reward);
             if (reward.IsFullXP == true)
@@ -7628,6 +7711,14 @@ void EverQuestMod::GrantZoneWideGroupRewardsForKill(Player* killer, Unit* victim
         }
 
         experience = static_cast<uint32>(experience * member->GetTotalAuraMultiplier(SPELL_AURA_MOD_XP_PCT));
+
+        // A max member earns none of it themselves, which also keeps it out of the secondary pool, but their hunter pet takes its share
+        if (IsPlayerReportingLevelCap(member) == true)
+        {
+            GiveKillExperienceToPetOfPlayer(member, experience);
+            continue;
+        }
+
         sScriptMgr->OnPlayerGiveXP(member, experience, victim, PlayerXPSource::XPSOURCE_KILL);
         member->GiveXP(experience, victim, reward.GroupRate);
 
@@ -14185,6 +14276,10 @@ uint8 EverQuestMod::GetGroupExperienceLevelForPlayer(Player const* player)
 void EverQuestMod::HandleLevelCapOnBeforeExperienceGain(Player const* player, uint8& levelForExpGain)
 {
     if (ConfigPlayerLevelCap == 0)
+        return;
+
+    // Only a number is being worked out
+    if (IsReadingRealLevelForExperienceGain == true)
         return;
 
     // Track that this player is inside Player::GiveXP, so an experience-driven level up attempt can be told apart from a direct GiveLevel call (GM .levelup / .character level), which must stay uncapped

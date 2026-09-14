@@ -380,7 +380,12 @@ public:
 
         // Nothing is left for Player::GiveXP to apply to a capped bar, and handing it the real amount would only print an experience line for nothing
         if (experienceBarCapped == true)
+        {
+            // The core feeds a hunter pet out of this same amount once the hook returns, so the pet's share is handed over before it is zeroed
+            if (xpSource == PlayerXPSource::XPSOURCE_KILL)
+                EverQuest->GiveKillExperienceToPetOfPlayer(player, amount);
             amount = 0;
+        }
     }
 
     void AddSecondaryExpPoolForKill(Player* player, uint32 amount, Unit* victim, uint8 xpSource)
@@ -587,7 +592,13 @@ public:
             }
         }
 
+        // The share before the correction below, which only rescales against the core's base experience and means nothing to a max character the core paid no base at all
+        float shareRate = rate;
         rate *= EverQuest->GetGroupExperienceCorrectionForKill(zoneWideKiller, zoneWideVictim);
+
+        // A max character reports level 255, so the core pays them nothing and their hunter pet nothing along with them.  The pet is still owed its share of what they would have earned
+        if (EverQuest->IsPlayerReportingLevelCap(player) == true && EverQuest->CanPetGainExperienceFromOwner(player) == true)
+            EverQuest->GiveKillExperienceToPetOfPlayer(player, EverQuest->GetKillExperienceForLevelCappedPlayer(player, zoneWideKiller, zoneWideVictim, shareRate));
 
         // Kill credit for a non-EQ creature outside of an EQ zone permanently costs the player the adventurer aura
         if (EverQuest->IsCreatureKillDisqualifyingForAdventurer(player, rewarder->GetVictim()) == true)

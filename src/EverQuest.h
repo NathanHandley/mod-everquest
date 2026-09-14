@@ -1265,11 +1265,23 @@ struct EverQuestZoneWideKillReward
     uint8 MaxLevel = 0;
     uint8 MaxLevelIncludingTethered = 0;
     Player* MaxNotGrayMember = nullptr;
-    uint8 GainReferenceLevel = 0;
     uint8 MaxNotGrayMemberLevel = 0;
     bool IsFullXP = false;
     uint32 BaseExperience = 0;
     float GroupRate = 1.0f;
+};
+
+// Group totals KillRewarder::_InitGroupData builds
+struct EverQuestGroupKillLevels
+{
+    bool AnythingDiffers = false;
+    bool HaveCoreReference = false;
+    uint8 CoreMaxLevel = 0;
+    uint8 CoreReferenceLevel = 0;
+    uint8 IntendedMaxLevel = 0;
+    uint8 IntendedReferenceLevel = 0;
+    Player* IntendedReferenceMember = nullptr;
+    uint8 MaxLevelIncludingTethered = 0;
 };
 
 class EverQuestFaction
@@ -2045,14 +2057,18 @@ public:
     bool IsMapIDAnEverQuestMap(uint32 mapID);
     bool IsZoneWideGroupRewardEnabledForMap(uint32 mapID);
     bool IsInZoneWideGroupRewardRange(Player* member, WorldObject* rewardSource);
-    uint8 GetPlayerLevelForExperienceGain(Player* player);
     void BuildZoneWideKillReward(Group* group, Player* killer, Unit* victim, EverQuestZoneWideKillReward& outReward);
     float GetZoneWideGroupExperienceRate(Player* player, const EverQuestZoneWideKillReward& reward);
     bool IsAlternateGroupExperienceFormulaActive(uint32 aliveMemberCount);
     float GetAlternateGroupExperienceRate(uint8 memberLevel, uint32 aliveMemberCount, uint32 aliveSumLevel);
     static float GetRetailGroupExperienceRate(uint8 memberLevel, uint32 aliveMemberCount, uint32 aliveSumLevel, bool isRaid);
+    void BuildGroupKillLevels(Player* killer, Unit* victim, EverQuestGroupKillLevels& outLevels);
     float GetGroupExperienceCorrectionForKill(Player* killer, Unit* victim);
     float GetGroupExperienceRateForMember(Player* member, const EverQuestZoneWideKillReward& reward);
+    uint32 GetExperienceGainAtRealLevel(Player* player, Unit* victim, bool isBattleGround);
+    uint32 GetKillExperienceForLevelCappedPlayer(Player* player, Player* killer, Unit* victim, float shareRate);
+    bool CanPetGainExperienceFromOwner(Player* owner);
+    void GiveKillExperienceToPetOfPlayer(Player* owner, uint32 ownerExperience);
     void ApplyEQOnkillReputationsForPlayer(Player* player, Unit* victim);
     void GrantZoneWideGroupRewardsForKill(Player* killer, Unit* victim, const EverQuestZoneWideKillReward& reward);
     void ApplyZoneWideGroupLootAccess(Loot* loot, Player* lootOwner, bool personal);
