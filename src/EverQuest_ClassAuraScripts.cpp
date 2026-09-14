@@ -26,6 +26,11 @@
 
 using namespace std;
 
+static bool IsClassAuraPeriodicTickProc(ProcEventInfo& eventInfo)
+{
+    return (eventInfo.GetTypeMask() & PERIODIC_PROC_FLAG_MASK) != 0;
+}
+
 // Rogue "Master Exploiter": any landed attack (autoattack, ability or harmful spell) stacks the momentum, and any attack that is missed, dodged or parried costs half of the stacks (rounded down)
 // A critical of any kind (heals included) can spend the readied Lucky Strike
 static const uint32 EQ_CLASSAURA_ROGUE_ATTACK_PROC_MASK = PROC_FLAG_DONE_MELEE_AUTO_ATTACK | PROC_FLAG_DONE_RANGED_AUTO_ATTACK | PROC_FLAG_DONE_SPELL_MELEE_DMG_CLASS
@@ -61,7 +66,7 @@ class EverQuest_ClassAuraRogueAuraScript : public AuraScript
     void HandleProc(ProcEventInfo& eventInfo)
     {
         PreventDefaultAction();
-        if (EverQuest->IsClassAuraSystemEnabled() == false)
+        if (EverQuest->IsClassAuraSystemEnabled() == false || IsClassAuraPeriodicTickProc(eventInfo) == true)
             return;
         Unit* rogue = GetTarget();
         if (rogue == nullptr || rogue->IsPlayer() == false || rogue->IsAlive() == false)
@@ -103,7 +108,7 @@ class EverQuest_ClassAuraRangerAuraScript : public AuraScript
     void HandleProc(ProcEventInfo& eventInfo)
     {
         PreventDefaultAction();
-        if (EverQuest->IsClassAuraSystemEnabled() == false)
+        if (EverQuest->IsClassAuraSystemEnabled() == false || IsClassAuraPeriodicTickProc(eventInfo) == true)
             return;
         Unit* ranger = GetTarget();
         if (ranger == nullptr || ranger->IsPlayer() == false || ranger->IsAlive() == false)
@@ -154,7 +159,7 @@ class EverQuest_ClassAuraPaladinAuraScript : public AuraScript
     void HandleProc(ProcEventInfo& eventInfo)
     {
         PreventDefaultAction();
-        if (EverQuest->IsClassAuraSystemEnabled() == false)
+        if (EverQuest->IsClassAuraSystemEnabled() == false || IsClassAuraPeriodicTickProc(eventInfo) == true)
             return;
         Unit* paladin = GetTarget();
         if (paladin == nullptr || paladin->IsPlayer() == false || paladin->IsAlive() == false)
@@ -191,10 +196,10 @@ class EverQuest_ClassAuraShadowKnightAuraScript : public AuraScript
 {
     PrepareAuraScript(EverQuest_ClassAuraShadowKnightAuraScript);
 
-    void HandleProc(ProcEventInfo& /*eventInfo*/)
+    void HandleProc(ProcEventInfo& eventInfo)
     {
         PreventDefaultAction();
-        if (EverQuest->IsClassAuraSystemEnabled() == false)
+        if (EverQuest->IsClassAuraSystemEnabled() == false || IsClassAuraPeriodicTickProc(eventInfo) == true)
             return;
         Unit* shadowKnight = GetTarget();
         if (shadowKnight == nullptr || shadowKnight->IsPlayer() == false || shadowKnight->IsAlive() == false)
@@ -214,7 +219,7 @@ class EverQuest_ClassAuraShadowKnightAuraScript : public AuraScript
 // Monk "Agile Fighter": the proc row on the armor aura already rolled the double attack, and in light armor some of those become a triple.
 static void DoClassAuraMonkDoubleAttack(Unit* monk, ProcEventInfo& eventInfo, uint32 tripleChancePercent)
 {
-    if (EverQuest->IsClassAuraSystemEnabled() == false)
+    if (EverQuest->IsClassAuraSystemEnabled() == false || IsClassAuraPeriodicTickProc(eventInfo) == true)
         return;
     if (monk == nullptr || monk->IsPlayer() == false || monk->IsAlive() == false)
         return;
@@ -269,10 +274,10 @@ class EverQuest_ClassAuraMagicianAuraScript : public AuraScript
 {
     PrepareAuraScript(EverQuest_ClassAuraMagicianAuraScript);
 
-    void HandleProc(ProcEventInfo& /*eventInfo*/)
+    void HandleProc(ProcEventInfo& eventInfo)
     {
         PreventDefaultAction();
-        if (EverQuest->IsClassAuraSystemEnabled() == false)
+        if (EverQuest->IsClassAuraSystemEnabled() == false || IsClassAuraPeriodicTickProc(eventInfo) == true)
             return;
         Unit* owner = GetTarget();
         if (owner == nullptr || owner->IsPlayer() == false || owner->IsAlive() == false)
@@ -297,10 +302,10 @@ class EverQuest_ClassAuraMagicianPetAuraScript : public AuraScript
 {
     PrepareAuraScript(EverQuest_ClassAuraMagicianPetAuraScript);
 
-    void HandleProc(ProcEventInfo& /*eventInfo*/)
+    void HandleProc(ProcEventInfo& eventInfo)
     {
         PreventDefaultAction();
-        if (EverQuest->IsClassAuraSystemEnabled() == false)
+        if (EverQuest->IsClassAuraSystemEnabled() == false || IsClassAuraPeriodicTickProc(eventInfo) == true)
             return;
         Unit* pet = GetTarget();
         if (pet == nullptr || pet->IsAlive() == false)
@@ -331,7 +336,7 @@ class EverQuest_ClassAuraDruidAuraScript : public AuraScript
     void HandleProc(ProcEventInfo& eventInfo)
     {
         PreventDefaultAction();
-        if (EverQuest->IsClassAuraSystemEnabled() == false)
+        if (EverQuest->IsClassAuraSystemEnabled() == false || IsClassAuraPeriodicTickProc(eventInfo) == true)
             return;
         Unit* druid = GetTarget();
         if (druid == nullptr || druid->IsPlayer() == false || druid->IsAlive() == false)
@@ -372,7 +377,7 @@ class EverQuest_ClassAuraDruidAuraScript : public AuraScript
     }
 };
 
-// Shaman "Spirit Channeler": healing an ally stacks vigor on them
+// Shaman "Spirit Channeler": directly healing an ally stacks vigor on them (heal over time ticks are not in the proc flags)
 class EverQuest_ClassAuraShamanAuraScript : public AuraScript
 {
     PrepareAuraScript(EverQuest_ClassAuraShamanAuraScript);
@@ -380,7 +385,7 @@ class EverQuest_ClassAuraShamanAuraScript : public AuraScript
     void HandleProc(ProcEventInfo& eventInfo)
     {
         PreventDefaultAction();
-        if (EverQuest->IsClassAuraSystemEnabled() == false)
+        if (EverQuest->IsClassAuraSystemEnabled() == false || IsClassAuraPeriodicTickProc(eventInfo) == true)
             return;
         Unit* shaman = GetTarget();
         if (shaman == nullptr || shaman->IsPlayer() == false || shaman->IsAlive() == false)
