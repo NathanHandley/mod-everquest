@@ -2090,6 +2090,10 @@ public:
     void ApplyZoneWideGroupLootAccess(Loot* loot, Player* lootOwner, bool personal);
     void ApplyZoneWideGroupMoneyShare(Player* looter, Loot* loot);
     bool IsCreatureKillDisqualifyingForAdventurer(Player* player, Unit* victim);
+    bool DoesCreatureKillOfferExperienceForAdventurer(Player* player, Unit* victim);
+    void ArmAdventurerKillReputationWatch(Player* player);
+    void DisarmAdventurerKillReputationWatch();
+    bool IsAdventurerKillReputationWatchArmedForPlayer(Player* player);
     bool IsQuestDisqualifyingForAdventurer(Player* player, uint32 questID);
     bool IsPlayerDisqualifiedFromAdventurer(Player* player);
     bool DisqualifyPlayerFromAdventurer(Player* player);

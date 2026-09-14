@@ -518,10 +518,33 @@ public:
         return victim->GetDistance(member) <= sWorld->getFloatConfig(CONFIG_GROUP_XP_DISTANCE);
     }
 
+    void DisqualifyAdventurerForCreatureKill(Player* player)
+    {
+        if (EverQuest->DisqualifyPlayerFromAdventurer(player) == true && player->GetSession() != nullptr)
+            ChatHandler(player->GetSession()).SendSysMessage("|cffFF0000You are no longer an Everquest Adventurer, as you gained kill credit for a creature that is not from Everquest.|r");
+    }
+
+    bool OnPlayerReputationChange(Player* player, uint32 factionID, int32& standing, bool /*incremental*/) override
+    {
+        if (EverQuest->IsEnabled == false)
+            return true;
+
+        // Only reputation that really moves counts, so a kill on a faction already at its cap leaves the adventurer aura alone
+        if (EverQuest->IsAdventurerKillReputationWatchArmedForPlayer(player) == true && standing != player->GetReputationMgr().GetReputation(factionID))
+        {
+            EverQuest->DisarmAdventurerKillReputationWatch();
+            DisqualifyAdventurerForCreatureKill(player);
+        }
+        return true;
+    }
+
     void OnPlayerRewardKillRewarder(Player* player, KillRewarder* rewarder, bool /*isDungeon*/, float& rate) override
     {
         if (EverQuest->IsEnabled == false)
             return;
+
+        // The previous group member's reputation has been paid by now, so their watch ends here
+        EverQuest->DisarmAdventurerKillReputationWatch();
 
         // Handle zone-wide award support
         Unit* zoneWideVictim = rewarder->GetVictim();
@@ -600,11 +623,16 @@ public:
         if (EverQuest->IsPlayerReportingLevelCap(player) == true && EverQuest->CanPetGainExperienceFromOwner(player) == true)
             EverQuest->GiveKillExperienceToPetOfPlayer(player, EverQuest->GetKillExperienceForLevelCappedPlayer(player, zoneWideKiller, zoneWideVictim, shareRate));
 
-        // Kill credit for a non-EQ creature outside of an EQ zone permanently costs the player the adventurer aura
+        // Kill credit for a non-EQ creature outside of an EQ zone permanently costs the player the adventurer aura, but only when the kill was worth experience or reputation to them
         if (EverQuest->IsCreatureKillDisqualifyingForAdventurer(player, rewarder->GetVictim()) == true)
         {
-            if (EverQuest->DisqualifyPlayerFromAdventurer(player) == true && player->GetSession() != nullptr)
-                ChatHandler(player->GetSession()).SendSysMessage("|cffFF0000You are no longer an Everquest Adventurer, as you gained kill credit for a creature that is not from Everquest.|r");
+            if (EverQuest->DoesCreatureKillOfferExperienceForAdventurer(player, rewarder->GetVictim()) == true)
+                DisqualifyAdventurerForCreatureKill(player);
+            else
+            {
+                // Reputation is paid after this, both below and once the hook returns, so it is watched for in OnPlayerReputationChange
+                EverQuest->ArmAdventurerKillReputationWatch(player);
+            }
         }
 
         // Grab the kill rewards, and apply any in the list

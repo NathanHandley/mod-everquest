@@ -7870,6 +7870,45 @@ bool EverQuestMod::IsCreatureKillDisqualifyingForAdventurer(Player* player, Unit
     return true;
 }
 
+bool EverQuestMod::DoesCreatureKillOfferExperienceForAdventurer(Player* player, Unit* victim)
+{
+    if (player == nullptr || victim == nullptr)
+        return false;
+
+    // Measured at the real level
+    uint32 experience = GetExperienceGainAtRealLevel(player, victim, false);
+
+    // Mirrors KillRewarder::_InitXP, where a low health modifier scales the experience down and can round it to nothing
+    if (experience != 0 && victim->IsCreature() == true)
+    {
+        CreatureTemplate const* creatureTemplate = victim->ToCreature()->GetCreatureTemplate();
+        if (creatureTemplate != nullptr && creatureTemplate->ModHealth <= 0.75f && creatureTemplate->ModHealth >= 0.0f)
+            experience = static_cast<uint32>(experience * creatureTemplate->ModHealth);
+    }
+    return experience != 0;
+}
+
+static thread_local ObjectGuid AdventurerKillReputationWatchPlayerGUID;
+
+void EverQuestMod::ArmAdventurerKillReputationWatch(Player* player)
+{
+    if (player == nullptr)
+        return;
+    AdventurerKillReputationWatchPlayerGUID = player->GetGUID();
+}
+
+void EverQuestMod::DisarmAdventurerKillReputationWatch()
+{
+    AdventurerKillReputationWatchPlayerGUID.Clear();
+}
+
+bool EverQuestMod::IsAdventurerKillReputationWatchArmedForPlayer(Player* player)
+{
+    if (player == nullptr || AdventurerKillReputationWatchPlayerGUID.IsEmpty() == true)
+        return false;
+    return AdventurerKillReputationWatchPlayerGUID == player->GetGUID();
+}
+
 bool EverQuestMod::IsQuestDisqualifyingForAdventurer(Player* player, uint32 questID)
 {
     if (player == nullptr)

@@ -860,7 +860,9 @@ EverQuest.Player.AddClassStartItems = True
 #		granted at character creation and is lost for good by completing a non-Everquest quest or
 #		by getting kill credit on a non-Everquest creature while outside of an Everquest map, so
 #		reaching this level with it still held means the character only ever adventured through
-#		Everquest content.  Nothing done inside an Everquest map can cost a character the aura,
+#		Everquest content.  A kill only costs the aura if the creature was worth experience at the
+#		character's real level or actually changed their reputation, so gray creatures, critters
+#		and creatures with no reputation reward (or one already capped) are safe.  Nothing done inside an Everquest map can cost a character the aura,
 #		and the aura is put back at login if it went missing without the character ever having
 #		earned the loss (a server crash, an aura wipe, and so on).
 #		Set to 0 to stop the feat of strength from ever being awarded through leveling.
