@@ -6898,6 +6898,33 @@ uint32 EverQuestMod::GetActiveEQPetCreatureTypeForPlayer(Player* player)
     return creatureTemplate->type;
 }
 
+void EverQuestMod::TryResummonTemporaryUnsummonedEQPet(Player* player)
+{
+    // The core only brings a pet back after a zone change, mount or vehicle when the owner knows the summoning spell (Player::CanResummonPet), so a pet summoned by an
+    // item click like the Orb of Mastery gets left behind with its pet number still held.  Logging in loads the pet without that check, so zoning does the same for EQ pets
+    uint32 petNumber = player->GetTemporaryUnsummonedPetNumber();
+    if (petNumber == 0)
+        return;
+
+    // Wait out the same states the core does
+    if (player->IsPetNeedBeTemporaryUnsummoned() == true || player->IsSpectator() == true || player->InArena() == true)
+        return;
+    if (player->GetPetGUID().IsEmpty() == false || player->GetCharmGUID().IsEmpty() == false)
+        return;
+
+    PetStable* petStable = player->GetPetStable();
+    if (petStable == nullptr || petStable->CurrentPet.has_value() == false || petStable->CurrentPet->PetNumber != petNumber)
+        return;
+    if (HasPetDataForCreatureTemplateID(petStable->CurrentPet->CreatureId) == false)
+        return;
+
+    // Mirrors Player::ResummonPetTemporaryUnSummonedIfAny past its spell check
+    Pet* pet = new Pet(player);
+    if (pet->LoadPetFromDB(player, 0, petNumber, true) == false)
+        delete pet;
+    player->SetTemporaryUnsummonedPetNumber(0);
+}
+
 void EverQuestMod::LoadCreatePlayerData()
 {
     PlayerCreateInfoByRaceIDThenClassID.clear();

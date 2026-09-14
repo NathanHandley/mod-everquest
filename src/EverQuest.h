@@ -2044,6 +2044,7 @@ public:
     const EverQuestPet& GetPetDataForCreatureTemplateID(uint32 creatureTemplateID);
     bool DoesPlayerHaveActiveEQPet(Player* player);
     uint32 GetActiveEQPetCreatureTypeForPlayer(Player* player);
+    void TryResummonTemporaryUnsummonedEQPet(Player* player);
     void FixInvalidCharacterPetModelIDs();
     void RemoveStaleSavedPetSpells();
     bool CanPetCreatureTemplateTeachSpell(uint32 creatureTemplateID, uint32 spellID);

@@ -480,6 +480,10 @@ public:
         if (EverQuest->ConfigSpellSummonPlayerAcrossZones == true)
             EverQuest->ConsumePendingSummonRequest(player);
 
+        // Bring back an EQ pet the core declined to resummon after a zone change, dismount or vehicle exit
+        if (player->GetTemporaryUnsummonedPetNumber() != 0)
+            EverQuest->TryResummonTemporaryUnsummonedEQPet(player);
+
         // Some ways an item leaves a slot have no unequip hook (auto-unequip when a two-hander goes on, item destruction),
         // so revalidate while the form that cares about it is held
         uint8 currentForm = player->GetShapeshiftForm();
