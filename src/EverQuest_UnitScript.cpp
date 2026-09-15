@@ -87,11 +87,14 @@ public:
         return false;
     }
 
-    void OnDamage(Unit* attacker, Unit* victim, uint32& /*damage*/) override
+    void OnDamage(Unit* attacker, Unit* victim, uint32& damage) override
     {
         if (EverQuest->IsEnabled == false)
             return;
         EverQuest->ProcessCreatureRetaliationOnDamage(attacker, victim);
+
+        // Class auras: a shadow knight stores a share of the damage they take for Blood Debt
+        EverQuest->HandleClassAuraShadowKnightBloodDebtOnDamage(attacker, victim, damage);
     }
 
     void OnUnitUpdate(Unit* unit, uint32 /*diff*/) override
@@ -245,9 +248,6 @@ public:
 
         // Slows needs to be weaker on boss creatures
         EverQuest->ApplyEQSlowBossReductionOnAuraApply(unit, aura);
-
-        // A slow landed by a Shaman class aura holder brings its burden mark along
-        EverQuest->HandleClassAuraSlowAuraApply(unit, aura);
 
         if (EverQuest->IsSpellBlockedByMaxCreatureTargetLevel(aura->GetId(), unit, aura->GetCaster()) == true)
         {

@@ -23,6 +23,8 @@
 #include "SpellScript.h"
 #include "Unit.h"
 #include "EverQuest.h"
+#include <algorithm>
+#include <limits>
 
 using namespace std;
 
@@ -256,6 +258,77 @@ class EverQuest_ClassAuraShadowKnightAuraScript : public AuraScript
     }
 };
 
+// Shadow Knight "Blood Debt": drains the stored damage from the target as shadow damage and heals the knight for the full amount stored.  The charge is only spent
+// on a hit that can take the damage, so a miss or an immune target costs nothing
+class EverQuest_ClassAuraShadowKnightBloodDebtSpellScript : public SpellScript
+{
+    PrepareSpellScript(EverQuest_ClassAuraShadowKnightBloodDebtSpellScript);
+
+    uint32 SpentAmount = 0;
+
+    SpellCastResult CheckStoredDamage()
+    {
+        Unit* caster = GetCaster();
+        if (caster == nullptr || caster->IsPlayer() == false)
+            return SPELL_FAILED_SPELL_UNAVAILABLE;
+        Player* shadowKnight = caster->ToPlayer();
+        if (EverQuest->IsClassAuraSystemEnabled() == false || EverQuest->PlayerHasClassAura(shadowKnight, EQ_CLASSAURA_SPELL_SHADOWKNIGHT_AURA) == false)
+            return SPELL_FAILED_SPELL_UNAVAILABLE;
+        if (EverQuest->GetClassAuraShadowKnightBloodDebtAmount(shadowKnight) == 0)
+            return SPELL_FAILED_CASTER_AURASTATE;
+        return SPELL_CAST_OK;
+    }
+
+    void SpendStoredDamageOnHit()
+    {
+        SpentAmount = 0;
+        Unit* caster = GetCaster();
+        Unit* target = GetHitUnit();
+        if (caster == nullptr || caster->IsPlayer() == false || target == nullptr)
+            return;
+
+        // Reflected back onto the knight, it does nothing at all
+        if (target == caster)
+        {
+            SetHitDamage(0);
+            return;
+        }
+
+        // A miss or an immune target arrives here without the placeholder damage
+        if (GetHitDamage() <= 0)
+            return;
+
+        // Damage immunity is only checked after this hook, so it is caught here before the charge is spent
+        if (target->IsImmunedToDamage(caster, GetSpellInfo()) == true)
+            return;
+        uint32 amount = EverQuest->SpendClassAuraShadowKnightBloodDebt(caster->ToPlayer());
+        SetHitDamage(int32(min<uint32>(amount, uint32(numeric_limits<int32>::max()))));
+        SpentAmount = amount;
+    }
+
+    void HealFromSpentDebt()
+    {
+        if (SpentAmount == 0)
+            return;
+        int32 healAmount = int32(min<uint32>(SpentAmount, uint32(numeric_limits<int32>::max())));
+        SpentAmount = 0;
+        Unit* caster = GetCaster();
+        if (caster == nullptr || caster->IsAlive() == false || caster->IsInWorld() == false)
+            return;
+        uint32 healSpellID = EverQuest->GetClassAuraSpellID(EQ_CLASSAURA_SPELL_SHADOWKNIGHT_BLOOD_DEBT_HEAL);
+        if (healSpellID == 0)
+            return;
+        caster->CastCustomSpell(caster, healSpellID, &healAmount, nullptr, nullptr, true);
+    }
+
+    void Register() override
+    {
+        OnCheckCast += SpellCheckCastFn(EverQuest_ClassAuraShadowKnightBloodDebtSpellScript::CheckStoredDamage);
+        OnHit += SpellHitFn(EverQuest_ClassAuraShadowKnightBloodDebtSpellScript::SpendStoredDamageOnHit);
+        AfterHit += SpellHitFn(EverQuest_ClassAuraShadowKnightBloodDebtSpellScript::HealFromSpentDebt);
+    }
+};
+
 // Monk "Agile Fighter": the proc row on the armor aura already rolled the double attack, and in light armor some of those become a triple.
 static void DoClassAuraMonkDoubleAttack(Unit* monk, ProcEventInfo& eventInfo, uint32 tripleChancePercent)
 {
@@ -476,6 +549,7 @@ void AddEverQuestClassAuraScripts()
     RegisterSpellScript(EverQuest_ClassAuraPaladinAuraScript);
     RegisterSpellScript(EverQuest_ClassAuraWarriorAuraScript);
     RegisterSpellScript(EverQuest_ClassAuraShadowKnightAuraScript);
+    RegisterSpellScript(EverQuest_ClassAuraShadowKnightBloodDebtSpellScript);
     RegisterSpellScript(EverQuest_ClassAuraMonkLightArmorAuraScript);
     RegisterSpellScript(EverQuest_ClassAuraMonkHeavyArmorAuraScript);
     RegisterSpellScript(EverQuest_ClassAuraMagicianAuraScript);

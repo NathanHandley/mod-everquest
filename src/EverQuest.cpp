@@ -312,6 +312,14 @@ bool EverQuestMod::LoadConfigurationSystemDataFromDB()
                 ConfigSystemClassAuraShamanDotExtendChancePercent = (uint32)atoi(value.c_str());
             else if (key == "ClassAuraShamanDotExtendInMS")
                 ConfigSystemClassAuraShamanDotExtendInMS = (uint32)atoi(value.c_str());
+            else if (key == "ClassAuraShadowKnightBloodDebtDamageTakenStoredPercent")
+                ConfigSystemClassAuraShadowKnightBloodDebtDamageTakenStoredPercent = (uint32)atoi(value.c_str());
+            else if (key == "ClassAuraShadowKnightBloodDebtMaxHealthPercent")
+                ConfigSystemClassAuraShadowKnightBloodDebtMaxHealthPercent = (uint32)atoi(value.c_str());
+            else if (key == "ClassAuraShadowKnightBloodDebtStoreDurationInMS")
+                ConfigSystemClassAuraShadowKnightBloodDebtStoreDurationInMS = (uint32)atoi(value.c_str());
+            else if (key == "ClassAuraShadowKnightBloodDebtFullSpellVisualKitID")
+                ConfigSystemClassAuraShadowKnightBloodDebtFullSpellVisualKitID = (uint32)atoi(value.c_str());
             else if (key == "SlowBossEffectivenessMod")
                 ConfigSystemSlowBossEffectivenessMod = (float)atof(value.c_str());
             else if (key == "RaidBossRespawnVarianceInSec")

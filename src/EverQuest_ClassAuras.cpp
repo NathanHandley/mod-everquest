@@ -54,7 +54,8 @@ static const char* EQ_CLASSAURA_SPELL_TYPE_NAMES[EQ_CLASSAURA_SPELL_TYPE_COUNT] 
     "ShamanPassive", "ShamanAura", "ShamanWarspirit", "ShamanVigor",
     "CastSpeedHelper",
     "DruidNaturesBalanceFire", "WarriorUnrelentingAssault", "WarriorRiposte", "BardVigor", "MonkChiSurge", "PaladinDeflection", "RogueLuckyStrike", "RogueLuckyStrikeHelper",
-    "DruidNaturesBalanceCold", "DruidNaturesBalanceNature", "DruidEntangleStrike", "ShamanWarspiritVigor"
+    "DruidNaturesBalanceCold", "DruidNaturesBalanceNature", "DruidEntangleStrike", "ShamanWarspiritVigor",
+    "ShadowKnightBloodDebt", "ShadowKnightBloodDebtCharge", "ShadowKnightBloodDebtHeal"
 };
 
 struct EverQuestClassAuraToggle
@@ -94,7 +95,7 @@ static const EverQuestClassAuraSpellType EQ_CLASSAURA_MOD_OWNED_TYPES[] =
     EQ_CLASSAURA_SPELL_ROGUE_AURA, EQ_CLASSAURA_SPELL_PALADIN_AURA, EQ_CLASSAURA_SPELL_SHADOWKNIGHT_AURA, EQ_CLASSAURA_SPELL_WARRIOR_AURA,
     EQ_CLASSAURA_SPELL_WIZARD_AURA, EQ_CLASSAURA_SPELL_MAGICIAN_AURA, EQ_CLASSAURA_SPELL_NECROMANCER_AURA, EQ_CLASSAURA_SPELL_CLERIC_AURA,
     EQ_CLASSAURA_SPELL_DRUID_AURA, EQ_CLASSAURA_SPELL_SHAMAN_AURA, EQ_CLASSAURA_SPELL_CAST_SPEED_HELPER, EQ_CLASSAURA_SPELL_WARRIOR_UNRELENTING_ASSAULT,
-    EQ_CLASSAURA_SPELL_MONK_CHI_SURGE, EQ_CLASSAURA_SPELL_ROGUE_LUCKY_STRIKE, EQ_CLASSAURA_SPELL_ROGUE_LUCKY_STRIKE_HELPER
+    EQ_CLASSAURA_SPELL_MONK_CHI_SURGE, EQ_CLASSAURA_SPELL_ROGUE_LUCKY_STRIKE, EQ_CLASSAURA_SPELL_ROGUE_LUCKY_STRIKE_HELPER, EQ_CLASSAURA_SPELL_SHADOWKNIGHT_BLOOD_DEBT_CHARGE
 };
 static const size_t EQ_CLASSAURA_MOD_OWNED_COUNT = sizeof(EQ_CLASSAURA_MOD_OWNED_TYPES) / sizeof(EQ_CLASSAURA_MOD_OWNED_TYPES[0]);
 
@@ -205,32 +206,7 @@ void EverQuestMod::RefreshClassAurasForPlayer(Player* player)
     RefreshClassAuraGearAurasForPlayer(player);
     UpdateEnchanterFocusForPlayer(player);
     RefreshMagicianPetAuraForPlayer(player);
-    RefreshPaladinBlockForPlayer(player);
     RefreshClassAuraTogglesForPlayer(player);
-}
-
-void EverQuestMod::RefreshPaladinBlockForPlayer(Player* player)
-{
-    if (player == nullptr)
-        return;
-    EverQuestPlayerClassAuraState* state = GetClassAuraStateForPlayer(player);
-    bool hasPaladinAura = IsClassAuraSystemEnabled() == true && PlayerHasClassAura(player, EQ_CLASSAURA_SPELL_PALADIN_AURA) == true;
-    if (hasPaladinAura == true)
-    {
-        // A class without the block skill (a priest holding a shield, say) is given it for as long as the aura is there
-        if (player->CanBlock() == false)
-        {
-            player->SetCanBlock(true);
-            state->BlockGrantedByClassAura = true;
-        }
-    }
-    else if (state->BlockGrantedByClassAura == true)
-    {
-        // Taken back with the aura, unless the character has since learned block
-        state->BlockGrantedByClassAura = false;
-        if (player->HasSpell(EQ_SPELL_ID_BLOCK) == false)
-            player->SetCanBlock(false);
-    }
 }
 
 void EverQuestMod::RefreshClassAuraGearAurasForPlayer(Player* player)
@@ -262,6 +238,7 @@ void EverQuestMod::UpdateClassAurasForPlayer(Player* player, uint32 diffInMS)
     UpdateWarriorClassAuraForPlayer(player);
     UpdateMonkChiSurgeForPlayer(player);
     UpdateRogueLuckyStrikeForPlayer(player);
+    UpdateShadowKnightBloodDebtForPlayer(player);
 }
 
 void EverQuestMod::UpdateRogueLuckyStrikeForPlayer(Player* player)
@@ -326,6 +303,106 @@ void EverQuestMod::UpdateMonkChiSurgeForPlayer(Player* player)
         player->AddAura(chiSurgeSpellID, player);
     else if (shouldHave == false && hasAura == true)
         player->RemoveAurasDueToSpell(chiSurgeSpellID);
+}
+
+static void ExpireClassAuraShadowKnightBloodDebt(EverQuestPlayerClassAuraState* state, uint32 nowMS, uint32 storeDurationInMS)
+{
+    // Everything stored is kept while hits keep landing, and lost all at once after the storing time passes with none
+    if (state->BloodDebtDamageTaken != 0 && nowMS - state->BloodDebtLastDamageTakenAtMS >= storeDurationInMS)
+        state->BloodDebtDamageTaken = 0;
+}
+
+void EverQuestMod::HandleClassAuraShadowKnightBloodDebtOnDamage(Unit* attacker, Unit* victim, uint32 damage)
+{
+    // Only damage from another unit is stored, so falling, lava, drowning, and the knight's own spells never add to it
+    if (damage == 0 || attacker == nullptr || victim == nullptr || attacker == victim || victim->IsPlayer() == false || victim->IsAlive() == false)
+        return;
+    if (IsClassAuraSystemEnabled() == false || ConfigSystemClassAuraShadowKnightBloodDebtDamageTakenStoredPercent == 0 || ConfigSystemClassAuraShadowKnightBloodDebtStoreDurationInMS == 0)
+        return;
+    Player* player = victim->ToPlayer();
+    if (GetClassAuraSpellID(EQ_CLASSAURA_SPELL_SHADOWKNIGHT_BLOOD_DEBT) == 0 || PlayerHasClassAura(player, EQ_CLASSAURA_SPELL_SHADOWKNIGHT_AURA) == false)
+        return;
+
+    // The raw damage is kept (the stored percent and the cap are applied when the charge is read)
+    EverQuestPlayerClassAuraState* state = GetClassAuraStateForPlayer(player);
+    uint32 nowMS = GameTime::GetGameTimeMS().count();
+    ExpireClassAuraShadowKnightBloodDebt(state, nowMS, ConfigSystemClassAuraShadowKnightBloodDebtStoreDurationInMS);
+    state->BloodDebtDamageTaken += damage;
+    state->BloodDebtLastDamageTakenAtMS = nowMS;
+}
+
+uint32 EverQuestMod::GetClassAuraShadowKnightBloodDebtAmount(Player* player)
+{
+    if (player == nullptr)
+        return 0;
+    EverQuestPlayerClassAuraState* state = GetClassAuraStateForPlayer(player);
+    uint32 nowMS = GameTime::GetGameTimeMS().count();
+    ExpireClassAuraShadowKnightBloodDebt(state, nowMS, ConfigSystemClassAuraShadowKnightBloodDebtStoreDurationInMS);
+
+    // The cap follows the current maximum health, so losing a stamina buff lowers what can be unleashed right away
+    uint64 amount = (state->BloodDebtDamageTaken * (uint64)ConfigSystemClassAuraShadowKnightBloodDebtDamageTakenStoredPercent) / 100;
+    uint64 maxAmount = ((uint64)player->GetMaxHealth() * (uint64)ConfigSystemClassAuraShadowKnightBloodDebtMaxHealthPercent) / 100;
+    return (uint32)std::min(amount, maxAmount);
+}
+
+uint32 EverQuestMod::SpendClassAuraShadowKnightBloodDebt(Player* player)
+{
+    // Everything stored goes at once, including any damage beyond the cap
+    if (player == nullptr)
+        return 0;
+    uint32 amount = GetClassAuraShadowKnightBloodDebtAmount(player);
+    EverQuestPlayerClassAuraState* state = GetClassAuraStateForPlayer(player);
+    state->BloodDebtDamageTaken = 0;
+    UpdateShadowKnightBloodDebtForPlayer(player);
+    return amount;
+}
+
+void EverQuestMod::UpdateShadowKnightBloodDebtForPlayer(Player* player)
+{
+    EverQuestPlayerClassAuraState* state = GetClassAuraStateForPlayer(player);
+    uint32 chargeSpellID = GetClassAuraSpellID(EQ_CLASSAURA_SPELL_SHADOWKNIGHT_BLOOD_DEBT_CHARGE);
+
+    // Dying or losing the shadow knight aura forfeits whatever was stored
+    if (GetClassAuraSpellID(EQ_CLASSAURA_SPELL_SHADOWKNIGHT_BLOOD_DEBT) == 0 || player->IsAlive() == false || PlayerHasClassAura(player, EQ_CLASSAURA_SPELL_SHADOWKNIGHT_AURA) == false)
+        state->BloodDebtDamageTaken = 0;
+    Aura* charge = chargeSpellID != 0 ? player->GetAura(chargeSpellID) : nullptr;
+    if (state->BloodDebtDamageTaken == 0 && charge == nullptr)
+    {
+        state->BloodDebtFullVisualPlayed = false;
+        return;
+    }
+    uint32 amount = GetClassAuraShadowKnightBloodDebtAmount(player);
+    uint32 maxHealth = player->GetMaxHealth();
+    uint32 maxAmount = (uint32)(((uint64)maxHealth * (uint64)ConfigSystemClassAuraShadowKnightBloodDebtMaxHealthPercent) / 100);
+
+    // The buff shows the charge as a percent of maximum health, one stack per percent (a charge under 1% still shows one stack)
+    if (chargeSpellID != 0)
+    {
+        uint32 stacks = 0;
+        if (amount > 0 && maxHealth > 0)
+            stacks = std::max<uint32>(1, (uint32)(((uint64)amount * 100) / maxHealth));
+        SpellInfo const* chargeSpellInfo = sSpellMgr->GetSpellInfo(chargeSpellID);
+        uint32 maxStacks = (chargeSpellInfo != nullptr && chargeSpellInfo->StackAmount > 0) ? chargeSpellInfo->StackAmount : 1;
+        stacks = std::min<uint32>(stacks, std::min<uint32>(maxStacks, 255));
+        if (stacks == 0)
+        {
+            if (charge != nullptr)
+                player->RemoveAurasDueToSpell(chargeSpellID);
+        }
+        else
+        {
+            if (charge == nullptr)
+                charge = player->AddAura(chargeSpellID, player);
+            if (charge != nullptr && charge->GetStackAmount() != stacks)
+                charge->SetStackAmount((uint8)stacks);
+        }
+    }
+
+    // Once full there's an animation
+    bool isFull = maxAmount > 0 && amount >= maxAmount;
+    if (isFull == true && state->BloodDebtFullVisualPlayed == false && ConfigSystemClassAuraShadowKnightBloodDebtFullSpellVisualKitID != 0)
+        player->SendPlaySpellVisual(ConfigSystemClassAuraShadowKnightBloodDebtFullSpellVisualKitID);
+    state->BloodDebtFullVisualPlayed = isFull;
 }
 
 void EverQuestMod::ClearClassAuraStateForPlayer(Player* player)

@@ -938,7 +938,10 @@ enum EverQuestClassAuraSpellType : uint32
     EQ_CLASSAURA_SPELL_DRUID_NATURES_BALANCE_NATURE = 57,
     EQ_CLASSAURA_SPELL_DRUID_ENTANGLE_STRIKE = 58,
     EQ_CLASSAURA_SPELL_SHAMAN_WARSPIRIT_VIGOR = 59,
-    EQ_CLASSAURA_SPELL_TYPE_COUNT = 60
+    EQ_CLASSAURA_SPELL_SHADOWKNIGHT_BLOOD_DEBT = 60,
+    EQ_CLASSAURA_SPELL_SHADOWKNIGHT_BLOOD_DEBT_CHARGE = 61,
+    EQ_CLASSAURA_SPELL_SHADOWKNIGHT_BLOOD_DEBT_HEAL = 62,
+    EQ_CLASSAURA_SPELL_TYPE_COUNT = 63
 };
 
 class EverQuestPlayerMoveWhileCastingState : public DataMap::Base
@@ -964,11 +967,13 @@ public:
     uint32 LuckyStrikeReadyAtMS = 0;
     uint32 NextUnrelentingAssaultStackAtMS = 0;
     ObjectGuid PendingRiposteTargetGUID;
-    bool BlockGrantedByClassAura = false;
     uint32 NaturesBalancePendingSpellID = 0;
     uint32 NaturesBalancePendingPercent = 0;
     uint32 NaturesBalancePendingAtMS = 0;
     uint32 NaturesBalancePendingGrantType = EQ_CLASSAURA_SPELL_TYPE_COUNT;
+    uint64 BloodDebtDamageTaken = 0;            // Raw damage taken since the last spend or timeout (the stored percent and cap are applied when read)
+    uint32 BloodDebtLastDamageTakenAtMS = 0;
+    bool BloodDebtFullVisualPlayed = false;
 };
 
 class EverQuestPlayerTrackingState : public DataMap::Base
@@ -1543,6 +1548,10 @@ public:
     uint32 ConfigSystemClassAuraDruidEntangleStrikeBehindDamagePercentPerStack = 2;
     uint32 ConfigSystemClassAuraShamanDotExtendChancePercent = 33;
     uint32 ConfigSystemClassAuraShamanDotExtendInMS = 3000;
+    uint32 ConfigSystemClassAuraShadowKnightBloodDebtDamageTakenStoredPercent = 5;
+    uint32 ConfigSystemClassAuraShadowKnightBloodDebtMaxHealthPercent = 50;
+    uint32 ConfigSystemClassAuraShadowKnightBloodDebtStoreDurationInMS = 20000;
+    uint32 ConfigSystemClassAuraShadowKnightBloodDebtFullSpellVisualKitID = 0;
     float ConfigSystemSlowBossEffectivenessMod = 0.5f;
     uint32 ConfigSystemRaidBossRespawnVarianceInSec;
     uint32 ConfigSystemRaidMiniBossRespawnVarianceInSec = 0;
@@ -1987,13 +1996,16 @@ public:
     void UpdateWarriorClassAuraForPlayer(Player* player);
     void UpdateMonkChiSurgeForPlayer(Player* player);
     void UpdateRogueLuckyStrikeForPlayer(Player* player);
+    void HandleClassAuraShadowKnightBloodDebtOnDamage(Unit* attacker, Unit* victim, uint32 damage);
+    void UpdateShadowKnightBloodDebtForPlayer(Player* player);
+    uint32 GetClassAuraShadowKnightBloodDebtAmount(Player* player);
+    uint32 SpendClassAuraShadowKnightBloodDebt(Player* player);
     void SpendClassAuraRogueLuckyStrike(Player* player);
     void HandleClassAuraRogueLuckyStrikeOnCheckCast(Player* player, Spell* spell, bool strict);
     void RemoveClassAuraRogueLuckyStrikeHelper(Player* player);
     void HandleClassAuraWarriorMeleeAttackedOnRoll(Player* warrior, Unit const* attacker, int32& missChance, int32& dodgeChance, int32& parryChance, int32& blockChance, int32& critChance);
     void UpdateWizardFocusMovementForPlayer(Player* player, uint32 diffInMS);
     void RefreshMagicianPetAuraForPlayer(Player* player);
-    void RefreshPaladinBlockForPlayer(Player* player);
     void ApplyMagicianPetAuraToPet(Pet* pet);
     void HandleClassAuraPetStrike(Unit* attacker, Unit* victim);
     void HandleClassAuraShamanStrike(Unit* attacker, Unit* victim);
