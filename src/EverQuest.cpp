@@ -280,12 +280,14 @@ bool EverQuestMod::LoadConfigurationSystemDataFromDB()
                 ConfigSystemClassAuraPaladinUndeadDemonDoubleDamageChancePercent = (uint32)atoi(value.c_str());
             else if (key == "ClassAuraWarriorRiposteChancePercent")
                 ConfigSystemClassAuraWarriorRiposteChancePercent = (uint32)atoi(value.c_str());
-            else if (key == "ClassAuraWarriorUnassailedDelayInMS")
-                ConfigSystemClassAuraWarriorUnassailedDelayInMS = (uint32)atoi(value.c_str());
+            else if (key == "ClassAuraWarriorUnrelentingAssaultStackIntervalInMS")
+                ConfigSystemClassAuraWarriorUnrelentingAssaultStackIntervalInMS = (uint32)atoi(value.c_str());
             else if (key == "ClassAuraWizardFocusStacksLostPerMovementEvent")
                 ConfigSystemClassAuraWizardFocusStacksLostPerMovementEvent = (uint32)atoi(value.c_str());
             else if (key == "ClassAuraWizardFocusMovementIntervalInMS")
                 ConfigSystemClassAuraWizardFocusMovementIntervalInMS = (uint32)atoi(value.c_str());
+            else if (key == "ClassAuraWizardFocusStillIntervalInMS")
+                ConfigSystemClassAuraWizardFocusStillIntervalInMS = (uint32)atoi(value.c_str());
             else if (key == "ClassAuraNecromancerDebuffTransferCooldownInMS")
                 ConfigSystemClassAuraNecromancerDebuffTransferCooldownInMS = (uint32)atoi(value.c_str());
             else if (key == "ClassAuraNecromancerMarkDirectDamagePercentPerStack")
@@ -4762,9 +4764,16 @@ private:
 
 void EverQuestMod::CastWeaponProcSpell(Player* player, Unit* victim, uint32 spellID)
 {
-    // In EverQuest, a proc buff outlives the weapon that trigger it, so needs to cast in WoW without linking to the item Triggered casts resolve inside this call (all EQ spells have a missile speed of 0), including chained spells, so the flag covers the whole chain
-    EverQuestWeaponProcCastGuard weaponProcCastGuard;
-    player->CastSpell(victim, spellID, TriggerCastFlags(TRIGGERED_FULL_MASK & ~TRIGGERED_IGNORE_SPELL_AND_CATEGORY_CD));
+    // In EverQuest, a proc buff outlives the weapon that trigger it, so needs to cast in WoW without linking to the item Triggered casts resolve inside this calln
+    Unit* swingVictim = player->GetVictim();
+    {
+        EverQuestWeaponProcCastGuard weaponProcCastGuard;
+        player->CastSpell(victim, spellID, TriggerCastFlags(TRIGGERED_FULL_MASK & ~TRIGGERED_IGNORE_SPELL_AND_CATEGORY_CD));
+    }
+
+    // A proc that stops auto attack once it lands (a mesmerize, the same way Polymorph does) was never the wielder's choice, so the swing they already had going is picked back up
+    if (swingVictim != nullptr && player->GetVictim() == nullptr && player->IsAlive() == true && swingVictim->IsAlive() == true && player->IsValidAttackTarget(swingVictim) == true)
+        player->Attack(swingVictim, true);
 }
 
 bool EverQuestMod::IsCastingWeaponProcSpell()
@@ -9000,6 +9009,23 @@ void EverQuestMod::UpdateCreatureSpecialAttacks(Creature* creature, EverQuestCre
 }
 
 // Similar to TAKP's "DoMainHandRound" + "DoOffHandRound". Intentionally not adding an explicit off-hand swing here
+// Set while a creature swings at everyone around it (wild rampage), so hooks reached from those swings can treat them as an area attack
+static thread_local bool IsDoingCreatureAreaSwingRound = false;
+
+class EverQuestCreatureAreaSwingRoundGuard
+{
+public:
+    EverQuestCreatureAreaSwingRoundGuard() : PreviousValue(IsDoingCreatureAreaSwingRound) { IsDoingCreatureAreaSwingRound = true; }
+    ~EverQuestCreatureAreaSwingRoundGuard() { IsDoingCreatureAreaSwingRound = PreviousValue; }
+private:
+    bool PreviousValue;
+};
+
+bool EverQuestMod::IsCreatureAreaSwingRoundInProgress()
+{
+    return IsDoingCreatureAreaSwingRound;
+}
+
 void EverQuestMod::DoCreatureCombatAbilitySwingRound(Creature* creature, Unit* target, uint32 damagePct)
 {
     if (target == nullptr || target->IsAlive() == false)
@@ -9062,6 +9088,7 @@ void EverQuestMod::DoCreatureRampage(Creature* creature, Unit* victim, float ran
 void EverQuestMod::DoCreatureWildRampage(Creature* creature, Unit* victim, uint32 maxTargets, uint32 damagePct)
 {
     creature->TextEmote(creature->GetName() + " goes on a WILD RAMPAGE!", nullptr);
+    EverQuestCreatureAreaSwingRoundGuard areaSwingRoundGuard;
 
     // Take a snapshot of the hate list in case it changes mid execution
     vector<ObjectGuid> hatedUnitGUIDs;

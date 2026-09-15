@@ -53,7 +53,7 @@ class ByteBuffer;
 struct AreaTrigger;
 struct BuildValuesCachePosPointers;
 
-#define EQ_MOD_VERSION                              106
+#define EQ_MOD_VERSION                              107
 
 #define EQ_MOVEMENT_CAST_SNARE_DURATION_BUFFER_IN_MS 2000 // How much longer than the remaining cast time the casting slow is given, so a pushed-back cast keeps it
 
@@ -923,11 +923,11 @@ enum EverQuestClassAuraSpellType : uint32
     EQ_CLASSAURA_SPELL_DRUID_REGROWTH = 42,
     EQ_CLASSAURA_SPELL_SHAMAN_PASSIVE = 43,
     EQ_CLASSAURA_SPELL_SHAMAN_AURA = 44,
-    EQ_CLASSAURA_SPELL_SHAMAN_SLOW_MARK = 45,
+    EQ_CLASSAURA_SPELL_SHAMAN_WARSPIRIT = 45,
     EQ_CLASSAURA_SPELL_SHAMAN_VIGOR = 46,
     EQ_CLASSAURA_SPELL_CAST_SPEED_HELPER = 47,
     EQ_CLASSAURA_SPELL_DRUID_NATURES_BALANCE_FIRE = 48,
-    EQ_CLASSAURA_SPELL_WARRIOR_UNASSAILED = 49,
+    EQ_CLASSAURA_SPELL_WARRIOR_UNRELENTING_ASSAULT = 49,
     EQ_CLASSAURA_SPELL_WARRIOR_RIPOSTE = 50,
     EQ_CLASSAURA_SPELL_BARD_VIGOR = 51,
     EQ_CLASSAURA_SPELL_MONK_CHI_SURGE = 52,
@@ -937,7 +937,8 @@ enum EverQuestClassAuraSpellType : uint32
     EQ_CLASSAURA_SPELL_DRUID_NATURES_BALANCE_COLD = 56,
     EQ_CLASSAURA_SPELL_DRUID_NATURES_BALANCE_NATURE = 57,
     EQ_CLASSAURA_SPELL_DRUID_ENTANGLE_STRIKE = 58,
-    EQ_CLASSAURA_SPELL_TYPE_COUNT = 59
+    EQ_CLASSAURA_SPELL_SHAMAN_WARSPIRIT_VIGOR = 59,
+    EQ_CLASSAURA_SPELL_TYPE_COUNT = 60
 };
 
 class EverQuestPlayerMoveWhileCastingState : public DataMap::Base
@@ -953,6 +954,7 @@ public:
     uint32 ManaCheckTimerMS = 0;
     bool WasMoving = false;
     uint32 MovingAccumulatedMS = 0;
+    uint32 StillAccumulatedMS = 0;
     uint32 NextDebuffTransferAllowedMS = 0;
     uint32 PendingCastAdjustSpellID = 0;        // The spell whose successful cast spends the readied cleric / shadow knight charge
     bool PendingCadenceConsume = false;
@@ -960,7 +962,7 @@ public:
     bool PendingChiSurgeConsume = false;
     uint32 ChiSurgeReadyAtMS = 0;
     uint32 LuckyStrikeReadyAtMS = 0;
-    uint32 LastMeleeAttackedMS = 0;
+    uint32 NextUnrelentingAssaultStackAtMS = 0;
     ObjectGuid PendingRiposteTargetGUID;
     bool BlockGrantedByClassAura = false;
     uint32 NaturesBalancePendingSpellID = 0;
@@ -1525,9 +1527,10 @@ public:
     uint32 ConfigSystemClassAuraPaladinBlockDeflectionDamagePercent = 15;
     uint32 ConfigSystemClassAuraPaladinUndeadDemonDoubleDamageChancePercent = 20;
     uint32 ConfigSystemClassAuraWarriorRiposteChancePercent = 5;
-    uint32 ConfigSystemClassAuraWarriorUnassailedDelayInMS = 20000;
+    uint32 ConfigSystemClassAuraWarriorUnrelentingAssaultStackIntervalInMS = 4000;
     uint32 ConfigSystemClassAuraWizardFocusStacksLostPerMovementEvent = 1;
     uint32 ConfigSystemClassAuraWizardFocusMovementIntervalInMS = 1000;
+    uint32 ConfigSystemClassAuraWizardFocusStillIntervalInMS = 2000;
     uint32 ConfigSystemClassAuraNecromancerDebuffTransferCooldownInMS = 20000;
     uint32 ConfigSystemClassAuraNecromancerMarkDirectDamagePercentPerStack = 1;
     uint32 ConfigSystemClassAuraNecromancerMarkDotDamagePercentPerStack = 2;
@@ -1988,7 +1991,6 @@ public:
     void HandleClassAuraRogueLuckyStrikeOnCheckCast(Player* player, Spell* spell, bool strict);
     void RemoveClassAuraRogueLuckyStrikeHelper(Player* player);
     void HandleClassAuraWarriorMeleeAttackedOnRoll(Player* warrior, Unit const* attacker, int32& missChance, int32& dodgeChance, int32& parryChance, int32& blockChance, int32& critChance);
-    void NoteClassAuraWarriorMeleeAttacked(Unit* target, SpellInfo const* spellInfo);
     void UpdateWizardFocusMovementForPlayer(Player* player, uint32 diffInMS);
     void RefreshMagicianPetAuraForPlayer(Player* player);
     void RefreshPaladinBlockForPlayer(Player* player);
@@ -2007,16 +2009,16 @@ public:
     void HandleClassAuraDruidNaturesBalanceOnSpellCast(Player* druid, SpellInfo const* spellInfo);
     void ApplyClassAuraPeriodicTickMods(Unit* target, Unit* attacker, uint32& amount, SpellInfo const* spellInfo);
     bool TryTransferDebuffToNecromancerPet(Player* player, Aura* aura);
-    void HandleClassAuraSlowAuraApply(Unit* target, Aura* aura);
-    void HandleClassAuraSlowAuraRemove(Unit* target, Aura* aura);
     void ApplyClassAuraCastAdjustmentsOnCheckCast(Player* player, Spell* spell, bool strict);
     void FinishClassAuraCastAdjustmentsOnPrepare(Player* player, Spell* spell);
     void HandleClassAuraSpellCastCancel(Player* player, Spell* spell);
     void ClearClassAuraCastAdjustmentsForPlayer(Player* player);
     void HandleClassAuraSpellCast(Player* player, Spell* spell);
     bool IsMovementCastSnareExemptForPlayer(Player* player);
-    void RefreshRangerEndlessQuiverForPlayer(Player* player);
-    bool HandleClassAuraRangerEndlessQuiverOnCheckCast(Player* player, Spell* spell, SpellCastResult& result);
+    void RefreshClassAuraTogglesForPlayer(Player* player);
+    bool HandleClassAuraToggleOnCheckCast(Player* player, Spell* spell, SpellCastResult& result);
+    void HandleClassAuraShamanWarspiritRemove(Unit* unit, Aura* aura);
+    void HandleClassAuraShamanWarspiritApply(Player* player, Aura* aura);
     void RegisterClassAuraRangerChannelAmmoSpell(SpellInfo* spellInfo);
     void HandleClassAuraRangerAmmoOnSpellCast(Player* player, Spell* spell);
 
@@ -2136,6 +2138,7 @@ public:
     void DoCreatureFlurry(Creature* creature, Unit* victim);
     void DoCreatureRampage(Creature* creature, Unit* victim, float range, uint32 damagePct);
     void DoCreatureWildRampage(Creature* creature, Unit* victim, uint32 maxTargets, uint32 damagePct);
+    bool IsCreatureAreaSwingRoundInProgress();
     bool IsCreatureEnragedForRiposte(Unit const* unit, Unit const* attacker);
     void TryDoCreatureEnrageRiposteCounter(Unit* victim, Unit* attacker);
     void ApplyCreatureCombatAbilityDamageMod(Unit* attacker, uint32& damage);

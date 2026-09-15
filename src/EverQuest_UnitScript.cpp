@@ -297,6 +297,9 @@ public:
         if (EverQuest->GetSpellDataForSpellID(spellID).IllusionFormEQRaceID != 0)
             EverQuest->RecalculateTemporaryFactionReactionsForPlayer(player);
 
+        // A Shaman turning Warspirit on gives up the vigor they gave themself by healing
+        EverQuest->HandleClassAuraShamanWarspiritApply(player, aura);
+
         // A Necromancer class aura holder hands enemy debuffs to their pet
         if (EverQuest->TryTransferDebuffToNecromancerPet(player, aura) == true)
             return;
@@ -341,8 +344,9 @@ public:
             EverQuest->UntrackEQHasteAurasAndEnforceCapOnAuraRemove(unit, aurApp->GetBase());
             EverQuest->UntrackAttackPowerAurasAndEnforceHighestOnlyOnAuraRemove(unit, aurApp->GetBase());
 
-            // The last slow from a Shaman class aura holder takes its burden mark with it
-            EverQuest->HandleClassAuraSlowAuraRemove(unit, aurApp->GetBase());
+            // A Shaman turning Warspirit off loses the vigor it built
+            EverQuest->HandleClassAuraShamanWarspiritRemove(unit, aurApp->GetBase());
+
             // Tell whoever cast a mesmerize who broke it, whether by damage, a mana drain, a dispel or a purging immunity
             EverQuest->NotifyCasterOfBrokenMesmerize(unit, aurApp, mode);
         }
@@ -698,7 +702,7 @@ public:
         if (victim->IsPlayer() == false)
             return;
 
-        // Class auras: a Warrior's riposte (forced through this roll) and unassailed clock.  Only the mod's own per-player state is
+        // Class auras: a Warrior's riposte, forced through this roll.  Only the mod's own per-player state is
         // written through the const_cast, plus the roll values this hook exists to change
         if (attType != RANGED_ATTACK)
             EverQuest->HandleClassAuraWarriorMeleeAttackedOnRoll(const_cast<Unit*>(victim)->ToPlayer(), attacker, miss_chance, dodge_chance, parry_chance, block_chance, crit_chance);

@@ -191,6 +191,46 @@ class EverQuest_ClassAuraPaladinAuraScript : public AuraScript
     }
 };
 
+// Warrior "Warmaster": a direct attack landing on the warrior (melee, ranged, or a single target spell, partial blocks included) takes a stack of Unrelenting Assault away.
+// Misses, dodges and parries never reach the proc's hit mask, full blocks are turned away here, and area attacks are skipped by their spell
+class EverQuest_ClassAuraWarriorAuraScript : public AuraScript
+{
+    PrepareAuraScript(EverQuest_ClassAuraWarriorAuraScript);
+
+    void HandleProc(ProcEventInfo& eventInfo)
+    {
+        PreventDefaultAction();
+        if (EverQuest->IsClassAuraSystemEnabled() == false || IsClassAuraPeriodicTickProc(eventInfo) == true)
+            return;
+        Unit* warrior = GetTarget();
+        if (warrior == nullptr || warrior->IsPlayer() == false || warrior->IsAlive() == false)
+            return;
+        uint32 hitMask = eventInfo.GetHitMask();
+        if ((hitMask & PROC_HIT_FULL_BLOCK) != 0 || (hitMask & (PROC_HIT_NORMAL | PROC_HIT_CRITICAL | PROC_HIT_ABSORB)) == 0)
+            return;
+        Unit* attacker = eventInfo.GetActor();
+        if (attacker == nullptr || attacker == warrior)
+            return;
+        SpellInfo const* spellInfo = eventInfo.GetSpellInfo();
+        if (spellInfo != nullptr && spellInfo->IsAffectingArea() == true)
+            return;
+
+        // A creature's wild rampage swings at everyone in reach, which makes it an area attack even though each swing is a plain melee hit
+        if (EverQuest->IsCreatureAreaSwingRoundInProgress() == true)
+            return;
+        uint32 assaultSpellID = EverQuest->GetClassAuraSpellID(EQ_CLASSAURA_SPELL_WARRIOR_UNRELENTING_ASSAULT);
+        if (assaultSpellID == 0)
+            return;
+        if (Aura* assault = warrior->GetAura(assaultSpellID))
+            assault->ModStackAmount(-1);
+    }
+
+    void Register() override
+    {
+        OnProc += AuraProcFn(EverQuest_ClassAuraWarriorAuraScript::HandleProc);
+    }
+};
+
 // Shadow Knight "Spellsword": a melee critical strike readies the edge (the proc row's cooldown spaces the triggers)
 class EverQuest_ClassAuraShadowKnightAuraScript : public AuraScript
 {
@@ -381,6 +421,7 @@ class EverQuest_ClassAuraDruidAuraScript : public AuraScript
 };
 
 // Shaman "Spirit Channeler": directly healing an ally stacks vigor on them (heal over time ticks are not in the proc flags)
+// With Warspirit on, the shaman's own landed attacks and damaging spells stack warspirit vigor on the shaman instead, and heals grant nothing
 class EverQuest_ClassAuraShamanAuraScript : public AuraScript
 {
     PrepareAuraScript(EverQuest_ClassAuraShamanAuraScript);
@@ -392,6 +433,21 @@ class EverQuest_ClassAuraShamanAuraScript : public AuraScript
             return;
         Unit* shaman = GetTarget();
         if (shaman == nullptr || shaman->IsPlayer() == false || shaman->IsAlive() == false)
+            return;
+
+        uint32 warspiritSpellID = EverQuest->GetClassAuraSpellID(EQ_CLASSAURA_SPELL_SHAMAN_WARSPIRIT);
+        if (warspiritSpellID != 0 && shaman->HasAura(warspiritSpellID) == true)
+        {
+            if ((eventInfo.GetTypeMask() & EQ_CLASSAURA_ROGUE_ATTACK_PROC_MASK) == 0)
+                return;
+            uint32 warspiritVigorSpellID = EverQuest->GetClassAuraSpellID(EQ_CLASSAURA_SPELL_SHAMAN_WARSPIRIT_VIGOR);
+            if (warspiritVigorSpellID == 0)
+                return;
+            shaman->CastSpell(shaman, warspiritVigorSpellID, true);
+            return;
+        }
+
+        if ((eventInfo.GetTypeMask() & (PROC_FLAG_DONE_SPELL_MAGIC_DMG_CLASS_POS | PROC_FLAG_DONE_SPELL_NONE_DMG_CLASS_POS)) == 0)
             return;
         HealInfo* healInfo = eventInfo.GetHealInfo();
         if (healInfo == nullptr || healInfo->GetHeal() == 0)
@@ -418,6 +474,7 @@ void AddEverQuestClassAuraScripts()
     RegisterSpellScript(EverQuest_ClassAuraRogueAuraScript);
     RegisterSpellScript(EverQuest_ClassAuraRangerAuraScript);
     RegisterSpellScript(EverQuest_ClassAuraPaladinAuraScript);
+    RegisterSpellScript(EverQuest_ClassAuraWarriorAuraScript);
     RegisterSpellScript(EverQuest_ClassAuraShadowKnightAuraScript);
     RegisterSpellScript(EverQuest_ClassAuraMonkLightArmorAuraScript);
     RegisterSpellScript(EverQuest_ClassAuraMonkHeavyArmorAuraScript);

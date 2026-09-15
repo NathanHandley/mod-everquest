@@ -74,8 +74,8 @@ public:
         if (spell->GetCaster()->IsPlayer() == true)
             EverQuest->ApplyClassAuraCastAdjustmentsOnCheckCast(spell->GetCaster()->ToPlayer(), spell, strict);
 
-        // Class auras: the Ranger's Endless Quiver is a toggle, so casting it while it is up turns it off
-        if (spell->GetCaster()->IsPlayer() == true && EverQuest->HandleClassAuraRangerEndlessQuiverOnCheckCast(spell->GetCaster()->ToPlayer(), spell, res) == true)
+        // Class auras: the Ranger's Endless Quiver and the Shaman's Warspirit are toggles, so casting one while it is up turns it off
+        if (spell->GetCaster()->IsPlayer() == true && EverQuest->HandleClassAuraToggleOnCheckCast(spell->GetCaster()->ToPlayer(), spell, res) == true)
             return;
 
         // A character that turned casting on the move off cannot start one of those casts while moving

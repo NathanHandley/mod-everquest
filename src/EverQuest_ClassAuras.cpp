@@ -51,11 +51,23 @@ static const char* EQ_CLASSAURA_SPELL_TYPE_NAMES[EQ_CLASSAURA_SPELL_TYPE_COUNT] 
     "NecromancerPassive", "NecromancerAura", "NecromancerMark",
     "ClericPassive", "ClericAura", "ClericCadence", "ClericHaste",
     "DruidPassive", "DruidAura", "DruidRegrowth",
-    "ShamanPassive", "ShamanAura", "ShamanSlowMark", "ShamanVigor",
+    "ShamanPassive", "ShamanAura", "ShamanWarspirit", "ShamanVigor",
     "CastSpeedHelper",
-    "DruidNaturesBalanceFire", "WarriorUnassailed", "WarriorRiposte", "BardVigor", "MonkChiSurge", "PaladinDeflection", "RogueLuckyStrike", "RogueLuckyStrikeHelper",
-    "DruidNaturesBalanceCold", "DruidNaturesBalanceNature", "DruidEntangleStrike"
+    "DruidNaturesBalanceFire", "WarriorUnrelentingAssault", "WarriorRiposte", "BardVigor", "MonkChiSurge", "PaladinDeflection", "RogueLuckyStrike", "RogueLuckyStrikeHelper",
+    "DruidNaturesBalanceCold", "DruidNaturesBalanceNature", "DruidEntangleStrike", "ShamanWarspiritVigor"
 };
+
+struct EverQuestClassAuraToggle
+{
+    EverQuestClassAuraSpellType ToggleType;
+    EverQuestClassAuraSpellType PassiveType;
+};
+static const EverQuestClassAuraToggle EQ_CLASSAURA_TOGGLES[] =
+{
+    { EQ_CLASSAURA_SPELL_RANGER_ENDLESS_QUIVER, EQ_CLASSAURA_SPELL_RANGER_PASSIVE },
+    { EQ_CLASSAURA_SPELL_SHAMAN_WARSPIRIT, EQ_CLASSAURA_SPELL_SHAMAN_PASSIVE }
+};
+static const size_t EQ_CLASSAURA_TOGGLE_COUNT = sizeof(EQ_CLASSAURA_TOGGLES) / sizeof(EQ_CLASSAURA_TOGGLES[0]);
 
 // The (passive, permanent aura) pair for each class
 static const EverQuestClassAuraSpellType EQ_CLASSAURA_CLASS_PASSIVE_TYPES[] =
@@ -81,7 +93,7 @@ static const EverQuestClassAuraSpellType EQ_CLASSAURA_MOD_OWNED_TYPES[] =
     EQ_CLASSAURA_SPELL_MONK_AURA, EQ_CLASSAURA_SPELL_MONK_LIGHT_ARMOR, EQ_CLASSAURA_SPELL_MONK_HEAVY_ARMOR, EQ_CLASSAURA_SPELL_RANGER_AURA,
     EQ_CLASSAURA_SPELL_ROGUE_AURA, EQ_CLASSAURA_SPELL_PALADIN_AURA, EQ_CLASSAURA_SPELL_SHADOWKNIGHT_AURA, EQ_CLASSAURA_SPELL_WARRIOR_AURA,
     EQ_CLASSAURA_SPELL_WIZARD_AURA, EQ_CLASSAURA_SPELL_MAGICIAN_AURA, EQ_CLASSAURA_SPELL_NECROMANCER_AURA, EQ_CLASSAURA_SPELL_CLERIC_AURA,
-    EQ_CLASSAURA_SPELL_DRUID_AURA, EQ_CLASSAURA_SPELL_SHAMAN_AURA, EQ_CLASSAURA_SPELL_CAST_SPEED_HELPER, EQ_CLASSAURA_SPELL_WARRIOR_UNASSAILED,
+    EQ_CLASSAURA_SPELL_DRUID_AURA, EQ_CLASSAURA_SPELL_SHAMAN_AURA, EQ_CLASSAURA_SPELL_CAST_SPEED_HELPER, EQ_CLASSAURA_SPELL_WARRIOR_UNRELENTING_ASSAULT,
     EQ_CLASSAURA_SPELL_MONK_CHI_SURGE, EQ_CLASSAURA_SPELL_ROGUE_LUCKY_STRIKE, EQ_CLASSAURA_SPELL_ROGUE_LUCKY_STRIKE_HELPER
 };
 static const size_t EQ_CLASSAURA_MOD_OWNED_COUNT = sizeof(EQ_CLASSAURA_MOD_OWNED_TYPES) / sizeof(EQ_CLASSAURA_MOD_OWNED_TYPES[0]);
@@ -90,7 +102,7 @@ void EverQuestMod::SetClassAuraSpellIDFromConfigKey(const string& spellTypeName,
 {
     for (uint32 i = 0; i < EQ_CLASSAURA_SPELL_TYPE_COUNT; ++i)
     {
-        if (spellTypeName != EQ_CLASSAURA_SPELL_TYPE_NAMES[i])
+        if (EQ_CLASSAURA_SPELL_TYPE_NAMES[i] == nullptr || spellTypeName != EQ_CLASSAURA_SPELL_TYPE_NAMES[i])
             continue;
         ConfigSystemClassAuraSpellIDs[i] = spellID;
         if (spellID != 0)
@@ -166,8 +178,8 @@ void EverQuestMod::ReapplyClassAurasForPlayer(Player* player)
     }
     player->SetInstantCast(false);
 
-    // Endless Quiver is the player's own toggle, so it stays through a relog, unless the character can no longer have it
-    RefreshRangerEndlessQuiverForPlayer(player);
+    // Toggles (Endless Quiver, Warspirit) are the player's own, so they stay through a relog, unless the character can no longer have them
+    RefreshClassAuraTogglesForPlayer(player);
     if (IsClassAuraSystemEnabled() == false)
         return;
     RefreshClassAurasForPlayer(player);
@@ -194,7 +206,7 @@ void EverQuestMod::RefreshClassAurasForPlayer(Player* player)
     UpdateEnchanterFocusForPlayer(player);
     RefreshMagicianPetAuraForPlayer(player);
     RefreshPaladinBlockForPlayer(player);
-    RefreshRangerEndlessQuiverForPlayer(player);
+    RefreshClassAuraTogglesForPlayer(player);
 }
 
 void EverQuestMod::RefreshPaladinBlockForPlayer(Player* player)
@@ -348,18 +360,41 @@ void EverQuestMod::UpdateWarriorClassAuraForPlayer(Player* player)
         }
     }
 
-    uint32 unassailedSpellID = GetClassAuraSpellID(EQ_CLASSAURA_SPELL_WARRIOR_UNASSAILED);
-    if (unassailedSpellID == 0)
+    // Unrelenting Assault gains a stack on a steady clock, and direct attacks landing on the warrior take stacks away (the Warrior aura script)
+    uint32 assaultSpellID = GetClassAuraSpellID(EQ_CLASSAURA_SPELL_WARRIOR_UNRELENTING_ASSAULT);
+    if (assaultSpellID == 0)
         return;
+    if (hasWarriorAura == false || player->IsAlive() == false)
+    {
+        state->NextUnrelentingAssaultStackAtMS = 0;
+        if (player->HasAura(assaultSpellID) == true)
+            player->RemoveAurasDueToSpell(assaultSpellID);
+        return;
+    }
     uint32 nowMS = GameTime::GetGameTimeMS().count();
-    if (state->LastMeleeAttackedMS == 0)
-        state->LastMeleeAttackedMS = nowMS;
-    bool shouldHave = hasWarriorAura == true && player->IsAlive() == true && (nowMS - state->LastMeleeAttackedMS) >= ConfigSystemClassAuraWarriorUnassailedDelayInMS;
-    bool hasAura = player->HasAura(unassailedSpellID);
-    if (shouldHave == true && hasAura == false)
-        player->AddAura(unassailedSpellID, player);
-    else if (shouldHave == false && hasAura == true)
-        player->RemoveAurasDueToSpell(unassailedSpellID);
+    uint32 stackIntervalInMS = std::max<uint32>(1, ConfigSystemClassAuraWarriorUnrelentingAssaultStackIntervalInMS);
+    if (state->NextUnrelentingAssaultStackAtMS == 0)
+    {
+        state->NextUnrelentingAssaultStackAtMS = nowMS + stackIntervalInMS;
+        return;
+    }
+    Aura* assault = player->GetAura(assaultSpellID);
+    SpellInfo const* assaultSpellInfo = sSpellMgr->GetSpellInfo(assaultSpellID);
+    uint32 maxStacks = (assaultSpellInfo != nullptr && assaultSpellInfo->StackAmount > 0) ? assaultSpellInfo->StackAmount : 1;
+
+    // The clock does not bank while at full stacks, so a lost stack comes back one interval after it was lost
+    if (assault != nullptr && assault->GetStackAmount() >= maxStacks)
+    {
+        state->NextUnrelentingAssaultStackAtMS = nowMS + stackIntervalInMS;
+        return;
+    }
+    if (nowMS < state->NextUnrelentingAssaultStackAtMS)
+        return;
+    state->NextUnrelentingAssaultStackAtMS = nowMS + stackIntervalInMS;
+    if (assault == nullptr)
+        player->AddAura(assaultSpellID, player);
+    else
+        assault->ModStackAmount(1);
 }
 
 void EverQuestMod::HandleClassAuraWarriorMeleeAttackedOnRoll(Player* warrior, Unit const* attacker, int32& missChance, int32& dodgeChance, int32& parryChance, int32& blockChance, int32& critChance)
@@ -370,9 +405,6 @@ void EverQuestMod::HandleClassAuraWarriorMeleeAttackedOnRoll(Player* warrior, Un
         return;
     if (PlayerHasClassAura(warrior, EQ_CLASSAURA_SPELL_WARRIOR_AURA) == false)
         return;
-    EverQuestPlayerClassAuraState* state = GetClassAuraStateForPlayer(warrior);
-    state->LastMeleeAttackedMS = GameTime::GetGameTimeMS().count();
-
     if (warrior->IsAlive() == false)
         return;
     if (warrior->HasUnitState(UNIT_STATE_CONTROLLED) == true || warrior->IsNonMeleeSpellCast(false, false, true) == true)
@@ -391,19 +423,7 @@ void EverQuestMod::HandleClassAuraWarriorMeleeAttackedOnRoll(Player* warrior, Un
         parryChance = 0;
         missChance = 30000;
     }
-    state->PendingRiposteTargetGUID = attacker->GetGUID();
-}
-
-void EverQuestMod::NoteClassAuraWarriorMeleeAttacked(Unit* target, SpellInfo const* spellInfo)
-{
-    if (target == nullptr || spellInfo == nullptr || target->IsPlayer() == false)
-        return;
-    if (spellInfo->DmgClass != SPELL_DAMAGE_CLASS_MELEE)
-        return;
-    Player* warrior = target->ToPlayer();
-    if (PlayerHasClassAura(warrior, EQ_CLASSAURA_SPELL_WARRIOR_AURA) == false)
-        return;
-    GetClassAuraStateForPlayer(warrior)->LastMeleeAttackedMS = GameTime::GetGameTimeMS().count();
+    GetClassAuraStateForPlayer(warrior)->PendingRiposteTargetGUID = attacker->GetGUID();
 }
 
 void EverQuestMod::RefreshMonkArmorAuraForPlayer(Player* player)
@@ -506,15 +526,45 @@ void EverQuestMod::UpdateWizardFocusMovementForPlayer(Player* player, uint32 dif
     if (focusSpellID == 0)
         return;
 
-    // Deliberate movement only, so a jump or a fall in place does not count
     EverQuestPlayerClassAuraState* state = GetClassAuraStateForPlayer(player);
+
+    // The focus has no duration of its own, so it goes as soon as the character dies or loses the wizard aura (a class switch)
+    if (player->IsAlive() == false || PlayerHasClassAura(player, EQ_CLASSAURA_SPELL_WIZARD_AURA) == false)
+    {
+        state->WasMoving = false;
+        state->MovingAccumulatedMS = 0;
+        state->StillAccumulatedMS = 0;
+        if (player->HasAura(focusSpellID) == true)
+            player->RemoveAurasDueToSpell(focusSpellID);
+        return;
+    }
+
+    // Deliberate movement only, so a jump or a fall in place does not count
     bool isMoving = player->m_movementInfo.HasMovementFlag(MOVEMENTFLAG_FORWARD | MOVEMENTFLAG_BACKWARD | MOVEMENTFLAG_STRAFE_LEFT | MOVEMENTFLAG_STRAFE_RIGHT | MOVEMENTFLAG_ASCENDING | MOVEMENTFLAG_DESCENDING);
     if (isMoving == false)
     {
         state->WasMoving = false;
         state->MovingAccumulatedMS = 0;
+
+        // Every interval spent standing still adds a stack
+        uint32 stillIntervalInMS = ConfigSystemClassAuraWizardFocusStillIntervalInMS < 100 ? 100 : ConfigSystemClassAuraWizardFocusStillIntervalInMS;
+        state->StillAccumulatedMS += diffInMS;
+        int32 stacksToGrant = (int32)(state->StillAccumulatedMS / stillIntervalInMS);
+        if (stacksToGrant == 0)
+            return;
+        state->StillAccumulatedMS %= stillIntervalInMS;
+        Aura* stillFocusAura = player->GetAura(focusSpellID);
+        if (stillFocusAura == nullptr)
+        {
+            player->AddAura(focusSpellID, player);
+            stacksToGrant--;
+            stillFocusAura = player->GetAura(focusSpellID);
+        }
+        if (stillFocusAura != nullptr && stacksToGrant > 0)
+            stillFocusAura->ModStackAmount(stacksToGrant);
         return;
     }
+    state->StillAccumulatedMS = 0;
     int32 stacksLostPerEvent = (int32)ConfigSystemClassAuraWizardFocusStacksLostPerMovementEvent;
     uint32 intervalInMS = ConfigSystemClassAuraWizardFocusMovementIntervalInMS < 100 ? 100 : ConfigSystemClassAuraWizardFocusMovementIntervalInMS;
     bool movementJustStarted = state->WasMoving == false;
@@ -611,9 +661,10 @@ void EverQuestMod::HandleClassAuraShamanStrike(Unit* attacker, Unit* victim)
     for (Unit::AuraApplicationMap::const_iterator auraIter = victimAuras.begin(); auraIter != victimAuras.end(); ++auraIter)
     {
         Aura* aura = auraIter->second->GetBase();
-        if (aura == nullptr || aura->GetCasterGUID() != shamanGUID || aura->IsPermanent() == true)
+        if (aura == nullptr || aura->IsRemoved() == true || aura->GetCasterGUID() != shamanGUID || aura->IsPermanent() == true)
             continue;
-        if (IsPeriodicDamageAura(aura) == false)
+        // A channeled drain belongs to the channel, which ends it on its own schedule
+        if (IsPeriodicDamageAura(aura) == false || aura->GetSpellInfo()->IsChanneled() == true)
             continue;
         int32 newDurationInMS = aura->GetDuration() + extendInMS;
         if (newDurationInMS > aura->GetMaxDuration())
@@ -861,9 +912,6 @@ void EverQuestMod::ApplyClassAuraDirectSpellDamageMods(Unit* target, Unit* attac
     if (target == nullptr || attacker == nullptr || spellInfo == nullptr || damage <= 0)
         return;
 
-    // Warrior, a melee ability hitting them counts as being attacked
-    NoteClassAuraWarriorMeleeAttacked(target, spellInfo);
-
     // Rangers and their pets alike
     ApplyClassAuraTackShotDamageBonus(attacker, target, damage);
 
@@ -972,92 +1020,6 @@ bool EverQuestMod::TryTransferDebuffToNecromancerPet(Player* player, Aura* aura)
     return true;
 }
 
-static bool IsSlowAura(Aura* aura)
-{
-    for (uint8 i = 0; i < MAX_SPELL_EFFECTS; ++i)
-    {
-        AuraEffect* effect = aura->GetEffect(i);
-        if (effect == nullptr)
-            continue;
-        AuraType auraType = effect->GetAuraType();
-        if (auraType != SPELL_AURA_MOD_MELEE_HASTE && auraType != SPELL_AURA_MOD_MELEE_RANGED_HASTE && auraType != SPELL_AURA_MELEE_SLOW)
-            continue;
-        if (effect->GetAmount() < 0)
-            return true;
-    }
-    return false;
-}
-
-void EverQuestMod::HandleClassAuraSlowAuraApply(Unit* target, Aura* aura)
-{
-    if (IsClassAuraSystemEnabled() == false)
-        return;
-    if (target == nullptr || aura == nullptr)
-        return;
-    uint32 slowMarkSpellID = GetClassAuraSpellID(EQ_CLASSAURA_SPELL_SHAMAN_SLOW_MARK);
-    if (slowMarkSpellID == 0 || aura->GetId() == slowMarkSpellID)
-        return;
-    if (IsSlowAura(aura) == false)
-        return;
-    Unit* caster = aura->GetCaster();
-    if (caster == nullptr || caster == target || caster->IsPlayer() == false)
-        return;
-    Player* shaman = caster->ToPlayer();
-    if (PlayerHasClassAura(shaman, EQ_CLASSAURA_SPELL_SHAMAN_AURA) == false)
-        return;
-    if (target->IsAlive() == false || shaman->IsValidAttackTarget(target) == false)
-        return;
-
-    // One shared mark per target (single aura stack), so a second shaman's cast refreshes the first one's copy
-    int32 existingRemainingInMS = 0;
-    if (Aura* existingMark = target->GetAura(slowMarkSpellID))
-        existingRemainingInMS = existingMark->GetDuration();
-    shaman->CastSpell(target, slowMarkSpellID, true);
-    Aura* mark = target->GetAura(slowMarkSpellID);
-    if (mark == nullptr || aura->IsPermanent() == true)
-        return;
-    if (aura->GetMaxDuration() > 0 && aura->GetDuration() > 0)
-    {
-        int32 durationInMS = std::max(aura->GetDuration(), existingRemainingInMS);
-        if (mark->GetMaxDuration() < durationInMS)
-            mark->SetMaxDuration(durationInMS);
-        mark->SetDuration(durationInMS);
-        mark->SetNeedClientUpdateForTargets();
-    }
-}
-
-void EverQuestMod::HandleClassAuraSlowAuraRemove(Unit* target, Aura* aura)
-{
-    if (IsClassAuraSystemEnabled() == false)
-        return;
-    if (target == nullptr || aura == nullptr)
-        return;
-    uint32 slowMarkSpellID = GetClassAuraSpellID(EQ_CLASSAURA_SPELL_SHAMAN_SLOW_MARK);
-    if (slowMarkSpellID == 0 || aura->GetId() == slowMarkSpellID)
-        return;
-    if (IsSlowAura(aura) == false)
-        return;
-    if (target->HasAura(slowMarkSpellID) == false)
-        return;
-
-    // Another qualifying slow still on the target keeps the mark
-    Unit::AuraApplicationMap const& targetAuras = target->GetAppliedAuras();
-    for (Unit::AuraApplicationMap::const_iterator auraIter = targetAuras.begin(); auraIter != targetAuras.end(); ++auraIter)
-    {
-        Aura* otherAura = auraIter->second->GetBase();
-        if (otherAura == nullptr || otherAura == aura || otherAura->IsRemoved() == true)
-            continue;
-        if (IsSlowAura(otherAura) == false)
-            continue;
-        Unit* otherCaster = otherAura->GetCaster();
-        if (otherCaster == nullptr || otherCaster->IsPlayer() == false)
-            continue;
-        if (PlayerHasClassAura(otherCaster->ToPlayer(), EQ_CLASSAURA_SPELL_SHAMAN_AURA) == true)
-            return;
-    }
-    target->RemoveAurasDueToSpell(slowMarkSpellID);
-}
-
 static SpellInfo const* FindClassAuraDirectHealSpellInfo(SpellInfo const* spellInfo, uint8 depth)
 {
     if (spellInfo == nullptr)
@@ -1114,8 +1076,21 @@ void EverQuestMod::ApplyClassAuraCastAdjustmentsOnCheckCast(Player* player, Spel
     if (player == nullptr || spell == nullptr)
         return;
     HandleClassAuraRogueLuckyStrikeOnCheckCast(player, spell, strict);
-    if (strict == false)
+
+    // The held autorepeat spell (Auto Shot) is checked again before every shot (Unit::_UpdateAutoRepeatSpell), and Auto Shot keeps firing through casts that
+    // do not reset combat timers.  Going on would wipe that cast's readied charges before it could spend them
+    if (spell->GetSpellInfo() != nullptr && spell->GetSpellInfo()->HasAttribute(SPELL_ATTR2_AUTO_REPEAT) == true)
         return;
+
+    if (strict == false)
+    {
+        // Druid, a spell with a cast time is checked once more just before it goes off.  Pricing it again here uses the stacks still up at that moment (one may have
+        // run out during a long cast) and starts the payout window as the damage lands, rather than when the cast began
+        if (spell->IsTriggered() == false && player->IsInWorld() == true && IsClassAuraSystemEnabled() == true && spell->GetSpellInfo() != nullptr
+            && IsClassAuraSpell(spell->GetSpellInfo()->Id) == false)
+            HandleClassAuraDruidNaturesBalanceOnCheckCast(player, spell->GetSpellInfo());
+        return;
+    }
     if (spell->IsTriggered() == true || player->IsInWorld() == false)
         return;
     SpellInfo const* spellInfo = spell->GetSpellInfo();
@@ -1286,19 +1261,6 @@ void EverQuestMod::ClearClassAuraCastAdjustmentsForPlayer(Player* player)
     }
 }
 
-static bool IsSpellCountedForWizardFocus(SpellInfo const* spellInfo, Spell* spell)
-{
-    if (spell->m_CastItem != nullptr)
-        return false;
-    if (spellInfo->IsPassive() == true || spellInfo->HasAttribute(SPELL_ATTR2_AUTO_REPEAT) == true)
-        return false;
-    if (spellInfo->DmgClass == SPELL_DAMAGE_CLASS_MELEE || spellInfo->DmgClass == SPELL_DAMAGE_CLASS_RANGED)
-        return false;
-    if (spellInfo->CalcCastTime() > 0)
-        return true;
-    return spellInfo->PowerType == POWER_MANA && (spellInfo->ManaCost > 0 || spellInfo->ManaCostPercentage > 0);
-}
-
 void EverQuestMod::HandleClassAuraSpellCast(Player* player, Spell* spell)
 {
     if (player == nullptr || spell == nullptr)
@@ -1366,11 +1328,6 @@ void EverQuestMod::HandleClassAuraSpellCast(Player* player, Spell* spell)
     // Druid, a slow enough fire, cold, or nature nuke builds the balance for its element
     HandleClassAuraDruidNaturesBalanceOnSpellCast(player, spellInfo);
 
-    // Wizard
-    uint32 wizardFocusSpellID = GetClassAuraSpellID(EQ_CLASSAURA_SPELL_WIZARD_FOCUS);
-    if (wizardFocusSpellID != 0 && PlayerHasClassAura(player, EQ_CLASSAURA_SPELL_WIZARD_AURA) == true && IsSpellCountedForWizardFocus(spellInfo, spell) == true)
-        player->CastSpell(player, wizardFocusSpellID, true);
-
     // Cleric, the heal may live on a spell the cast triggers or is linked to (Holy Nova) and that spell has a say in whether this was an area heal
     SpellInfo const* healSpellInfo = FindClassAuraDirectHealSpellInfo(spellInfo, 0);
     if (healSpellInfo != nullptr && PlayerHasClassAura(player, EQ_CLASSAURA_SPELL_CLERIC_AURA) == true)
@@ -1398,44 +1355,78 @@ bool EverQuestMod::IsMovementCastSnareExemptForPlayer(Player* player)
     return PlayerHasClassAura(player, EQ_CLASSAURA_SPELL_WIZARD_AURA);
 }
 
-void EverQuestMod::RefreshRangerEndlessQuiverForPlayer(Player* player)
+void EverQuestMod::RefreshClassAuraTogglesForPlayer(Player* player)
 {
-    // Turning it on and off is up to the player
+    // Turning them on and off is up to the player
     if (player == nullptr)
         return;
-    uint32 quiverSpellID = GetClassAuraSpellID(EQ_CLASSAURA_SPELL_RANGER_ENDLESS_QUIVER);
-    if (quiverSpellID == 0 || player->HasAura(quiverSpellID) == false)
-        return;
-    uint32 passiveSpellID = GetClassAuraSpellID(EQ_CLASSAURA_SPELL_RANGER_PASSIVE);
-    if (IsClassAuraSystemEnabled() == true && passiveSpellID != 0 && player->HasSpell(passiveSpellID) == true)
-        return;
-    player->RemoveAurasDueToSpell(quiverSpellID);
+    for (size_t i = 0; i < EQ_CLASSAURA_TOGGLE_COUNT; ++i)
+    {
+        uint32 toggleSpellID = GetClassAuraSpellID(EQ_CLASSAURA_TOGGLES[i].ToggleType);
+        if (toggleSpellID == 0 || player->HasAura(toggleSpellID) == false)
+            continue;
+        uint32 passiveSpellID = GetClassAuraSpellID(EQ_CLASSAURA_TOGGLES[i].PassiveType);
+        if (IsClassAuraSystemEnabled() == true && passiveSpellID != 0 && player->HasSpell(passiveSpellID) == true)
+            continue;
+        player->RemoveAurasDueToSpell(toggleSpellID);
+    }
 }
 
-bool EverQuestMod::HandleClassAuraRangerEndlessQuiverOnCheckCast(Player* player, Spell* spell, SpellCastResult& result)
+bool EverQuestMod::HandleClassAuraToggleOnCheckCast(Player* player, Spell* spell, SpellCastResult& result)
 {
     if (player == nullptr || spell == nullptr || spell->GetSpellInfo() == nullptr || spell->IsTriggered() == true)
         return false;
-    uint32 quiverSpellID = GetClassAuraSpellID(EQ_CLASSAURA_SPELL_RANGER_ENDLESS_QUIVER);
-    if (quiverSpellID == 0 || spell->GetSpellInfo()->Id != quiverSpellID)
+    for (size_t i = 0; i < EQ_CLASSAURA_TOGGLE_COUNT; ++i)
+    {
+        uint32 toggleSpellID = GetClassAuraSpellID(EQ_CLASSAURA_TOGGLES[i].ToggleType);
+        if (toggleSpellID == 0 || spell->GetSpellInfo()->Id != toggleSpellID)
+            continue;
+
+        // Casting it while it is up turns it off
+        if (player->HasAura(toggleSpellID) == true)
+        {
+            player->RemoveAurasDueToSpell(toggleSpellID);
+            result = SPELL_FAILED_DONT_REPORT;
+            return true;
+        }
+
+        // Only the toggle's class (primary or secondary) can turn it on
+        uint32 passiveSpellID = GetClassAuraSpellID(EQ_CLASSAURA_TOGGLES[i].PassiveType);
+        if (IsClassAuraSystemEnabled() == false || passiveSpellID == 0 || player->HasSpell(passiveSpellID) == false)
+        {
+            result = SPELL_FAILED_SPELL_UNAVAILABLE;
+            return true;
+        }
         return false;
-
-    // Casting it while it is up turns it off
-    if (player->HasAura(quiverSpellID) == true)
-    {
-        player->RemoveAurasDueToSpell(quiverSpellID);
-        result = SPELL_FAILED_DONT_REPORT;
-        return true;
-    }
-
-    // Only a ranger (primary or secondary) can turn it on
-    uint32 passiveSpellID = GetClassAuraSpellID(EQ_CLASSAURA_SPELL_RANGER_PASSIVE);
-    if (IsClassAuraSystemEnabled() == false || passiveSpellID == 0 || player->HasSpell(passiveSpellID) == false)
-    {
-        result = SPELL_FAILED_SPELL_UNAVAILABLE;
-        return true;
     }
     return false;
+}
+
+void EverQuestMod::HandleClassAuraShamanWarspiritRemove(Unit* unit, Aura* aura)
+{
+    // Turning Warspirit off (or losing it) ends the vigor it built, so switching back to heals never keeps both
+    if (unit == nullptr || aura == nullptr || unit->IsPlayer() == false)
+        return;
+    uint32 warspiritSpellID = GetClassAuraSpellID(EQ_CLASSAURA_SPELL_SHAMAN_WARSPIRIT);
+    if (warspiritSpellID == 0 || aura->GetId() != warspiritSpellID)
+        return;
+    uint32 warspiritVigorSpellID = GetClassAuraSpellID(EQ_CLASSAURA_SPELL_SHAMAN_WARSPIRIT_VIGOR);
+    if (warspiritVigorSpellID != 0 && unit->HasAura(warspiritVigorSpellID) == true)
+        unit->RemoveAurasDueToSpell(warspiritVigorSpellID);
+}
+
+void EverQuestMod::HandleClassAuraShamanWarspiritApply(Player* player, Aura* aura)
+{
+    // Turning Warspirit on ends the vigor the shaman gave themself by healing, so healing up stacks and then switching never carries both.  Stacks another
+    // shaman put on them are left alone
+    if (player == nullptr || aura == nullptr)
+        return;
+    uint32 warspiritSpellID = GetClassAuraSpellID(EQ_CLASSAURA_SPELL_SHAMAN_WARSPIRIT);
+    if (warspiritSpellID == 0 || aura->GetId() != warspiritSpellID)
+        return;
+    uint32 vigorSpellID = GetClassAuraSpellID(EQ_CLASSAURA_SPELL_SHAMAN_VIGOR);
+    if (vigorSpellID != 0 && player->HasAura(vigorSpellID, player->GetGUID()) == true)
+        player->RemoveAurasDueToSpell(vigorSpellID, player->GetGUID());
 }
 
 static bool IsClassAuraRangerAmmoAttackSpell(SpellInfo const* spellInfo)
