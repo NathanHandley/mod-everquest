@@ -82,6 +82,7 @@ public:
         EverQuest->LoadForageData();
         EverQuest->LoadZoneSafePointData();
         EverQuest->LoadZoneData();
+        EverQuest->AlignRaidInstanceResetTimes();
         EverQuest->LoadZoneTeleportDestinationData();
         EverQuest->LoadFactionData();
     }

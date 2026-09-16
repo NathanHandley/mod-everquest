@@ -60,6 +60,9 @@ struct BuildValuesCachePosPointers;
 #define EQ_DISPEL_MESSAGE_DEFAULT_COLOR             0xFFAA00
 #define EQ_MEZ_BREAK_MESSAGE_COLOR                  0xFF8040
 
+#define EQ_RAID_RESET_REFERENCE_MAP_ID_3_DAY        309 // Zul'Gurub; EQ raid instance maps with the same reset period share its reset time
+#define EQ_RAID_RESET_REFERENCE_MAP_ID_7_DAY        409 // Molten Core
+
 #define EQ_DRUID_FORM_TYPE_BEAR                     1 // Covers both Bear Form and Dire Bear Form
 #define EQ_DRUID_FORM_TYPE_CAT                      2
 #define EQ_DRUID_FORM_TYPE_TRAVEL                   3
@@ -2230,6 +2233,7 @@ public:
     bool TryReturnGhostToNorrathGraveyardAtLogin(Player* player, uint32 arrivalMapID);
     bool TryReturnCharacterToNorrathAtLogin(Player* player, uint32 arrivalMapID);
     void LoadZoneData();
+    void AlignRaidInstanceResetTimes();
     void LoadZoneTeleportDestinationData();
     bool IsZoneTeleportDestination(uint32 mapID, float x, float y, float z);
     uint32 GetInstanceMapIDForZoneTeleport(Player* player, uint32 destinationMapID);

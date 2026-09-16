@@ -10757,6 +10757,120 @@ void EverQuestMod::LoadZoneData()
     }
 }
 
+static uint32 GetInstanceResetPeriodInSec(uint32 resetTimeInSec)
+{
+    // Same calculation InstanceSaveMgr::LoadResetTimes uses, so a period here always matches the core's
+    uint32 resetPeriodInSec = uint32(((resetTimeInSec * sWorld->getRate(RATE_INSTANCE_RESET_TIME)) / DAY) * DAY);
+    if (resetPeriodInSec < uint32(DAY))
+        resetPeriodInSec = uint32(DAY);
+    return resetPeriodInSec;
+}
+
+void EverQuestMod::AlignRaidInstanceResetTimes()
+{
+    // The core runs a separate reset cycle for every raid map, anchored to whichever day that map's instance_reset row was first created
+    // This will align them to ZG or MC depending on the lock duration
+    if (InstanceRaidLowMapIDs.empty())
+        return;
+
+    string mapDifficultyFilePath = sWorld->GetDataPath() + "dbc/MapDifficulty.dbc";
+    DBCFileLoader mapDifficultyFile;
+    if (mapDifficultyFile.Load(mapDifficultyFilePath.c_str(), MapDifficultyEntryfmt) == false || mapDifficultyFile.GetCols() != sizeof(MapDifficultyEntryfmt) - 1)
+    {
+        LOG_ERROR("module.EverQuest", "EverQuestMod could not read {}, so raid instance reset times were not aligned", mapDifficultyFilePath);
+        return;
+    }
+
+    struct EverQuestRaidMapDifficulty
+    {
+        uint32 MapID;
+        uint32 Difficulty;
+        uint32 ResetPeriodInSec;
+    };
+    vector<EverQuestRaidMapDifficulty> raidMapDifficulties;
+    unordered_map<uint32, uint32> referenceMapIDByResetPeriodInSec;
+    for (uint32 i = 0; i < mapDifficultyFile.GetNumRows(); ++i)
+    {
+        // Field positions from MapDifficultyEntry in DBCStructure.h
+        DBCFileLoader::Record record = mapDifficultyFile.getRecord(i);
+        uint32 mapID = record.getUInt(1);
+        uint32 difficulty = record.getUInt(2);
+        uint32 resetTimeInSec = record.getUInt(20);
+        if (resetTimeInSec == 0)
+            continue;
+        uint32 resetPeriodInSec = GetInstanceResetPeriodInSec(resetTimeInSec);
+        if (difficulty == 0 && (mapID == EQ_RAID_RESET_REFERENCE_MAP_ID_3_DAY || mapID == EQ_RAID_RESET_REFERENCE_MAP_ID_7_DAY))
+            referenceMapIDByResetPeriodInSec[resetPeriodInSec] = mapID;
+        if (InstanceRaidLowMapIDs.find(mapID) != InstanceRaidLowMapIDs.end())
+            raidMapDifficulties.push_back({ mapID, difficulty, resetPeriodInSec });
+    }
+
+    unordered_map<uint64, uint32> resetTimeByMapDifficultyKey;
+    QueryResult queryResult = CharacterDatabase.Query("SELECT mapid, difficulty, resettime FROM instance_reset");
+    if (queryResult)
+    {
+        do
+        {
+            Field* fields = queryResult->Fetch();
+            uint64 mapDifficultyKey = (uint64(fields[0].Get<uint16>()) << 32) | fields[1].Get<uint8>();
+            resetTimeByMapDifficultyKey[mapDifficultyKey] = fields[2].Get<uint32>();
+        } while (queryResult->NextRow());
+    }
+
+    // A reference raid with no row yet gets the same first reset time the core would give it, written now so the EQ raids line up on this startup too.
+    // Every write here is direct rather than queued, since the core reads this table later in this same startup
+    time_t now = GameTime::GetGameTime().count();
+    time_t today = (now / DAY) * DAY;
+    uint32 resetHourOffsetInSec = sWorld->getIntConfig(CONFIG_INSTANCE_RESET_TIME_HOUR) * HOUR;
+    unordered_map<uint32, uint32> referenceResetTimeByResetPeriodInSec;
+    for (unordered_map<uint32, uint32>::const_iterator referenceItr = referenceMapIDByResetPeriodInSec.begin(); referenceItr != referenceMapIDByResetPeriodInSec.end(); ++referenceItr)
+    {
+        uint32 resetPeriodInSec = referenceItr->first;
+        uint32 referenceMapID = referenceItr->second;
+        uint32 referenceResetTime = 0;
+        unordered_map<uint64, uint32>::const_iterator currentItr = resetTimeByMapDifficultyKey.find(uint64(referenceMapID) << 32);
+        if (currentItr != resetTimeByMapDifficultyKey.end())
+            referenceResetTime = currentItr->second;
+        else
+        {
+            referenceResetTime = uint32(today + resetPeriodInSec + resetHourOffsetInSec);
+            CharacterDatabase.DirectExecute("INSERT INTO instance_reset (mapid, difficulty, resettime) VALUES ({}, 0, {})", referenceMapID, referenceResetTime);
+        }
+        referenceResetTimeByResetPeriodInSec[resetPeriodInSec] = referenceResetTime;
+    }
+
+    for (const EverQuestRaidMapDifficulty& raidMapDifficulty : raidMapDifficulties)
+    {
+        if (raidMapDifficulty.ResetPeriodInSec <= uint32(DAY))
+            continue;
+
+        unordered_map<uint32, uint32>::const_iterator referenceItr = referenceResetTimeByResetPeriodInSec.find(raidMapDifficulty.ResetPeriodInSec);
+        if (referenceItr == referenceResetTimeByResetPeriodInSec.end())
+        {
+            LOG_ERROR("module.EverQuest", "EverQuestMod raid instance map {} difficulty {} has a reset period of {} seconds, which no reference raid shares, so its reset time was not aligned", raidMapDifficulty.MapID, raidMapDifficulty.Difficulty, raidMapDifficulty.ResetPeriodInSec);
+            continue;
+        }
+        uint32 alignedResetTime = referenceItr->second;
+
+        uint64 mapDifficultyKey = (uint64(raidMapDifficulty.MapID) << 32) | raidMapDifficulty.Difficulty;
+        uint32 previousResetTime = 0;
+        unordered_map<uint64, uint32>::const_iterator currentItr = resetTimeByMapDifficultyKey.find(mapDifficultyKey);
+        if (currentItr != resetTimeByMapDifficultyKey.end())
+        {
+            previousResetTime = currentItr->second;
+            if (previousResetTime == alignedResetTime)
+                continue;
+        }
+
+        CharacterDatabase.DirectExecute("INSERT INTO instance_reset (mapid, difficulty, resettime) VALUES ({}, {}, {}) ON DUPLICATE KEY UPDATE resettime = {}", raidMapDifficulty.MapID, raidMapDifficulty.Difficulty, alignedResetTime, alignedResetTime);
+
+        // Existing lockouts keep their own copy of the reset time, which is what the raid info window counts down and what the core's startup cleanup expires them by
+        CharacterDatabase.DirectExecute("UPDATE instance SET resettime = {} WHERE map = {} AND difficulty = {} AND resettime > 0", alignedResetTime, raidMapDifficulty.MapID, raidMapDifficulty.Difficulty);
+
+        LOG_INFO("module.EverQuest", "EverQuestMod aligned the reset time of raid instance map {} difficulty {} with its reference raid ({} -> {})", raidMapDifficulty.MapID, raidMapDifficulty.Difficulty, previousResetTime, alignedResetTime);
+    }
+}
+
 void EverQuestMod::LoadZoneTeleportDestinationData()
 {
     ZoneTeleportDestinationsByMapID.clear();
