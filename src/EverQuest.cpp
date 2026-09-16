@@ -295,6 +295,8 @@ bool EverQuestMod::LoadConfigurationSystemDataFromDB()
                 ConfigSystemClassAuraWizardFocusStillIntervalInMS = (uint32)atoi(value.c_str());
             else if (key == "ClassAuraNecromancerShadowExchangeMaxDistanceInYards")
                 ConfigSystemClassAuraNecromancerShadowExchangeMaxDistanceInYards = (uint32)atoi(value.c_str());
+            else if (key == "ClassAuraMagicianDetonateSummonedUnsummonDelayInMS")
+                ConfigSystemClassAuraMagicianDetonateSummonedUnsummonDelayInMS = (uint32)atoi(value.c_str());
             else if (key == "ClassAuraNecromancerMarkDirectDamagePercentPerStack")
                 ConfigSystemClassAuraNecromancerMarkDirectDamagePercentPerStack = (uint32)atoi(value.c_str());
             else if (key == "ClassAuraNecromancerMarkDotDamagePercentPerStack")

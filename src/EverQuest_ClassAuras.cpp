@@ -56,7 +56,8 @@ static const char* EQ_CLASSAURA_SPELL_TYPE_NAMES[EQ_CLASSAURA_SPELL_TYPE_COUNT] 
     "DruidNaturesBalanceFire", "WarriorUnrelentingAssault", "WarriorRiposte", "BardVigor", "MonkChiSurge", "PaladinDeflection", "RogueLuckyStrike", "RogueLuckyStrikeHelper",
     "DruidNaturesBalanceCold", "DruidNaturesBalanceNature", "DruidEntangleStrike", "ShamanWarspiritVigor",
     "ShadowKnightBloodDebt", "ShadowKnightBloodDebtCharge", "ShadowKnightBloodDebtHeal",
-    "NecromancerShadowExchange", "RangerCompoundInjuryMoving"
+    "NecromancerShadowExchange", "RangerCompoundInjuryMoving",
+    "MagicianDetonateSummoned", "MagicianDetonateSummonedBlast"
 };
 
 struct EverQuestClassAuraToggle
@@ -220,7 +221,12 @@ void EverQuestMod::RefreshClassAuraGearAurasForPlayer(Player* player)
 
 void EverQuestMod::UpdateClassAurasForPlayer(Player* player, uint32 diffInMS)
 {
-    if (player == nullptr || IsClassAuraSystemEnabled() == false)
+    if (player == nullptr)
+        return;
+
+    // Runs even with class auras switched off, so a pet left lingering after a detonation is never stranded
+    UpdateMagicianDetonatedPetForPlayer(player);
+    if (IsClassAuraSystemEnabled() == false)
         return;
     EverQuestPlayerClassAuraState* state = GetClassAuraStateForPlayer(player);
     state->GearRefreshTimerMS += diffInMS;
@@ -1203,6 +1209,92 @@ void EverQuestMod::DoClassAuraNecromancerShadowExchange(Player* player)
 
     pet->NearTeleportTo(playerX, playerY, playerZ, playerOrientation);
     player->NearTeleportTo(petX, petY, petZ, petOrientation);
+}
+
+// Magician "Detonate Summoned": only a living pet the magician summoned counts, so a hunter's tamed pet or a charmed creature never does
+Pet* EverQuestMod::GetClassAuraMagicianDetonatePet(Player* player)
+{
+    if (IsClassAuraSystemEnabled() == false || player == nullptr)
+        return nullptr;
+    if (PlayerHasClassAura(player, EQ_CLASSAURA_SPELL_MAGICIAN_AURA) == false)
+        return nullptr;
+    Pet* pet = player->GetPet();
+    if (pet == nullptr || pet->IsAlive() == false || pet->IsInWorld() == false || pet->getPetType() != SUMMON_PET)
+        return nullptr;
+    if (pet->FindMap() != player->FindMap())
+        return nullptr;
+
+    // A pet that already exploded and is only lingering for its nova can't be detonated again
+    if (GetClassAuraStateForPlayer(player)->DetonatedPetGUID == pet->GetGUID())
+        return nullptr;
+    return pet;
+}
+
+// Magician "Detonate Summoned": the exploded pet is unsummoned once its nova has had time to play
+void EverQuestMod::UpdateMagicianDetonatedPetForPlayer(Player* player)
+{
+    EverQuestPlayerClassAuraState* state = GetClassAuraStateForPlayer(player);
+    if (state->DetonatedPetGUID.IsEmpty() == true)
+        return;
+    Pet* pet = player->GetPet();
+    bool isPetStillOut = pet != nullptr && pet->GetGUID() == state->DetonatedPetGUID;
+    if (isPetStillOut == true && GameTime::GetGameTimeMS().count() < state->DetonatedPetUnsummonAtMS)
+        return;
+
+    uint32 detonatedPetNumber = state->DetonatedPetNumber;
+    state->DetonatedPetGUID.Clear();
+    state->DetonatedPetNumber = 0;
+    state->DetonatedPetUnsummonAtMS = 0;
+    if (isPetStillOut == true)
+    {
+        player->RemovePet(pet, PET_SAVE_NOT_IN_SLOT);
+        return;
+    }
+
+    // A teleport or mount during the linger held the pet to bring back afterwards, which an exploded pet must never be
+    if (detonatedPetNumber != 0 && player->GetTemporaryUnsummonedPetNumber() == detonatedPetNumber)
+        player->SetTemporaryUnsummonedPetNumber(0);
+}
+
+void EverQuestMod::DoClassAuraMagicianDetonateSummoned(Player* player)
+{
+    Pet* pet = GetClassAuraMagicianDetonatePet(player);
+    if (pet == nullptr)
+        return;
+
+    // Health is read here, once the cast has finished, so whatever the pet took during the cast is already gone from it
+    int32 blastDamage = (int32)std::min<uint32>(pet->GetHealth(), (uint32)std::numeric_limits<int32>::max());
+
+    // The pet sets the blast off so it is centered on the pet, and the magician is the original caster so the damage and threat are theirs
+    uint32 blastSpellID = GetClassAuraSpellID(EQ_CLASSAURA_SPELL_MAGICIAN_DETONATE_SUMMONED_BLAST);
+    SpellInfo const* blastSpellInfo = (blastSpellID != 0) ? sSpellMgr->GetSpellInfo(blastSpellID) : nullptr;
+    if (blastSpellInfo != nullptr && blastDamage > 0)
+    {
+        CustomSpellValues blastValues;
+        blastValues.AddSpellMod(SPELLVALUE_BASE_POINT0, blastDamage);
+        pet->CastCustomSpell(blastSpellInfo, blastValues, nullptr, TRIGGERED_FULL_MASK, nullptr, nullptr, player->GetGUID());
+    }
+
+    // The blast runs scripts on everything it hits, so the pet is proven to still be the magician's before anything more is done to it
+    if (player->IsInWorld() == false || player->GetPet() != pet)
+        return;
+    if (ConfigSystemClassAuraMagicianDetonateSummonedUnsummonDelayInMS == 0)
+    {
+        player->RemovePet(pet, PET_SAVE_NOT_IN_SLOT);
+        return;
+    }
+
+    // The nova and its sound play on the pet and unsummoning it now would cut them off, so it lingers briefly
+    pet->CastStop();
+    pet->AttackStop();
+    pet->SetReactState(REACT_PASSIVE);
+    pet->SetUnitFlag(UNIT_FLAG_NOT_SELECTABLE);
+    pet->SetUnitFlag(UNIT_FLAG_NON_ATTACKABLE);
+    pet->SetControlled(true, UNIT_STATE_ROOT);
+    EverQuestPlayerClassAuraState* state = GetClassAuraStateForPlayer(player);
+    state->DetonatedPetGUID = pet->GetGUID();
+    state->DetonatedPetNumber = (pet->GetCharmInfo() != nullptr) ? pet->GetCharmInfo()->GetPetNumber() : 0;
+    state->DetonatedPetUnsummonAtMS = GameTime::GetGameTimeMS().count() + ConfigSystemClassAuraMagicianDetonateSummonedUnsummonDelayInMS;
 }
 
 static SpellInfo const* FindClassAuraDirectHealSpellInfo(SpellInfo const* spellInfo, uint8 depth)

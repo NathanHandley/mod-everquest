@@ -580,15 +580,75 @@ class EverQuest_ClassAuraNecromancerShadowExchangeSpellScript : public SpellScri
     }
 };
 
+// Ranger "Compound Injury (Moving)": held at its full duration for as long as the target keeps moving, so the doubling lasts the whole duration after the target stops
+class EverQuest_ClassAuraRangerCompoundInjuryMovingAuraScript : public AuraScript
+{
+    PrepareAuraScript(EverQuest_ClassAuraRangerCompoundInjuryMovingAuraScript);
+
+    void HoldFullWhileMoving(AuraEffect const* /*aurEff*/)
+    {
+        Unit* target = GetUnitOwner();
+        if (target == nullptr || target->isMoving() == false)
+            return;
+
+        // SetDuration rather than RefreshDuration, which does nothing once the ranger who applied it has left the map
+        Aura* movingAura = GetAura();
+        if (movingAura->GetDuration() < movingAura->GetMaxDuration())
+            movingAura->SetDuration(movingAura->GetMaxDuration());
+    }
+
+    void Register() override
+    {
+        OnEffectPeriodic += AuraEffectPeriodicFn(EverQuest_ClassAuraRangerCompoundInjuryMovingAuraScript::HoldFullWhileMoving, EFFECT_0, SPELL_AURA_PERIODIC_DUMMY);
+    }
+};
+
+// Magician "Detonate Summoned": the magician's summoned pet explodes for its current health as fire damage to every enemy near it, and is unsummoned
+class EverQuest_ClassAuraMagicianDetonateSummonedSpellScript : public SpellScript
+{
+    PrepareSpellScript(EverQuest_ClassAuraMagicianDetonateSummonedSpellScript);
+
+    // Runs when the cast starts and again when it finishes, so a pet that died or was dismissed during the cast stops it
+    SpellCastResult CheckPet()
+    {
+        Unit* caster = GetCaster();
+        if (caster == nullptr || caster->IsPlayer() == false)
+            return SPELL_FAILED_SPELL_UNAVAILABLE;
+        Player* magician = caster->ToPlayer();
+        if (EverQuest->IsClassAuraSystemEnabled() == false || EverQuest->PlayerHasClassAura(magician, EQ_CLASSAURA_SPELL_MAGICIAN_AURA) == false)
+            return SPELL_FAILED_SPELL_UNAVAILABLE;
+        if (EverQuest->GetClassAuraMagicianDetonatePet(magician) == nullptr)
+            return SPELL_FAILED_NO_PET;
+        return SPELL_CAST_OK;
+    }
+
+    void Detonate(SpellEffIndex effIndex)
+    {
+        PreventHitDefaultEffect(effIndex);
+        Unit* caster = GetCaster();
+        if (caster == nullptr || caster->IsPlayer() == false)
+            return;
+        EverQuest->DoClassAuraMagicianDetonateSummoned(caster->ToPlayer());
+    }
+
+    void Register() override
+    {
+        OnCheckCast += SpellCheckCastFn(EverQuest_ClassAuraMagicianDetonateSummonedSpellScript::CheckPet);
+        OnEffectHitTarget += SpellEffectFn(EverQuest_ClassAuraMagicianDetonateSummonedSpellScript::Detonate, EFFECT_0, SPELL_EFFECT_DUMMY);
+    }
+};
+
 void AddEverQuestClassAuraScripts()
 {
     RegisterSpellScript(EverQuest_ClassAuraRogueAuraScript);
     RegisterSpellScript(EverQuest_ClassAuraRangerAuraScript);
+    RegisterSpellScript(EverQuest_ClassAuraRangerCompoundInjuryMovingAuraScript);
     RegisterSpellScript(EverQuest_ClassAuraPaladinAuraScript);
     RegisterSpellScript(EverQuest_ClassAuraWarriorAuraScript);
     RegisterSpellScript(EverQuest_ClassAuraShadowKnightAuraScript);
     RegisterSpellScript(EverQuest_ClassAuraShadowKnightBloodDebtSpellScript);
     RegisterSpellScript(EverQuest_ClassAuraNecromancerShadowExchangeSpellScript);
+    RegisterSpellScript(EverQuest_ClassAuraMagicianDetonateSummonedSpellScript);
     RegisterSpellScript(EverQuest_ClassAuraMonkLightArmorAuraScript);
     RegisterSpellScript(EverQuest_ClassAuraMonkHeavyArmorAuraScript);
     RegisterSpellScript(EverQuest_ClassAuraMagicianAuraScript);

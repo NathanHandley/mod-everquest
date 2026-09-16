@@ -53,7 +53,7 @@ class ByteBuffer;
 struct AreaTrigger;
 struct BuildValuesCachePosPointers;
 
-#define EQ_MOD_VERSION                              107
+#define EQ_MOD_VERSION                              108
 
 #define EQ_MOVEMENT_CAST_SNARE_DURATION_BUFFER_IN_MS 2000 // How much longer than the remaining cast time the casting slow is given, so a pushed-back cast keeps it
 
@@ -957,7 +957,9 @@ enum EverQuestClassAuraSpellType : uint32
     EQ_CLASSAURA_SPELL_SHADOWKNIGHT_BLOOD_DEBT_HEAL = 62,
     EQ_CLASSAURA_SPELL_NECROMANCER_SHADOW_EXCHANGE = 63,
     EQ_CLASSAURA_SPELL_RANGER_COMPOUND_INJURY_MOVING = 64,
-    EQ_CLASSAURA_SPELL_TYPE_COUNT = 65
+    EQ_CLASSAURA_SPELL_MAGICIAN_DETONATE_SUMMONED = 65,
+    EQ_CLASSAURA_SPELL_MAGICIAN_DETONATE_SUMMONED_BLAST = 66,
+    EQ_CLASSAURA_SPELL_TYPE_COUNT = 67
 };
 
 class EverQuestPlayerMoveWhileCastingState : public DataMap::Base
@@ -1006,6 +1008,9 @@ public:
     uint64 BloodDebtDamageTaken = 0;            // Raw damage taken since the last spend or timeout (the stored percent and cap are applied when read)
     uint32 BloodDebtLastDamageTakenAtMS = 0;
     bool BloodDebtFullVisualPlayed = false;
+    ObjectGuid DetonatedPetGUID;                // A pet the magician exploded, lingering so the nova plays out on it before it is unsummoned
+    uint32 DetonatedPetNumber = 0;
+    uint32 DetonatedPetUnsummonAtMS = 0;
 };
 
 class EverQuestPlayerTrackingState : public DataMap::Base
@@ -1570,6 +1575,7 @@ public:
     uint32 ConfigSystemClassAuraWizardFocusMovementIntervalInMS = 1000;
     uint32 ConfigSystemClassAuraWizardFocusStillIntervalInMS = 2000;
     uint32 ConfigSystemClassAuraNecromancerShadowExchangeMaxDistanceInYards = 100;
+    uint32 ConfigSystemClassAuraMagicianDetonateSummonedUnsummonDelayInMS = 1000;
     uint32 ConfigSystemClassAuraNecromancerMarkDirectDamagePercentPerStack = 1;
     uint32 ConfigSystemClassAuraNecromancerMarkDotDamagePercentPerStack = 2;
     uint32 ConfigSystemClassAuraClericCadenceReductionPercent = 33;
@@ -2049,6 +2055,7 @@ public:
     void UpdateRogueLuckyStrikeForPlayer(Player* player);
     void HandleClassAuraShadowKnightBloodDebtOnDamage(Unit* attacker, Unit* victim, uint32 damage);
     void UpdateShadowKnightBloodDebtForPlayer(Player* player);
+    void UpdateMagicianDetonatedPetForPlayer(Player* player);
     uint32 GetClassAuraShadowKnightBloodDebtAmount(Player* player);
     uint32 SpendClassAuraShadowKnightBloodDebt(Player* player);
     void SpendClassAuraRogueLuckyStrike(Player* player);
@@ -2075,6 +2082,8 @@ public:
     Unit* GetClassAuraNecromancerShadowExchangePet(Player* player, bool& isOutOfRange);
     void TransferClassAuraNecromancerDebuffsToPet(Player* player, Unit* pet);
     void DoClassAuraNecromancerShadowExchange(Player* player);
+    Pet* GetClassAuraMagicianDetonatePet(Player* player);
+    void DoClassAuraMagicianDetonateSummoned(Player* player);
     void ApplyClassAuraCastAdjustmentsOnCheckCast(Player* player, Spell* spell, bool strict);
     void FinishClassAuraCastAdjustmentsOnPrepare(Player* player, Spell* spell);
     void HandleClassAuraSpellCastCancel(Player* player, Spell* spell);
