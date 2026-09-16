@@ -343,6 +343,12 @@ bool EverQuestMod::LoadConfigurationSystemDataFromDB()
                 ConfigSystemIllusionObjectTreeMaxDistance = (float)atof(value.c_str());
             else if (key == "HarmTouchPlayerPvPDamagePercent")
                 ConfigSystemHarmTouchPlayerPvPDamagePercent = (uint32)atoi(value.c_str());
+            else if (key == "ClamberMaxSlopeAngleInDegrees")
+                ConfigSystemClamberMaxSlopeAngleInDegrees = (float)atof(value.c_str());
+            else if (key == "ClamberMaxDropInYards")
+                ConfigSystemClamberMaxDropInYards = (float)atof(value.c_str());
+            else if (key == "ClamberMaxGapDepthInYards")
+                ConfigSystemClamberMaxGapDepthInYards = (float)atof(value.c_str());
             else if (key == "ClientDataVersion")
                 ConfigSystemClientDataVersion = (uint32)atoi(value.c_str());
             else if (key == "ClientDataVersionMismatchMessage")

@@ -341,6 +341,13 @@ struct BuildValuesCachePosPointers;
 #define EQ_MOVE_TEST_Z_DOWN_AMOUNT_FOR_WATER_TEST   10.0f   // How far to test down when looking for water in the Z testing
 #define EQ_MOVE_MAX_PATH_NODES                      512     // Hard cap on generated step nodes
 
+#define EQ_CLAMBER_SAMPLE_STEP_DISTANCE             1.0f    // Distance between floor samples along a clamber
+#define EQ_CLAMBER_MAX_PATH_NODES                   128     // Hard cap on floor samples along a clamber
+#define EQ_CLAMBER_MIN_DISTANCE                     1.0f    // Spots closer than this aren't worth clambering to
+#define EQ_CLAMBER_FLOOR_SEARCH_MARGIN              0.5f    // Extra height above the expected ground to start a floor search from
+#define EQ_CLAMBER_STANDING_TOLERANCE               1.0f    // How far off the floor the caster (or the picked spot) can be and still count as on it
+#define EQ_CLAMBER_STEP_ALLOWANCE                   0.5f    // Extra rise allowed between two samples beyond the slope limit, for small ledges and bumps
+
 #define EQ_MOVE_PHASE_NONE                          0
 #define EQ_MOVE_PHASE_TRAVELING                     1
 #define EQ_MOVE_PHASE_WAITING_FOR_TIMER             2
@@ -1586,6 +1593,9 @@ public:
     float ConfigSystemIllusionObjectMaxDistance = 0;
     float ConfigSystemIllusionObjectTreeMaxDistance = 0;
     uint32 ConfigSystemHarmTouchPlayerPvPDamagePercent = 50;
+    float ConfigSystemClamberMaxSlopeAngleInDegrees = 85.0f;
+    float ConfigSystemClamberMaxDropInYards = 5.0f;
+    float ConfigSystemClamberMaxGapDepthInYards = 5.0f;
     uint32 ConfigSystemClientDataVersion = 0;
     string ConfigSystemClientDataVersionMismatchMessage;
     uint32 ConfigSystemFactionGoodClassMask;
