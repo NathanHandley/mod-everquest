@@ -415,12 +415,20 @@ EverQuest.Spells.BardFearDiminishingReturnsResetTimeInMS = 15000
 #		playing right through it.  Songs on creatures are not affected
 #	Default: True (a pvp silence stops the oldest song playing)
 #
+# 	EverQuest.Spells.PvPEQCharmImmunityEnabled
+#		If true, players (and their pets) are fully immune to the charm from any EverQuest spell or
+#		bard song when anything a player controls casts it (their pets and charmed creatures
+#		included).  The charm shows as immune and never takes hold; any other effects the same spell
+#		has still land.  Charms on creatures, and creature cast charms on players, are not affected
+#	Default: True (EverQuest charms do not work in pvp)
+#
 ###################################################################################################
 
 EverQuest.Spells.PvPChainedCrowdControlDiminishingReturnsEnabled = True
 EverQuest.Spells.PvPCrowdControlMaxDurationInMS = 10000
 EverQuest.Spells.PvPSnareDiminishingReturnsEnabled = True
 EverQuest.Spells.PvPSilenceCancelsBardSongsEnabled = True
+EverQuest.Spells.PvPEQCharmImmunityEnabled = True
 
 ###################################################################################################
 #

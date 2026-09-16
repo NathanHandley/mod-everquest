@@ -131,6 +131,7 @@ EverQuestMod::EverQuestMod() :
     ConfigSpellPvPCrowdControlMaxDurationInMS(10000),
     ConfigSpellPvPSnareDiminishingReturnsEnabled(true),
     ConfigSpellPvPSilenceCancelsBardSongsEnabled(true),
+    ConfigSpellPvPEQCharmImmunityEnabled(true),
     ConfigSpellNoSwingTimerResetForEQSpells(true),
     ConfigSpellNoSwingTimerResetForWoWSpells(false),
     ConfigSpellMovementCastSnareEnabled(true),
@@ -464,6 +465,7 @@ void EverQuestMod::LoadConfigurationFile()
     ConfigSpellPvPCrowdControlMaxDurationInMS = sConfigMgr->GetOption<uint32>("EverQuest.Spells.PvPCrowdControlMaxDurationInMS", 10000);
     ConfigSpellPvPSnareDiminishingReturnsEnabled = sConfigMgr->GetOption<bool>("EverQuest.Spells.PvPSnareDiminishingReturnsEnabled", true);
     ConfigSpellPvPSilenceCancelsBardSongsEnabled = sConfigMgr->GetOption<bool>("EverQuest.Spells.PvPSilenceCancelsBardSongsEnabled", true);
+    ConfigSpellPvPEQCharmImmunityEnabled = sConfigMgr->GetOption<bool>("EverQuest.Spells.PvPEQCharmImmunityEnabled", true);
     ConfigSpellNoSwingTimerResetForEQSpells = sConfigMgr->GetOption<bool>("EverQuest.Spells.NoSwingTimerResetForEQSpells", true);
     ConfigSpellNoSwingTimerResetForWoWSpells = sConfigMgr->GetOption<bool>("EverQuest.Spells.NoSwingTimerResetForWoWSpells", false);
 
@@ -5747,6 +5749,64 @@ void EverQuestMod::CancelBardSongsOnPvPSilenceAuraApply(Unit* target, Aura* aura
     }
     if (oldestSongSpellID != 0)
         targetPlayer->RemoveAurasDueToSpell(oldestSongSpellID);
+}
+
+uint8 EverQuestMod::GetEQCharmEffectMask(SpellInfo const* spellInfo)
+{
+    if (spellInfo == nullptr)
+        return 0;
+    if (spellInfo->Id < ConfigSystemSpellDBCIDMin || spellInfo->Id > ConfigSystemSpellDBCIDMax)
+        return 0;
+
+    // Bard charm songs land their charm through the song's tick spell
+    if (IsSpellAnEQSpell(spellInfo->Id) == false && BardSongTickSpellIDs.find(spellInfo->Id) == BardSongTickSpellIDs.end())
+        return 0;
+    uint8 charmEffectMask = 0;
+    for (uint8 i = 0; i < MAX_SPELL_EFFECTS; ++i)
+        if (spellInfo->Effects[i].IsAura(SPELL_AURA_MOD_CHARM) == true || spellInfo->Effects[i].IsAura(SPELL_AURA_AOE_CHARM) == true)
+            charmEffectMask |= (uint8)(1 << i);
+    return charmEffectMask;
+}
+
+bool EverQuestMod::IsEQCharmBlockedInPvP(SpellInfo const* spellInfo, Unit* target, Unit* caster)
+{
+    // EverQuest charms never take hold of a player (or a player's pet) when anything a player controls casts them
+    if (ConfigSpellPvPEQCharmImmunityEnabled == false)
+        return false;
+    if (spellInfo == nullptr || target == nullptr || caster == nullptr || caster == target)
+        return false;
+    if (GetEQCharmEffectMask(spellInfo) == 0)
+        return false;
+    return IsPvPCrowdControlDurationCappedForTarget(target, caster);
+}
+
+uint8 EverQuestMod::GetPvPEQCharmImmuneEffectMaskForTarget(Spell* spell, Unit* target)
+{
+    if (spell == nullptr || target == nullptr)
+        return 0;
+
+    // A chained charm is cast by the unit it lands on, so the player behind it is the original caster
+    Unit* caster = spell->GetOriginalCaster();
+    if (caster == nullptr)
+        caster = spell->GetCaster();
+    SpellInfo const* spellInfo = spell->GetSpellInfo();
+    if (IsEQCharmBlockedInPvP(spellInfo, target, caster) == false)
+        return 0;
+    return GetEQCharmEffectMask(spellInfo);
+}
+
+bool EverQuestMod::IsPvPEQCharmAuraApplication(Unit* target, Aura* aura)
+{
+    // Catches a charm added without a spell (aura linked chains), which the effect strip before landing never sees
+    if (target == nullptr || aura == nullptr)
+        return false;
+    SpellInfo const* spellInfo = aura->GetSpellInfo();
+    if (IsEQCharmBlockedInPvP(spellInfo, target, aura->GetCaster()) == false)
+        return false;
+    AuraApplication const* auraApplication = aura->GetApplicationOfTarget(target->GetGUID());
+    if (auraApplication == nullptr)
+        return false;
+    return (auraApplication->GetEffectMask() & GetEQCharmEffectMask(spellInfo)) != 0;
 }
 
 static const uint64 EQ_AURA_EFFECT_TRACKING_KEY_PLAYERS = UINT64_MAX;

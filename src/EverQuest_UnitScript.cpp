@@ -227,6 +227,13 @@ public:
         if (TryHandleBashKickStunChance(unit, aura) == true)
             return;
 
+        // An EverQuest charm that got past the strip before landing still has no hold in pvp
+        if (EverQuest->IsPvPEQCharmAuraApplication(unit, aura) == true)
+        {
+            unit->RemoveAura(aura);
+            return;
+        }
+
         // Chained crowd control should fall off if it's at limit
         if (EverQuest->HandlePvPChainedCrowdControlDiminishingReturnsOnAuraApply(unit, aura) == true)
         {

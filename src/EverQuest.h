@@ -1648,6 +1648,7 @@ public:
     uint32 ConfigSpellPvPCrowdControlMaxDurationInMS;
     bool ConfigSpellPvPSnareDiminishingReturnsEnabled;
     bool ConfigSpellPvPSilenceCancelsBardSongsEnabled;
+    bool ConfigSpellPvPEQCharmImmunityEnabled;
     bool ConfigSpellNoSwingTimerResetForEQSpells;
     bool ConfigSpellNoSwingTimerResetForWoWSpells;
     bool ConfigSpellMovementCastSnareEnabled;
@@ -2016,6 +2017,10 @@ public:
     bool HandlePvPSnareDiminishingReturnsOnAuraApply(Unit* target, Aura* aura);
     void ClearPvPSnareDiminishingReturnState(Unit* unit);
     void CancelBardSongsOnPvPSilenceAuraApply(Unit* target, Aura* aura);
+    uint8 GetEQCharmEffectMask(SpellInfo const* spellInfo);
+    bool IsEQCharmBlockedInPvP(SpellInfo const* spellInfo, Unit* target, Unit* caster);
+    uint8 GetPvPEQCharmImmuneEffectMaskForTarget(Spell* spell, Unit* target);
+    bool IsPvPEQCharmAuraApplication(Unit* target, Aura* aura);
     uint64 GetAuraEffectTrackingKeyForUnit(Unit* unit);
     void TrackEQHasteAurasAndEnforceCapOnAuraApply(Unit* unit, Aura* aura);
     void UntrackEQHasteAurasAndEnforceCapOnAuraRemove(Unit* unit, Aura* aura);

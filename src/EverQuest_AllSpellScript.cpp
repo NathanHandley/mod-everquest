@@ -192,6 +192,17 @@ public:
             targetInfo.effectMask = targetInfo.effectMask & (uint8)(~pvpImmuneEffectMask);
         }
 
+        // EverQuest charms have no hold on players in pvp
+        uint8 pvpCharmImmuneEffectMask = EverQuest->GetPvPEQCharmImmuneEffectMaskForTarget(spell, target);
+        if (pvpCharmImmuneEffectMask != 0)
+        {
+            uint8 firstImmuneEffectBit = (uint8)(pvpCharmImmuneEffectMask & (uint8)(~pvpCharmImmuneEffectMask + 1));
+            Unit* immuneReportCaster = (spell->GetOriginalCaster() != nullptr) ? spell->GetOriginalCaster() : spell->GetCaster();
+            if ((effectMask & firstImmuneEffectBit) != 0 && immuneReportCaster != nullptr)
+                immuneReportCaster->SendSpellMiss(target, spellInfo->Id, SPELL_MISS_IMMUNE);
+            targetInfo.effectMask = targetInfo.effectMask & (uint8)(~pvpCharmImmuneEffectMask);
+        }
+
         if (EverQuest->ShouldStripBashKickStunBeforeItLands(spellInfo->Id, target) == false)
             return;
 
