@@ -960,7 +960,9 @@ enum EverQuestClassAuraSpellType : uint32
     EQ_CLASSAURA_SPELL_RANGER_COMPOUND_INJURY_MOVING = 64,
     EQ_CLASSAURA_SPELL_MAGICIAN_DETONATE_SUMMONED = 65,
     EQ_CLASSAURA_SPELL_MAGICIAN_DETONATE_SUMMONED_BLAST = 66,
-    EQ_CLASSAURA_SPELL_TYPE_COUNT = 67
+    EQ_CLASSAURA_SPELL_CLERIC_RADIANCE = 67,
+    EQ_CLASSAURA_SPELL_CLERIC_RADIANCE_FREE_MANA = 68,
+    EQ_CLASSAURA_SPELL_TYPE_COUNT = 69
 };
 
 class EverQuestPlayerMoveWhileCastingState : public DataMap::Base
@@ -1580,6 +1582,8 @@ public:
     uint32 ConfigSystemClassAuraNecromancerMarkDirectDamagePercentPerStack = 1;
     uint32 ConfigSystemClassAuraNecromancerMarkDotDamagePercentPerStack = 2;
     uint32 ConfigSystemClassAuraClericCadenceReductionPercent = 33;
+    uint32 ConfigSystemClassAuraClericRadianceDamagePercent = 10;
+    uint32 ConfigSystemClassAuraClericRadianceFreeManaHealthPercent = 20;
     uint32 ConfigSystemClassAuraDruidDirectHealRegenPercent = 20;
     uint32 ConfigSystemClassAuraDruidDirectHealRegenTickCount = 4;
     uint32 ConfigSystemClassAuraDruidNaturesBalanceDamagePercentPerStack = 10;
@@ -2060,6 +2064,7 @@ public:
     void UpdateWarriorClassAuraForPlayer(Player* player);
     void UpdateMonkChiSurgeForPlayer(Player* player);
     void UpdateRogueLuckyStrikeForPlayer(Player* player);
+    void UpdateClericUnbrokenRadianceForPlayer(Player* player);
     void HandleClassAuraShadowKnightBloodDebtOnDamage(Unit* attacker, Unit* victim, uint32 damage);
     void UpdateShadowKnightBloodDebtForPlayer(Player* player);
     void UpdateMagicianDetonatedPetForPlayer(Player* player);
@@ -2079,6 +2084,7 @@ public:
     void ApplyClassAuraCompoundInjuryDamageBonus(Unit* attacker, Unit* victim, int32& damage);
     void ApplyClassAuraRangerCompoundInjury(Player* ranger, Unit* target);
     void ApplyClassAuraPaladinUndeadDemonDamageBonus(Unit* attacker, Unit* victim, int32& damage);
+    void ApplyClassAuraClericUnbrokenRadianceDamageBonus(Unit* attacker, int32& damage);
     void ApplyClassAuraEntangleStrikeDamageMods(Unit* attacker, Unit* victim, int32& damage, bool isMeleeDamage, bool isPhysicalDamage);
     uint32 GetClassAuraDruidNaturesBalanceBonusPercent(Player* druid, uint32 castBalanceType);
     void RemoveClassAuraDruidNaturesBalanceStacks(Player* druid, uint32 castBalanceType);

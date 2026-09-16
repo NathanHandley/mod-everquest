@@ -57,7 +57,8 @@ static const char* EQ_CLASSAURA_SPELL_TYPE_NAMES[EQ_CLASSAURA_SPELL_TYPE_COUNT] 
     "DruidNaturesBalanceCold", "DruidNaturesBalanceNature", "DruidEntangleStrike", "ShamanWarspiritVigor",
     "ShadowKnightBloodDebt", "ShadowKnightBloodDebtCharge", "ShadowKnightBloodDebtHeal",
     "NecromancerShadowExchange", "RangerCompoundInjuryMoving",
-    "MagicianDetonateSummoned", "MagicianDetonateSummonedBlast"
+    "MagicianDetonateSummoned", "MagicianDetonateSummonedBlast",
+    "ClericRadiance", "ClericRadianceFreeMana"
 };
 
 struct EverQuestClassAuraToggle
@@ -246,6 +247,34 @@ void EverQuestMod::UpdateClassAurasForPlayer(Player* player, uint32 diffInMS)
     UpdateMonkChiSurgeForPlayer(player);
     UpdateRogueLuckyStrikeForPlayer(player);
     UpdateShadowKnightBloodDebtForPlayer(player);
+    UpdateClericUnbrokenRadianceForPlayer(player);
+}
+
+// Cleric "Unbroken Radiance": the two marks only show what the cleric's health already earns.  The payouts test the health themselves, so a mark that is a tick behind never misprices a hit
+void EverQuestMod::UpdateClericUnbrokenRadianceForPlayer(Player* player)
+{
+    bool hasClericAura = PlayerHasClassAura(player, EQ_CLASSAURA_SPELL_CLERIC_AURA);
+    uint32 radianceSpellID = GetClassAuraSpellID(EQ_CLASSAURA_SPELL_CLERIC_RADIANCE);
+    if (radianceSpellID != 0)
+    {
+        bool shouldHave = hasClericAura == true && ConfigSystemClassAuraClericRadianceDamagePercent > 0 && player->IsAlive() == true && player->IsFullHealth() == true;
+        bool hasAura = player->HasAura(radianceSpellID);
+        if (shouldHave == true && hasAura == false)
+            player->AddAura(radianceSpellID, player);
+        else if (shouldHave == false && hasAura == true)
+            player->RemoveAurasDueToSpell(radianceSpellID);
+    }
+    uint32 freeManaSpellID = GetClassAuraSpellID(EQ_CLASSAURA_SPELL_CLERIC_RADIANCE_FREE_MANA);
+    if (freeManaSpellID != 0)
+    {
+        bool shouldHave = hasClericAura == true && ConfigSystemClassAuraClericRadianceFreeManaHealthPercent > 0 && player->IsAlive() == true
+            && player->GetHealthPct() < (float)ConfigSystemClassAuraClericRadianceFreeManaHealthPercent;
+        bool hasAura = player->HasAura(freeManaSpellID);
+        if (shouldHave == true && hasAura == false)
+            player->AddAura(freeManaSpellID, player);
+        else if (shouldHave == false && hasAura == true)
+            player->RemoveAurasDueToSpell(freeManaSpellID);
+    }
 }
 
 void EverQuestMod::UpdateRogueLuckyStrikeForPlayer(Player* player)
@@ -761,6 +790,55 @@ void EverQuestMod::HandleClassAuraShamanStrike(Unit* attacker, Unit* victim)
     }
 }
 
+// A spell counts as damaging when any one of its effects takes health outright or over time
+static bool IsClassAuraDamagingSpell(SpellInfo const* spellInfo)
+{
+    for (uint8 i = 0; i < MAX_SPELL_EFFECTS; ++i)
+    {
+        switch (spellInfo->Effects[i].Effect)
+        {
+            case SPELL_EFFECT_SCHOOL_DAMAGE:
+            case SPELL_EFFECT_ENVIRONMENTAL_DAMAGE:
+            case SPELL_EFFECT_HEALTH_LEECH:
+            case SPELL_EFFECT_WEAPON_DAMAGE:
+            case SPELL_EFFECT_WEAPON_DAMAGE_NOSCHOOL:
+            case SPELL_EFFECT_NORMALIZED_WEAPON_DMG:
+            case SPELL_EFFECT_WEAPON_PERCENT_DAMAGE:
+                return true;
+            default:
+                break;
+        }
+        switch (spellInfo->Effects[i].ApplyAuraName)
+        {
+            case SPELL_AURA_PERIODIC_DAMAGE:
+            case SPELL_AURA_PERIODIC_DAMAGE_PERCENT:
+            case SPELL_AURA_PERIODIC_LEECH:
+                return true;
+            default:
+                break;
+        }
+    }
+    return false;
+}
+
+// Cleric "Unbroken Radiance": health that nothing has broken into sharpens every source of damage the cleric deals, their pet's strikes included.  The health is read live rather than from
+// the mark, so the bonus is never a tick stale in either direction
+void EverQuestMod::ApplyClassAuraClericUnbrokenRadianceDamageBonus(Unit* attacker, int32& damage)
+{
+    if (attacker == nullptr || damage <= 0 || ConfigSystemClassAuraClericRadianceDamagePercent == 0)
+        return;
+
+    // A pet or a charmed creature strikes on the cleric's behalf, so it is the owner's health that decides this, not the attacker's
+    Player* player = attacker->GetCharmerOrOwnerPlayerOrPlayerItself();
+    if (player == nullptr)
+        return;
+    if (player != attacker && (player->FindMap() == nullptr || player->FindMap() != attacker->FindMap()))
+        return;
+    if (player->IsFullHealth() == false || PlayerHasClassAura(player, EQ_CLASSAURA_SPELL_CLERIC_AURA) == false)
+        return;
+    damage += (damage * (int32)ConfigSystemClassAuraClericRadianceDamagePercent) / 100;
+}
+
 void EverQuestMod::ApplyClassAuraMeleeDamageMods(Unit* attacker, Unit* victim, uint32& damage)
 {
     if (IsClassAuraSystemEnabled() == false)
@@ -777,6 +855,11 @@ void EverQuestMod::ApplyClassAuraMeleeDamageMods(Unit* attacker, Unit* victim, u
     int32 entangleDamage = (int32)damage;
     ApplyClassAuraEntangleStrikeDamageMods(attacker, victim, entangleDamage, true, true);
     damage = (uint32)entangleDamage;
+
+    // Cleric, the owner's own swings and their pet's alike
+    int32 radianceDamage = (int32)damage;
+    ApplyClassAuraClericUnbrokenRadianceDamageBonus(attacker, radianceDamage);
+    damage = (uint32)radianceDamage;
 
     if (attacker->IsPlayer() == false)
         return;
@@ -1037,6 +1120,9 @@ void EverQuestMod::ApplyClassAuraDirectSpellDamageMods(Unit* target, Unit* attac
     bool isPhysicalSpell = (spellInfo->GetSchoolMask() & SPELL_SCHOOL_MASK_NORMAL) != 0;
     ApplyClassAuraEntangleStrikeDamageMods(attacker, target, damage, isMeleeSpell, isPhysicalSpell);
 
+    // Cleric, the owner's own spells and abilities and their pet's alike
+    ApplyClassAuraClericUnbrokenRadianceDamageBonus(attacker, damage);
+
     if (attacker->IsPlayer() == false)
         return;
     Player* player = attacker->ToPlayer();
@@ -1073,6 +1159,11 @@ void EverQuestMod::ApplyClassAuraPeriodicTickMods(Unit* target, Unit* attacker, 
     int32 compoundInjuryAmount = (int32)amount;
     ApplyClassAuraCompoundInjuryDamageBonus(attacker, target, compoundInjuryAmount);
     amount = (uint32)compoundInjuryAmount;
+
+    // Cleric, the owner's own damage over time and their pet's alike
+    int32 radianceAmount = (int32)amount;
+    ApplyClassAuraClericUnbrokenRadianceDamageBonus(attacker, radianceAmount);
+    amount = (uint32)radianceAmount;
 
     if (attacker->IsPlayer() == false)
         return;
@@ -1553,6 +1644,9 @@ void EverQuestMod::HandleClassAuraSpellCast(Player* player, Spell* spell)
         return;
 
     EverQuestPlayerClassAuraState* state = GetClassAuraStateForPlayer(player);
+
+    // What a focus charge has already handed back on this cast.  A second giveback below subtracts it, so no combination can ever return more mana than the cast was charged
+    int32 manaAlreadyRefunded = 0;
     if (state->PendingCastAdjustSpellID == spellInfo->Id)
     {
         if (state->PendingCadenceConsume == true)
@@ -1569,7 +1663,10 @@ void EverQuestMod::HandleClassAuraSpellCast(Player* player, Spell* spell)
                 {
                     int32 cadenceRefund = (spell->GetPowerCost() * (int32)ConfigSystemClassAuraClericCadenceReductionPercent) / 100;
                     if (cadenceRefund > 0)
+                    {
                         player->ModifyPower(POWER_MANA, cadenceRefund);
+                        manaAlreadyRefunded += cadenceRefund;
+                    }
                 }
             }
         }
@@ -1596,6 +1693,18 @@ void EverQuestMod::HandleClassAuraSpellCast(Player* player, Spell* spell)
     uint32 helperSpellID = GetClassAuraSpellID(EQ_CLASSAURA_SPELL_CAST_SPEED_HELPER);
     if (helperSpellID != 0 && state->PendingCastAdjustSpellID == 0 && player->HasAura(helperSpellID) == true)
         player->RemoveAurasDueToSpell(helperSpellID);
+
+    // Cleric "Unbroken Radiance", a damaging spell cast from near death costs the cleric nothing.  The price is handed back rather than never charged, since Spell::m_powerCost is the core's
+    // own and a module cannot reach it.  The health is read here rather than at the check cast, so what counts is where the cleric stood when the spell actually went off
+    if (ConfigSystemClassAuraClericRadianceFreeManaHealthPercent > 0 && spell->m_CastItem == nullptr && spellInfo->PowerType == POWER_MANA && spell->GetPowerCost() > 0
+        && IsSpellAnEQBardSong(spellInfo->Id) == false && spellInfo->IsPositive() == false && IsClassAuraDamagingSpell(spellInfo) == true
+        && player->GetHealthPct() < (float)ConfigSystemClassAuraClericRadianceFreeManaHealthPercent
+        && PlayerHasClassAura(player, EQ_CLASSAURA_SPELL_CLERIC_AURA) == true)
+    {
+        int32 radianceRefund = spell->GetPowerCost() - manaAlreadyRefunded;
+        if (radianceRefund > 0)
+            player->ModifyPower(POWER_MANA, radianceRefund);
+    }
 
     // Bard, every song that finishes casting (a restarted one included) grants the vigor
     uint32 bardVigorSpellID = GetClassAuraSpellID(EQ_CLASSAURA_SPELL_BARD_VIGOR);

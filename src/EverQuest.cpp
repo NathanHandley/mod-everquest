@@ -304,6 +304,10 @@ bool EverQuestMod::LoadConfigurationSystemDataFromDB()
                 ConfigSystemClassAuraNecromancerMarkDotDamagePercentPerStack = (uint32)atoi(value.c_str());
             else if (key == "ClassAuraClericCadenceReductionPercent")
                 ConfigSystemClassAuraClericCadenceReductionPercent = (uint32)atoi(value.c_str());
+            else if (key == "ClassAuraClericRadianceDamagePercent")
+                ConfigSystemClassAuraClericRadianceDamagePercent = (uint32)atoi(value.c_str());
+            else if (key == "ClassAuraClericRadianceFreeManaHealthPercent")
+                ConfigSystemClassAuraClericRadianceFreeManaHealthPercent = (uint32)atoi(value.c_str());
             else if (key == "ClassAuraDruidDirectHealRegenPercent")
                 ConfigSystemClassAuraDruidDirectHealRegenPercent = (uint32)atoi(value.c_str());
             else if (key == "ClassAuraDruidDirectHealRegenTickCount")
@@ -2866,6 +2870,7 @@ void EverQuestMod::LoadItemTemplateData()
             everQuestItemTemplate.AllowedEQClassMask = fields[3].Get<uint32>();
             everQuestItemTemplate.EQArmorMaterial = (uint32)std::max(0, fields[4].Get<int32>());
             everQuestItemTemplate.IllusionTintID = (uint32)std::max(0, fields[5].Get<int32>());
+            everQuestItemTemplate.NeverLootStack = fields[6].Get<uint8>() != 0;
             ItemTemplatesByEntryID[everQuestItemTemplate.ItemTemplateEntryID] = everQuestItemTemplate;
             if (everQuestItemTemplate.WornEffectSpellID != 0)
                 WornEffectSpellIDs.insert(everQuestItemTemplate.WornEffectSpellID);
