@@ -25,6 +25,8 @@
 #include "Creature.h"
 #include "CreatureAI.h"
 #include "CreatureData.h"
+#include "DBCFileLoader.h"
+#include "DBCfmt.h"
 #include "DBCStores.h"
 #include "Formulas.h"
 #include "GameTime.h"
@@ -2958,6 +2960,237 @@ void EverQuestMod::RechargeSlotshiftItemForPlayer(Player* player, Item* item)
         item->SetSpellCharges(spellIndex, itemSpell.SpellCharges);
         item->SetState(ITEM_CHANGED, player);
     }
+}
+
+Spell* EverQuestMod::GetActiveItemTransformSpellForPlayer(Player* player)
+{
+    if (player == nullptr)
+        return nullptr;
+
+    // Item clicks cast as generic spells, and Spell::prepare registers the spell as current before the cast runs, so the whole destroy plus create window sees it
+    Spell* spell = player->GetCurrentSpell(CURRENT_GENERIC_SPELL);
+    if (spell == nullptr)
+        return nullptr;
+    SpellInfo const* spellInfo = spell->GetSpellInfo();
+    if (spellInfo == nullptr)
+        return nullptr;
+    if (spellInfo->HasEffect(SPELL_EFFECT_CREATE_ITEM) == false && spellInfo->HasEffect(SPELL_EFFECT_CREATE_ITEM_2) == false)
+        return nullptr;
+
+    // A transform always pays for the new item with an old one.  A summon clicky that creates an item from nothing must never move an enchantment around
+    if (DoesSpellConsumeAnItemForTransform(spell) == false)
+        return nullptr;
+    return spell;
+}
+
+bool EverQuestMod::DoesSpellConsumeAnItemForTransform(Spell* spell)
+{
+    SpellInfo const* spellInfo = spell->GetSpellInfo();
+
+    // The combines eat the old item as a reagent
+    for (uint8 reagentIndex = 0; reagentIndex < MAX_SPELL_REAGENTS; ++reagentIndex)
+        if (spellInfo->Reagent[reagentIndex] > 0)
+            return true;
+
+    // The slotshift rings and the expendable clickies eat the item that was clicked
+    if (spell->m_CastItem == nullptr)
+        return false;
+    ItemTemplate const* castItemTemplate = spell->m_CastItem->GetTemplate();
+    if (castItemTemplate == nullptr)
+        return false;
+    for (uint8 spellIndex = 0; spellIndex < MAX_ITEM_PROTO_SPELLS; ++spellIndex)
+        if (castItemTemplate->Spells[spellIndex].SpellCharges < 0)
+            return true;
+    return false;
+}
+
+bool EverQuestMod::IsItemConsumedByTransformSpell(Spell* spell, Item* item)
+{
+    // The clicked item itself, which is how a slotshift ring member is spent
+    if (spell->m_CastItem == item)
+        return true;
+
+    // Or a reagent, which is how the combines spend the item being transformed.  Spell::TakeReagents clears m_CastItem before destroying it when the
+    // clicked item is also the reagent, so this branch is what covers that case
+    SpellInfo const* spellInfo = spell->GetSpellInfo();
+    for (uint8 reagentIndex = 0; reagentIndex < MAX_SPELL_REAGENTS; ++reagentIndex)
+        if (spellInfo->Reagent[reagentIndex] > 0 && uint32(spellInfo->Reagent[reagentIndex]) == item->GetEntry())
+            return true;
+    return false;
+}
+
+bool EverQuestMod::IsItemCreatedByTransformSpell(Spell* spell, Item* item)
+{
+    SpellInfo const* spellInfo = spell->GetSpellInfo();
+    for (uint8 effectIndex = 0; effectIndex < MAX_SPELL_EFFECTS; ++effectIndex)
+    {
+        if (spellInfo->Effects[effectIndex].Effect != SPELL_EFFECT_CREATE_ITEM && spellInfo->Effects[effectIndex].Effect != SPELL_EFFECT_CREATE_ITEM_2)
+            continue;
+        if (spellInfo->Effects[effectIndex].ItemType == item->GetEntry())
+            return true;
+    }
+    return false;
+}
+
+EverQuestPlayerItemEnchantMemoryState* EverQuestMod::GetOrLoadItemEnchantMemoryForPlayer(Player* player)
+{
+    EverQuestPlayerItemEnchantMemoryState* memoryState = player->CustomData.GetDefault<EverQuestPlayerItemEnchantMemoryState>(EQ_PLAYER_CUSTOMDATA_ITEMENCHANTMEMORY);
+    if (memoryState->Loaded == true)
+        return memoryState;
+
+    // Loaded on first use instead of at login, since most characters never transform an enchanted item and this saves them the query
+    memoryState->Loaded = true;
+    QueryResult queryResult = CharacterDatabase.Query("SELECT `itemEntry`, `enchantId`, `count` FROM `mod_everquest_character_item_enchant_memory` WHERE `guid` = {}",
+        player->GetGUID().GetCounter());
+    if (queryResult)
+    {
+        do
+        {
+            Field* fields = queryResult->Fetch();
+            EverQuestRememberedItemEnchant rememberedEnchant;
+            rememberedEnchant.ItemEntry = fields[0].Get<uint32>();
+            rememberedEnchant.EnchantID = fields[1].Get<uint32>();
+            rememberedEnchant.Count = fields[2].Get<uint32>();
+            if (rememberedEnchant.ItemEntry == 0 || rememberedEnchant.EnchantID == 0 || rememberedEnchant.Count == 0)
+                continue;
+            memoryState->RememberedEnchants.push_back(rememberedEnchant);
+        } while (queryResult->NextRow());
+    }
+    return memoryState;
+}
+
+void EverQuestMod::RememberItemEnchantForTransformedItem(Player* player, Item* item)
+{
+    if (IsEnabled == false || player == nullptr || item == nullptr)
+        return;
+
+    // Only the permanent slot is remembered.  Temporary enchantments (oils, stones, poisons) run on a timer and are not
+    uint32 enchantID = item->GetEnchantmentId(PERM_ENCHANTMENT_SLOT);
+    if (enchantID == 0)
+        return;
+    if (IsItemTemplateIDAnEQItemTemplateID(item->GetEntry()) == false)
+        return;
+    if (item->GetOwnerGUID() != player->GetGUID())
+        return;
+
+    Spell* transformSpell = GetActiveItemTransformSpellForPlayer(player);
+    if (transformSpell == nullptr)
+        return;
+    if (IsItemConsumedByTransformSpell(transformSpell, item) == false)
+        return;
+
+    EverQuestPlayerItemEnchantMemoryState* memoryState = GetOrLoadItemEnchantMemoryForPlayer(player);
+    uint32 totalRememberedCount = 0;
+    for (uint32 rememberedIndex = 0; rememberedIndex < memoryState->RememberedEnchants.size(); ++rememberedIndex)
+        totalRememberedCount += memoryState->RememberedEnchants[rememberedIndex].Count;
+    if (totalRememberedCount >= EQ_ITEM_ENCHANT_MEMORY_MAX_PER_CHARACTER)
+    {
+        LOG_INFO("module.EverQuest", "EverQuestMod Not remembering enchantment {} on item {} for player {} with GUID {}, since they already hold the maximum of {} remembered enchantments",
+            enchantID, item->GetEntry(), player->GetName(), player->GetGUID().GetCounter(), EQ_ITEM_ENCHANT_MEMORY_MAX_PER_CHARACTER);
+        return;
+    }
+
+    uint32 newCount = 1;
+    bool foundExistingRow = false;
+    for (uint32 rememberedIndex = 0; rememberedIndex < memoryState->RememberedEnchants.size(); ++rememberedIndex)
+    {
+        EverQuestRememberedItemEnchant& rememberedEnchant = memoryState->RememberedEnchants[rememberedIndex];
+        if (rememberedEnchant.ItemEntry != item->GetEntry() || rememberedEnchant.EnchantID != enchantID)
+            continue;
+        ++rememberedEnchant.Count;
+        newCount = rememberedEnchant.Count;
+        foundExistingRow = true;
+        break;
+    }
+    if (foundExistingRow == false)
+    {
+        EverQuestRememberedItemEnchant rememberedEnchant;
+        rememberedEnchant.ItemEntry = item->GetEntry();
+        rememberedEnchant.EnchantID = enchantID;
+        rememberedEnchant.Count = 1;
+        memoryState->RememberedEnchants.push_back(rememberedEnchant);
+    }
+
+    CharacterDatabase.Execute("INSERT INTO `mod_everquest_character_item_enchant_memory` (`guid`, `itemEntry`, `enchantId`, `count`) VALUES ({}, {}, {}, {}) ON DUPLICATE KEY UPDATE `count` = {}",
+        player->GetGUID().GetCounter(), item->GetEntry(), enchantID, newCount, newCount);
+    LOG_INFO("module.EverQuest", "EverQuestMod Remembered enchantment {} from item {} for player {} with GUID {}, since a transform consumed that version of the item",
+        enchantID, item->GetEntry(), player->GetName(), player->GetGUID().GetCounter());
+}
+
+bool EverQuestMod::RestoreRememberedItemEnchantForItem(Player* player, Item* item)
+{
+    ItemTemplate const* itemTemplate = item->GetTemplate();
+    if (itemTemplate == nullptr)
+        return false;
+    if (IsItemTemplateIDAnEQItemTemplateID(item->GetEntry()) == false)
+        return false;
+
+    // A stack shares one set of enchantment fields across every copy in it, so there is nothing sane to put an enchantment back onto
+    if (itemTemplate->Stackable != 1 || item->GetCount() != 1)
+        return false;
+
+    // Never paint over an enchantment that is already on the item
+    if (item->GetEnchantmentId(PERM_ENCHANTMENT_SLOT) != 0)
+        return false;
+
+    EverQuestPlayerItemEnchantMemoryState* memoryState = GetOrLoadItemEnchantMemoryForPlayer(player);
+    for (uint32 rememberedIndex = 0; rememberedIndex < memoryState->RememberedEnchants.size(); ++rememberedIndex)
+    {
+        EverQuestRememberedItemEnchant& rememberedEnchant = memoryState->RememberedEnchants[rememberedIndex];
+        if (rememberedEnchant.ItemEntry != item->GetEntry())
+            continue;
+
+        uint32 enchantID = rememberedEnchant.EnchantID;
+        uint32 newCount = rememberedEnchant.Count > 0 ? rememberedEnchant.Count - 1 : 0;
+
+        // One remembered enchantment pays out exactly once, so the row is spent here before the item is touched
+        if (newCount == 0)
+        {
+            memoryState->RememberedEnchants.erase(memoryState->RememberedEnchants.begin() + rememberedIndex);
+            CharacterDatabase.Execute("DELETE FROM `mod_everquest_character_item_enchant_memory` WHERE `guid` = {} AND `itemEntry` = {} AND `enchantId` = {}",
+                player->GetGUID().GetCounter(), item->GetEntry(), enchantID);
+        }
+        else
+        {
+            rememberedEnchant.Count = newCount;
+            CharacterDatabase.Execute("UPDATE `mod_everquest_character_item_enchant_memory` SET `count` = {} WHERE `guid` = {} AND `itemEntry` = {} AND `enchantId` = {}",
+                newCount, player->GetGUID().GetCounter(), item->GetEntry(), enchantID);
+        }
+
+        // The item is always freshly created into a bag here, never into an equipped slot, so no stat application is needed
+        item->SetEnchantment(PERM_ENCHANTMENT_SLOT, enchantID, 0, 0);
+        item->SetState(ITEM_CHANGED, player);
+        ChatHandler(player->GetSession()).PSendSysMessage("The enchantment you placed on |cffFFFFFF{}|r has returned with it.", itemTemplate->Name1);
+        LOG_INFO("module.EverQuest", "EverQuestMod Restored remembered enchantment {} onto item {} for player {} with GUID {}",
+            enchantID, item->GetEntry(), player->GetName(), player->GetGUID().GetCounter());
+        return true;
+    }
+    return false;
+}
+
+void EverQuestMod::RestoreRememberedItemEnchantForCreatedItem(Player* player, Item* item)
+{
+    if (IsEnabled == false || player == nullptr || item == nullptr)
+        return;
+
+    Spell* transformSpell = GetActiveItemTransformSpellForPlayer(player);
+    if (transformSpell == nullptr)
+        return;
+    if (IsItemCreatedByTransformSpell(transformSpell, item) == false)
+        return;
+    RestoreRememberedItemEnchantForItem(player, item);
+}
+
+void EverQuestMod::RestoreRememberedItemEnchantForLootedItem(Player* player, Item* item, ObjectGuid lootGUID)
+{
+    if (IsEnabled == false || player == nullptr || item == nullptr)
+        return;
+
+    // A combine that produces more than one item hands back a container that opens into the real items, so the second half of that transform
+    // arrives as container loot rather than as a created item
+    if (lootGUID.IsItem() == false)
+        return;
+    RestoreRememberedItemEnchantForItem(player, item);
 }
 
 void EverQuestMod::RegisterEQWeaponPoisonProcSpells(SpellInfo* spellInfo)

@@ -381,6 +381,8 @@ struct BuildValuesCachePosPointers;
 #define EQ_PLAYER_CUSTOMDATA_CLASSAURA              "EQClassAura"
 #define EQ_PLAYER_CUSTOMDATA_QUESTFACTION           "EQQuestFaction"
 #define EQ_PLAYER_CUSTOMDATA_MOVEWHILECASTING       "EQMoveWhileCasting"
+#define EQ_PLAYER_CUSTOMDATA_ITEMENCHANTMEMORY      "EQItemEnchantMemory"
+#define EQ_ITEM_ENCHANT_MEMORY_MAX_PER_CHARACTER    100     // Ceiling on enchantments one character can have owed back to them
 #define EQ_QUEST_FACTION_RECHECK_INTERVAL_IN_MS     1000
 #define EQ_CLASS_AURA_GEAR_REFRESH_INTERVAL_MS      2000    // Gear and pet based class auras rescan on this interval since some ways they change have no hook
 #define EQ_CLASS_AURA_MANA_CHECK_INTERVAL_MS        500     // How often the Enchanter mana threshold is checked
@@ -1888,6 +1890,15 @@ public:
     void RemoveOrphanedItemEquipAurasForPlayer(Player* player);
     bool IsSlotshiftSpell(SpellInfo const* spellInfo);
     void RechargeSlotshiftItemForPlayer(Player* player, Item* item);
+    Spell* GetActiveItemTransformSpellForPlayer(Player* player);
+    bool DoesSpellConsumeAnItemForTransform(Spell* spell);
+    bool IsItemConsumedByTransformSpell(Spell* spell, Item* item);
+    bool IsItemCreatedByTransformSpell(Spell* spell, Item* item);
+    EverQuestPlayerItemEnchantMemoryState* GetOrLoadItemEnchantMemoryForPlayer(Player* player);
+    bool RestoreRememberedItemEnchantForItem(Player* player, Item* item);
+    void RememberItemEnchantForTransformedItem(Player* player, Item* item);
+    void RestoreRememberedItemEnchantForCreatedItem(Player* player, Item* item);
+    void RestoreRememberedItemEnchantForLootedItem(Player* player, Item* item, ObjectGuid lootGUID);
     void RegisterEQWeaponPoisonProcSpells(SpellInfo* spellInfo);
     bool IsSpellAnEQWeaponPoisonProc(uint32 spellID);
     void LoadSpellData();

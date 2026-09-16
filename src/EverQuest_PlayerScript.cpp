@@ -1219,6 +1219,18 @@ public:
             return;
 
         EverQuest->RemoveVisualEquippedItemForCreatureGUIDIfExists(player->GetMap(), lootguid, item->GetTemplate()->ItemId);
+
+        // A combine that produces more than one item returns them inside a container, so an item coming out of one can still be owed an enchantment
+        EverQuest->RestoreRememberedItemEnchantForLootedItem(player, item, lootguid);
+    }
+
+    void OnPlayerCreateItem(Player* player, Item* item, uint32 /*count*/) override
+    {
+        if (EverQuest->IsEnabled == false)
+            return;
+
+        // A slotshift or transform just built the new version of an item, which may be owed the enchantment that its old version was carrying
+        EverQuest->RestoreRememberedItemEnchantForCreatedItem(player, item);
     }
 
     void OnPlayerBeforeLootMoney(Player* player, Loot* loot) override

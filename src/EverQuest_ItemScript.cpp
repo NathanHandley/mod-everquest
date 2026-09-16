@@ -57,6 +57,18 @@ public:
         // Returning false lets the core carry on and cast the item's spell
         return false;
     }
+
+    bool CanItemRemove(Player* player, Item* item) override
+    {
+        if (EverQuest->IsEnabled == false)
+            return true;
+
+        // A slotshift or a transform destroys the old version of the item, and this is the last moment its enchantment can still be read off it
+        EverQuest->RememberItemEnchantForTransformedItem(player, item);
+
+        // Returning true lets the core carry on and destroy the item
+        return true;
+    }
 };
 
 void AddEverQuestItemScripts()
