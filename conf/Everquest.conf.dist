@@ -409,11 +409,11 @@ EverQuest.Spells.BardFearDiminishingReturnsResetTimeInMS = 15000
 #
 # 	EverQuest.Spells.PvPSilenceCancelsBardSongsEnabled
 #		If true, a silence landed by a player (or by their pet or a creature they have charmed) on
-#		another player cancels the bard songs that player already has running.  A bard song is an
-#		aura that keeps pulsing on its own, so without this a silence only stops a song from being
-#		started or restarted and every song already up keeps playing right through it.  Songs on
-#		creatures are not affected
-#	Default: True (a pvp silence stops songs already playing)
+#		another player cancels the oldest bard song that player has running (the next one song
+#		cycling would drop).  A bard song is an aura that keeps pulsing on its own, so without this
+#		a silence only stops a song from being started or restarted and every song already up keeps
+#		playing right through it.  Songs on creatures are not affected
+#	Default: True (a pvp silence stops the oldest song playing)
 #
 ###################################################################################################
 

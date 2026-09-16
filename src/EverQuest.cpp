@@ -5706,17 +5706,47 @@ void EverQuestMod::CancelBardSongsOnPvPSilenceAuraApply(Unit* target, Aura* aura
     if (isSilence == false)
         return;
 
-    vector<uint32> bardSongSpellIDs;
-    for (auto const& ownedAuraIter : targetPlayer->GetOwnedAuras())
+    // Only the oldest running song is stripped, taken from the song cycling order (oldest first) when it is being tracked
+    uint32 oldestSongSpellID = 0;
+    if (ConfigBardMaxConcurrentSongs != 0)
     {
-        uint32 curSpellID = ownedAuraIter.first;
-        if (IsSpellAnEQBardSong(curSpellID) == false)
-            continue;
-        if (std::find(bardSongSpellIDs.begin(), bardSongSpellIDs.end(), curSpellID) == bardSongSpellIDs.end())
-            bardSongSpellIDs.push_back(curSpellID);
+        deque<uint32>* queue = nullptr;
+        {
+            std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+            auto queueIt = PlayerCasterConcurrentBardSongs.find(targetPlayer->GetGUID());
+            if (queueIt != PlayerCasterConcurrentBardSongs.end())
+                queue = &queueIt->second;
+        }
+        if (queue != nullptr)
+        {
+            for (uint32 queuedSpellID : *queue)
+            {
+                if (targetPlayer->HasAura(queuedSpellID) == true)
+                {
+                    oldestSongSpellID = queuedSpellID;
+                    break;
+                }
+            }
+        }
     }
-    for (uint32 curSpellID : bardSongSpellIDs)
-        targetPlayer->RemoveAurasDueToSpell(curSpellID);
+
+    // Without the cycling order, fall back to whichever song aura was applied first
+    if (oldestSongSpellID == 0)
+    {
+        time_t oldestApplyTime = 0;
+        for (auto const& ownedAuraIter : targetPlayer->GetOwnedAuras())
+        {
+            if (IsSpellAnEQBardSong(ownedAuraIter.first) == false)
+                continue;
+            if (oldestSongSpellID == 0 || ownedAuraIter.second->GetApplyTime() < oldestApplyTime)
+            {
+                oldestSongSpellID = ownedAuraIter.first;
+                oldestApplyTime = ownedAuraIter.second->GetApplyTime();
+            }
+        }
+    }
+    if (oldestSongSpellID != 0)
+        targetPlayer->RemoveAurasDueToSpell(oldestSongSpellID);
 }
 
 static const uint64 EQ_AURA_EFFECT_TRACKING_KEY_PLAYERS = UINT64_MAX;
