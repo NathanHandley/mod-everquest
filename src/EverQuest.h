@@ -1647,6 +1647,7 @@ public:
     bool ConfigCreatureEmotesEnabled;
     bool ConfigCreatureEmotesAmbientEnabled;
     bool ConfigCreatureMovementSoundsEnabled;
+    bool ConfigCreatureWornEffectsHideAuraIcons;
     uint32 ConfigIllusionGearRefreshTimeInMS;
     bool ConfigShowClassMessageOnLogin;
     float ConfigSecondaryExpPoolGainPercent;

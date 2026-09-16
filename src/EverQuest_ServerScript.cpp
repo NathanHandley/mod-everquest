@@ -18,6 +18,7 @@
 #include "Opcodes.h"
 #include "Player.h"
 #include "ScriptMgr.h"
+#include "SpellAuraDefines.h"
 #include "WorldPacket.h"
 #include "WorldSession.h"
 
@@ -77,6 +78,87 @@ static bool HandleAuctionListResultPacketSend(WorldSession* session, WorldPacket
         return true;
     session->SendPacket(&filteredPacket);
     return false;
+}
+
+// Reads a packed guid starting at pos without moving the packet's read position, and returns the position just past it
+static size_t ReadPackedGUIDAtPosition(WorldPacket const& packet, size_t pos, uint64& guid)
+{
+    guid = 0;
+    uint8 guidMask = packet.read<uint8>(pos);
+    ++pos;
+    for (uint8 i = 0; i < 8; ++i)
+    {
+        if ((guidMask & (uint8(1) << i)) == 0)
+            continue;
+        guid |= (uint64(packet.read<uint8>(pos)) << (i * 8));
+        ++pos;
+    }
+    return pos;
+}
+
+// Returns the position just past one aura entry of SMSG_AURA_UPDATE / SMSG_AURA_UPDATE_ALL that starts at its slot byte.  Field layout must match AuraApplication::BuildUpdatePacket
+static size_t GetAuraUpdateEntryEndPosition(WorldPacket const& packet, size_t pos, uint32& spellID)
+{
+    spellID = packet.read<uint32>(pos + 1);
+    pos += 5;
+    if (spellID == 0)
+        return pos;
+    uint8 flags = packet.read<uint8>(pos);
+    pos += 3; // Flags, caster level, stack amount or charges
+    if ((flags & AFLAG_CASTER) == 0)
+    {
+        uint64 casterGUID = 0;
+        pos = ReadPackedGUIDAtPosition(packet, pos, casterGUID);
+    }
+    if ((flags & AFLAG_DURATION) != 0)
+        pos += 8; // Max duration, duration
+    return pos;
+}
+
+// Creatures carry the worn effect auras of the loot they rolled (ApplyLootWornEffectAuras), and EverQuest.CreatureWornEffects.HideAuraIcons keeps those icons off the client while
+// the effect stays.  The visible aura slot belongs to the core, so the entries are taken out of the aura packets on the way out instead.  Players' own worn auras are untouched
+static bool HandleAuraUpdatePacketSend(WorldSession* session, WorldPacket const& packet)
+{
+    if (EverQuest->IsEnabled == false || EverQuest->ConfigCreatureWornEffectsHideAuraIcons == false)
+        return true;
+
+    try
+    {
+        uint64 rawTargetGUID = 0;
+        size_t entriesStartPosition = ReadPackedGUIDAtPosition(packet, 0, rawTargetGUID);
+        if (ObjectGuid(rawTargetGUID).IsAnyTypeCreature() == false)
+            return true;
+
+        // A single slot update is either the icon or its removal, and a removal carries no spell so it always goes through
+        if (packet.GetOpcode() == SMSG_AURA_UPDATE)
+            return EverQuest->IsWornEffectSpell(packet.read<uint32>(entriesStartPosition + 1)) == false;
+
+        // The full list is resent without the hidden entries, and only when there was one to hide.  The resent packet comes back through here with nothing left to strip
+        WorldPacket filteredPacket(SMSG_AURA_UPDATE_ALL, packet.size());
+        filteredPacket.append(packet.contents(), entriesStartPosition);
+        bool hasHiddenEntry = false;
+        size_t position = entriesStartPosition;
+        while (position < packet.size())
+        {
+            uint32 spellID = 0;
+            size_t entryEndPosition = GetAuraUpdateEntryEndPosition(packet, position, spellID);
+            if (entryEndPosition > packet.size())
+                return true;
+            if (EverQuest->IsWornEffectSpell(spellID) == true)
+                hasHiddenEntry = true;
+            else
+                filteredPacket.append(packet.contents() + position, entryEndPosition - position);
+            position = entryEndPosition;
+        }
+        if (hasHiddenEntry == false)
+            return true;
+        session->SendPacket(&filteredPacket);
+        return false;
+    }
+    catch (ByteBufferException const&)
+    {
+        return true;
+    }
 }
 
 static bool HandleSetFactionAtWarPacketReceive(WorldSession* session)
@@ -148,6 +230,8 @@ public:
             return EverQuest->HandleMentorshipStablePacketSend(session, packet);
         if (opcode == SMSG_AUCTION_LIST_RESULT)
             return HandleAuctionListResultPacketSend(session, packet);
+        if (opcode == SMSG_AURA_UPDATE || opcode == SMSG_AURA_UPDATE_ALL)
+            return HandleAuraUpdatePacketSend(session, packet);
         if (opcode != SMSG_SPELL_GO && opcode != SMSG_SPELL_START)
             return true;
         if (EverQuest->IsEnabled == false || EverQuest->BardSongTickSpellIDs.empty() == true)

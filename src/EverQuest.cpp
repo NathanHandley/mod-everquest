@@ -145,6 +145,7 @@ EverQuestMod::EverQuestMod() :
     ConfigCharmUncharmedPlayerCheckRadius(100.0f),
     ConfigCreatureEmotesEnabled(true),
     ConfigCreatureEmotesAmbientEnabled(true),
+    ConfigCreatureWornEffectsHideAuraIcons(true),
     ConfigIllusionGearRefreshTimeInMS(1000),
     ConfigShowClassMessageOnLogin(true),
     ConfigSecondaryExpPoolGainPercent(25.0f),
@@ -507,6 +508,9 @@ void EverQuestMod::LoadConfigurationFile()
 
     // Creature movement sounds
     ConfigCreatureMovementSoundsEnabled = sConfigMgr->GetOption<bool>("EverQuest.CreatureMovementSounds.Enabled", true);
+
+    // Creature worn effects
+    ConfigCreatureWornEffectsHideAuraIcons = sConfigMgr->GetOption<bool>("EverQuest.CreatureWornEffects.HideAuraIcons", true);
 
     // Illusion
     ConfigIllusionGearRefreshTimeInMS = sConfigMgr->GetOption<uint32>("EverQuest.Illusion.GearRefreshTimeInMS", 1000);

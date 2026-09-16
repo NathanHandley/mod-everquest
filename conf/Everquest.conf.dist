@@ -729,6 +729,19 @@ EverQuest.CreatureEmotes.AmbientEnabled = True
 EverQuest.CreatureMovementSounds.Enabled = True
 
 ###################################################################################################
+# Creature Worn Effect Settings
+#
+# 	EverQuest.CreatureWornEffects.HideAuraIcons
+#		If true, the worn effect auras a creature gets from the loot it rolled (like the haste from a
+#		Flowing Black Silk Sash) are not shown to players as buff icons on that creature.  The creature
+#		still has the aura and its effect.  Players still see their own worn effect icons
+#	Default: True
+#
+###################################################################################################
+
+EverQuest.CreatureWornEffects.HideAuraIcons = True
+
+###################################################################################################
 #
 # 	EverQuest.Illusion.GearRefreshTimeInMS
 #		How often, in milliseconds, an illusioned player's gear-matched display is revalidated. This
