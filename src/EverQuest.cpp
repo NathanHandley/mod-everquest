@@ -4590,6 +4590,17 @@ uint8 EverQuestMod::GetIllusionObjectClassForSpellID(uint32 spellID)
     return spellDataItr->second.IllusionObjectClass;
 }
 
+uint8 EverQuestMod::GetIllusionObjectClassForFormSpellID(uint32 spellID)
+{
+    // The parent spell carries the object class too, for its cast check, but its aura only holds the spell's other effects.  Only the form changes the look
+    auto spellDataItr = SpellDataBySpellID.find(spellID);
+    if (spellDataItr == SpellDataBySpellID.end())
+        return EQ_ILLUSION_OBJECT_CLASS_NONE;
+    if (spellDataItr->second.IllusionFormEQRaceID == 0)
+        return EQ_ILLUSION_OBJECT_CLASS_NONE;
+    return spellDataItr->second.IllusionObjectClass;
+}
+
 float EverQuestMod::GetIllusionObjectMaxDistanceForClass(uint8 illusionObjectClass)
 {
     // Zero or less means the whole zone is in range
@@ -4643,7 +4654,7 @@ bool EverQuestMod::HasIllusionObjectInRangeForCaster(Unit* caster, uint32 spellI
 
 void EverQuestMod::ApplyIllusionObjectDisplayOnFormAuraApply(Player* player, uint32 formSpellID)
 {
-    uint8 illusionObjectClass = GetIllusionObjectClassForSpellID(formSpellID);
+    uint8 illusionObjectClass = GetIllusionObjectClassForFormSpellID(formSpellID);
     if (illusionObjectClass == EQ_ILLUSION_OBJECT_CLASS_NONE)
         return;
 
@@ -4662,7 +4673,7 @@ void EverQuestMod::RefreshIllusionObjectDisplayForPlayer(Player* player)
         if (appliedAurApp == nullptr || appliedAurApp->GetBase() == nullptr)
             continue;
         uint32 appliedSpellID = appliedAurApp->GetBase()->GetId();
-        if (GetIllusionObjectClassForSpellID(appliedSpellID) == EQ_ILLUSION_OBJECT_CLASS_NONE)
+        if (GetIllusionObjectClassForFormSpellID(appliedSpellID) == EQ_ILLUSION_OBJECT_CLASS_NONE)
             continue;
         ApplyIllusionObjectDisplayOnFormAuraApply(player, appliedSpellID);
         return;
@@ -4678,7 +4689,7 @@ bool EverQuestMod::IsUnitInIllusionObjectForm(Unit* unit)
         AuraApplication const* appliedAurApp = appliedAuraItr.second;
         if (appliedAurApp == nullptr || appliedAurApp->GetBase() == nullptr)
             continue;
-        if (GetIllusionObjectClassForSpellID(appliedAurApp->GetBase()->GetId()) != EQ_ILLUSION_OBJECT_CLASS_NONE)
+        if (GetIllusionObjectClassForFormSpellID(appliedAurApp->GetBase()->GetId()) != EQ_ILLUSION_OBJECT_CLASS_NONE)
             return true;
     }
     return false;
@@ -4713,8 +4724,8 @@ bool EverQuestMod::IsLevitationBlockedByIllusionObjectForm(SpellInfo const* spel
 
 bool EverQuestMod::IsIllusionObjectFormBlockedByLevitation(uint32 spellID, Unit* target)
 {
-    // The two can never overlap even for an instant, so a levitating target simply does not get the form
-    if (GetIllusionObjectClassForSpellID(spellID) == EQ_ILLUSION_OBJECT_CLASS_NONE)
+    // The two can never overlap even for an instant, so a levitating target simply does not get the form.  Only the form is refused here
+    if (GetIllusionObjectClassForFormSpellID(spellID) == EQ_ILLUSION_OBJECT_CLASS_NONE)
         return false;
     return IsUnitLevitating(target);
 }

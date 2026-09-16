@@ -275,7 +275,10 @@ EverQuest.Spells.CrowdControlLevelRestrictionsEnabled = True
 #		spells take part as well (spell groups "Flat AP Buffs" - Battle Shout, Blessing of Might - and
 #		"AP Debuffs" - Demoralizing Shout/Roar, Vindication, Curse of Weakness), so an EverQuest spell
 #		will not stack on top of those either.  Worn item effects are exempt, since EverQuest keeps item
-#		ATK in its own additive bucket
+#		ATK in its own additive bucket.  Beneficial bard songs resolve in their own gain pool, since
+#		EverQuest bard songs stack with everything that isn't a bard song - the strongest song adds on
+#		top of the strongest non-song buff.  Reductions are not split that way, so the single strongest
+#		attack power reduction holds on a target whether it came from a song or not
 #	Default: True (use EverQuest behavior)
 #
 # 	EverQuest.Spells.SlowsWeakerOnBossesEnabled

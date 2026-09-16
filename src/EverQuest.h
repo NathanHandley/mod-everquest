@@ -1921,6 +1921,7 @@ public:
     void ClearIllusionTrackingForPlayer(ObjectGuid playerGUID);
     void LoadIllusionObjectData();
     uint8 GetIllusionObjectClassForSpellID(uint32 spellID);
+    uint8 GetIllusionObjectClassForFormSpellID(uint32 spellID);
     float GetIllusionObjectMaxDistanceForClass(uint8 illusionObjectClass);
     bool TryGetNearestIllusionObject(uint32 mapID, float x, float y, float z, uint8 illusionObjectClass, EverQuestIllusionObject& illusionObjectOut);
     bool HasIllusionObjectInRangeForCaster(Unit* caster, uint32 spellID);

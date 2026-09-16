@@ -1066,6 +1066,10 @@ bool EverQuestMod::TryTransferDebuffToNecromancerPet(Player* player, Aura* aura)
     if (aura->IsPermanent() == true || IsClassAuraSpell(aura->GetId()) == true)
         return false;
 
+    // An illusion's look is only cosmetic, and it lands just ahead of its spell's own effect aura, so passing it along would spend the cooldown and leave the real debuff behind
+    if (GetSpellDataForSpellID(aura->GetId()).IllusionFormEQRaceID != 0)
+        return false;
+
     // Control effects that would make no sense on a pet, and anything the necromancer put on themself
     if (spellInfo->HasAura(SPELL_AURA_MOD_CHARM) == true || spellInfo->HasAura(SPELL_AURA_MOD_POSSESS) == true || spellInfo->HasAura(SPELL_AURA_AOE_CHARM) == true
         || spellInfo->HasAura(SPELL_AURA_MOD_POSSESS_PET) == true)
