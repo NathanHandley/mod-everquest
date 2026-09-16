@@ -852,6 +852,9 @@ public:
         // A character that logged out inside a private dungeon copy is still in it, and the map entry announcement could not be sent while loading
         EverQuest->SendInstanceDungeonEntryMessageToPlayer(player);
 
+        // Death knights that skip the Ebon Hold chain still need its final quest for the dungeon finder
+        EverQuest->GrantDeathKnightDungeonFinderQuestIfNeeded(player);
+
         // First login behavior
         if (player->HasAtLoginFlag(AT_LOGIN_FIRST) == true)
         {

@@ -31,6 +31,7 @@
 #include "Formulas.h"
 #include "GameTime.h"
 #include "Guild.h"
+#include "LFGMgr.h"
 #include "LootMgr.h"
 #include "Mail.h"
 #include "Pet.h"
@@ -62,6 +63,7 @@
 #include "GridNotifiers.h"
 #include "GridNotifiersImpl.h"
 #include "WorldSessionMgr.h"
+#include "World.h"
 
 #include "EverQuest.h"
 
@@ -7451,6 +7453,28 @@ void EverQuestMod::GrantDeathKnightStarterAbilitiesIfNeeded(Player* player)
     }
 
     player->learnSpell(EQ_DEATHKNIGHT_BLOODSTRIKE_SPELL_ID);
+}
+
+void EverQuestMod::GrantDeathKnightDungeonFinderQuestIfNeeded(Player* player)
+{
+    if (ConfigDeathKnightsStartLikeOtherClasses == false)
+        return;
+    if (player->getClass() != CLASS_DEATH_KNIGHT)
+        return;
+
+    // LFGMgr::InitializeLockedDungeons locks every dungeon for a death knight until the last Ebon Hold quest is rewarded, and these death knights never run that chain
+    if (player->IsQuestRewarded(EQ_DEATHKNIGHT_FINAL_QUEST_ALLIANCE_ID) == true || player->IsQuestRewarded(EQ_DEATHKNIGHT_FINAL_QUEST_HORDE_ID) == true)
+        return;
+
+    // Only the rewarded flag is set, so no experience, money or follow-up quest effects are handed out
+    if (player->GetTeamId(true) == TEAM_ALLIANCE)
+        player->SetRewardedQuest(EQ_DEATHKNIGHT_FINAL_QUEST_ALLIANCE_ID);
+    else
+        player->SetRewardedQuest(EQ_DEATHKNIGHT_FINAL_QUEST_HORDE_ID);
+
+    // The core's own login script may already have built this character's dungeon lock list, so rebuild it now that the quest counts
+    if (sLFGMgr->isOptionEnabled(lfg::LFG_OPTION_ENABLE_DUNGEON_FINDER | lfg::LFG_OPTION_ENABLE_RAID_BROWSER | lfg::LFG_OPTION_ENABLE_SEASONAL_BOSSES) == true)
+        sLFGMgr->InitializeLockedDungeons(player, player->GetGroup());
 }
 
 void EverQuestMod::LowerDeathKnightGlyphRequiredLevels()

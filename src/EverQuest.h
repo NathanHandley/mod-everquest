@@ -131,6 +131,8 @@ struct BuildValuesCachePosPointers;
 #define EQ_DEATHKNIGHT_RUNEFORGING_SKILL_ID         776
 #define EQ_DEATHKNIGHT_GLYPH_REQUIRED_LEVEL         15
 #define EQ_DEATHKNIGHT_BLOODSTRIKE_SPELL_ID         45902
+#define EQ_DEATHKNIGHT_FINAL_QUEST_ALLIANCE_ID      13188 // Where Kings Walk, which LFGMgr requires before a death knight can use the dungeon finder
+#define EQ_DEATHKNIGHT_FINAL_QUEST_HORDE_ID         13189 // Warchief's Blessing, the horde version of the same
 #define EQ_DEATHKNIGHT_SKILL_ID_BLOOD               770
 #define EQ_DEATHKNIGHT_SKILL_ID_FROST               771
 #define EQ_DEATHKNIGHT_SKILL_ID_UNHOLY              772
@@ -2111,6 +2113,7 @@ public:
     void SetPendingStartItemEQClassForPlayer(Player* player, uint8 eqClassID);
     void ApplyAutoLearnedClassSkillsAndSpells(Player* player);
     void GrantDeathKnightStarterAbilitiesIfNeeded(Player* player);
+    void GrantDeathKnightDungeonFinderQuestIfNeeded(Player* player);
     void LowerDeathKnightGlyphRequiredLevels();
     void AddHearthstoneForNewCharacter(Player* player);
     bool IsItemTemplateAMasterTotem(Player* player, ItemTemplate const* itemTemplate);
