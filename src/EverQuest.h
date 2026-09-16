@@ -905,7 +905,7 @@ enum EverQuestClassAuraSpellType : uint32
     EQ_CLASSAURA_SPELL_RANGER_PASSIVE = 10,
     EQ_CLASSAURA_SPELL_RANGER_AURA = 11,
     EQ_CLASSAURA_SPELL_RANGER_ENDLESS_QUIVER = 12,
-    EQ_CLASSAURA_SPELL_RANGER_TACK_SHOT = 13,
+    EQ_CLASSAURA_SPELL_RANGER_COMPOUND_INJURY = 13,
     EQ_CLASSAURA_SPELL_ROGUE_PASSIVE = 14,
     EQ_CLASSAURA_SPELL_ROGUE_AURA = 15,
     EQ_CLASSAURA_SPELL_ROGUE_EXPLOIT = 16,
@@ -956,7 +956,8 @@ enum EverQuestClassAuraSpellType : uint32
     EQ_CLASSAURA_SPELL_SHADOWKNIGHT_BLOOD_DEBT_CHARGE = 61,
     EQ_CLASSAURA_SPELL_SHADOWKNIGHT_BLOOD_DEBT_HEAL = 62,
     EQ_CLASSAURA_SPELL_NECROMANCER_SHADOW_EXCHANGE = 63,
-    EQ_CLASSAURA_SPELL_TYPE_COUNT = 64
+    EQ_CLASSAURA_SPELL_RANGER_COMPOUND_INJURY_MOVING = 64,
+    EQ_CLASSAURA_SPELL_TYPE_COUNT = 65
 };
 
 class EverQuestPlayerMoveWhileCastingState : public DataMap::Base
@@ -1557,7 +1558,7 @@ public:
     uint32 ConfigSystemClassAuraRogueLuckyStrikeCritPercent = 100;
     uint32 ConfigSystemClassAuraRogueLuckyStrikeCooldownInMS = 8000;
     uint32 ConfigSystemClassAuraMonkDoubleToTripleAttackChancePercent = 50;
-    uint32 ConfigSystemClassAuraRangerTackShotDamagePercentPerStack = 1;
+    uint32 ConfigSystemClassAuraRangerCompoundInjuryDamagePercentPerStack = 1;
     uint32 ConfigSystemClassAuraRangerEndlessQuiverBaseManaCostPercent = 1;
     std::unordered_set<uint32> ClassAuraRangerChannelAmmoSpellIDs; // Need to track these because channeled attacks (like Volley) didn't have a good hook to stop the ammo consumption
     uint32 ConfigSystemClassAuraPaladinHealSelfPercent = 15;
@@ -2061,7 +2062,8 @@ public:
     void HandleClassAuraShamanStrike(Unit* attacker, Unit* victim);
     void ApplyClassAuraMeleeDamageMods(Unit* attacker, Unit* victim, uint32& damage);
     void ApplyClassAuraDirectSpellDamageMods(Unit* target, Unit* attacker, int32& damage, SpellInfo const* spellInfo);
-    void ApplyClassAuraTackShotDamageBonus(Unit* attacker, Unit* victim, int32& damage);
+    void ApplyClassAuraCompoundInjuryDamageBonus(Unit* attacker, Unit* victim, int32& damage);
+    void ApplyClassAuraRangerCompoundInjury(Player* ranger, Unit* target);
     void ApplyClassAuraPaladinUndeadDemonDamageBonus(Unit* attacker, Unit* victim, int32& damage);
     void ApplyClassAuraEntangleStrikeDamageMods(Unit* attacker, Unit* victim, int32& damage, bool isMeleeDamage, bool isPhysicalDamage);
     uint32 GetClassAuraDruidNaturesBalanceBonusPercent(Player* druid, uint32 castBalanceType);

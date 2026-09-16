@@ -41,7 +41,7 @@ static const char* EQ_CLASSAURA_SPELL_TYPE_NAMES[EQ_CLASSAURA_SPELL_TYPE_COUNT] 
     "EnchanterPassive", "EnchanterAura", "EnchanterFocus",
     "BardPassive", "BardAura", "BardInstrument",
     "MonkPassive", "MonkAura", "MonkLightArmor", "MonkHeavyArmor",
-    "RangerPassive", "RangerAura", "RangerEndlessQuiver", "RangerTackShot",
+    "RangerPassive", "RangerAura", "RangerEndlessQuiver", "RangerCompoundInjury",
     "RoguePassive", "RogueAura", "RogueExploit",
     "PaladinPassive", "PaladinAura", "PaladinHeal",
     "ShadowKnightPassive", "ShadowKnightAura", "ShadowKnightEdge",
@@ -56,7 +56,7 @@ static const char* EQ_CLASSAURA_SPELL_TYPE_NAMES[EQ_CLASSAURA_SPELL_TYPE_COUNT] 
     "DruidNaturesBalanceFire", "WarriorUnrelentingAssault", "WarriorRiposte", "BardVigor", "MonkChiSurge", "PaladinDeflection", "RogueLuckyStrike", "RogueLuckyStrikeHelper",
     "DruidNaturesBalanceCold", "DruidNaturesBalanceNature", "DruidEntangleStrike", "ShamanWarspiritVigor",
     "ShadowKnightBloodDebt", "ShadowKnightBloodDebtCharge", "ShadowKnightBloodDebtHeal",
-    "NecromancerShadowExchange"
+    "NecromancerShadowExchange", "RangerCompoundInjuryMoving"
 };
 
 struct EverQuestClassAuraToggle
@@ -713,6 +713,9 @@ void EverQuestMod::HandleClassAuraPetStrike(Unit* attacker, Unit* victim)
     uint32 markSpellID = GetClassAuraSpellID(EQ_CLASSAURA_SPELL_NECROMANCER_MARK);
     if (markSpellID != 0 && victim->IsAlive() == true && PlayerHasClassAura(owner, EQ_CLASSAURA_SPELL_NECROMANCER_AURA) == true && owner->IsValidAttackTarget(victim) == true)
         owner->CastSpell(victim, markSpellID, true);
+
+    // A ranger's pet compounds the injury on its owner's behalf (the owner's own attacks come through the aura's proc instead)
+    ApplyClassAuraRangerCompoundInjury(owner, victim);
 }
 
 static bool IsPeriodicDamageAura(Aura* aura)
@@ -760,9 +763,9 @@ void EverQuestMod::ApplyClassAuraMeleeDamageMods(Unit* attacker, Unit* victim, u
         return;
 
     // Ranger
-    int32 tackShotDamage = (int32)damage;
-    ApplyClassAuraTackShotDamageBonus(attacker, victim, tackShotDamage);
-    damage = (uint32)tackShotDamage;
+    int32 compoundInjuryDamage = (int32)damage;
+    ApplyClassAuraCompoundInjuryDamageBonus(attacker, victim, compoundInjuryDamage);
+    damage = (uint32)compoundInjuryDamage;
 
     // Druid
     int32 entangleDamage = (int32)damage;
@@ -956,14 +959,14 @@ void EverQuestMod::ApplyClassAuraEntangleStrikeDamageMods(Unit* attacker, Unit* 
     damage -= (damage * reductionPercent) / 100;
 }
 
-void EverQuestMod::ApplyClassAuraTackShotDamageBonus(Unit* attacker, Unit* victim, int32& damage)
+void EverQuestMod::ApplyClassAuraCompoundInjuryDamageBonus(Unit* attacker, Unit* victim, int32& damage)
 {
     if (attacker == nullptr || victim == nullptr || damage <= 0)
         return;
-    uint32 tackShotSpellID = GetClassAuraSpellID(EQ_CLASSAURA_SPELL_RANGER_TACK_SHOT);
-    if (tackShotSpellID == 0)
+    uint32 compoundInjurySpellID = GetClassAuraSpellID(EQ_CLASSAURA_SPELL_RANGER_COMPOUND_INJURY);
+    if (compoundInjurySpellID == 0)
         return;
-    if (victim->HasAura(tackShotSpellID) == false)
+    if (victim->HasAura(compoundInjurySpellID) == false)
         return;
     Player* ranger = attacker->GetCharmerOrOwnerPlayerOrPlayerItself();
     if (ranger == nullptr)
@@ -972,15 +975,45 @@ void EverQuestMod::ApplyClassAuraTackShotDamageBonus(Unit* attacker, Unit* victi
         return;
     if (PlayerHasClassAura(ranger, EQ_CLASSAURA_SPELL_RANGER_AURA) == false)
         return;
-    Aura* mark = victim->GetAura(tackShotSpellID, ranger->GetGUID());
+
+    // Only the copy this ranger put there pays out, so a mark from another ranger is never read here
+    Aura* mark = victim->GetAura(compoundInjurySpellID, ranger->GetGUID());
     if (mark == nullptr)
         return;
-    int32 bonusPercent = (int32)ConfigSystemClassAuraRangerTackShotDamagePercentPerStack * (int32)mark->GetStackAmount();
-    if (victim->isMoving() == true)
+    int32 bonusPercent = (int32)ConfigSystemClassAuraRangerCompoundInjuryDamagePercentPerStack * (int32)mark->GetStackAmount();
+
+    // Moving doubles it right away, and the moving mark carries the doubling on for its own duration after the target holds still
+    uint32 movingSpellID = GetClassAuraSpellID(EQ_CLASSAURA_SPELL_RANGER_COMPOUND_INJURY_MOVING);
+    if (victim->isMoving() == true || (movingSpellID != 0 && victim->HasAura(movingSpellID) == true))
         bonusPercent *= 2;
     if (bonusPercent <= 0)
         return;
     damage += (damage * bonusPercent) / 100;
+}
+
+void EverQuestMod::ApplyClassAuraRangerCompoundInjury(Player* ranger, Unit* target)
+{
+    if (IsClassAuraSystemEnabled() == false || ranger == nullptr || target == nullptr)
+        return;
+    if (PlayerHasClassAura(ranger, EQ_CLASSAURA_SPELL_RANGER_AURA) == false)
+        return;
+    uint32 compoundInjurySpellID = GetClassAuraSpellID(EQ_CLASSAURA_SPELL_RANGER_COMPOUND_INJURY);
+    if (compoundInjurySpellID == 0)
+        return;
+    if (target == ranger || target->IsAlive() == false || ranger->IsAlive() == false)
+        return;
+    if (ranger->FindMap() == nullptr || target->FindMap() != ranger->FindMap())
+        return;
+    if (ranger->IsValidAttackTarget(target) == false)
+        return;
+    ranger->CastSpell(target, compoundInjurySpellID, true);
+
+    // Struck while on the move, so the doubling window is started or pushed back out
+    if (target->isMoving() == false)
+        return;
+    uint32 movingSpellID = GetClassAuraSpellID(EQ_CLASSAURA_SPELL_RANGER_COMPOUND_INJURY_MOVING);
+    if (movingSpellID != 0)
+        ranger->CastSpell(target, movingSpellID, true);
 }
 
 void EverQuestMod::ApplyClassAuraDirectSpellDamageMods(Unit* target, Unit* attacker, int32& damage, SpellInfo const* spellInfo)
@@ -991,7 +1024,7 @@ void EverQuestMod::ApplyClassAuraDirectSpellDamageMods(Unit* target, Unit* attac
         return;
 
     // Rangers and their pets alike
-    ApplyClassAuraTackShotDamageBonus(attacker, target, damage);
+    ApplyClassAuraCompoundInjuryDamageBonus(attacker, target, damage);
 
     // Druid, an entangled target trading physical damage with the druid or their pet (only a melee ability earns the bonus from behind)
     bool isMeleeSpell = spellInfo->DmgClass == SPELL_DAMAGE_CLASS_MELEE;
@@ -1031,9 +1064,9 @@ void EverQuestMod::ApplyClassAuraPeriodicTickMods(Unit* target, Unit* attacker, 
         return;
 
     // Ranger
-    int32 tackShotAmount = (int32)amount;
-    ApplyClassAuraTackShotDamageBonus(attacker, target, tackShotAmount);
-    amount = (uint32)tackShotAmount;
+    int32 compoundInjuryAmount = (int32)amount;
+    ApplyClassAuraCompoundInjuryDamageBonus(attacker, target, compoundInjuryAmount);
+    amount = (uint32)compoundInjuryAmount;
 
     if (attacker->IsPlayer() == false)
         return;

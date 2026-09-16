@@ -102,7 +102,8 @@ class EverQuest_ClassAuraRogueAuraScript : public AuraScript
     }
 };
 
-// Ranger "Swift Reactions": every landed ranged autoattack (bow, gun, thrown), ranged ability or harmful spell tacks its target
+// Ranger: every landed melee or ranged autoattack, and every harmful single target spell, compounds the target's injuries.  The pet's strikes do the same through
+// HandleClassAuraPetStrike, since a proc row on the ranger never sees them
 class EverQuest_ClassAuraRangerAuraScript : public AuraScript
 {
     PrepareAuraScript(EverQuest_ClassAuraRangerAuraScript);
@@ -116,17 +117,15 @@ class EverQuest_ClassAuraRangerAuraScript : public AuraScript
         if (ranger == nullptr || ranger->IsPlayer() == false || ranger->IsAlive() == false)
             return;
         uint32 typeMask = eventInfo.GetTypeMask();
-        if ((typeMask & (PROC_FLAG_DONE_RANGED_AUTO_ATTACK | PROC_FLAG_DONE_SPELL_RANGED_DMG_CLASS | PROC_FLAG_DONE_SPELL_MAGIC_DMG_CLASS_NEG | PROC_FLAG_DONE_SPELL_NONE_DMG_CLASS_NEG)) == 0)
+        if ((typeMask & (PROC_FLAG_DONE_MELEE_AUTO_ATTACK | PROC_FLAG_DONE_RANGED_AUTO_ATTACK | PROC_FLAG_DONE_SPELL_MELEE_DMG_CLASS
+            | PROC_FLAG_DONE_SPELL_RANGED_DMG_CLASS | PROC_FLAG_DONE_SPELL_MAGIC_DMG_CLASS_NEG | PROC_FLAG_DONE_SPELL_NONE_DMG_CLASS_NEG)) == 0)
             return;
-        uint32 tackShotSpellID = EverQuest->GetClassAuraSpellID(EQ_CLASSAURA_SPELL_RANGER_TACK_SHOT);
-        if (tackShotSpellID == 0)
+
+        // Only a spell aimed at one target counts, so an area spell never compounds everything it washes over.  An autoattack carries no spell to check
+        SpellInfo const* procSpellInfo = eventInfo.GetSpellInfo();
+        if (procSpellInfo != nullptr && procSpellInfo->IsTargetingArea() == true)
             return;
-        Unit* target = eventInfo.GetProcTarget();
-        if (target == nullptr || target == ranger || target->IsAlive() == false || target->FindMap() != ranger->FindMap())
-            return;
-        if (ranger->IsValidAttackTarget(target) == false)
-            return;
-        ranger->CastSpell(target, tackShotSpellID, true);
+        EverQuest->ApplyClassAuraRangerCompoundInjury(ranger->ToPlayer(), eventInfo.GetProcTarget());
     }
 
     void Register() override

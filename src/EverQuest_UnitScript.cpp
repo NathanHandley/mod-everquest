@@ -431,7 +431,7 @@ public:
         if (EverQuest->IsSpellDamageFixed(spellID) == true)
             return;
 
-        // Class auras: the Ranger's Tack Shot mark, the Paladin's double damage against undead and demons and the Necromancer's marks (any spell, EQ or WoW)
+        // Class auras: the Ranger's Compound Injury mark, the Paladin's double damage against undead and demons and the Necromancer's marks (any spell, EQ or WoW)
         EverQuest->ApplyClassAuraPeriodicTickMods(target, attacker, damage, spellInfo);
 
         if (EverQuest->IsSpellAnEQSpell(spellID) == false)
@@ -607,7 +607,7 @@ public:
         if (EverQuest->IsSpellDamageFixed(spellInfo->Id) == true)
             return;
 
-        // Class auras: the Ranger's Tack Shot mark, the Paladin's double damage against undead and demons, the Necromancer's marks and the Druid's impaired target bonus (any spell, EQ or WoW)
+        // Class auras: the Ranger's Compound Injury mark, the Paladin's double damage against undead and demons, the Necromancer's marks and the Druid's impaired target bonus (any spell, EQ or WoW)
         EverQuest->ApplyClassAuraDirectSpellDamageMods(target, attacker, damage, spellInfo);
 
         if (EverQuest->ConfigSpellTalentAlignmentEnabled == false)

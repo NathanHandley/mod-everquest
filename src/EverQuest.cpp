@@ -273,8 +273,8 @@ bool EverQuestMod::LoadConfigurationSystemDataFromDB()
                 ConfigSystemClassAuraRogueLuckyStrikeCooldownInMS = (uint32)atoi(value.c_str());
             else if (key == "ClassAuraMonkDoubleToTripleAttackChancePercent")
                 ConfigSystemClassAuraMonkDoubleToTripleAttackChancePercent = (uint32)atoi(value.c_str());
-            else if (key == "ClassAuraRangerTackShotDamagePercentPerStack")
-                ConfigSystemClassAuraRangerTackShotDamagePercentPerStack = (uint32)atoi(value.c_str());
+            else if (key == "ClassAuraRangerCompoundInjuryDamagePercentPerStack")
+                ConfigSystemClassAuraRangerCompoundInjuryDamagePercentPerStack = (uint32)atoi(value.c_str());
             else if (key == "ClassAuraRangerEndlessQuiverBaseManaCostPercent")
                 ConfigSystemClassAuraRangerEndlessQuiverBaseManaCostPercent = (uint32)atoi(value.c_str());
             else if (key == "ClassAuraPaladinHealSelfPercent")
