@@ -1987,8 +1987,10 @@ public:
     uint8 GetCharmProtectedDispelEffectMaskForTarget(SpellInfo const* spellInfo, Unit* target);
     bool IsHealingSpell(SpellInfo const* spellInfo);
     bool IsGateSpell(SpellInfo const* spellInfo);
+    bool IsDispelSpell(SpellInfo const* spellInfo);
     bool IsUnitCastingHealingSpell(Unit* unit);
     bool IsUnitCastingGateSpell(Unit* unit);
+    bool IsUnitCastingDispelSpell(Unit* unit);
     bool IsEQBossTierCreature(Unit* unit);
     uint8 GetBossInterruptProtectedEffectMaskForTarget(SpellInfo const* spellInfo, Unit* target);
     uint8 GetBossSilenceProtectedEffectMaskForTarget(SpellInfo const* spellInfo, Unit* target);

@@ -5199,6 +5199,20 @@ bool EverQuestMod::IsGateSpell(SpellInfo const* spellInfo)
     return spellInfo->Effects[EFFECT_0].MiscValue == EQ_SPELLDUMMYTYPE_GATE;
 }
 
+bool EverQuestMod::IsDispelSpell(SpellInfo const* spellInfo)
+{
+    // Any spell that strips auras counts, which covers the converted EQ cancel magic / cure spells (SPELL_EFFECT_DISPEL) and WoW mechanic dispels and spellsteal
+    if (spellInfo == nullptr)
+        return false;
+    for (uint8 i = 0; i < MAX_SPELL_EFFECTS; ++i)
+    {
+        uint32 effectType = spellInfo->Effects[i].Effect;
+        if (effectType == SPELL_EFFECT_DISPEL || effectType == SPELL_EFFECT_DISPEL_MECHANIC || effectType == SPELL_EFFECT_STEAL_BENEFICIAL_BUFF)
+            return true;
+    }
+    return false;
+}
+
 bool EverQuestMod::IsUnitCastingHealingSpell(Unit* unit)
 {
     if (unit == nullptr)
@@ -5237,6 +5251,25 @@ bool EverQuestMod::IsUnitCastingGateSpell(Unit* unit)
     return false;
 }
 
+bool EverQuestMod::IsUnitCastingDispelSpell(Unit* unit)
+{
+    if (unit == nullptr)
+        return false;
+
+    // Same slots as the healing check, since those are the ones the core interrupt effect can actually stop
+    for (uint32 i = CURRENT_FIRST_NON_MELEE_SPELL; i < CURRENT_AUTOREPEAT_SPELL; ++i)
+    {
+        Spell* currentSpell = unit->GetCurrentSpell(CurrentSpellTypes(i));
+        if (currentSpell == nullptr)
+            continue;
+        if (currentSpell->getState() != SPELL_STATE_CASTING && currentSpell->getState() != SPELL_STATE_PREPARING)
+            continue;
+        if (IsDispelSpell(currentSpell->GetSpellInfo()) == true)
+            return true;
+    }
+    return false;
+}
+
 bool EverQuestMod::IsEQBossTierCreature(Unit* unit)
 {
     // Deliberately the EQ difficulty type and not the boss creature flag, so WoW encounters keep stock behavior
@@ -5267,8 +5300,8 @@ uint8 EverQuestMod::GetBossInterruptProtectedEffectMaskForTarget(SpellInfo const
     if (interruptEffectMask == 0)
         return 0;
 
-    // A heal or a gate are the casts that can still be stopped, so a boss caught mid heal or mid gate is interrupted normally
-    if (IsUnitCastingHealingSpell(target) == true || IsUnitCastingGateSpell(target) == true)
+    // Heals, gates and dispels are the casts that can still be stopped, so a boss caught mid heal, gate or dispel is interrupted normally
+    if (IsUnitCastingHealingSpell(target) == true || IsUnitCastingGateSpell(target) == true || IsUnitCastingDispelSpell(target) == true)
         return 0;
 
     return interruptEffectMask;
