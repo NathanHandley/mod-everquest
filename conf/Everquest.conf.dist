@@ -69,6 +69,19 @@ EverQuest.Map.RestrictedMapCheckIntervalInSeconds = 300
 EverQuest.Quest.GrantExpOnRepeatCompletion = True
 
 ###################################################################################################
+#
+# 	EverQuest.EventSpawn.MaxLifetimeInSeconds
+#		Backstop lifetime for creatures spawned by quest, gossip, or kill/combat/evade/timer triggers.
+#       Once this many seconds pass after the spawn, the creature despawns (waiting for any fight to
+#       end first). Creatures with their own ooctimer despawn rule in the kill spawn table are exempt.
+#       Corpses are not affected. 0 disables the backstop.
+#	Default: 1800 (30 minutes)
+#
+###################################################################################################
+
+EverQuest.EventSpawn.MaxLifetimeInSeconds = 1800
+
+###################################################################################################
 # Death Graveyard Settings
 #
 # 	EverQuest.Death.EnforceGraveyardDomain

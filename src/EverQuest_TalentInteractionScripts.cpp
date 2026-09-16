@@ -14,6 +14,7 @@
 //  You should have received a copy of the GNU General Public License
 //  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+#include "Creature.h"
 #include "Player.h"
 #include "Random.h"
 #include "ScriptMgr.h"
@@ -547,6 +548,30 @@ class EverQuest_RoguePoisonSpellScript : public SpellScript
     }
 };
 
+// Runs alongside spell_warl_demonic_empowerment, which picks the empowerment by the pet's creature family and so never matches an
+// EverQuest pet.  An EverQuest pet gets the Felguard's empowerment instead
+class EverQuest_DemonicEmpowermentSpellScript : public SpellScript
+{
+    PrepareSpellScript(EverQuest_DemonicEmpowermentSpellScript);
+
+    void HandleScriptEffect(SpellEffIndex /*effIndex*/)
+    {
+        if (IsEQTalentInteractionEnabled() == false)
+            return;
+        Creature* targetCreature = GetHitCreature();
+        if (targetCreature == nullptr || targetCreature->IsPet() == false)
+            return;
+        if (EverQuest->HasPetDataForCreatureTemplateID(targetCreature->GetEntry()) == false)
+            return;
+        targetCreature->CastSpell(targetCreature, EQ_SPELL_ID_WARLOCK_DEMONIC_EMPOWERMENT_FELGUARD, true);
+    }
+
+    void Register() override
+    {
+        OnEffectHitTarget += SpellEffectFn(EverQuest_DemonicEmpowermentSpellScript::HandleScriptEffect, EFFECT_0, SPELL_EFFECT_SCRIPT_EFFECT);
+    }
+};
+
 void AddEverQuestTalentInteractionScripts()
 {
     RegisterSpellScript(EverQuest_ColdSnapSpellScript);
@@ -562,4 +587,5 @@ void AddEverQuestTalentInteractionScripts()
     RegisterSpellScript(EverQuest_ShadowWeavingSpellScript);
     RegisterSpellScript(EverQuest_EmpoweredRenewSpellScript);
     RegisterSpellScript(EverQuest_RoguePoisonSpellScript);
+    RegisterSpellScript(EverQuest_DemonicEmpowermentSpellScript);
 }

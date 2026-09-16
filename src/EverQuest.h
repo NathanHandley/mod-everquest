@@ -53,7 +53,7 @@ class ByteBuffer;
 struct AreaTrigger;
 struct BuildValuesCachePosPointers;
 
-#define EQ_MOD_VERSION                              109
+#define EQ_MOD_VERSION                              110
 
 #define EQ_MOVEMENT_CAST_SNARE_DURATION_BUFFER_IN_MS 2000 // How much longer than the remaining cast time the casting slow is given, so a pushed-back cast keeps it
 
@@ -169,6 +169,11 @@ struct BuildValuesCachePosPointers;
 #define EQ_SPELL_ID_WARLOCK_PET_SCALING_03          34957 // Frost, arcane and nature resistance off the owner
 #define EQ_SPELL_ID_WARLOCK_PET_SCALING_04          34958 // Shadow resistance off the owner
 #define EQ_SPELL_ID_WARLOCK_PET_SCALING_05          61013 // Spell hit and expertise off the owner
+#define EQ_SPELL_ID_WARLOCK_PET_STAMINA_PASSIVE     18735 // Stamina percent, which Fel Vitality modifies
+#define EQ_SPELL_ID_WARLOCK_PET_INTELLECT_PASSIVE   18742 // Intellect percent, which Fel Vitality modifies
+#define EQ_SPELL_ID_WARLOCK_PET_CRIT_PASSIVE        35695 // Critical strike chance, which Demonic Tactics and Improved Demonic Tactics modify
+#define EQ_SPELL_ID_WARLOCK_PET_DEMONIC_PACT        53646 // Critical strikes trigger the owner's Demonic Pact
+#define EQ_SPELL_ID_WARLOCK_DEMONIC_EMPOWERMENT_FELGUARD 54508
 #define EQ_SPELL_ID_MAGE_TORMENT_THE_WEAK_RANK1     29447
 #define EQ_SPELL_ID_WARLOCK_DEATHS_EMBRACE_RANK1    47198
 #define EQ_SPELL_ID_WARLOCK_SOUL_SIPHON_RANK1       17804
@@ -280,6 +285,7 @@ struct BuildValuesCachePosPointers;
 #define EQ_REACTION_WALK_POINT_ID                   9910001
 #define EQ_REACTION_WALK_STALL_CHECK_MS             1000
 #define EQ_ASSAULT_ENGAGE_DISTANCE                  30.0f
+#define EQ_EVENT_SPAWN_LIFETIME_RECHECK_MS          5000 // How long an expired event spawn that couldn't leave yet (fighting, charmed) waits before trying again
 #define EQ_FACTION_TEMPLATE_SCRIPTED_ASSAILANT      2338 // TODO: Read this from the converter
 
 #define EQ_KILLSPAWN_TRIGGER_DEATH                  0
@@ -635,6 +641,13 @@ public:
     float PositionZ = 0;
     float Orientation = 0;
     bool EnforceUniqueSpawn = false;
+};
+
+class EverQuestEventSpawnLifetime
+{
+public:
+    ObjectGuid CreatureGUID;
+    uint64 DespawnAtGameTimeMS = 0;
 };
 
 class EverQuestPendingGateReturn
@@ -1627,6 +1640,7 @@ public:
     uint32 ConfigClientVersionCheckKickDelayInSeconds = 10;
     bool ConfigSpellTalentAlignmentEnabled;
     bool ConfigQuestGrantExpOnRepeatCompletion;
+    uint32 ConfigEventSpawnMaxLifetimeInSeconds = 1800;
     bool ConfigExpLossOnDeathEnabled;
     int ConfigExpLossOnDeathMinLevel;
     float ConfigExpLossOnDeathLossPercent;
@@ -1742,6 +1756,7 @@ public:
     unordered_map<uint64, unordered_map<uint32, int32>> PresenceGroupCheckTimerInMSByMapInstanceKeyThenGroupID;
     unordered_map<uint64, unordered_set<uint32>> SuppressedPresenceGroupIDsByMapInstanceKey;
     unordered_set<uint32> EvadeKillSpawnTriggerCreatureTemplateIDs;
+    unordered_set<uint64> SelfDespawnOocTimerKeys; // Key is (open world mapID << 32) | creature template ID, for creatures whose own out-of-combat timer always despawns them there, so the event spawn lifetime backstop leaves them alone
     unordered_map<uint32, uint32> OocTimerKillSpawnDurationMSByCreatureTemplateID;
     unordered_map<uint32, vector<ObjectGuid::LowType>> VulakRequiredDragonSpawnIDsByMapID; // Keyed by map ID, since the raid instance copy of the zone has its own dragon spawn rows
     unordered_map<uint32, vector<EverQuestCreatureEmote>> CreatureEmotesByCreatureTemplateID;
@@ -1762,6 +1777,9 @@ public:
     std::mutex PendingGateReturnsMutex;
     vector<EverQuestPendingGateReturn> PendingGateReturns;
     std::atomic<uint32> ReactionSpawnedCreatureCount{ 0 };
+    std::mutex EventSpawnLifetimesMutex;
+    unordered_map<uint64, vector<EverQuestEventSpawnLifetime>> EventSpawnLifetimesByMapInstanceKey;
+    std::atomic<uint32> EventSpawnLifetimeCount{ 0 };
     unordered_map<uint64, vector<EverQuestTriggeredQuestKillSpawn>> TriggeredQuestKillSpawnsByMapInstanceKey;
     unordered_map<uint32, EverQuestItemTemplate> ItemTemplatesByEntryID;
     unordered_map<uint64, vector<EverQuestGearSwapCandidate>> GearSwapCandidatesByLookupKey;
@@ -2364,6 +2382,10 @@ public:
     void ProcessPendingReactionSpawnGridRemovals();
     void UpdateReactionSpawnedCreatures(Map* map);
     void ClearReactionSpawnedCreaturesForMap(Map* map);
+    void TrackEventSpawnLifetime(Creature* creature);
+    void RefreshEventSpawnLifetimeCount();
+    void UpdateEventSpawnLifetimes(Map* map);
+    void ClearEventSpawnLifetimesForMap(Map* map);
     void ClearPerMapRuntimeStateForMap(Map* map);
     void DespawnCreature(uint32 entryID, Map* map);
     void MakeCreatureAttackPlayer(uint32 entryID, Map* map, Player* player);

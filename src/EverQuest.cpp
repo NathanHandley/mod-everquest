@@ -438,6 +438,9 @@ void EverQuestMod::LoadConfigurationFile()
     // Quest
     ConfigQuestGrantExpOnRepeatCompletion = sConfigMgr->GetOption<bool>("EverQuest.Quest.GrantExpOnRepeatCompletion", true);
 
+    // Event Spawns
+    ConfigEventSpawnMaxLifetimeInSeconds = sConfigMgr->GetOption<uint32>("EverQuest.EventSpawn.MaxLifetimeInSeconds", 1800);
+
     // Exp Loss on Death
     ConfigExpLossOnDeathEnabled = sConfigMgr->GetOption<bool>("EverQuest.ExpLossOnDeath.Enabled", true);
     ConfigExpLossOnDeathMinLevel = sConfigMgr->GetOption<uint32>("EverQuest.ExpLossOnDeath.MinLevel", 5);
@@ -977,6 +980,7 @@ void EverQuestMod::LoadCreatureKillSpawnData()
     CreatureKillSpawnsByTriggerCreatureTemplateID.clear();
     EvadeKillSpawnTriggerCreatureTemplateIDs.clear();
     OocTimerKillSpawnDurationMSByCreatureTemplateID.clear();
+    SelfDespawnOocTimerKeys.clear();
 
     QueryResult queryResult = WorldDatabase.Query("SELECT ID, TriggerCreatureTemplateID, TriggerTypeID, MapID, ActionType, TargetCreatureTemplateID, Chance, AltGroup, AltID, AltWeight, SpawnAtCorpse, PositionX, PositionY, PositionZ, Orientation, DelayMinMS, DelayMaxMS, OnlyIfNotAliveCreatureTemplateID, RequireDeadCreatureTemplateIDs, RequireAliveCreatureTemplateIDs, AddToHateList, TriggerMinLevel, TriggerMaxLevel, RespawnTimeSec FROM mod_everquest_creature_kill_spawn;");
     if (queryResult)
@@ -1020,8 +1024,17 @@ void EverQuestMod::LoadCreatureKillSpawnData()
                 // This delay is the out-of-combat (ooc) countdouwn duration and the creature's countdown uses the longest duration
                 if (killSpawn.DelayMinMS == 0)
                     LOG_ERROR("module.EverQuest", "EverQuestMod::LoadCreatureKillSpawnData kill spawn ID {} has an ooctimer trigger with no delay duration, so it will never fire", killSpawn.ID);
-                else if (killSpawn.DelayMinMS > OocTimerKillSpawnDurationMSByCreatureTemplateID[killSpawn.TriggerCreatureTemplateID])
-                    OocTimerKillSpawnDurationMSByCreatureTemplateID[killSpawn.TriggerCreatureTemplateID] = killSpawn.DelayMinMS;
+                else
+                {
+                    if (killSpawn.DelayMinMS > OocTimerKillSpawnDurationMSByCreatureTemplateID[killSpawn.TriggerCreatureTemplateID])
+                        OocTimerKillSpawnDurationMSByCreatureTemplateID[killSpawn.TriggerCreatureTemplateID] = killSpawn.DelayMinMS;
+
+                    // Only a self despawn that can't be skipped by a roll or a requirement counts as the creature's own despawn timer
+                    if (killSpawn.ActionType == EQ_KILLSPAWN_ACTION_DESPAWN && killSpawn.TargetCreatureTemplateID == killSpawn.TriggerCreatureTemplateID && killSpawn.Chance >= 100 &&
+                        killSpawn.AltGroup == 0 && killSpawn.TriggerMinLevel == 0 && killSpawn.TriggerMaxLevel == 0 && killSpawn.RequireDeadCreatureTemplateIDs.empty() == true &&
+                        killSpawn.RequireAliveCreatureTemplateIDs.empty() == true)
+                        SelfDespawnOocTimerKeys.insert((static_cast<uint64>(killSpawn.MapID) << 32) | killSpawn.TriggerCreatureTemplateID);
+                }
             }
             CreatureKillSpawnsByTriggerCreatureTemplateID[killSpawn.TriggerCreatureTemplateID].push_back(killSpawn);
         } while (queryResult->NextRow());
@@ -1950,6 +1963,7 @@ void EverQuestMod::ExecuteKillSpawnAction(Map* map, EverQuestPendingKillSpawnAct
                 LOG_ERROR("module.EverQuest", "EverQuestMod::ExecuteKillSpawnAction failed to summon creature with template ID {}", action.TargetCreatureTemplateID);
                 return;
             }
+            TrackEventSpawnLifetime(summonedCreature);
             if (action.AddToHateList == true && action.KillerGUID.IsEmpty() == false)
             {
                 Unit* killer = ObjectAccessor::GetUnit(*summonedCreature, action.KillerGUID);
@@ -12947,6 +12961,7 @@ void EverQuestMod::ExecutePendingReactionSpawn(const EverQuestPendingReactionSpa
 
     // In EverQuest a scripted spawn has no spawn point behind it, so it is gone for good once it dies or depops.
     TrackReactionSpawnedCreature(creature);
+    TrackEventSpawnLifetime(creature);
 }
 
 void EverQuestMod::ProcessPendingReactionSpawnCreations()
@@ -13091,6 +13106,111 @@ void EverQuestMod::ClearReactionSpawnedCreaturesForMap(Map* map)
 
     for (ObjectGuid::LowType spawnID : spawnIDsToRetire)
         RetireReactionSpawnedCreature(map, spawnID);
+}
+
+void EverQuestMod::TrackEventSpawnLifetime(Creature* creature)
+{
+    // A backstop for event spawns with no despawn rule of their own, so they can't stand around forever.  Creatures that already carry their own despawn timer keep it instead
+    if (creature == nullptr || ConfigEventSpawnMaxLifetimeInSeconds == 0)
+        return;
+    uint64 selfDespawnOocTimerKey = (static_cast<uint64>(GetOpenWorldMapIDForMapID(creature->GetMap()->GetId())) << 32) | creature->GetEntry();
+    if (SelfDespawnOocTimerKeys.find(selfDespawnOocTimerKey) != SelfDespawnOocTimerKeys.end())
+        return;
+
+    EverQuestEventSpawnLifetime lifetime;
+    lifetime.CreatureGUID = creature->GetGUID();
+    lifetime.DespawnAtGameTimeMS = static_cast<uint64>(GameTime::GetGameTimeMS().count()) + static_cast<uint64>(ConfigEventSpawnMaxLifetimeInSeconds) * 1000;
+    std::lock_guard<std::mutex> lock(EventSpawnLifetimesMutex);
+    EventSpawnLifetimesByMapInstanceKey[GetMapInstanceKey(creature->GetMap())].push_back(lifetime);
+    RefreshEventSpawnLifetimeCount();
+}
+
+void EverQuestMod::RefreshEventSpawnLifetimeCount()
+{
+    uint32 trackedCount = 0;
+    for (auto& lifetimesByMapInstanceKey : EventSpawnLifetimesByMapInstanceKey)
+        trackedCount += (uint32)lifetimesByMapInstanceKey.second.size();
+    EventSpawnLifetimeCount.store(trackedCount);
+}
+
+void EverQuestMod::UpdateEventSpawnLifetimes(Map* map)
+{
+    // This runs on every map tick, so the common case of nothing event-spawned must not take the lock at all
+    if (EventSpawnLifetimeCount.load() == 0)
+        return;
+    if (map == nullptr)
+        return;
+    uint64 nowMS = static_cast<uint64>(GameTime::GetGameTimeMS().count());
+
+    vector<ObjectGuid> expiredCreatureGUIDs;
+    {
+        std::lock_guard<std::mutex> lock(EventSpawnLifetimesMutex);
+        auto trackedIter = EventSpawnLifetimesByMapInstanceKey.find(GetMapInstanceKey(map));
+        if (trackedIter == EventSpawnLifetimesByMapInstanceKey.end())
+            return;
+        vector<EverQuestEventSpawnLifetime>& lifetimes = trackedIter->second;
+        for (size_t i = lifetimes.size(); i > 0; --i)
+        {
+            if (lifetimes[i - 1].DespawnAtGameTimeMS > nowMS)
+                continue;
+            expiredCreatureGUIDs.push_back(lifetimes[i - 1].CreatureGUID);
+            lifetimes.erase(lifetimes.begin() + (i - 1));
+        }
+        if (expiredCreatureGUIDs.empty() == true)
+            return;
+        if (lifetimes.empty() == true)
+            EventSpawnLifetimesByMapInstanceKey.erase(trackedIter);
+        RefreshEventSpawnLifetimeCount();
+    }
+
+    // Despawning reaches back into hooks and the other spawn trackers, so none of it runs while holding the lock
+    vector<ObjectGuid> stillBusyCreatureGUIDs;
+    for (const ObjectGuid& creatureGUID : expiredCreatureGUIDs)
+    {
+        // Already gone, dead, or a corpse, which the death and corpse handling of each spawn path takes care of
+        Creature* creature = map->GetCreature(creatureGUID);
+        if (creature == nullptr || creature->IsInWorld() == false || creature->IsAlive() == false)
+            continue;
+
+        // The backstop may have been switched off by a config reload since this creature spawned
+        if (ConfigEventSpawnMaxLifetimeInSeconds == 0)
+            continue;
+
+        // Never pull a creature out from under a fight or away from whoever charmed it, so try again shortly
+        if (creature->IsInCombat() == true || creature->IsCharmed() == true)
+        {
+            stillBusyCreatureGUIDs.push_back(creatureGUID);
+            continue;
+        }
+
+        LOG_INFO("module.EverQuest", "EverQuestMod::UpdateEventSpawnLifetimes despawned event spawned creature {} on map {} instance {} after reaching the {} second lifetime limit, as it has no despawn rule of its own", creature->GetEntry(), map->GetId(), map->GetInstanceId(), ConfigEventSpawnMaxLifetimeInSeconds);
+        DoCreatureEmoteEvent(creature, EQ_CREATURE_EMOTE_EVENT_ONDESPAWN, nullptr);
+        creature->DespawnOrUnsummon();
+    }
+
+    if (stillBusyCreatureGUIDs.empty() == true)
+        return;
+    std::lock_guard<std::mutex> lock(EventSpawnLifetimesMutex);
+    vector<EverQuestEventSpawnLifetime>& lifetimes = EventSpawnLifetimesByMapInstanceKey[GetMapInstanceKey(map)];
+    for (const ObjectGuid& creatureGUID : stillBusyCreatureGUIDs)
+    {
+        EverQuestEventSpawnLifetime lifetime;
+        lifetime.CreatureGUID = creatureGUID;
+        lifetime.DespawnAtGameTimeMS = nowMS + EQ_EVENT_SPAWN_LIFETIME_RECHECK_MS;
+        lifetimes.push_back(lifetime);
+    }
+    RefreshEventSpawnLifetimeCount();
+}
+
+void EverQuestMod::ClearEventSpawnLifetimesForMap(Map* map)
+{
+    if (EventSpawnLifetimeCount.load() == 0)
+        return;
+    if (map == nullptr)
+        return;
+    std::lock_guard<std::mutex> lock(EventSpawnLifetimesMutex);
+    EventSpawnLifetimesByMapInstanceKey.erase(GetMapInstanceKey(map));
+    RefreshEventSpawnLifetimeCount();
 }
 
 void EverQuestMod::DespawnCreature(uint32 entryID, Map* map)

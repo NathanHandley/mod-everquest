@@ -34,6 +34,7 @@ public:
         EverQuest->UpdatePendingKillSpawnActions(map, diff);
         EverQuest->UpdatePendingArrivalActions(map, diff);
         EverQuest->UpdateReactionSpawnedCreatures(map);
+        EverQuest->UpdateEventSpawnLifetimes(map);
         EverQuest->UpdateCycleSpawns(map, diff);
         EverQuest->UpdateCreaturePresenceGroups(map, diff);
     }
@@ -46,6 +47,7 @@ public:
         if (mapID < EverQuest->ConfigSystemMapDBCIDMin || mapID > EverQuest->ConfigSystemMapDBCIDMax)
             return;
         EverQuest->ClearReactionSpawnedCreaturesForMap(map);
+        EverQuest->ClearEventSpawnLifetimesForMap(map);
         EverQuest->ClearCreaturePresenceGroupStateForMap(map);
         EverQuest->ClearPerMapRuntimeStateForMap(map);
     }

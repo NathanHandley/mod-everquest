@@ -47,6 +47,16 @@ public:
         guardian->AddAura(EQ_SPELL_ID_WARLOCK_PET_SCALING_03, guardian);
         guardian->AddAura(EQ_SPELL_ID_WARLOCK_PET_SCALING_04, guardian);
         guardian->AddAura(EQ_SPELL_ID_WARLOCK_PET_SCALING_05, guardian);
+
+        // The warlock minion passives that owner talents reach through their spell modifiers or procs (Fel Vitality, Demonic Tactics, Improved Demonic Tactics and Demonic Pact).
+        // They do nothing without those talents.  Added here, ahead of the stat update and full heal, so the Stamina increase is already in the pet's starting health
+        if (EverQuest->ConfigSpellTalentAlignmentEnabled == true)
+        {
+            guardian->AddAura(EQ_SPELL_ID_WARLOCK_PET_STAMINA_PASSIVE, guardian);
+            guardian->AddAura(EQ_SPELL_ID_WARLOCK_PET_INTELLECT_PASSIVE, guardian);
+            guardian->AddAura(EQ_SPELL_ID_WARLOCK_PET_CRIT_PASSIVE, guardian);
+            guardian->AddAura(EQ_SPELL_ID_WARLOCK_PET_DEMONIC_PACT, guardian);
+        }
     }
 
     void OnPetAddToWorld(Pet* pet) override
