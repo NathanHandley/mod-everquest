@@ -2852,7 +2852,7 @@ void EverQuestMod::LoadItemTemplateData()
 {
     ItemTemplatesByEntryID.clear();
     WornEffectSpellIDs.clear();
-    QueryResult queryResult = WorldDatabase.Query("SELECT ItemTemplateID, NPCEquipItemTemplateID, WornEffectSpellID, AllowedEQClassMask, EQArmorMaterial, IllusionTintID FROM mod_everquest_item_template ORDER BY ItemTemplateID;");
+    QueryResult queryResult = WorldDatabase.Query("SELECT ItemTemplateID, NPCEquipItemTemplateID, WornEffectSpellID, AllowedEQClassMask, EQArmorMaterial, IllusionTintID, NeverLootStack FROM mod_everquest_item_template ORDER BY ItemTemplateID;");
     if (queryResult)
     {
         do
@@ -2876,6 +2876,14 @@ void EverQuestMod::LoadItemTemplateData()
 bool EverQuestMod::IsWornEffectSpell(uint32 spellID)
 {
     return WornEffectSpellIDs.find(spellID) != WornEffectSpellIDs.end();
+}
+
+bool EverQuestMod::IsNeverLootStackItem(uint32 itemTemplateEntryID)
+{
+    unordered_map<uint32, EverQuestItemTemplate>::const_iterator itemTemplateItr = ItemTemplatesByEntryID.find(itemTemplateEntryID);
+    if (itemTemplateItr == ItemTemplatesByEntryID.end())
+        return false;
+    return itemTemplateItr->second.NeverLootStack;
 }
 
 bool EverQuestMod::IsItemEquipAuraSpell(SpellInfo const* spellInfo)
@@ -8239,6 +8247,42 @@ void EverQuestMod::ApplyZoneWideGroupLootAccess(Loot* loot, Player* lootOwner, b
         lootSource->AddAllowedLooter(member->GetGUID());
         if (member->IsAtLootRewardDistance(lootSource) == false)
             loot->FillNotNormalLootFor(member);
+    }
+}
+
+void EverQuestMod::SplitNeverLootStackItems(Loot* loot)
+{
+    if (loot == nullptr)
+        return;
+
+    // Only walk the slots the loot template produced, since the split copies get appended past them
+    size_t originalItemCount = loot->items.size();
+    for (size_t i = 0; i < originalItemCount; ++i)
+    {
+        LootItem& lootItem = loot->items[i];
+        if (lootItem.count <= 1)
+            continue;
+        if (IsNeverLootStackItem(lootItem.itemid) == false)
+            continue;
+
+        // Copy everything off the slot first, since AddItem can reallocate the vector the reference points into
+        uint32 itemID = lootItem.itemid;
+        uint32 stackCount = lootItem.count;
+        uint8 groupID = lootItem.groupid;
+        ConditionList conditions = lootItem.conditions;
+
+        // Loot::AddItem does the slot bookkeeping (index, unlooted count) for each copy.  A local store item is used rather than the shared loot store's, so nothing another map thread reads is touched
+        LootStoreItem singleCopyStoreItem(itemID, 0, 100.0f, false, LOOT_MODE_DEFAULT, groupID, 1, 1);
+        singleCopyStoreItem.conditions = conditions;
+        uint32 addedCopyCount = 0;
+        while (addedCopyCount < stackCount - 1 && loot->items.size() < MAX_NR_LOOT_ITEMS)
+        {
+            loot->AddItem(singleCopyStoreItem);
+            ++addedCopyCount;
+        }
+
+        // Once the loot window is full, whatever couldn't get its own slot stays stacked on the original rather than vanishing
+        loot->items[i].count = uint8(stackCount - addedCopyCount);
     }
 }
 

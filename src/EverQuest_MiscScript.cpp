@@ -32,6 +32,7 @@ public:
         if (EverQuest->IsEnabled == false)
             return;
 
+        EverQuest->SplitNeverLootStackItems(loot);
         EverQuest->ApplyZoneWideGroupLootAccess(loot, lootOwner, personal);
     }
 };

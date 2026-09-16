@@ -53,7 +53,7 @@ class ByteBuffer;
 struct AreaTrigger;
 struct BuildValuesCachePosPointers;
 
-#define EQ_MOD_VERSION                              108
+#define EQ_MOD_VERSION                              109
 
 #define EQ_MOVEMENT_CAST_SNARE_DURATION_BUFFER_IN_MS 2000 // How much longer than the remaining cast time the casting slow is given, so a pushed-back cast keeps it
 
@@ -843,6 +843,7 @@ public:
     uint32 AllowedEQClassMask = 0;
     uint32 EQArmorMaterial = 0;
     uint32 IllusionTintID = 0;
+    bool NeverLootStack = false;                                    // Loot drops of this item are split into single copies so each can go to a different player
 };
 
 class EverQuestAuctionRealmFilter
@@ -1928,6 +1929,7 @@ public:
     void BuildAuctionScanResultPacket(EverQuestAuctionSearchScan& scan, WorldPacket& resultPacket);
     void SendAuctionScanResultPacket(WorldSession* session, WorldPacket& resultPacket);
     bool IsWornEffectSpell(uint32 spellID);
+    bool IsNeverLootStackItem(uint32 itemTemplateEntryID);
     bool IsItemEquipAuraSpell(SpellInfo const* spellInfo);
     void RemoveOrphanedItemEquipAurasForPlayer(Player* player);
     bool IsSlotshiftSpell(SpellInfo const* spellInfo);
@@ -2175,6 +2177,7 @@ public:
     void ApplyEQOnkillReputationsForPlayer(Player* player, Unit* victim);
     void GrantZoneWideGroupRewardsForKill(Player* killer, Unit* victim, const EverQuestZoneWideKillReward& reward);
     void ApplyZoneWideGroupLootAccess(Loot* loot, Player* lootOwner, bool personal);
+    void SplitNeverLootStackItems(Loot* loot);
     void ApplyZoneWideGroupMoneyShare(Player* looter, Loot* loot);
     bool IsCreatureKillDisqualifyingForAdventurer(Player* player, Unit* victim);
     bool DoesCreatureKillOfferExperienceForAdventurer(Player* player, Unit* victim);
