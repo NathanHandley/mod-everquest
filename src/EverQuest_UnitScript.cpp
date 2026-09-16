@@ -300,10 +300,6 @@ public:
         // A Shaman turning Warspirit on gives up the vigor they gave themself by healing
         EverQuest->HandleClassAuraShamanWarspiritApply(player, aura);
 
-        // A Necromancer class aura holder hands enemy debuffs to their pet
-        if (EverQuest->TryTransferDebuffToNecromancerPet(player, aura) == true)
-            return;
-
         // A silence landed by another player, or their pet, stops the songs this player already has running
         EverQuest->CancelBardSongsOnPvPSilenceAuraApply(player, aura);
 

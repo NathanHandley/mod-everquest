@@ -293,8 +293,8 @@ bool EverQuestMod::LoadConfigurationSystemDataFromDB()
                 ConfigSystemClassAuraWizardFocusMovementIntervalInMS = (uint32)atoi(value.c_str());
             else if (key == "ClassAuraWizardFocusStillIntervalInMS")
                 ConfigSystemClassAuraWizardFocusStillIntervalInMS = (uint32)atoi(value.c_str());
-            else if (key == "ClassAuraNecromancerDebuffTransferCooldownInMS")
-                ConfigSystemClassAuraNecromancerDebuffTransferCooldownInMS = (uint32)atoi(value.c_str());
+            else if (key == "ClassAuraNecromancerShadowExchangeMaxDistanceInYards")
+                ConfigSystemClassAuraNecromancerShadowExchangeMaxDistanceInYards = (uint32)atoi(value.c_str());
             else if (key == "ClassAuraNecromancerMarkDirectDamagePercentPerStack")
                 ConfigSystemClassAuraNecromancerMarkDirectDamagePercentPerStack = (uint32)atoi(value.c_str());
             else if (key == "ClassAuraNecromancerMarkDotDamagePercentPerStack")

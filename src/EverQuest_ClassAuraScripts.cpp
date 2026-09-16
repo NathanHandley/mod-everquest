@@ -542,6 +542,45 @@ class EverQuest_ClassAuraShamanAuraScript : public AuraScript
     }
 };
 
+// Necromancer "Shadow Exchange": the necromancer and the pet trade places, and every harmful effect an enemy left on the necromancer goes to the pet
+class EverQuest_ClassAuraNecromancerShadowExchangeSpellScript : public SpellScript
+{
+    PrepareSpellScript(EverQuest_ClassAuraNecromancerShadowExchangeSpellScript);
+
+    SpellCastResult CheckPet()
+    {
+        Unit* caster = GetCaster();
+        if (caster == nullptr || caster->IsPlayer() == false)
+            return SPELL_FAILED_SPELL_UNAVAILABLE;
+        Player* necromancer = caster->ToPlayer();
+        if (EverQuest->IsClassAuraSystemEnabled() == false || EverQuest->PlayerHasClassAura(necromancer, EQ_CLASSAURA_SPELL_NECROMANCER_AURA) == false)
+            return SPELL_FAILED_SPELL_UNAVAILABLE;
+        bool isOutOfRange = false;
+        if (EverQuest->GetClassAuraNecromancerShadowExchangePet(necromancer, isOutOfRange) == nullptr)
+        {
+            if (isOutOfRange == true)
+                return SPELL_FAILED_OUT_OF_RANGE;
+            return SPELL_FAILED_NO_PET;
+        }
+        return SPELL_CAST_OK;
+    }
+
+    void SwapWithPet(SpellEffIndex effIndex)
+    {
+        PreventHitDefaultEffect(effIndex);
+        Unit* caster = GetCaster();
+        if (caster == nullptr || caster->IsPlayer() == false)
+            return;
+        EverQuest->DoClassAuraNecromancerShadowExchange(caster->ToPlayer());
+    }
+
+    void Register() override
+    {
+        OnCheckCast += SpellCheckCastFn(EverQuest_ClassAuraNecromancerShadowExchangeSpellScript::CheckPet);
+        OnEffectHitTarget += SpellEffectFn(EverQuest_ClassAuraNecromancerShadowExchangeSpellScript::SwapWithPet, EFFECT_0, SPELL_EFFECT_DUMMY);
+    }
+};
+
 void AddEverQuestClassAuraScripts()
 {
     RegisterSpellScript(EverQuest_ClassAuraRogueAuraScript);
@@ -550,6 +589,7 @@ void AddEverQuestClassAuraScripts()
     RegisterSpellScript(EverQuest_ClassAuraWarriorAuraScript);
     RegisterSpellScript(EverQuest_ClassAuraShadowKnightAuraScript);
     RegisterSpellScript(EverQuest_ClassAuraShadowKnightBloodDebtSpellScript);
+    RegisterSpellScript(EverQuest_ClassAuraNecromancerShadowExchangeSpellScript);
     RegisterSpellScript(EverQuest_ClassAuraMonkLightArmorAuraScript);
     RegisterSpellScript(EverQuest_ClassAuraMonkHeavyArmorAuraScript);
     RegisterSpellScript(EverQuest_ClassAuraMagicianAuraScript);

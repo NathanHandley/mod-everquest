@@ -955,7 +955,8 @@ enum EverQuestClassAuraSpellType : uint32
     EQ_CLASSAURA_SPELL_SHADOWKNIGHT_BLOOD_DEBT = 60,
     EQ_CLASSAURA_SPELL_SHADOWKNIGHT_BLOOD_DEBT_CHARGE = 61,
     EQ_CLASSAURA_SPELL_SHADOWKNIGHT_BLOOD_DEBT_HEAL = 62,
-    EQ_CLASSAURA_SPELL_TYPE_COUNT = 63
+    EQ_CLASSAURA_SPELL_NECROMANCER_SHADOW_EXCHANGE = 63,
+    EQ_CLASSAURA_SPELL_TYPE_COUNT = 64
 };
 
 class EverQuestPlayerMoveWhileCastingState : public DataMap::Base
@@ -989,7 +990,6 @@ public:
     bool WasMoving = false;
     uint32 MovingAccumulatedMS = 0;
     uint32 StillAccumulatedMS = 0;
-    uint32 NextDebuffTransferAllowedMS = 0;
     uint32 PendingCastAdjustSpellID = 0;        // The spell whose successful cast spends the readied cleric / shadow knight charge
     bool PendingCadenceConsume = false;
     bool PendingEdgeConsume = false;
@@ -1568,7 +1568,7 @@ public:
     uint32 ConfigSystemClassAuraWizardFocusStacksLostPerMovementEvent = 1;
     uint32 ConfigSystemClassAuraWizardFocusMovementIntervalInMS = 1000;
     uint32 ConfigSystemClassAuraWizardFocusStillIntervalInMS = 2000;
-    uint32 ConfigSystemClassAuraNecromancerDebuffTransferCooldownInMS = 20000;
+    uint32 ConfigSystemClassAuraNecromancerShadowExchangeMaxDistanceInYards = 100;
     uint32 ConfigSystemClassAuraNecromancerMarkDirectDamagePercentPerStack = 1;
     uint32 ConfigSystemClassAuraNecromancerMarkDotDamagePercentPerStack = 2;
     uint32 ConfigSystemClassAuraClericCadenceReductionPercent = 33;
@@ -2070,7 +2070,9 @@ public:
     void HandleClassAuraDruidNaturesBalanceOnCheckCast(Player* druid, SpellInfo const* spellInfo);
     void HandleClassAuraDruidNaturesBalanceOnSpellCast(Player* druid, SpellInfo const* spellInfo);
     void ApplyClassAuraPeriodicTickMods(Unit* target, Unit* attacker, uint32& amount, SpellInfo const* spellInfo);
-    bool TryTransferDebuffToNecromancerPet(Player* player, Aura* aura);
+    Unit* GetClassAuraNecromancerShadowExchangePet(Player* player, bool& isOutOfRange);
+    void TransferClassAuraNecromancerDebuffsToPet(Player* player, Unit* pet);
+    void DoClassAuraNecromancerShadowExchange(Player* player);
     void ApplyClassAuraCastAdjustmentsOnCheckCast(Player* player, Spell* spell, bool strict);
     void FinishClassAuraCastAdjustmentsOnPrepare(Player* player, Spell* spell);
     void HandleClassAuraSpellCastCancel(Player* player, Spell* spell);

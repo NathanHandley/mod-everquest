@@ -55,7 +55,8 @@ static const char* EQ_CLASSAURA_SPELL_TYPE_NAMES[EQ_CLASSAURA_SPELL_TYPE_COUNT] 
     "CastSpeedHelper",
     "DruidNaturesBalanceFire", "WarriorUnrelentingAssault", "WarriorRiposte", "BardVigor", "MonkChiSurge", "PaladinDeflection", "RogueLuckyStrike", "RogueLuckyStrikeHelper",
     "DruidNaturesBalanceCold", "DruidNaturesBalanceNature", "DruidEntangleStrike", "ShamanWarspiritVigor",
-    "ShadowKnightBloodDebt", "ShadowKnightBloodDebtCharge", "ShadowKnightBloodDebtHeal"
+    "ShadowKnightBloodDebt", "ShadowKnightBloodDebtCharge", "ShadowKnightBloodDebtHeal",
+    "NecromancerShadowExchange"
 };
 
 struct EverQuestClassAuraToggle
@@ -1052,53 +1053,123 @@ void EverQuestMod::ApplyClassAuraPeriodicTickMods(Unit* target, Unit* attacker, 
     }
 }
 
-bool EverQuestMod::TryTransferDebuffToNecromancerPet(Player* player, Aura* aura)
+// Necromancer "Shadow Exchange": the pet that can be traded places with, which has to be alive, on the same map, and close enough to reach
+Unit* EverQuestMod::GetClassAuraNecromancerShadowExchangePet(Player* player, bool& isOutOfRange)
 {
-    if (IsClassAuraSystemEnabled() == false)
-        return false;
-    if (player == nullptr || aura == nullptr)
-        return false;
+    isOutOfRange = false;
+    if (IsClassAuraSystemEnabled() == false || player == nullptr)
+        return nullptr;
     if (PlayerHasClassAura(player, EQ_CLASSAURA_SPELL_NECROMANCER_AURA) == false)
-        return false;
-    SpellInfo const* spellInfo = aura->GetSpellInfo();
-    if (spellInfo == nullptr || spellInfo->IsPositive() == true || spellInfo->IsPassive() == true || spellInfo->HasAreaAuraEffect() == true)
-        return false;
-    if (aura->IsPermanent() == true || IsClassAuraSpell(aura->GetId()) == true)
-        return false;
-
-    // An illusion's look is only cosmetic, and it lands just ahead of its spell's own effect aura, so passing it along would spend the cooldown and leave the real debuff behind
-    if (GetSpellDataForSpellID(aura->GetId()).IllusionFormEQRaceID != 0)
-        return false;
-
-    // Control effects that would make no sense on a pet, and anything the necromancer put on themself
-    if (spellInfo->HasAura(SPELL_AURA_MOD_CHARM) == true || spellInfo->HasAura(SPELL_AURA_MOD_POSSESS) == true || spellInfo->HasAura(SPELL_AURA_AOE_CHARM) == true
-        || spellInfo->HasAura(SPELL_AURA_MOD_POSSESS_PET) == true)
-        return false;
-    if (aura->GetCasterGUID().IsEmpty() == true || aura->GetCasterGUID() == player->GetGUID())
-        return false;
-    Unit* caster = aura->GetCaster();
-    if (caster == nullptr || caster->IsFriendlyTo(player) == true)
-        return false;
-    EverQuestPlayerClassAuraState* state = GetClassAuraStateForPlayer(player);
-    uint32 nowMS = GameTime::GetGameTimeMS().count();
-    if (nowMS < state->NextDebuffTransferAllowedMS)
-        return false;
+        return nullptr;
     Unit* pet = GetActiveClassAuraPetForPlayer(player);
-    if (pet == nullptr || pet->FindMap() != player->FindMap())
-        return false;
 
-    // A pet that is immune gets no copy, and then the necromancer keeps the effect and the cooldown is not spent
-    Aura* petAura = caster->AddAura(spellInfo, MAX_EFFECT_MASK, pet);
-    if (petAura == nullptr || petAura->IsRemoved() == true)
-        return false;
-    petAura->SetMaxDuration(aura->GetMaxDuration());
-    petAura->SetDuration(aura->GetDuration());
-    if (aura->GetStackAmount() > 1)
-        petAura->SetStackAmount(aura->GetStackAmount());
-    petAura->SetNeedClientUpdateForTargets();
-    state->NextDebuffTransferAllowedMS = nowMS + ConfigSystemClassAuraNecromancerDebuffTransferCooldownInMS;
-    player->RemoveAura(aura);
-    return true;
+    // A near teleport only ever works inside one map
+    if (pet == nullptr || pet->FindMap() != player->FindMap())
+        return nullptr;
+
+    // A pet left across the zone should not turn this into a free escape
+    if (ConfigSystemClassAuraNecromancerShadowExchangeMaxDistanceInYards > 0
+        && player->IsWithinDist3d(pet, (float)ConfigSystemClassAuraNecromancerShadowExchangeMaxDistanceInYards) == false)
+    {
+        isOutOfRange = true;
+        return nullptr;
+    }
+    return pet;
+}
+
+// Every harmful effect an enemy put on the necromancer moves onto the pet, keeping whatever duration and stacks were left
+void EverQuestMod::TransferClassAuraNecromancerDebuffsToPet(Player* player, Unit* pet)
+{
+    if (player == nullptr || pet == nullptr)
+        return;
+
+    // What to move is gathered first, since applying and removing auras changes the list being walked
+    vector<uint32> auraSpellIDs;
+    vector<ObjectGuid> auraCasterGUIDs;
+    Unit::AuraApplicationMap const& auraApplications = player->GetAppliedAuras();
+    for (Unit::AuraApplicationMap::const_iterator itr = auraApplications.begin(); itr != auraApplications.end(); ++itr)
+    {
+        if (itr->second == nullptr)
+            continue;
+        Aura* aura = itr->second->GetBase();
+        if (aura == nullptr)
+            continue;
+        SpellInfo const* spellInfo = aura->GetSpellInfo();
+        if (spellInfo == nullptr || spellInfo->IsPositive() == true || spellInfo->IsPassive() == true || spellInfo->HasAreaAuraEffect() == true)
+            continue;
+        if (aura->IsPermanent() == true || IsClassAuraSpell(aura->GetId()) == true)
+            continue;
+
+        // An illusion's look is only cosmetic, and the effect it came with rides its own aura
+        if (GetSpellDataForSpellID(aura->GetId()).IllusionFormEQRaceID != 0)
+            continue;
+
+        // Control effects that would make no sense on a pet, and anything the necromancer put on themself
+        if (spellInfo->HasAura(SPELL_AURA_MOD_CHARM) == true || spellInfo->HasAura(SPELL_AURA_MOD_POSSESS) == true || spellInfo->HasAura(SPELL_AURA_AOE_CHARM) == true
+            || spellInfo->HasAura(SPELL_AURA_MOD_POSSESS_PET) == true)
+            continue;
+        if (aura->GetCasterGUID().IsEmpty() == true || aura->GetCasterGUID() == player->GetGUID())
+            continue;
+        auraSpellIDs.push_back(aura->GetId());
+        auraCasterGUIDs.push_back(aura->GetCasterGUID());
+    }
+
+    for (size_t i = 0; i < auraSpellIDs.size(); ++i)
+    {
+        // Looked up again rather than held as a pointer, since the copy made for the pet can remove auras from either side
+        Aura* aura = player->GetAura(auraSpellIDs[i], auraCasterGUIDs[i]);
+        if (aura == nullptr)
+            continue;
+        SpellInfo const* spellInfo = aura->GetSpellInfo();
+        if (spellInfo == nullptr)
+            continue;
+        Unit* caster = aura->GetCaster();
+        if (caster == nullptr || caster->IsFriendlyTo(player) == true)
+            continue;
+
+        // A pet that is immune gets no copy, and then the necromancer keeps the effect
+        Aura* petAura = caster->AddAura(spellInfo, MAX_EFFECT_MASK, pet);
+        if (petAura == nullptr || petAura->IsRemoved() == true)
+            continue;
+        petAura->SetMaxDuration(aura->GetMaxDuration());
+        petAura->SetDuration(aura->GetDuration());
+        if (aura->GetStackAmount() > 1)
+            petAura->SetStackAmount(aura->GetStackAmount());
+        petAura->SetNeedClientUpdateForTargets();
+        player->RemoveAura(aura);
+    }
+}
+
+void EverQuestMod::DoClassAuraNecromancerShadowExchange(Player* player)
+{
+    bool isOutOfRange = false;
+    Unit* pet = GetClassAuraNecromancerShadowExchangePet(player, isOutOfRange);
+    if (pet == nullptr)
+        return;
+
+    // Both positions are read before anything moves, since the first teleport changes what the second would have read
+    float playerX = player->GetPositionX();
+    float playerY = player->GetPositionY();
+    float playerZ = player->GetPositionZ();
+    float playerOrientation = player->GetOrientation();
+    float petX = pet->GetPositionX();
+    float petY = pet->GetPositionY();
+    float petZ = pet->GetPositionZ();
+    float petOrientation = pet->GetOrientation();
+
+    // The debuffs move while both are still known to be where they were, because a teleport can run scripted side effects that drop either unit
+    TransferClassAuraNecromancerDebuffsToPet(player, pet);
+
+    // Taking on the debuffs can kill the pet outright (a damage over time that ticks on apply is enough), so everything is proven again before anything moves.
+    // The debuffs staying moved with no swap is the right outcome there, since the pet did take them
+    bool isOutOfRangeAfterTransfer = false;
+    if (player->IsInWorld() == false || player->IsAlive() == false)
+        return;
+    if (GetClassAuraNecromancerShadowExchangePet(player, isOutOfRangeAfterTransfer) != pet)
+        return;
+
+    pet->NearTeleportTo(playerX, playerY, playerZ, playerOrientation);
+    player->NearTeleportTo(petX, petY, petZ, petOrientation);
 }
 
 static SpellInfo const* FindClassAuraDirectHealSpellInfo(SpellInfo const* spellInfo, uint8 depth)
