@@ -4337,6 +4337,26 @@ void EverQuestMod::LoadSpellData()
     }
 }
 
+void EverQuestMod::LoadBardSongEffectSpellIDs()
+{
+    // A song's effects can be spread across its tick spell and the split blocks that tick chains into, and only spell_linked_spell knows about those blocks
+    BardSongEffectSpellIDs.clear();
+    for (uint32 tickSpellID : BardSongTickSpellIDs)
+    {
+        BardSongEffectSpellIDs.insert(tickSpellID);
+        int32 linkKeys[2] = { (int32)tickSpellID + SPELL_LINK_AURA, (int32)tickSpellID + SPELL_LINK_HIT };
+        for (int32 linkKey : linkKeys)
+        {
+            std::vector<int32> const* linkedSpellIDs = sSpellMgr->GetSpellLinked(linkKey);
+            if (linkedSpellIDs == nullptr)
+                continue;
+            for (int32 linkedSpellID : *linkedSpellIDs)
+                if (linkedSpellID > 0)
+                    BardSongEffectSpellIDs.insert((uint32)linkedSpellID);
+        }
+    }
+}
+
 const EverQuestSpell& EverQuestMod::GetSpellDataForSpellID(uint32 spellID)
 {
     if (SpellDataBySpellID.find(spellID) != SpellDataBySpellID.end())
@@ -5940,6 +5960,7 @@ void EverQuestMod::TrackAttackPowerAurasAndEnforceHighestOnlyOnAuraApply(Unit* u
     // Capture the natural (unclamped) amounts.  Buff refreshes reset effect amounts to their recalculated natural values before this/ hook fires, so the current amount is the natural amount
     // except for an effect that was already clamped to zero when the character was saved, which comes back clamped and has to be recovered from the spell data
     Unit* caster = aura->GetCaster();
+    bool isBardSong = BardSongEffectSpellIDs.find(spellID) != BardSongEffectSpellIDs.end();
     EverQuestUnitAttackPowerAuraEffect newAttackPowerAuraEffects[MAX_SPELL_EFFECTS];
     uint8 newAttackPowerAuraEffectCount = 0;
     for (uint8 i = 0; i < MAX_SPELL_EFFECTS; ++i)
@@ -5965,6 +5986,7 @@ void EverQuestMod::TrackAttackPowerAurasAndEnforceHighestOnlyOnAuraApply(Unit* u
         newAttackPowerAuraEffects[newAttackPowerAuraEffectCount].EffectIndex = i;
         newAttackPowerAuraEffects[newAttackPowerAuraEffectCount].AuraType = (uint32)auraType;
         newAttackPowerAuraEffects[newAttackPowerAuraEffectCount].NaturalAmount = naturalAmount;
+        newAttackPowerAuraEffects[newAttackPowerAuraEffectCount].IsBardSong = isBardSong;
         ++newAttackPowerAuraEffectCount;
     }
     if (newAttackPowerAuraEffectCount == 0)
@@ -6051,12 +6073,12 @@ void EverQuestMod::UntrackAttackPowerAurasAndEnforceHighestOnlyOnAuraRemove(Unit
 
 void EverQuestMod::EnforceHighestOnlyAttackPowerOnUnit(Unit* unit, vector<EverQuestUnitAttackPowerAuraEffect>& trackedAttackPowerAuraEffects)
 {
-    // Raw attack power gains never add together in EverQuest, and neither do raw attack power reductions, so only the strongest of each applies
+    // Highest attack power gains fight for the slot, and Bard songs have their own slot
     uint32 auraTypesToProcess[2] = { SPELL_AURA_MOD_ATTACK_POWER, SPELL_AURA_MOD_RANGED_ATTACK_POWER };
     for (uint32 auraType : auraTypesToProcess)
     {
-        int gainWinnerIndex = -1;
-        int reductionWinnerIndex = -1;
+        int gainWinnerIndexes[2] = { -1, -1 };      // Indexed by IsBardSong
+        int reductionWinnerIndex = -1;              // Songs share the one reduction pool with everything else
         for (size_t i = 0; i < trackedAttackPowerAuraEffects.size(); ++i)
         {
             EverQuestUnitAttackPowerAuraEffect& trackedAttackPowerAuraEffect = trackedAttackPowerAuraEffects[i];
@@ -6064,10 +6086,11 @@ void EverQuestMod::EnforceHighestOnlyAttackPowerOnUnit(Unit* unit, vector<EverQu
                 continue;
             if (unit->GetAuraEffect(trackedAttackPowerAuraEffect.SpellID, trackedAttackPowerAuraEffect.EffectIndex, trackedAttackPowerAuraEffect.CasterGUID) == nullptr)
                 continue;
+            uint8 pool = trackedAttackPowerAuraEffect.IsBardSong == true ? 1 : 0;
             if (trackedAttackPowerAuraEffect.NaturalAmount > 0)
             {
-                if (gainWinnerIndex == -1 || trackedAttackPowerAuraEffect.NaturalAmount > trackedAttackPowerAuraEffects[gainWinnerIndex].NaturalAmount)
-                    gainWinnerIndex = (int)i;
+                if (gainWinnerIndexes[pool] == -1 || trackedAttackPowerAuraEffect.NaturalAmount > trackedAttackPowerAuraEffects[gainWinnerIndexes[pool]].NaturalAmount)
+                    gainWinnerIndexes[pool] = (int)i;
             }
             else if (trackedAttackPowerAuraEffect.NaturalAmount < 0)
             {
@@ -6084,7 +6107,8 @@ void EverQuestMod::EnforceHighestOnlyAttackPowerOnUnit(Unit* unit, vector<EverQu
             AuraEffect* auraEffect = unit->GetAuraEffect(trackedAttackPowerAuraEffect.SpellID, trackedAttackPowerAuraEffect.EffectIndex, trackedAttackPowerAuraEffect.CasterGUID);
             if (auraEffect == nullptr)
                 continue;
-            bool isWinner = gainWinnerIndex == (int)i || reductionWinnerIndex == (int)i;
+            uint8 pool = trackedAttackPowerAuraEffect.IsBardSong == true ? 1 : 0;
+            bool isWinner = gainWinnerIndexes[pool] == (int)i || reductionWinnerIndex == (int)i;
             int32 newAmount = isWinner == true ? trackedAttackPowerAuraEffect.NaturalAmount : 0;
             if (auraEffect->GetAmount() != newAmount)
                 auraEffect->ChangeAmount(newAmount);
@@ -17321,6 +17345,7 @@ bool EverQuestMod::PerformPlayerDelete(ObjectGuid guid)
     transaction->Append("DELETE FROM mod_everquest_character_class_glyphs WHERE guid = {}", playerGUID);
     transaction->Append("DELETE FROM mod_everquest_character_class_inventory WHERE guid = {}", playerGUID);
     transaction->Append("DELETE FROM mod_everquest_character_settings WHERE guid = {}", playerGUID);
+    transaction->Append("DELETE FROM mod_everquest_character_item_enchant_memory WHERE guid = {}", playerGUID);
     transaction->Append("DELETE FROM mod_everquest_character_class_queststatus WHERE guid = {}", playerGUID);
     transaction->Append("DELETE FROM mod_everquest_character_class_queststatus_rewarded WHERE guid = {}", playerGUID);
     transaction->Append("DELETE FROM character_pet WHERE owner = 0 AND eq_owner = {}", playerGUID);

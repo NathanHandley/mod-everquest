@@ -952,6 +952,23 @@ public:
     bool Enabled = true;
 };
 
+class EverQuestRememberedItemEnchant
+{
+public:
+    uint32 ItemEntry = 0;
+    uint32 EnchantID = 0;
+    uint32 Count = 0;
+};
+
+// Permanent enchantments owed back to item versions that a slotshift or transform destroyed, mirroring mod_everquest_character_item_enchant_memory.
+// Lives on the player rather than in a mod wide container, so only the thread that owns this player ever touches it and no lock is needed
+class EverQuestPlayerItemEnchantMemoryState : public DataMap::Base
+{
+public:
+    bool Loaded = false;
+    std::vector<EverQuestRememberedItemEnchant> RememberedEnchants;
+};
+
 class EverQuestPlayerClassAuraState : public DataMap::Base
 {
 public:
@@ -1452,6 +1469,7 @@ struct EverQuestUnitAttackPowerAuraEffect
     uint8 EffectIndex;
     uint32 AuraType;
     int32 NaturalAmount;    // The amount the effect would apply if it were the strongest one of its direction on the unit
+    bool IsBardSong;        // Bard song effects only compete with other bard song effects
 };
 
 class EverQuestClassMap
@@ -1723,6 +1741,7 @@ public:
     unordered_set<uint32> EQWeaponPoisonProcSpellIDs;
     unordered_map<uint32, EverQuestSpell> SpellDataBySpellID;
     unordered_set<uint32> BardSongTickSpellIDs;
+    unordered_set<uint32> BardSongEffectSpellIDs;
     unordered_set<uint32> MovementCastSnareSpellIDs;
     unordered_map<uint64, uint32> IllusionDisplayIDsByLookupKey;
     unordered_map<uint64, uint32> IllusionFaceDisplayIDsByLookupKey;
@@ -1902,6 +1921,7 @@ public:
     void RegisterEQWeaponPoisonProcSpells(SpellInfo* spellInfo);
     bool IsSpellAnEQWeaponPoisonProc(uint32 spellID);
     void LoadSpellData();
+    void LoadBardSongEffectSpellIDs();
     const EverQuestSpell& GetSpellDataForSpellID(uint32 spellID);
     void LoadSpellMovementCastSnareData();
     bool IsMovementCastSpell(uint32 spellID);

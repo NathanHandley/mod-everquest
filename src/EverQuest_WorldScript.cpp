@@ -131,6 +131,9 @@ public:
         EverQuest->ResolveCreaturePresenceGroupSpawnPoints();
         EverQuest->ResolveVulakRequiredDragonSpawnPoints();
 
+        // Song split blocks are chained through spell_linked_spell, which the core loads well after the module config does
+        EverQuest->LoadBardSongEffectSpellIDs();
+
         // Saved pet display IDs can become wrong when converted content updates invalide previous display IDs, which crashes the core on pet summon
         EverQuest->FixInvalidCharacterPetModelIDs();
 
