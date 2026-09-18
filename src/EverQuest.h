@@ -2046,6 +2046,7 @@ public:
     uint8 GetPvPEQCharmImmuneEffectMaskForTarget(Spell* spell, Unit* target);
     bool IsPvPEQCharmAuraApplication(Unit* target, Aura* aura);
     uint64 GetAuraEffectTrackingKeyForUnit(Unit* unit);
+    AuraEffect* GetTrackedAuraEffectOnUnit(Unit* unit, uint32 spellID, uint8 effectIndex, ObjectGuid casterGUID);
     void TrackEQHasteAurasAndEnforceCapOnAuraApply(Unit* unit, Aura* aura);
     void UntrackEQHasteAurasAndEnforceCapOnAuraRemove(Unit* unit, Aura* aura);
     void EnforceEQHastePercentCapOnUnit(Unit* unit, vector<EverQuestUnitHasteAuraEffect>& trackedHasteAuraEffects);

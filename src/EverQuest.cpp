@@ -5845,6 +5845,18 @@ uint64 EverQuestMod::GetAuraEffectTrackingKeyForUnit(Unit* unit)
     return GetMapInstanceKey(unit->GetMap());
 }
 
+AuraEffect* EverQuestMod::GetTrackedAuraEffectOnUnit(Unit* unit, uint32 spellID, uint8 effectIndex, ObjectGuid casterGUID)
+{
+    AuraApplication* auraApplication = unit->GetAuraApplication(spellID, casterGUID);
+    if (auraApplication == nullptr)
+        return nullptr;
+
+    // An effect the unit was immune to never becomes part of the application
+    if ((auraApplication->GetEffectsToApply() & (1 << effectIndex)) == 0)
+        return nullptr;
+    return auraApplication->GetBase()->GetEffect(effectIndex);
+}
+
 void EverQuestMod::TrackEQHasteAurasAndEnforceCapOnAuraApply(Unit* unit, Aura* aura)
 {
     if (ConfigSpellHasteCapEnabled == false)
@@ -5983,10 +5995,9 @@ void EverQuestMod::EnforceEQHastePercentCapOnUnit(Unit* unit, vector<EverQuestUn
     uint8 unitLevel = unit->GetLevel();
 
     // EQ haste never stacks within a category (worn/item, spell/song/clicky, v2) - only the strongest effect of each category applies and
-    // the categories then add together additively, matching TAKP Mob::GetHaste.  WoW stacks haste auras multiplicatively, so walk the effects
-    // in apply order and clamp each applied amount such that the combined multiplier equals what the capped additive total of the category
-    // winners would give.  Losing effects stay on the unit as visible buffs but get clamped to zero, and get restored if their category winner
-    // is removed.  Melee and ranged process independently
+    // the categories then add together additively, matching TAKP Mob::GetHaste.  WoW stacks haste auras multiplicatively, so the capped additive
+    // total is handed to a single carrier effect and every other tracked effect is clamped to zero.  Losing and zeroed effects stay on the unit as
+    // visible buffs and go back into the running the moment the enforcement runs again.  Melee and ranged process independently
     uint32 auraTypesToProcess[2] = { SPELL_AURA_MOD_MELEE_HASTE, SPELL_AURA_MOD_RANGED_HASTE };
     for (uint32 auraType : auraTypesToProcess)
     {
@@ -5997,7 +6008,7 @@ void EverQuestMod::EnforceEQHastePercentCapOnUnit(Unit* unit, vector<EverQuestUn
             EverQuestUnitHasteAuraEffect& trackedHasteAuraEffect = trackedHasteAuraEffects[i];
             if (trackedHasteAuraEffect.AuraType != auraType)
                 continue;
-            if (unit->GetAuraEffect(trackedHasteAuraEffect.SpellID, trackedHasteAuraEffect.EffectIndex, trackedHasteAuraEffect.CasterGUID) == nullptr)
+            if (GetTrackedAuraEffectOnUnit(unit, trackedHasteAuraEffect.SpellID, trackedHasteAuraEffect.EffectIndex, trackedHasteAuraEffect.CasterGUID) == nullptr)
                 continue;
             uint32 hasteType = trackedHasteAuraEffect.HasteType;
             if (hasteType < EQ_HASTE_TYPE_WORNITEM || hasteType > EQ_HASTE_TYPE_SPELL_V2)
@@ -6007,36 +6018,55 @@ void EverQuestMod::EnforceEQHastePercentCapOnUnit(Unit* unit, vector<EverQuestUn
                 winnerIndexByHasteType[hasteType] = (int)i;
         }
 
-        // In TAKP worn haste is capped at 10 until level 26, v2 haste only works at level 50+ and adds at most 10
+        // In TAKP worn haste is capped at 10 until level 26, and v2 haste only works at level 50+ and adds at most 10.  Both are ceilings out of the TAKP level rules, the same
+        // as the total caps in GetEQHasteCapPercentForUnit, so they take the same EverQuest.Spells.HasteCapMod scaling and stay in proportion with the halved total cap
+        float categoryCapMod = ConfigSpellHasteCapMod < 0.0f ? 0.0f : ConfigSpellHasteCapMod;
+        float wornBelowLevel26CapPercent = 10.0f * categoryCapMod;
+        float spellV2MaxContributionPercent = 10.0f * categoryCapMod;
+
         float contributionsByHasteType[4] = { 0, 0, 0, 0 };
         if (winnerIndexByHasteType[1] >= 0)
         {
             float wornAmount = (float)trackedHasteAuraEffects[winnerIndexByHasteType[1]].NaturalAmount;
-            contributionsByHasteType[1] = unitLevel > 25 ? wornAmount : std::min(wornAmount, 10.0f);
+            contributionsByHasteType[1] = unitLevel > 25 ? wornAmount : std::min(wornAmount, wornBelowLevel26CapPercent);
         }
         if (winnerIndexByHasteType[2] >= 0)
             contributionsByHasteType[2] = (float)trackedHasteAuraEffects[winnerIndexByHasteType[2]].NaturalAmount;
         if (winnerIndexByHasteType[3] >= 0 && unitLevel > 49)
-            contributionsByHasteType[3] = std::min((float)trackedHasteAuraEffects[winnerIndexByHasteType[3]].NaturalAmount, 10.0f);
+            contributionsByHasteType[3] = std::min((float)trackedHasteAuraEffects[winnerIndexByHasteType[3]].NaturalAmount, spellV2MaxContributionPercent);
 
-        float runningTotalPercent = 0;
-        float previousCappedTotalPercent = 0;
+        float totalPercent = contributionsByHasteType[EQ_HASTE_TYPE_WORNITEM] + contributionsByHasteType[EQ_HASTE_TYPE_SPELL_V1] + contributionsByHasteType[EQ_HASTE_TYPE_SPELL_V2];
+        float cappedTotalPercent = std::min(totalPercent, capPercent);
+        int32 cappedTotalAmount = (int32)std::lround(cappedTotalPercent);
+
+        // A cap that lands on a fraction (the level rules scaled by EverQuest.Spells.HasteCapMod) is rounded down to it rather than past it
+        if ((float)cappedTotalAmount > capPercent)
+            cappedTotalAmount = (int32)std::floor(capPercent);
+
+        // The whole total rides on the strongest category winner and everything else is zeroed, because the unit multiplies its haste effects together and each
+        // applied amount is a whole percent.  Splitting the total across the effects has to round every factor, and the rounded factors multiply out short of the
+        // target (15% and 30% give 1.495, not the 1.50 a 50% cap calls for), so the ceiling could never actually be reached.  One carrier makes the applied total
+        // exact at any cap.  Nothing player facing reads these amounts - the buff tooltip is the spell's own description text - and losing the carrier's aura runs
+        // the enforcement again off the aura remove hook, which hands the total to whatever is left
+        bool carrierAssigned = false;
         for (size_t i = 0; i < trackedHasteAuraEffects.size(); ++i)
         {
             EverQuestUnitHasteAuraEffect& trackedHasteAuraEffect = trackedHasteAuraEffects[i];
             if (trackedHasteAuraEffect.AuraType != auraType)
                 continue;
-            AuraEffect* auraEffect = unit->GetAuraEffect(trackedHasteAuraEffect.SpellID, trackedHasteAuraEffect.EffectIndex, trackedHasteAuraEffect.CasterGUID);
+            AuraEffect* auraEffect = GetTrackedAuraEffectOnUnit(unit, trackedHasteAuraEffect.SpellID, trackedHasteAuraEffect.EffectIndex, trackedHasteAuraEffect.CasterGUID);
             if (auraEffect == nullptr)
                 continue;
             uint32 hasteType = trackedHasteAuraEffect.HasteType;
             if (hasteType < EQ_HASTE_TYPE_WORNITEM || hasteType > EQ_HASTE_TYPE_SPELL_V2)
                 hasteType = EQ_HASTE_TYPE_SPELL_V1;
-            if (winnerIndexByHasteType[hasteType] == (int)i)
-                runningTotalPercent += contributionsByHasteType[hasteType];
-            float cappedTotalPercent = std::min(runningTotalPercent, capPercent);
-            int32 newAmount = (int32)std::lround(100.0f * ((100.0f + cappedTotalPercent) / (100.0f + previousCappedTotalPercent)) - 100.0f);
-            previousCappedTotalPercent = cappedTotalPercent;
+
+            int32 newAmount = 0;
+            if (carrierAssigned == false && winnerIndexByHasteType[hasteType] == (int)i)
+            {
+                newAmount = cappedTotalAmount;
+                carrierAssigned = true;
+            }
             if (auraEffect->GetAmount() != newAmount)
                 auraEffect->ChangeAmount(newAmount);
         }
@@ -6244,7 +6274,7 @@ void EverQuestMod::EnforceHighestOnlyAttackPowerOnUnit(Unit* unit, vector<EverQu
             EverQuestUnitAttackPowerAuraEffect& trackedAttackPowerAuraEffect = trackedAttackPowerAuraEffects[i];
             if (trackedAttackPowerAuraEffect.AuraType != auraType)
                 continue;
-            if (unit->GetAuraEffect(trackedAttackPowerAuraEffect.SpellID, trackedAttackPowerAuraEffect.EffectIndex, trackedAttackPowerAuraEffect.CasterGUID) == nullptr)
+            if (GetTrackedAuraEffectOnUnit(unit, trackedAttackPowerAuraEffect.SpellID, trackedAttackPowerAuraEffect.EffectIndex, trackedAttackPowerAuraEffect.CasterGUID) == nullptr)
                 continue;
             uint8 pool = trackedAttackPowerAuraEffect.IsBardSong == true ? 1 : 0;
             if (trackedAttackPowerAuraEffect.NaturalAmount > 0)
@@ -6264,7 +6294,7 @@ void EverQuestMod::EnforceHighestOnlyAttackPowerOnUnit(Unit* unit, vector<EverQu
             EverQuestUnitAttackPowerAuraEffect& trackedAttackPowerAuraEffect = trackedAttackPowerAuraEffects[i];
             if (trackedAttackPowerAuraEffect.AuraType != auraType)
                 continue;
-            AuraEffect* auraEffect = unit->GetAuraEffect(trackedAttackPowerAuraEffect.SpellID, trackedAttackPowerAuraEffect.EffectIndex, trackedAttackPowerAuraEffect.CasterGUID);
+            AuraEffect* auraEffect = GetTrackedAuraEffectOnUnit(unit, trackedAttackPowerAuraEffect.SpellID, trackedAttackPowerAuraEffect.EffectIndex, trackedAttackPowerAuraEffect.CasterGUID);
             if (auraEffect == nullptr)
                 continue;
             uint8 pool = trackedAttackPowerAuraEffect.IsBardSong == true ? 1 : 0;
