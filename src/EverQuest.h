@@ -37,6 +37,7 @@
 #include <mutex>
 #include <set>
 #include <unordered_set>
+#include <vector>
 #include <limits>
 
 using namespace std;
@@ -53,7 +54,7 @@ class ByteBuffer;
 struct AreaTrigger;
 struct BuildValuesCachePosPointers;
 
-#define EQ_MOD_VERSION                              110
+#define EQ_MOD_VERSION                              112
 
 #define EQ_MOVEMENT_CAST_SNARE_DURATION_BUFFER_IN_MS 2000 // How much longer than the remaining cast time the casting slow is given, so a pushed-back cast keeps it
 
@@ -975,7 +976,8 @@ enum EverQuestClassAuraSpellType : uint32
     EQ_CLASSAURA_SPELL_MAGICIAN_DETONATE_SUMMONED_BLAST = 66,
     EQ_CLASSAURA_SPELL_CLERIC_RADIANCE = 67,
     EQ_CLASSAURA_SPELL_CLERIC_RADIANCE_FREE_MANA = 68,
-    EQ_CLASSAURA_SPELL_TYPE_COUNT = 69
+    EQ_CLASSAURA_SPELL_WIZARD_INTENSIFIED_SKYFALL = 69,
+    EQ_CLASSAURA_SPELL_TYPE_COUNT = 70
 };
 
 class EverQuestPlayerMoveWhileCastingState : public DataMap::Base
@@ -1001,6 +1003,15 @@ public:
     std::vector<EverQuestRememberedItemEnchant> RememberedEnchants;
 };
 
+// A rain's later waves are a spell of their own that the rain's cloud casts every few seconds, long after the cast itself was priced
+struct EverQuestNaturesBalanceRainPayout
+{
+    uint32 WaveSpellID = 0;
+    uint32 Percent = 0;
+    uint64 CastAtMS = 0;
+    uint32 PayoutWindowInMS = 0;
+};
+
 class EverQuestPlayerClassAuraState : public DataMap::Base
 {
 public:
@@ -1013,20 +1024,20 @@ public:
     bool PendingCadenceConsume = false;
     bool PendingEdgeConsume = false;
     bool PendingChiSurgeConsume = false;
-    uint32 ChiSurgeReadyAtMS = 0;
-    uint32 LuckyStrikeReadyAtMS = 0;
-    uint32 NextUnrelentingAssaultStackAtMS = 0;
+    uint64 ChiSurgeReadyAtMS = 0;
+    uint64 LuckyStrikeReadyAtMS = 0;
+    uint64 NextUnrelentingAssaultStackAtMS = 0;
     ObjectGuid PendingRiposteTargetGUID;
     uint32 NaturesBalancePendingSpellID = 0;
     uint32 NaturesBalancePendingPercent = 0;
-    uint32 NaturesBalancePendingAtMS = 0;
+    uint64 NaturesBalancePendingAtMS = 0;
     uint32 NaturesBalancePendingGrantType = EQ_CLASSAURA_SPELL_TYPE_COUNT;
+    std::vector<EverQuestNaturesBalanceRainPayout> NaturesBalanceRainPayouts; // Rains still falling, whose later waves are paid what their cast was priced at
     uint64 BloodDebtDamageTaken = 0;            // Raw damage taken since the last spend or timeout (the stored percent and cap are applied when read)
-    uint32 BloodDebtLastDamageTakenAtMS = 0;
+    uint64 BloodDebtLastDamageTakenAtMS = 0;
     bool BloodDebtFullVisualPlayed = false;
-    ObjectGuid DetonatedPetGUID;                // A pet the magician exploded, lingering so the nova plays out on it before it is unsummoned
-    uint32 DetonatedPetNumber = 0;
-    uint32 DetonatedPetUnsummonAtMS = 0;
+    bool BloodDebtChargeTimerSynced = false;    // The charge buff's timer was last set from the hit at BloodDebtChargeTimerHitAtMS
+    uint64 BloodDebtChargeTimerHitAtMS = 0;
 };
 
 class EverQuestPlayerTrackingState : public DataMap::Base
@@ -1540,6 +1551,8 @@ public:
     float ConfigWorldScale;
     uint32 ConfigBardMaxConcurrentSongs;
     bool ConfigSpellBuffLevelRestrictionsEnabled;
+    int32 ConfigRainTargetHitCap = 4; 
+    int32 ConfigRainTargetHitCapNoDirectDamage = 5;
     uint32 ConfigSystemMapDBCIDMin;
     uint32 ConfigSystemMapDBCIDMax;
     uint32 ConfigSystemSpellDBCIDMin;
@@ -1591,7 +1604,7 @@ public:
     uint32 ConfigSystemClassAuraWizardFocusMovementIntervalInMS = 1000;
     uint32 ConfigSystemClassAuraWizardFocusStillIntervalInMS = 2000;
     uint32 ConfigSystemClassAuraNecromancerShadowExchangeMaxDistanceInYards = 100;
-    uint32 ConfigSystemClassAuraMagicianDetonateSummonedUnsummonDelayInMS = 1000;
+    uint32 ConfigSystemClassAuraMagicianDetonateSummonedPetHealthCostPercent = 50;
     uint32 ConfigSystemClassAuraNecromancerMarkDirectDamagePercentPerStack = 1;
     uint32 ConfigSystemClassAuraNecromancerMarkDotDamagePercentPerStack = 2;
     uint32 ConfigSystemClassAuraClericCadenceReductionPercent = 33;
@@ -1875,6 +1888,7 @@ public:
     ObjectGuid::LowType RollCycleSpawnCreatureGUID(const EverQuestCycleSpawnGroup& cycleSpawnGroup, uint32 excludedSpawnPointID, Map* map);
     void ProcessCycleSpawnForCreatureDeath(Creature* deadCreature);
     void ApplyRaidBossRespawnVariance(Creature* deadCreature);
+    void BindRaidInstanceOnCreatureKill(Creature* deadCreature, Unit* killer);
     void UpdateCycleSpawns(Map* map, uint32 diff);
     void LoadCreatureKillSpawnData();
     void ResolveKillSpawnRespawnTargetSpawnPoints();
@@ -2086,7 +2100,6 @@ public:
     void UpdateClericUnbrokenRadianceForPlayer(Player* player);
     void HandleClassAuraShadowKnightBloodDebtOnDamage(Unit* attacker, Unit* victim, uint32 damage);
     void UpdateShadowKnightBloodDebtForPlayer(Player* player);
-    void UpdateMagicianDetonatedPetForPlayer(Player* player);
     uint32 GetClassAuraShadowKnightBloodDebtAmount(Player* player);
     uint32 SpendClassAuraShadowKnightBloodDebt(Player* player);
     void SpendClassAuraRogueLuckyStrike(Player* player);
@@ -2097,6 +2110,7 @@ public:
     void RefreshMagicianPetAuraForPlayer(Player* player);
     void ApplyMagicianPetAuraToPet(Pet* pet);
     void HandleClassAuraPetStrike(Unit* attacker, Unit* victim);
+    void HandleClassAuraRangerDirectDamage(Unit* attacker, Unit* victim, SpellInfo const* spellInfo);
     void HandleClassAuraShamanStrike(Unit* attacker, Unit* victim);
     void ApplyClassAuraMeleeDamageMods(Unit* attacker, Unit* victim, uint32& damage);
     void ApplyClassAuraDirectSpellDamageMods(Unit* target, Unit* attacker, int32& damage, SpellInfo const* spellInfo);
@@ -2106,6 +2120,8 @@ public:
     void ApplyClassAuraClericUnbrokenRadianceDamageBonus(Unit* attacker, int32& damage);
     void ApplyClassAuraEntangleStrikeDamageMods(Unit* attacker, Unit* victim, int32& damage, bool isMeleeDamage, bool isPhysicalDamage);
     uint32 GetClassAuraDruidNaturesBalanceBonusPercent(Player* druid, uint32 castBalanceType);
+    void RecordClassAuraDruidNaturesBalanceRainPayout(EverQuestPlayerClassAuraState* state, SpellInfo const* rainSpellInfo, uint32 percent);
+    uint32 GetRainWaveSpellID(uint32 rainSpellID, uint32& cloudDurationInMS);
     void RemoveClassAuraDruidNaturesBalanceStacks(Player* druid, uint32 castBalanceType);
     void ApplyClassAuraDruidNaturesBalanceDamageBonus(Unit* attacker, int32& damage, SpellInfo const* spellInfo);
     void HandleClassAuraDruidNaturesBalanceOnCheckCast(Player* druid, SpellInfo const* spellInfo);

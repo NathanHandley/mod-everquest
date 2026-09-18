@@ -58,7 +58,8 @@ static const char* EQ_CLASSAURA_SPELL_TYPE_NAMES[EQ_CLASSAURA_SPELL_TYPE_COUNT] 
     "ShadowKnightBloodDebt", "ShadowKnightBloodDebtCharge", "ShadowKnightBloodDebtHeal",
     "NecromancerShadowExchange", "RangerCompoundInjuryMoving",
     "MagicianDetonateSummoned", "MagicianDetonateSummonedBlast",
-    "ClericRadiance", "ClericRadianceFreeMana"
+    "ClericRadiance", "ClericRadianceFreeMana",
+    "WizardIntensifiedSkyfall"
 };
 
 struct EverQuestClassAuraToggle
@@ -69,7 +70,8 @@ struct EverQuestClassAuraToggle
 static const EverQuestClassAuraToggle EQ_CLASSAURA_TOGGLES[] =
 {
     { EQ_CLASSAURA_SPELL_RANGER_ENDLESS_QUIVER, EQ_CLASSAURA_SPELL_RANGER_PASSIVE },
-    { EQ_CLASSAURA_SPELL_SHAMAN_WARSPIRIT, EQ_CLASSAURA_SPELL_SHAMAN_PASSIVE }
+    { EQ_CLASSAURA_SPELL_SHAMAN_WARSPIRIT, EQ_CLASSAURA_SPELL_SHAMAN_PASSIVE },
+    { EQ_CLASSAURA_SPELL_WIZARD_INTENSIFIED_SKYFALL, EQ_CLASSAURA_SPELL_WIZARD_PASSIVE }
 };
 static const size_t EQ_CLASSAURA_TOGGLE_COUNT = sizeof(EQ_CLASSAURA_TOGGLES) / sizeof(EQ_CLASSAURA_TOGGLES[0]);
 
@@ -225,8 +227,6 @@ void EverQuestMod::UpdateClassAurasForPlayer(Player* player, uint32 diffInMS)
     if (player == nullptr)
         return;
 
-    // Runs even with class auras switched off, so a pet left lingering after a detonation is never stranded
-    UpdateMagicianDetonatedPetForPlayer(player);
     if (IsClassAuraSystemEnabled() == false)
         return;
     EverQuestPlayerClassAuraState* state = GetClassAuraStateForPlayer(player);
@@ -341,7 +341,7 @@ void EverQuestMod::UpdateMonkChiSurgeForPlayer(Player* player)
         player->RemoveAurasDueToSpell(chiSurgeSpellID);
 }
 
-static void ExpireClassAuraShadowKnightBloodDebt(EverQuestPlayerClassAuraState* state, uint32 nowMS, uint32 storeDurationInMS)
+static void ExpireClassAuraShadowKnightBloodDebt(EverQuestPlayerClassAuraState* state, uint64 nowMS, uint32 storeDurationInMS)
 {
     // Everything stored is kept while hits keep landing, and lost all at once after the storing time passes with none
     if (state->BloodDebtDamageTaken != 0 && nowMS - state->BloodDebtLastDamageTakenAtMS >= storeDurationInMS)
@@ -361,7 +361,7 @@ void EverQuestMod::HandleClassAuraShadowKnightBloodDebtOnDamage(Unit* attacker, 
 
     // The raw damage is kept (the stored percent and the cap are applied when the charge is read)
     EverQuestPlayerClassAuraState* state = GetClassAuraStateForPlayer(player);
-    uint32 nowMS = GameTime::GetGameTimeMS().count();
+    uint64 nowMS = GameTime::GetGameTimeMS().count();
     ExpireClassAuraShadowKnightBloodDebt(state, nowMS, ConfigSystemClassAuraShadowKnightBloodDebtStoreDurationInMS);
     state->BloodDebtDamageTaken += damage;
     state->BloodDebtLastDamageTakenAtMS = nowMS;
@@ -372,7 +372,7 @@ uint32 EverQuestMod::GetClassAuraShadowKnightBloodDebtAmount(Player* player)
     if (player == nullptr)
         return 0;
     EverQuestPlayerClassAuraState* state = GetClassAuraStateForPlayer(player);
-    uint32 nowMS = GameTime::GetGameTimeMS().count();
+    uint64 nowMS = GameTime::GetGameTimeMS().count();
     ExpireClassAuraShadowKnightBloodDebt(state, nowMS, ConfigSystemClassAuraShadowKnightBloodDebtStoreDurationInMS);
 
     // The cap follows the current maximum health, so losing a stamina buff lowers what can be unleashed right away
@@ -402,9 +402,14 @@ void EverQuestMod::UpdateShadowKnightBloodDebtForPlayer(Player* player)
     if (GetClassAuraSpellID(EQ_CLASSAURA_SPELL_SHADOWKNIGHT_BLOOD_DEBT) == 0 || player->IsAlive() == false || PlayerHasClassAura(player, EQ_CLASSAURA_SPELL_SHADOWKNIGHT_AURA) == false)
         state->BloodDebtDamageTaken = 0;
     Aura* charge = chargeSpellID != 0 ? player->GetAura(chargeSpellID) : nullptr;
+
+    // The charge buff's timer is the storing time, so the buff running out with no hit since its timer was set means the pool is lost too (this keeps the two from ending a tick apart)
+    if (charge == nullptr && state->BloodDebtChargeTimerSynced == true && state->BloodDebtChargeTimerHitAtMS == state->BloodDebtLastDamageTakenAtMS)
+        state->BloodDebtDamageTaken = 0;
     if (state->BloodDebtDamageTaken == 0 && charge == nullptr)
     {
         state->BloodDebtFullVisualPlayed = false;
+        state->BloodDebtChargeTimerSynced = false;
         return;
     }
     uint32 amount = GetClassAuraShadowKnightBloodDebtAmount(player);
@@ -424,13 +429,29 @@ void EverQuestMod::UpdateShadowKnightBloodDebtForPlayer(Player* player)
         {
             if (charge != nullptr)
                 player->RemoveAurasDueToSpell(chargeSpellID);
+            state->BloodDebtChargeTimerSynced = false;
         }
         else
         {
             if (charge == nullptr)
+            {
                 charge = player->AddAura(chargeSpellID, player);
+                state->BloodDebtChargeTimerSynced = false;
+            }
             if (charge != nullptr && charge->GetStackAmount() != stacks)
                 charge->SetStackAmount((uint8)stacks);
+
+            // The buff counts down the time left before the pool is lost, restarting whenever a new hit lands
+            if (charge != nullptr && (state->BloodDebtChargeTimerSynced == false || state->BloodDebtChargeTimerHitAtMS != state->BloodDebtLastDamageTakenAtMS))
+            {
+                uint32 storeDurationInMS = ConfigSystemClassAuraShadowKnightBloodDebtStoreDurationInMS;
+                uint64 sinceLastHitInMS = (uint64)GameTime::GetGameTimeMS().count() - state->BloodDebtLastDamageTakenAtMS;
+                uint32 remainingInMS = sinceLastHitInMS < storeDurationInMS ? storeDurationInMS - (uint32)sinceLastHitInMS : 0;
+                charge->SetMaxDuration((int32)storeDurationInMS);
+                charge->SetDuration((int32)remainingInMS);
+                state->BloodDebtChargeTimerSynced = true;
+                state->BloodDebtChargeTimerHitAtMS = state->BloodDebtLastDamageTakenAtMS;
+            }
         }
     }
 
@@ -484,7 +505,7 @@ void EverQuestMod::UpdateWarriorClassAuraForPlayer(Player* player)
             player->RemoveAurasDueToSpell(assaultSpellID);
         return;
     }
-    uint32 nowMS = GameTime::GetGameTimeMS().count();
+    uint64 nowMS = GameTime::GetGameTimeMS().count();
     uint32 stackIntervalInMS = std::max<uint32>(1, ConfigSystemClassAuraWarriorUnrelentingAssaultStackIntervalInMS);
     if (state->NextUnrelentingAssaultStackAtMS == 0)
     {
@@ -748,9 +769,82 @@ void EverQuestMod::HandleClassAuraPetStrike(Unit* attacker, Unit* victim)
     uint32 markSpellID = GetClassAuraSpellID(EQ_CLASSAURA_SPELL_NECROMANCER_MARK);
     if (markSpellID != 0 && victim->IsAlive() == true && PlayerHasClassAura(owner, EQ_CLASSAURA_SPELL_NECROMANCER_AURA) == true && owner->IsValidAttackTarget(victim) == true)
         owner->CastSpell(victim, markSpellID, true);
+}
 
-    // A ranger's pet compounds the injury on its owner's behalf (the owner's own attacks come through the aura's proc instead)
-    ApplyClassAuraRangerCompoundInjury(owner, victim);
+static bool IsClassAuraDirectDamageSpell(SpellInfo const* spellInfo)
+{
+    for (uint8 i = 0; i < MAX_SPELL_EFFECTS; ++i)
+    {
+        switch (spellInfo->Effects[i].Effect)
+        {
+            case SPELL_EFFECT_SCHOOL_DAMAGE:
+            case SPELL_EFFECT_ENVIRONMENTAL_DAMAGE:
+            case SPELL_EFFECT_HEALTH_LEECH:
+            case SPELL_EFFECT_WEAPON_DAMAGE:
+            case SPELL_EFFECT_WEAPON_DAMAGE_NOSCHOOL:
+            case SPELL_EFFECT_NORMALIZED_WEAPON_DMG:
+            case SPELL_EFFECT_WEAPON_PERCENT_DAMAGE:
+                return true;
+            default:
+                break;
+        }
+    }
+    return false;
+}
+
+static std::unordered_set<uint32> BuildClassAuraAreaTriggeredSpellIDs()
+{
+    std::unordered_set<uint32> areaTriggeredSpellIDs;
+    for (uint32 spellID = 0; spellID < sSpellMgr->GetSpellInfoStoreSize(); ++spellID)
+    {
+        SpellInfo const* spellInfo = sSpellMgr->GetSpellInfo(spellID);
+        if (spellInfo == nullptr)
+            continue;
+        for (uint8 i = 0; i < MAX_SPELL_EFFECTS; ++i)
+        {
+            if (spellInfo->Effects[i].ApplyAuraName != SPELL_AURA_PERIODIC_TRIGGER_SPELL || spellInfo->Effects[i].TriggerSpell == 0)
+                continue;
+            if (spellInfo->Effects[i].Effect == SPELL_EFFECT_PERSISTENT_AREA_AURA || spellInfo->Effects[i].IsAreaAuraEffect() == true)
+                areaTriggeredSpellIDs.insert(spellInfo->Effects[i].TriggerSpell);
+        }
+    }
+    return areaTriggeredSpellIDs;
+}
+
+static bool IsClassAuraSingleTargetSpell(SpellInfo const* spellInfo)
+{
+    if (spellInfo->IsTargetingArea() == true)
+        return false;
+
+    // Built once on first use, which C++ makes safe across map threads, from the spell store that never changes after startup
+    static std::unordered_set<uint32> const areaTriggeredSpellIDs = BuildClassAuraAreaTriggeredSpellIDs();
+    if (areaTriggeredSpellIDs.find(spellInfo->Id) != areaTriggeredSpellIDs.end())
+        return false;
+    for (uint8 i = 0; i < MAX_SPELL_EFFECTS; ++i)
+        if (spellInfo->Effects[i].ChainTarget > 1)
+            return false;
+    return true;
+}
+
+void EverQuestMod::HandleClassAuraRangerDirectDamage(Unit* attacker, Unit* victim, SpellInfo const* spellInfo)
+{
+    if (IsClassAuraSystemEnabled() == false)
+        return;
+    if (attacker == nullptr || victim == nullptr)
+        return;
+
+    // A pet or a charmed creature strikes on the ranger's behalf, and the ranger stays the caster of the injury so it is their copy that pays out.  This
+    // runs for every hit anywhere, so the cheap tests go first
+    Player* ranger = attacker->GetCharmerOrOwnerPlayerOrPlayerItself();
+    if (ranger == nullptr)
+        return;
+    if (ranger != attacker && (ranger->FindMap() == nullptr || ranger->FindMap() != attacker->FindMap()))
+        return;
+    if (PlayerHasClassAura(ranger, EQ_CLASSAURA_SPELL_RANGER_AURA) == false)
+        return;
+    if (spellInfo != nullptr && (IsClassAuraDirectDamageSpell(spellInfo) == false || IsClassAuraSingleTargetSpell(spellInfo) == false))
+        return;
+    ApplyClassAuraRangerCompoundInjury(ranger, victim);
 }
 
 static bool IsPeriodicDamageAura(Aura* aura)
@@ -793,21 +887,10 @@ void EverQuestMod::HandleClassAuraShamanStrike(Unit* attacker, Unit* victim)
 // A spell counts as damaging when any one of its effects takes health outright or over time
 static bool IsClassAuraDamagingSpell(SpellInfo const* spellInfo)
 {
+    if (IsClassAuraDirectDamageSpell(spellInfo) == true)
+        return true;
     for (uint8 i = 0; i < MAX_SPELL_EFFECTS; ++i)
     {
-        switch (spellInfo->Effects[i].Effect)
-        {
-            case SPELL_EFFECT_SCHOOL_DAMAGE:
-            case SPELL_EFFECT_ENVIRONMENTAL_DAMAGE:
-            case SPELL_EFFECT_HEALTH_LEECH:
-            case SPELL_EFFECT_WEAPON_DAMAGE:
-            case SPELL_EFFECT_WEAPON_DAMAGE_NOSCHOOL:
-            case SPELL_EFFECT_NORMALIZED_WEAPON_DMG:
-            case SPELL_EFFECT_WEAPON_PERCENT_DAMAGE:
-                return true;
-            default:
-                break;
-        }
         switch (spellInfo->Effects[i].ApplyAuraName)
         {
             case SPELL_AURA_PERIODIC_DAMAGE:
@@ -938,6 +1021,34 @@ void EverQuestMod::RemoveClassAuraDruidNaturesBalanceStacks(Player* druid, uint3
     }
 }
 
+void EverQuestMod::RecordClassAuraDruidNaturesBalanceRainPayout(EverQuestPlayerClassAuraState* state, SpellInfo const* rainSpellInfo, uint32 percent)
+{
+    // A rain's own cast is its first wave and is paid like any other nuke.  Its later waves are what the rain's cloud casts while it falls, so the
+    // price its cast was paid is kept for them until the cloud is gone.  A wave cannot tell which cast of its rain it came from, so a newer cast
+    // of the same rain that was priced at something replaces the older one's price, while one priced at nothing leaves the older one alone
+    uint32 cloudDurationInMS = 0;
+    uint32 waveSpellID = GetRainWaveSpellID(rainSpellInfo->Id, cloudDurationInMS);
+    if (waveSpellID == 0)
+        return;
+    uint64 nowInMS = GameTime::GetGameTimeMS().count();
+    std::vector<EverQuestNaturesBalanceRainPayout>& payouts = state->NaturesBalanceRainPayouts;
+    for (std::vector<EverQuestNaturesBalanceRainPayout>::iterator payoutIter = payouts.begin(); payoutIter != payouts.end();)
+    {
+        if ((payoutIter->WaveSpellID == waveSpellID && percent != 0) || nowInMS - payoutIter->CastAtMS > payoutIter->PayoutWindowInMS)
+            payoutIter = payouts.erase(payoutIter);
+        else
+            ++payoutIter;
+    }
+    if (percent == 0)
+        return;
+    EverQuestNaturesBalanceRainPayout payout;
+    payout.WaveSpellID = waveSpellID;
+    payout.Percent = percent;
+    payout.CastAtMS = nowInMS;
+    payout.PayoutWindowInMS = cloudDurationInMS + EQ_CLASSAURA_DRUID_NATURES_BALANCE_PAYOUT_WINDOW_IN_MS;
+    payouts.push_back(payout);
+}
+
 void EverQuestMod::ApplyClassAuraDruidNaturesBalanceDamageBonus(Unit* attacker, int32& damage, SpellInfo const* spellInfo)
 {
     // Read only, since the check cast priced this spell and the cast hook is what spends the stacks
@@ -945,13 +1056,29 @@ void EverQuestMod::ApplyClassAuraDruidNaturesBalanceDamageBonus(Unit* attacker, 
         return;
     Player* druid = attacker->ToPlayer();
     EverQuestPlayerClassAuraState* state = druid->CustomData.Get<EverQuestPlayerClassAuraState>(EQ_PLAYER_CUSTOMDATA_CLASSAURA);
-    if (state == nullptr || state->NaturesBalancePendingPercent == 0 || state->NaturesBalancePendingSpellID != spellInfo->Id)
+    if (state == nullptr)
         return;
-    if (GameTime::GetGameTimeMS().count() - state->NaturesBalancePendingAtMS > EQ_CLASSAURA_DRUID_NATURES_BALANCE_PAYOUT_WINDOW_IN_MS)
+    uint64 nowInMS = GameTime::GetGameTimeMS().count();
+    uint32 bonusPercent = 0;
+    if (state->NaturesBalancePendingPercent != 0 && state->NaturesBalancePendingSpellID == spellInfo->Id
+        && nowInMS - state->NaturesBalancePendingAtMS <= EQ_CLASSAURA_DRUID_NATURES_BALANCE_PAYOUT_WINDOW_IN_MS)
+        bonusPercent = state->NaturesBalancePendingPercent;
+    else
+    {
+        // A later wave of a rain that is still falling
+        for (EverQuestNaturesBalanceRainPayout const& payout : state->NaturesBalanceRainPayouts)
+        {
+            if (payout.WaveSpellID != spellInfo->Id || nowInMS - payout.CastAtMS > payout.PayoutWindowInMS)
+                continue;
+            bonusPercent = payout.Percent;
+            break;
+        }
+    }
+    if (bonusPercent == 0)
         return;
     if (PlayerHasClassAura(druid, EQ_CLASSAURA_SPELL_DRUID_AURA) == false)
         return;
-    damage += (damage * (int32)state->NaturesBalancePendingPercent) / 100;
+    damage += (damage * (int32)bonusPercent) / 100;
 }
 
 void EverQuestMod::HandleClassAuraDruidNaturesBalanceOnCheckCast(Player* druid, SpellInfo const* spellInfo)
@@ -994,7 +1121,8 @@ void EverQuestMod::HandleClassAuraDruidNaturesBalanceOnSpellCast(Player* druid, 
         return;
 
     // The cast went through, so what it was priced against is spent now.  Its own damage is paid from the priced amount, which is what lets a spell
-    // that flies to its target still collect when it lands
+    // that flies to its target still collect when it lands, and a rain's later waves are paid the same amount for as long as it falls
+    RecordClassAuraDruidNaturesBalanceRainPayout(state, spellInfo, state->NaturesBalancePendingPercent);
     RemoveClassAuraDruidNaturesBalanceStacks(druid, castBalanceType);
     if (state->NaturesBalancePendingGrantType != castBalanceType)
         return;
@@ -1314,37 +1442,7 @@ Pet* EverQuestMod::GetClassAuraMagicianDetonatePet(Player* player)
         return nullptr;
     if (pet->FindMap() != player->FindMap())
         return nullptr;
-
-    // A pet that already exploded and is only lingering for its nova can't be detonated again
-    if (GetClassAuraStateForPlayer(player)->DetonatedPetGUID == pet->GetGUID())
-        return nullptr;
     return pet;
-}
-
-// Magician "Detonate Summoned": the exploded pet is unsummoned once its nova has had time to play
-void EverQuestMod::UpdateMagicianDetonatedPetForPlayer(Player* player)
-{
-    EverQuestPlayerClassAuraState* state = GetClassAuraStateForPlayer(player);
-    if (state->DetonatedPetGUID.IsEmpty() == true)
-        return;
-    Pet* pet = player->GetPet();
-    bool isPetStillOut = pet != nullptr && pet->GetGUID() == state->DetonatedPetGUID;
-    if (isPetStillOut == true && GameTime::GetGameTimeMS().count() < state->DetonatedPetUnsummonAtMS)
-        return;
-
-    uint32 detonatedPetNumber = state->DetonatedPetNumber;
-    state->DetonatedPetGUID.Clear();
-    state->DetonatedPetNumber = 0;
-    state->DetonatedPetUnsummonAtMS = 0;
-    if (isPetStillOut == true)
-    {
-        player->RemovePet(pet, PET_SAVE_NOT_IN_SLOT);
-        return;
-    }
-
-    // A teleport or mount during the linger held the pet to bring back afterwards, which an exploded pet must never be
-    if (detonatedPetNumber != 0 && player->GetTemporaryUnsummonedPetNumber() == detonatedPetNumber)
-        player->SetTemporaryUnsummonedPetNumber(0);
 }
 
 void EverQuestMod::DoClassAuraMagicianDetonateSummoned(Player* player)
@@ -1353,8 +1451,16 @@ void EverQuestMod::DoClassAuraMagicianDetonateSummoned(Player* player)
     if (pet == nullptr)
         return;
 
-    // Health is read here, once the cast has finished, so whatever the pet took during the cast is already gone from it
-    int32 blastDamage = (int32)std::min<uint32>(pet->GetHealth(), (uint32)std::numeric_limits<int32>::max());
+    // Health is read here, once the cast has finished, so whatever the pet took during the cast is already gone from it.
+    // The blast deals this full amount even though the pet only pays a share of it below
+    uint32 petHealth = pet->GetHealth();
+    int32 blastDamage = (int32)std::min<uint32>(petHealth, (uint32)std::numeric_limits<int32>::max());
+
+    // The pet pays before the blast goes off, so anything the blast triggers already sees the spent health.
+    // The cost is a straight health loss rather than damage: it never kills the pet, and it draws no threat and no damage shield
+    uint32 healthCostPercent = std::min<uint32>(ConfigSystemClassAuraMagicianDetonateSummonedPetHealthCostPercent, 100);
+    uint32 healthCost = (uint32)((uint64)petHealth * healthCostPercent / 100);
+    pet->SetHealth(std::max<uint32>(1, petHealth - std::min<uint32>(healthCost, petHealth - 1)));
 
     // The pet sets the blast off so it is centered on the pet, and the magician is the original caster so the damage and threat are theirs
     uint32 blastSpellID = GetClassAuraSpellID(EQ_CLASSAURA_SPELL_MAGICIAN_DETONATE_SUMMONED_BLAST);
@@ -1365,27 +1471,6 @@ void EverQuestMod::DoClassAuraMagicianDetonateSummoned(Player* player)
         blastValues.AddSpellMod(SPELLVALUE_BASE_POINT0, blastDamage);
         pet->CastCustomSpell(blastSpellInfo, blastValues, nullptr, TRIGGERED_FULL_MASK, nullptr, nullptr, player->GetGUID());
     }
-
-    // The blast runs scripts on everything it hits, so the pet is proven to still be the magician's before anything more is done to it
-    if (player->IsInWorld() == false || player->GetPet() != pet)
-        return;
-    if (ConfigSystemClassAuraMagicianDetonateSummonedUnsummonDelayInMS == 0)
-    {
-        player->RemovePet(pet, PET_SAVE_NOT_IN_SLOT);
-        return;
-    }
-
-    // The nova and its sound play on the pet and unsummoning it now would cut them off, so it lingers briefly
-    pet->CastStop();
-    pet->AttackStop();
-    pet->SetReactState(REACT_PASSIVE);
-    pet->SetUnitFlag(UNIT_FLAG_NOT_SELECTABLE);
-    pet->SetUnitFlag(UNIT_FLAG_NON_ATTACKABLE);
-    pet->SetControlled(true, UNIT_STATE_ROOT);
-    EverQuestPlayerClassAuraState* state = GetClassAuraStateForPlayer(player);
-    state->DetonatedPetGUID = pet->GetGUID();
-    state->DetonatedPetNumber = (pet->GetCharmInfo() != nullptr) ? pet->GetCharmInfo()->GetPetNumber() : 0;
-    state->DetonatedPetUnsummonAtMS = GameTime::GetGameTimeMS().count() + ConfigSystemClassAuraMagicianDetonateSummonedUnsummonDelayInMS;
 }
 
 static SpellInfo const* FindClassAuraDirectHealSpellInfo(SpellInfo const* spellInfo, uint8 depth)

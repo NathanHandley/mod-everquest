@@ -296,8 +296,8 @@ bool EverQuestMod::LoadConfigurationSystemDataFromDB()
                 ConfigSystemClassAuraWizardFocusStillIntervalInMS = (uint32)atoi(value.c_str());
             else if (key == "ClassAuraNecromancerShadowExchangeMaxDistanceInYards")
                 ConfigSystemClassAuraNecromancerShadowExchangeMaxDistanceInYards = (uint32)atoi(value.c_str());
-            else if (key == "ClassAuraMagicianDetonateSummonedUnsummonDelayInMS")
-                ConfigSystemClassAuraMagicianDetonateSummonedUnsummonDelayInMS = (uint32)atoi(value.c_str());
+            else if (key == "ClassAuraMagicianDetonateSummonedPetHealthCostPercent")
+                ConfigSystemClassAuraMagicianDetonateSummonedPetHealthCostPercent = (uint32)atoi(value.c_str());
             else if (key == "ClassAuraNecromancerMarkDirectDamagePercentPerStack")
                 ConfigSystemClassAuraNecromancerMarkDirectDamagePercentPerStack = (uint32)atoi(value.c_str());
             else if (key == "ClassAuraNecromancerMarkDotDamagePercentPerStack")
@@ -332,6 +332,10 @@ bool EverQuestMod::LoadConfigurationSystemDataFromDB()
                 ConfigSystemClassAuraShadowKnightBloodDebtStoreDurationInMS = (uint32)atoi(value.c_str());
             else if (key == "ClassAuraShadowKnightBloodDebtFullSpellVisualKitID")
                 ConfigSystemClassAuraShadowKnightBloodDebtFullSpellVisualKitID = (uint32)atoi(value.c_str());
+            else if (key == "RainTargetHitCap")
+                ConfigRainTargetHitCap = (int32)atoi(value.c_str());
+            else if (key == "RainTargetHitCapNoDirectDamage")
+                ConfigRainTargetHitCapNoDirectDamage = (int32)atoi(value.c_str());
             else if (key == "SlowBossEffectivenessMod")
                 ConfigSystemSlowBossEffectivenessMod = (float)atof(value.c_str());
             else if (key == "RaidBossRespawnVarianceInSec")
@@ -827,6 +831,26 @@ void EverQuestMod::ApplyRaidBossRespawnVariance(Creature* deadCreature)
     deadCreature->SetRespawnDelay(respawnInSec);
     deadCreature->SetRespawnTime(respawnInSec + deadCreature->GetCorpseDelay());
     deadCreature->SaveRespawnTime();
+}
+
+void EverQuestMod::BindRaidInstanceOnCreatureKill(Creature* deadCreature, Unit* killer)
+{
+    // The converter flags these with CREATURE_FLAG_EXTRA_MODULE instead of CREATURE_FLAG_EXTRA_INSTANCE_BIND, since the same template also spawns in the open world
+    // copy of the zone and the core logs an error at load for each of those spawns.  Reading the flag here at kill time instead of restoring INSTANCE_BIND in memory
+    // also keeps working after a '.reload creature_template', which would otherwise wipe a restored flag.  The conditions mirror the core's check in Unit::Kill
+    if (deadCreature->HasFlagsExtra(CREATURE_FLAG_EXTRA_MODULE) == false)
+        return;
+    // Stock templates also carry CREATURE_FLAG_EXTRA_MODULE (the Karazhan chess pieces, in a raid), so only converted EQ creatures may bind
+    if (HasCreatureDataForCreatureTemplateID(deadCreature->GetEntry()) == false)
+        return;
+    if (deadCreature->GetInstanceId() == 0)
+        return;
+    if (killer == nullptr || killer->GetCharmerOrOwnerPlayerOrPlayerItself() == nullptr)
+        return;
+    Map* map = deadCreature->GetMap();
+    if (map->IsDungeon() == false || map->IsRaidOrHeroicDungeon() == false)
+        return;
+    map->ToInstanceMap()->PermBindAllPlayers();
 }
 
 void EverQuestMod::UpdateCycleSpawns(Map* map, uint32 diff)

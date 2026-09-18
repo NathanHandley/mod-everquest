@@ -159,6 +159,8 @@ public:
         if (mapID < EverQuest->ConfigSystemMapDBCIDMin || mapID > EverQuest->ConfigSystemMapDBCIDMax)
             return;
 
+        EverQuest->BindRaidInstanceOnCreatureKill(creature, killer);
+
         // TAKP fires 'OnDeath' at death and 'AfterDeath' right after the corpse forms, so both fire here in order
         EverQuest->DoCreatureEmoteEvent(creature, EQ_CREATURE_EMOTE_EVENT_ONDEATH, killer);
         EverQuest->DoCreatureEmoteEvent(creature, EQ_CREATURE_EMOTE_EVENT_AFTERDEATH, killer);
@@ -617,6 +619,10 @@ public:
         // Class auras: the Ranger's Compound Injury mark, the Paladin's double damage against undead and demons, the Necromancer's marks and the Druid's impaired target bonus (any spell, EQ or WoW)
         EverQuest->ApplyClassAuraDirectSpellDamageMods(target, attacker, damage, spellInfo);
 
+        // Compound Injury stacks only after the hit above was paid from the stacks already there, same as a melee swing.  Autoshots, abilities and spells, the ranger's or their pet's
+        if (damage > 0)
+            EverQuest->HandleClassAuraRangerDirectDamage(attacker, target, spellInfo);
+
         if (EverQuest->ConfigSpellTalentAlignmentEnabled == false)
             return;
         if (damage <= 0)
@@ -675,9 +681,10 @@ public:
         if (damagetype != DIRECT_DAMAGE || damage == 0 || attacker == nullptr || victim == nullptr)
             return damage;
 
-        // Class auras: a controlled creature's strike (Necromancer mark) and a Shaman's swing
+        // Class auras: a controlled creature's strike (Necromancer mark), a Shaman's swing, and a Ranger's or their pet's swing (Compound Injury)
         EverQuest->HandleClassAuraPetStrike(attacker, victim);
         EverQuest->HandleClassAuraShamanStrike(attacker, victim);
+        EverQuest->HandleClassAuraRangerDirectDamage(attacker, victim, nullptr);
         return damage;
     }
 

@@ -102,38 +102,6 @@ class EverQuest_ClassAuraRogueAuraScript : public AuraScript
     }
 };
 
-// Ranger: every landed melee or ranged autoattack, and every harmful single target spell, compounds the target's injuries.  The pet's strikes do the same through
-// HandleClassAuraPetStrike, since a proc row on the ranger never sees them
-class EverQuest_ClassAuraRangerAuraScript : public AuraScript
-{
-    PrepareAuraScript(EverQuest_ClassAuraRangerAuraScript);
-
-    void HandleProc(ProcEventInfo& eventInfo)
-    {
-        PreventDefaultAction();
-        if (EverQuest->IsClassAuraSystemEnabled() == false || IsClassAuraPeriodicTickProc(eventInfo) == true)
-            return;
-        Unit* ranger = GetTarget();
-        if (ranger == nullptr || ranger->IsPlayer() == false || ranger->IsAlive() == false)
-            return;
-        uint32 typeMask = eventInfo.GetTypeMask();
-        if ((typeMask & (PROC_FLAG_DONE_MELEE_AUTO_ATTACK | PROC_FLAG_DONE_RANGED_AUTO_ATTACK | PROC_FLAG_DONE_SPELL_MELEE_DMG_CLASS
-            | PROC_FLAG_DONE_SPELL_RANGED_DMG_CLASS | PROC_FLAG_DONE_SPELL_MAGIC_DMG_CLASS_NEG | PROC_FLAG_DONE_SPELL_NONE_DMG_CLASS_NEG)) == 0)
-            return;
-
-        // Only a spell aimed at one target counts, so an area spell never compounds everything it washes over.  An autoattack carries no spell to check
-        SpellInfo const* procSpellInfo = eventInfo.GetSpellInfo();
-        if (procSpellInfo != nullptr && procSpellInfo->IsTargetingArea() == true)
-            return;
-        EverQuest->ApplyClassAuraRangerCompoundInjury(ranger->ToPlayer(), eventInfo.GetProcTarget());
-    }
-
-    void Register() override
-    {
-        OnProc += AuraProcFn(EverQuest_ClassAuraRangerAuraScript::HandleProc);
-    }
-};
-
 static const uint32 EQ_CLASSAURA_PALADIN_TAKEN_ATTACK_PROC_MASK = PROC_FLAG_TAKEN_MELEE_AUTO_ATTACK | PROC_FLAG_TAKEN_SPELL_MELEE_DMG_CLASS
     | PROC_FLAG_TAKEN_RANGED_AUTO_ATTACK | PROC_FLAG_TAKEN_SPELL_RANGED_DMG_CLASS;
 
@@ -328,12 +296,27 @@ class EverQuest_ClassAuraShadowKnightBloodDebtSpellScript : public SpellScript
     }
 };
 
+// Abilities like Heroic Strike, Maul and Raptor Strike are queued onto the next autoattack and take the place of that swing rather than landing alongside it, so the swing
+// they consumed never reaches the melee autoattack proc.  Those land on the melee damage class flag instead, and are taken so the monk still gets the extra swings behind them
+static bool IsClassAuraMonkSwingReplacingAbilityProc(ProcEventInfo& eventInfo)
+{
+    if ((eventInfo.GetTypeMask() & PROC_FLAG_DONE_SPELL_MELEE_DMG_CLASS) == 0)
+        return false;
+    SpellInfo const* spellInfo = eventInfo.GetSpellInfo();
+    if (spellInfo == nullptr)
+        return false;
+    return spellInfo->HasAttribute(SPELL_ATTR0_ON_NEXT_SWING_NO_DAMAGE) == true || spellInfo->HasAttribute(SPELL_ATTR0_ON_NEXT_SWING) == true;
+}
+
 // Monk "Agile Fighter": the proc row on the armor aura already rolled the double attack, and in light armor some of those become a triple.
 static void DoClassAuraMonkDoubleAttack(Unit* monk, ProcEventInfo& eventInfo, uint32 tripleChancePercent)
 {
     if (EverQuest->IsClassAuraSystemEnabled() == false || IsClassAuraPeriodicTickProc(eventInfo) == true)
         return;
     if (monk == nullptr || monk->IsPlayer() == false || monk->IsAlive() == false)
+        return;
+    // The proc row also catches every other melee ability, which swings on its own and leaves the autoattack alone, so only real swings roll here
+    if ((eventInfo.GetTypeMask() & PROC_FLAG_DONE_MELEE_AUTO_ATTACK) == 0 && IsClassAuraMonkSwingReplacingAbilityProc(eventInfo) == false)
         return;
     // A swing that is itself an extra attack (ours or any other extra attack effect) never chains
     if (monk->GetLastExtraAttackSpell() != 0)
@@ -344,6 +327,8 @@ static void DoClassAuraMonkDoubleAttack(Unit* monk, ProcEventInfo& eventInfo, ui
     int32 extraAttackCount = 1;
     if (tripleChancePercent > 0 && roll_chance_i((int32)tripleChancePercent) == true)
         extraAttackCount = 2;
+    // The extra swings are aimed at whoever the core last recorded damage against, which an ability that was fully absorbed never sets, so it is pinned to the proc target here
+    monk->SetLastDamagedTargetGuid(victim->GetGUID());
     // Thrash has one die side, which the core adds on top of the custom base points, so the base points sit one below the swing count
     int32 extraAttackBasePoints = extraAttackCount - 1;
     monk->CastCustomSpell(monk, EQ_SPELL_ID_THRASH, &extraAttackBasePoints, nullptr, nullptr, true);
@@ -603,7 +588,7 @@ class EverQuest_ClassAuraRangerCompoundInjuryMovingAuraScript : public AuraScrip
     }
 };
 
-// Magician "Detonate Summoned": the magician's summoned pet explodes for its current health as fire damage to every enemy near it, and is unsummoned
+// Magician "Detonate Summoned": the magician's summoned pet explodes for its current health as arcane damage to every enemy near it, and pays part of that health to do it
 class EverQuest_ClassAuraMagicianDetonateSummonedSpellScript : public SpellScript
 {
     PrepareSpellScript(EverQuest_ClassAuraMagicianDetonateSummonedSpellScript);
@@ -641,7 +626,6 @@ class EverQuest_ClassAuraMagicianDetonateSummonedSpellScript : public SpellScrip
 void AddEverQuestClassAuraScripts()
 {
     RegisterSpellScript(EverQuest_ClassAuraRogueAuraScript);
-    RegisterSpellScript(EverQuest_ClassAuraRangerAuraScript);
     RegisterSpellScript(EverQuest_ClassAuraRangerCompoundInjuryMovingAuraScript);
     RegisterSpellScript(EverQuest_ClassAuraPaladinAuraScript);
     RegisterSpellScript(EverQuest_ClassAuraWarriorAuraScript);
