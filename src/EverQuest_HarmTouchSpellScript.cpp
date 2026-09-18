@@ -27,7 +27,7 @@ class EverQuest_HarmTouchSpellScript : public SpellScript
 {
     PrepareSpellScript(EverQuest_HarmTouchSpellScript);
 
-    void SetDamageFromCasterMaxHealth()
+    void SetDamageFromMaxHealth()
     {
         if (EverQuest->IsEnabled == false)
             return;
@@ -38,15 +38,16 @@ class EverQuest_HarmTouchSpellScript : public SpellScript
         if (target == nullptr)
             return;
 
+        // Against players and what they own or charm, deal a percent of the target's max health instead of the caster's
         uint32 damage = caster->GetMaxHealth();
         if (target->GetCharmerOrOwnerPlayerOrPlayerItself() != nullptr)
-            damage = caster->CountPctFromMaxHealth(int32(min<uint32>(EverQuest->ConfigSystemHarmTouchPlayerPvPDamagePercent, 100)));
+            damage = target->CountPctFromMaxHealth(int32(min<uint32>(EverQuest->ConfigSystemHarmTouchPlayerPvPDamagePercent, 100)));
         SetHitDamage(int32(min<uint32>(damage, uint32(numeric_limits<int32>::max()))));
     }
 
     void Register() override
     {
-        OnHit += SpellHitFn(EverQuest_HarmTouchSpellScript::SetDamageFromCasterMaxHealth);
+        OnHit += SpellHitFn(EverQuest_HarmTouchSpellScript::SetDamageFromMaxHealth);
     }
 };
 
