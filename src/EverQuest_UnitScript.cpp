@@ -668,6 +668,9 @@ public:
 
         // Class auras: the Bard's instrument bonus and the Paladin's double damage against undead and demons
         EverQuest->ApplyClassAuraMeleeDamageMods(attacker, target, damage);
+
+        // Class auras: a Paladin's full block zeroes the swing, so it has to come after everything else that sizes it
+        EverQuest->HandleClassAuraPaladinFullBlockOnMeleeDamage(attacker, target, damage);
     }
 
     uint32 DealDamage(Unit* attacker, Unit* victim, uint32 damage, DamageEffectType damagetype) override
@@ -712,9 +715,10 @@ public:
         if (victim->IsPlayer() == false)
             return;
 
-        // Class auras: a Warrior's riposte, forced through this roll.  Only the mod's own per-player state is
-        // written through the const_cast, plus the roll values this hook exists to change
-        if (attType != RANGED_ATTACK)
+        // Class auras: a Paladin's full block (chosen when the swing's damage was sized) and a Warrior's riposte, forced through this roll.  Only the
+        // mod's own per-player state is written through the const_cast, plus the roll values this hook exists to change.  A full block wins over a riposte
+        bool isPaladinFullBlock = EverQuest->HandleClassAuraPaladinFullBlockOnRoll(const_cast<Unit*>(victim)->ToPlayer(), attacker, block_chance);
+        if (attType != RANGED_ATTACK && isPaladinFullBlock == false)
             EverQuest->HandleClassAuraWarriorMeleeAttackedOnRoll(const_cast<Unit*>(victim)->ToPlayer(), attacker, miss_chance, dodge_chance, parry_chance, block_chance, crit_chance);
 
         // This is a bit 'hacky', but this logic will fold dodge and parry into 'miss' during the casting of a bard song to

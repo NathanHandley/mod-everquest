@@ -282,6 +282,8 @@ bool EverQuestMod::LoadConfigurationSystemDataFromDB()
                 ConfigSystemClassAuraPaladinHealSelfPercent = (uint32)atoi(value.c_str());
             else if (key == "ClassAuraPaladinBlockDeflectionDamagePercent")
                 ConfigSystemClassAuraPaladinBlockDeflectionDamagePercent = (uint32)atoi(value.c_str());
+            else if (key == "ClassAuraPaladinFullBlockPercent")
+                ConfigSystemClassAuraPaladinFullBlockPercent = std::min<uint32>((uint32)atoi(value.c_str()), 100);
             else if (key == "ClassAuraPaladinUndeadDemonDoubleDamageChancePercent")
                 ConfigSystemClassAuraPaladinUndeadDemonDoubleDamageChancePercent = (uint32)atoi(value.c_str());
             else if (key == "ClassAuraWarriorRiposteChancePercent")

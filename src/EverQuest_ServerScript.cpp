@@ -232,6 +232,8 @@ public:
             return HandleAuctionListResultPacketSend(session, packet);
         if (opcode == SMSG_AURA_UPDATE || opcode == SMSG_AURA_UPDATE_ALL)
             return HandleAuraUpdatePacketSend(session, packet);
+        if (opcode == SMSG_ATTACKERSTATEUPDATE)
+            return EverQuest->HandlePaladinFullBlockSwingLogPacketSend(session, packet);
         if (opcode != SMSG_SPELL_GO && opcode != SMSG_SPELL_START)
             return true;
         if (EverQuest->IsEnabled == false || EverQuest->BardSongTickSpellIDs.empty() == true)

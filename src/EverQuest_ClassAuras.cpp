@@ -20,6 +20,7 @@
 #include "GridNotifiers.h"
 #include "GridNotifiersImpl.h"
 #include "ObjectAccessor.h"
+#include "Opcodes.h"
 #include "Pet.h"
 #include "Player.h"
 #include "Random.h"
@@ -30,6 +31,8 @@
 #include "SpellMgr.h"
 #include "Unit.h"
 #include "World.h"
+#include "WorldPacket.h"
+#include "WorldSession.h"
 #include "EverQuest.h"
 #include <algorithm>
 #include <cmath>
@@ -558,6 +561,223 @@ void EverQuestMod::HandleClassAuraWarriorMeleeAttackedOnRoll(Player* warrior, Un
         missChance = 30000;
     }
     GetClassAuraStateForPlayer(warrior)->PendingRiposteTargetGUID = attacker->GetGUID();
+}
+
+// Paladin "Blessed Deflection" full block.  The core only knows a block as the shield's block value taken off a hit, and it rolls the block after the swing's damage
+// is final, so there is no hook that can turn a block into a whole one after the fact.  Instead the full block is chosen here, in ModifyMeleeDamage (the last point
+// the damage can change): the damage is zeroed, and the outcome roll that follows in the same Unit::CalculateMeleeDamage is forced to a block, which the core then
+// records as a full block.  Miss, dodge and parry still roll ahead of it as normal.  The chance per swing is sized so that the configured share of all blocks come
+// out whole while the overall block rate stays what the core would have given
+static uint32 GetPaladinFullBlockArmorReducedDamage(Unit* attacker, Unit* victim, uint32 damage, uint8 damageIndex)
+{
+    if (damage == 0)
+        return 0;
+    SpellSchoolMask schoolMask = attacker->GetMeleeDamageSchoolMask(BASE_ATTACK, damageIndex);
+    if (Unit::IsDamageReducedByArmor(schoolMask) == false)
+        return damage;
+    return Unit::CalcArmorReducedDamage(attacker, victim, damage, nullptr, 0, BASE_ATTACK);
+}
+
+static void ClearPaladinFullBlockSwing(EverQuestPlayerClassAuraState* state)
+{
+    state->PaladinFullBlockSwingPending = false;
+    state->PaladinFullBlockSwingAttackerGUID.Clear();
+    state->PaladinFullBlockSwingForced = false;
+    state->PaladinFullBlockSwingDamageIndex = 0;
+    state->PaladinFullBlockSwingAmount = 0;
+    state->PaladinFullBlockSwingBlockScale = 1.0f;
+}
+
+// The core writes a forced full block's swing line with a blocked amount of 0, since the damage was zeroed before the roll.  The roll arms this, and the swing
+// packet then goes out on this same thread (Unit::SendAttackStateUpdate runs right after the roll in the same attack), where CanPacketSend gives the real amount
+struct EverQuestPaladinFullBlockSwingLog
+{
+    ObjectGuid AttackerGUID;
+    ObjectGuid PaladinGUID;
+    uint32 Amount = 0;
+};
+static thread_local EverQuestPaladinFullBlockSwingLog PaladinFullBlockSwingLog;
+
+static void ClearPaladinFullBlockSwingLog()
+{
+    PaladinFullBlockSwingLog.AttackerGUID.Clear();
+    PaladinFullBlockSwingLog.PaladinGUID.Clear();
+    PaladinFullBlockSwingLog.Amount = 0;
+}
+
+void EverQuestMod::HandleClassAuraPaladinFullBlockOnMeleeDamage(Unit* attacker, Unit* victim, uint32& damage)
+{
+    if (IsClassAuraSystemEnabled() == false || ConfigSystemClassAuraPaladinFullBlockPercent == 0)
+        return;
+    if (attacker == nullptr || victim == nullptr || attacker == victim || victim->IsPlayer() == false)
+        return;
+    Player* paladin = victim->ToPlayer();
+    if (PlayerHasClassAura(paladin, EQ_CLASSAURA_SPELL_PALADIN_AURA) == false)
+        return;
+    EverQuestPlayerClassAuraState* state = GetClassAuraStateForPlayer(paladin);
+
+    // A player's weapon can carry a second damage type, which passes through here again before the swing's one outcome roll
+    if (state->PaladinFullBlockSwingPending == true && state->PaladinFullBlockSwingAttackerGUID == attacker->GetGUID())
+    {
+        if (state->PaladinFullBlockSwingForced == true)
+        {
+            state->PaladinFullBlockSwingAmount += GetPaladinFullBlockArmorReducedDamage(attacker, paladin, damage, state->PaladinFullBlockSwingDamageIndex);
+            damage = 0;
+        }
+        ++state->PaladinFullBlockSwingDamageIndex;
+        return;
+    }
+
+    // A new swing.  Anything left from the last one (a forced block that was missed, dodged or parried instead) is dropped
+    ClearPaladinFullBlockSwing(state);
+    state->PaladinFullBlockLandedAttackerGUID.Clear();
+    state->PaladinFullBlockLandedAmount = 0;
+    if (PaladinFullBlockSwingLog.PaladinGUID == paladin->GetGUID())
+        ClearPaladinFullBlockSwingLog();
+
+    // The same conditions under which the core lets a player block at all.  A sitting or sleeping victim has every landed swing turned into a critical hit
+    if (paladin->IsAlive() == false || paladin->HasUnitState(UNIT_STATE_CONTROLLED) == true || paladin->IsNonMeleeSpellCast(false, false, true) == true)
+        return;
+    if (paladin->IsSitState() == true || paladin->getStandState() == UNIT_STAND_STATE_SLEEP)
+        return;
+    if (paladin->HasInArc(M_PI, attacker) == false && paladin->HasIgnoreHitDirectionAura() == false)
+        return;
+
+    // Mirrors Unit::RollMeleeOutcomeAgainst: dodge, parry and block each lose 0.04% per point of the attacker's weapon skill over the victim's level cap
+    int32 skillDiff = int32(attacker->GetWeaponSkillValue(BASE_ATTACK, paladin)) - int32(paladin->Unit::GetMaxSkillValueForLevel(attacker));
+    float skillPenalty = float(skillDiff) * 0.04f;
+    float blockChance = paladin->GetUnitBlockChance() - skillPenalty;
+    if (blockChance <= 0.0f)
+        return;
+    float avoidChance = attacker->MeleeSpellMissChance(paladin, BASE_ATTACK, skillDiff, 0);
+    avoidChance += std::max(0.0f, paladin->GetUnitDodgeChance() - skillPenalty);
+    avoidChance += std::max(0.0f, paladin->GetUnitParryChance() - skillPenalty);
+    avoidChance = std::clamp(avoidChance, 0.0f, 95.0f);
+
+    // A chosen swing still has to get past miss, dodge and parry, so it is picked often enough that the whole blocks are the configured share of all blocks
+    float fullShare = float(ConfigSystemClassAuraPaladinFullBlockPercent) / 100.0f;
+    float swingChance = std::min(1.0f, fullShare * (blockChance / 100.0f) / (1.0f - (avoidChance / 100.0f)));
+
+    state->PaladinFullBlockSwingPending = true;
+    state->PaladinFullBlockSwingAttackerGUID = attacker->GetGUID();
+    state->PaladinFullBlockSwingDamageIndex = 1;
+    state->PaladinFullBlockSwingBlockScale = swingChance < 1.0f ? (1.0f - fullShare) / (1.0f - swingChance) : 0.0f;
+    if (roll_chance_f(swingChance * 100.0f) == false)
+        return;
+    state->PaladinFullBlockSwingForced = true;
+    state->PaladinFullBlockSwingAmount = GetPaladinFullBlockArmorReducedDamage(attacker, paladin, damage, 0);
+    damage = 0;
+}
+
+// Returns true when the swing was forced to a full block, so no other class aura rewrites this roll
+bool EverQuestMod::HandleClassAuraPaladinFullBlockOnRoll(Player* paladin, Unit const* attacker, int32& blockChance)
+{
+    if (paladin == nullptr || attacker == nullptr)
+        return false;
+    EverQuestPlayerClassAuraState* state = paladin->CustomData.Get<EverQuestPlayerClassAuraState>(EQ_PLAYER_CUSTOMDATA_CLASSAURA);
+    if (state == nullptr || state->PaladinFullBlockSwingPending == false)
+        return false;
+    bool isThisSwing = state->PaladinFullBlockSwingAttackerGUID == attacker->GetGUID();
+    bool isForced = isThisSwing == true && state->PaladinFullBlockSwingForced == true;
+    uint32 forcedAmount = state->PaladinFullBlockSwingAmount;
+    float blockScale = state->PaladinFullBlockSwingBlockScale;
+    ClearPaladinFullBlockSwing(state);
+    if (isThisSwing == false)
+        return false;
+    if (isForced == false)
+    {
+        blockChance = int32(float(blockChance) * blockScale);
+        return false;
+    }
+
+    // Leaves miss, dodge and parry alone, and always wins the roll over everything after them
+    blockChance = 30000;
+    state->PaladinFullBlockLandedAttackerGUID = attacker->GetGUID();
+    state->PaladinFullBlockLandedAmount = forcedAmount;
+    PaladinFullBlockSwingLog.AttackerGUID = attacker->GetGUID();
+    PaladinFullBlockSwingLog.PaladinGUID = paladin->GetGUID();
+    PaladinFullBlockSwingLog.Amount = forcedAmount;
+    return true;
+}
+
+// Called from the Paladin aura's proc on a full block that carries no blocked amount (the forced kind).  Gives the amount the swing would have done.  The proc
+// runs after the swing packet has gone out, so the combat log rewrite is finished with as well
+uint32 EverQuestMod::ConsumeClassAuraPaladinFullBlockAmount(Player* paladin, Unit* attacker)
+{
+    if (paladin == nullptr || attacker == nullptr)
+        return 0;
+    if (PaladinFullBlockSwingLog.PaladinGUID == paladin->GetGUID())
+        ClearPaladinFullBlockSwingLog();
+    EverQuestPlayerClassAuraState* state = paladin->CustomData.Get<EverQuestPlayerClassAuraState>(EQ_PLAYER_CUSTOMDATA_CLASSAURA);
+    if (state == nullptr || state->PaladinFullBlockLandedAmount == 0)
+        return 0;
+    bool isThisSwing = state->PaladinFullBlockLandedAttackerGUID == attacker->GetGUID();
+    uint32 amount = state->PaladinFullBlockLandedAmount;
+    state->PaladinFullBlockLandedAttackerGUID.Clear();
+    state->PaladinFullBlockLandedAmount = 0;
+    if (isThisSwing == false)
+        return 0;
+    return amount;
+}
+
+static bool ReadPackedGUIDFromPacket(WorldPacket const& packet, size_t& pos, uint64& rawGUID)
+{
+    rawGUID = 0;
+    if (pos + 1 > packet.size())
+        return false;
+    uint8 mask = packet.read<uint8>(pos++);
+    for (uint8 i = 0; i < 8; ++i)
+    {
+        if ((mask & (1 << i)) == 0)
+            continue;
+        if (pos + 1 > packet.size())
+            return false;
+        rawGUID |= uint64(packet.read<uint8>(pos++)) << (i * 8);
+    }
+    return true;
+}
+
+// SMSG_ATTACKERSTATEUPDATE going out for an armed full block: sends a copy with the real blocked amount in place of the 0, and drops the original.  The copy
+// comes back through here but no longer matches, since its amount is not 0.  Walks the layout Unit::SendAttackStateUpdate writes
+bool EverQuestMod::HandlePaladinFullBlockSwingLogPacketSend(WorldSession* session, WorldPacket const& packet)
+{
+    if (IsEnabled == false || session == nullptr || PaladinFullBlockSwingLog.Amount == 0)
+        return true;
+
+    size_t pos = 0;
+    if (packet.size() < 4)
+        return true;
+    uint32 hitInfo = packet.read<uint32>(pos);
+    pos += 4;
+    if ((hitInfo & HITINFO_BLOCK) == 0)
+        return true;
+    uint64 attackerRawGUID = 0;
+    uint64 targetRawGUID = 0;
+    if (ReadPackedGUIDFromPacket(packet, pos, attackerRawGUID) == false || ReadPackedGUIDFromPacket(packet, pos, targetRawGUID) == false)
+        return true;
+    if (attackerRawGUID != PaladinFullBlockSwingLog.AttackerGUID.GetRawValue() || targetRawGUID != PaladinFullBlockSwingLog.PaladinGUID.GetRawValue())
+        return true;
+
+    pos += 4 + 4; // Total damage, overkill
+    if (pos + 1 > packet.size())
+        return true;
+    uint8 subDamageCount = packet.read<uint8>(pos);
+    pos += 1 + size_t(subDamageCount) * (4 + 4 + 4); // School, float damage, damage
+    if ((hitInfo & (HITINFO_FULL_ABSORB | HITINFO_PARTIAL_ABSORB)) != 0)
+        pos += size_t(subDamageCount) * 4;
+    if ((hitInfo & (HITINFO_FULL_RESIST | HITINFO_PARTIAL_RESIST)) != 0)
+        pos += size_t(subDamageCount) * 4;
+    if (pos + 1 + 4 + 4 + 4 > packet.size())
+        return true;
+    uint8 targetState = packet.read<uint8>(pos);
+    pos += 1 + 4 + 4; // Target state, unknown, melee spell id
+    if (targetState != VICTIMSTATE_BLOCKS || packet.read<uint32>(pos) != 0)
+        return true;
+
+    WorldPacket correctedPacket(packet);
+    correctedPacket.put<uint32>(pos, PaladinFullBlockSwingLog.Amount);
+    session->SendPacket(&correctedPacket);
+    return false;
 }
 
 void EverQuestMod::RefreshMonkArmorAuraForPlayer(Player* player)

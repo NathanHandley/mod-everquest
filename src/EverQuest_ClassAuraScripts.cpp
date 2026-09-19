@@ -114,12 +114,19 @@ class EverQuest_ClassAuraPaladinAuraScript : public AuraScript
         if ((eventInfo.GetHitMask() & (PROC_HIT_BLOCK | PROC_HIT_FULL_BLOCK)) == 0)
             return;
         DamageInfo* damageInfo = eventInfo.GetDamageInfo();
-        if (damageInfo == nullptr || damageInfo->GetBlock() == 0)
+        if (damageInfo == nullptr)
+            return;
+
+        // A full block the mod forced carries no blocked amount of its own (its damage was zeroed before the roll), so the whole swing is fetched instead
+        uint32 blockedAmount = damageInfo->GetBlock();
+        if (blockedAmount == 0 && (eventInfo.GetHitMask() & PROC_HIT_FULL_BLOCK) != 0)
+            blockedAmount = EverQuest->ConsumeClassAuraPaladinFullBlockAmount(paladin->ToPlayer(), eventInfo.GetActor());
+        if (blockedAmount == 0)
             return;
         uint32 deflectionSpellID = EverQuest->GetClassAuraSpellID(EQ_CLASSAURA_SPELL_PALADIN_DEFLECTION);
         if (deflectionSpellID == 0 || paladin->IsInWorld() == false)
             return;
-        int32 damageAmount = (int32)(((uint64)damageInfo->GetBlock() * (uint64)EverQuest->ConfigSystemClassAuraPaladinBlockDeflectionDamagePercent) / 100);
+        int32 damageAmount = (int32)(((uint64)blockedAmount * (uint64)EverQuest->ConfigSystemClassAuraPaladinBlockDeflectionDamagePercent) / 100);
         if (damageAmount <= 0)
             return;
         paladin->CastCustomSpell(paladin, deflectionSpellID, &damageAmount, nullptr, nullptr, true);

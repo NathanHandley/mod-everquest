@@ -55,6 +55,7 @@ struct AreaTrigger;
 struct BuildValuesCachePosPointers;
 
 #define EQ_MOD_VERSION                              112
+#define EQ_MOD_VERSION                              113
 
 #define EQ_MOVEMENT_CAST_SNARE_DURATION_BUFFER_IN_MS 2000 // How much longer than the remaining cast time the casting slow is given, so a pushed-back cast keeps it
 
@@ -1597,6 +1598,7 @@ public:
     std::unordered_set<uint32> ClassAuraRangerChannelAmmoSpellIDs; // Need to track these because channeled attacks (like Volley) didn't have a good hook to stop the ammo consumption
     uint32 ConfigSystemClassAuraPaladinHealSelfPercent = 15;
     uint32 ConfigSystemClassAuraPaladinBlockDeflectionDamagePercent = 15;
+    uint32 ConfigSystemClassAuraPaladinFullBlockPercent = 10;
     uint32 ConfigSystemClassAuraPaladinUndeadDemonDoubleDamageChancePercent = 20;
     uint32 ConfigSystemClassAuraWarriorRiposteChancePercent = 5;
     uint32 ConfigSystemClassAuraWarriorUnrelentingAssaultStackIntervalInMS = 4000;
@@ -2106,6 +2108,10 @@ public:
     void HandleClassAuraRogueLuckyStrikeOnCheckCast(Player* player, Spell* spell, bool strict);
     void RemoveClassAuraRogueLuckyStrikeHelper(Player* player);
     void HandleClassAuraWarriorMeleeAttackedOnRoll(Player* warrior, Unit const* attacker, int32& missChance, int32& dodgeChance, int32& parryChance, int32& blockChance, int32& critChance);
+    void HandleClassAuraPaladinFullBlockOnMeleeDamage(Unit* attacker, Unit* victim, uint32& damage);
+    bool HandleClassAuraPaladinFullBlockOnRoll(Player* paladin, Unit const* attacker, int32& blockChance);
+    uint32 ConsumeClassAuraPaladinFullBlockAmount(Player* paladin, Unit* attacker);
+    bool HandlePaladinFullBlockSwingLogPacketSend(WorldSession* session, WorldPacket const& packet);
     void UpdateWizardFocusMovementForPlayer(Player* player, uint32 diffInMS);
     void RefreshMagicianPetAuraForPlayer(Player* player);
     void ApplyMagicianPetAuraToPet(Pet* pet);
