@@ -25,7 +25,10 @@ using namespace std;
 class EverQuest_MiscScript : public MiscScript
 {
 public:
-    EverQuest_MiscScript() : MiscScript("EverQuest_MiscScript") {}
+    // Only the loot hook is enabled.  With no list every Misc hook is enabled, including the
+    // object/player destructor hooks, and ScriptMgr::Unload deletes this script without pruning
+    // the enabled-hook lists, so exit-time destructors (AuctionHouseMgr's items) crash on it
+    EverQuest_MiscScript() : MiscScript("EverQuest_MiscScript", { MISCHOOK_ON_AFTER_LOOT_TEMPLATE_PROCESS }) {}
 
     void OnAfterLootTemplateProcess(Loot* loot, LootTemplate const* /*lootTemplate*/, LootStore const& /*store*/, Player* lootOwner, bool personal, bool /*noEmptyError*/, uint16 /*lootMode*/) override
     {
