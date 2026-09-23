@@ -289,6 +289,14 @@ class EverQuest_ClassAuraShadowKnightBloodDebtSpellScript : public SpellScript
         Unit* caster = GetCaster();
         if (caster == nullptr || caster->IsAlive() == false || caster->IsInWorld() == false)
             return;
+
+        // Maximum health goes up by the same amount first, so the heal lands in full even at full health.  A raise still running from the last use is taken off before the new one goes on
+        uint32 vitalitySpellID = EverQuest->GetClassAuraSpellID(EQ_CLASSAURA_SPELL_SHADOWKNIGHT_BLOOD_DEBT_VITALITY);
+        if (vitalitySpellID != 0)
+        {
+            caster->RemoveAurasDueToSpell(vitalitySpellID);
+            caster->CastCustomSpell(caster, vitalitySpellID, &healAmount, nullptr, nullptr, true);
+        }
         uint32 healSpellID = EverQuest->GetClassAuraSpellID(EQ_CLASSAURA_SPELL_SHADOWKNIGHT_BLOOD_DEBT_HEAL);
         if (healSpellID == 0)
             return;
@@ -300,6 +308,36 @@ class EverQuest_ClassAuraShadowKnightBloodDebtSpellScript : public SpellScript
         OnCheckCast += SpellCheckCastFn(EverQuest_ClassAuraShadowKnightBloodDebtSpellScript::CheckStoredDamage);
         OnHit += SpellHitFn(EverQuest_ClassAuraShadowKnightBloodDebtSpellScript::SpendStoredDamageOnHit);
         AfterHit += SpellHitFn(EverQuest_ClassAuraShadowKnightBloodDebtSpellScript::HealFromSpentDebt);
+    }
+};
+
+// Shadow Knight "Blood Debt" raised maximum health.  The stock handler also adds the amount to current health on apply and takes it back on removal, so here only maximum health
+// moves: the heal cast right after supplies the health, and when this fades the health is kept, only clamped down to the lowered maximum.  Stat-only reapplies (level ups and
+// the like) are left to the stock handler, which is symmetric across them
+class EverQuest_ClassAuraShadowKnightBloodDebtVitalityAuraScript : public AuraScript
+{
+    PrepareAuraScript(EverQuest_ClassAuraShadowKnightBloodDebtVitalityAuraScript);
+
+    void HandleApply(AuraEffect const* aurEff, AuraEffectHandleModes /*mode*/)
+    {
+        PreventDefaultAction();
+        Unit* target = GetTarget();
+        if (target != nullptr)
+            target->HandleStatFlatModifier(UNIT_MOD_HEALTH, TOTAL_VALUE, float(aurEff->GetAmount()), true);
+    }
+
+    void HandleRemove(AuraEffect const* aurEff, AuraEffectHandleModes /*mode*/)
+    {
+        PreventDefaultAction();
+        Unit* target = GetTarget();
+        if (target != nullptr)
+            target->HandleStatFlatModifier(UNIT_MOD_HEALTH, TOTAL_VALUE, float(aurEff->GetAmount()), false);
+    }
+
+    void Register() override
+    {
+        OnEffectApply += AuraEffectApplyFn(EverQuest_ClassAuraShadowKnightBloodDebtVitalityAuraScript::HandleApply, EFFECT_0, SPELL_AURA_MOD_INCREASE_HEALTH, AURA_EFFECT_HANDLE_REAL);
+        OnEffectRemove += AuraEffectRemoveFn(EverQuest_ClassAuraShadowKnightBloodDebtVitalityAuraScript::HandleRemove, EFFECT_0, SPELL_AURA_MOD_INCREASE_HEALTH, AURA_EFFECT_HANDLE_REAL);
     }
 };
 
@@ -638,6 +676,7 @@ void AddEverQuestClassAuraScripts()
     RegisterSpellScript(EverQuest_ClassAuraWarriorAuraScript);
     RegisterSpellScript(EverQuest_ClassAuraShadowKnightAuraScript);
     RegisterSpellScript(EverQuest_ClassAuraShadowKnightBloodDebtSpellScript);
+    RegisterSpellScript(EverQuest_ClassAuraShadowKnightBloodDebtVitalityAuraScript);
     RegisterSpellScript(EverQuest_ClassAuraNecromancerShadowExchangeSpellScript);
     RegisterSpellScript(EverQuest_ClassAuraMagicianDetonateSummonedSpellScript);
     RegisterSpellScript(EverQuest_ClassAuraMonkLightArmorAuraScript);

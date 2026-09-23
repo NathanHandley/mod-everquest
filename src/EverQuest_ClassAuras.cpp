@@ -62,7 +62,8 @@ static const char* EQ_CLASSAURA_SPELL_TYPE_NAMES[EQ_CLASSAURA_SPELL_TYPE_COUNT] 
     "NecromancerShadowExchange", "RangerCompoundInjuryMoving",
     "MagicianDetonateSummoned", "MagicianDetonateSummonedBlast",
     "ClericRadiance", "ClericRadianceFreeMana",
-    "WizardIntensifiedSkyfall"
+    "WizardIntensifiedSkyfall",
+    "ShadowKnightBloodDebtVitality"
 };
 
 struct EverQuestClassAuraToggle
