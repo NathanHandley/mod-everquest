@@ -944,6 +944,9 @@ public:
         if (player->IsAlive() == false && player->HasPlayerFlag(PLAYER_FLAGS_GHOST) == false)
             EverQuest->ApplyCorpseIllusionNativeDisplayOnDeath(player);
 
+        // A loaded mirror image flag with no character-model illusion behind it would render the player undressed
+        EverQuest->ClearStaleMirrorImageFlagForPlayer(player);
+
         // Grab EQ class info for the login summary message
         EverQuestClassMap classMap = EverQuest->GetClassMapForWOWClassID(player->getClass());
         uint8 secondClassID = EverQuest->GetCurrentSecondEQClassForPlayer(player);
@@ -1171,7 +1174,7 @@ public:
         if (EverQuest->IsEnabled == false)
             return;
 
-        // The corpse now exists and copied the swapped native display, so put the real native display back
+        // The corpse now exists and copied the swapped native display (and fake race for character-model illusions), so put the real values back
         EverQuest->RestoreNativeDisplayAfterCorpseIllusion(player);
 
         // Releasing the spirit is what costs experience, so a resurrection accepted before this point costs nothing

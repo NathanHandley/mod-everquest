@@ -54,8 +54,7 @@ class ByteBuffer;
 struct AreaTrigger;
 struct BuildValuesCachePosPointers;
 
-#define EQ_MOD_VERSION                              112
-#define EQ_MOD_VERSION                              113
+#define EQ_MOD_VERSION                              114
 
 #define EQ_MOVEMENT_CAST_SNARE_DURATION_BUFFER_IN_MS 2000 // How much longer than the remaining cast time the casting slow is given, so a pushed-back cast keeps it
 
@@ -409,6 +408,8 @@ struct BuildValuesCachePosPointers;
 #define EQ_SPELL_ID_AUTO_SHOT                       75
 #define EQ_SPELL_ID_THRASH                          21919   // The Thrash Blade's extra attack proc, cast by the mod for the Monk's double and triple attacks
 #define EQ_SPELL_ID_BLOCK                           107     // The WoW passive that grants the block skill (the only spell with SPELL_EFFECT_BLOCK)
+
+#define EQ_MIRROR_IMAGE_ITEM_SLOT_COUNT             11      // Visible equipment slots carried by SMSG_MIRRORIMAGE_DATA, in packet order
 
 // Vulak`Aerr (Temple of Veeshan) spawns perma-rooted and "locked" (unattackable, non-aggro) until every required dragon is dead, matching Velious-era EQ
 #define EQ_VULAK_CREATURE_TEMPLATE_ID               55045
@@ -856,8 +857,6 @@ public:
     uint32 ItemTemplateEntryIDForNPCEquip = 0;
     uint32 WornEffectSpellID = 0;
     uint32 AllowedEQClassMask = 0;
-    uint32 EQArmorMaterial = 0;
-    uint32 IllusionTintID = 0;
     bool NeverLootStack = false;                                    // Loot drops of this item are split into single copies so each can go to a different player
 };
 
@@ -898,11 +897,35 @@ public:
     uint32 ItemDisplayID = 0;
 };
 
+class EverQuestIllusionCharacter
+{
+public:
+    uint32 EQRaceID = 0;
+    uint8 Gender = 0;
+    uint8 ChrRaceID = 0;
+    uint32 DisplayID = 0;
+    uint32 AltDisplayID = 0;
+    uint32 FaceCount = 0;
+    bool IsRobeCapable = false;
+    float Scale = 1.0f; // Object scale applied with the display and the race's display rows stay at scale 1 (see the converter's GetDBCDisplayScale)
+};
+
 class EverQuestPlayerIllusionState
 {
 public:
     uint32 FormSpellID = 0;
     uint32 RefreshTimerMS = 0;
+    const EverQuestIllusionCharacter* CharacterEntry = nullptr; // Set when the form's EQ race renders as a dressed character model instead of a pre-baked gear display
+    uint8 CharacterFaceByte = 0;
+    bool CharacterUsingAltDisplay = false;
+    uint64 CharacterGearSignature = 0;
+};
+
+class EverQuestCorpseIllusionRestoreData
+{
+public:
+    uint32 NativeDisplayID = 0;
+    uint8 AppliedChrRaceID = 0; // Non-zero when the player's race was temporarily swapped so the corpse composes as the dressed character
 };
 
 // These need to sync with the converter's values (ClassAuraSpellType.cs)
@@ -1039,6 +1062,14 @@ public:
     bool BloodDebtFullVisualPlayed = false;
     bool BloodDebtChargeTimerSynced = false;    // The charge buff's timer was last set from the hit at BloodDebtChargeTimerHitAtMS
     uint64 BloodDebtChargeTimerHitAtMS = 0;
+    bool PaladinFullBlockSwingPending = false;      // A melee swing at the paladin was sized in ModifyMeleeDamage and its outcome roll is still to come
+    ObjectGuid PaladinFullBlockSwingAttackerGUID;
+    bool PaladinFullBlockSwingForced = false;       // That swing was chosen as a full block, and its damage was zeroed
+    uint8 PaladinFullBlockSwingDamageIndex = 0;     // Damage types of the swing seen so far (a player's weapon can carry two)
+    uint32 PaladinFullBlockSwingAmount = 0;         // What the zeroed swing would have done after armor
+    float PaladinFullBlockSwingBlockScale = 1.0f;   // Applied to the ordinary block chance when the swing was not chosen, so the overall block rate holds
+    ObjectGuid PaladinFullBlockLandedAttackerGUID;  // A forced full block waiting on its proc for the combat log line and the deflection
+    uint32 PaladinFullBlockLandedAmount = 0;
 };
 
 class EverQuestPlayerTrackingState : public DataMap::Base
@@ -1804,9 +1835,10 @@ public:
     unordered_set<uint32> BardSongTickSpellIDs;
     unordered_set<uint32> BardSongEffectSpellIDs;
     unordered_set<uint32> MovementCastSnareSpellIDs;
-    unordered_map<uint64, uint32> IllusionDisplayIDsByLookupKey;
-    unordered_map<uint64, uint32> IllusionFaceDisplayIDsByLookupKey;
-    uint32 IllusionMaxFaceIndex;
+    unordered_map<uint64, EverQuestIllusionCharacter> IllusionCharactersByRaceAndGenderKey;
+    unordered_map<uint64, uint32> IllusionNativeItemDisplayIDsByLookupKey; // (item display, ChrRaceID, gender) - that race's native armor display, loaded once at startup, read-only after
+    unordered_map<uint64, uint32> IllusionGenericItemDisplayIDsByLookupKey; // (ChrRaceID, gender, WoW inventory type, WoW armor subclass) - untinted native display for WoW items worn in illusion forms, loaded once at startup, read-only after
+    uint32 IllusionMaxFaceIndex; // Highest selectable illusion face index across the dressable character models
     unordered_set<uint32> IllusionFormSpellIDs;
     unordered_map<uint32, vector<EverQuestIllusionObject>> IllusionObjectsByMapID;
     unordered_map<ObjectGuid, EverQuestPlayerIllusionState> PlayerIllusionStatesByPlayerGUID;
@@ -1869,7 +1901,7 @@ public:
     unordered_map<ObjectGuid, vector<uint32>> ForcedFactionReactionIDsByPlayerGUID;
     unordered_set<ObjectGuid> PlayersPendingTempFactionRecalculation;
     unordered_set<ObjectGuid> PlayersPendingFactionGatedQuestRefresh;
-    unordered_map<ObjectGuid, uint32> CorpseIllusionOriginalNativeDisplayByPlayerGUID;
+    unordered_map<ObjectGuid, EverQuestCorpseIllusionRestoreData> CorpseIllusionRestoreDataByPlayerGUID;
     unordered_map<ObjectGuid, EverQuestPendingSummonRequest> PendingSummonRequestByTargetPlayerGUID;
     unordered_map<uint8, EverQuestClassMap> ClassMapByWOWClassID;
 
@@ -1997,17 +2029,23 @@ public:
     void ApplyMovementCastSnareForPlayerCurrentCast(Player* player);
     void ClearMovementCastSnareForPlayer(Player* player);
     void UpdateMovementCastSnareForPlayer(Player* player);
-    void LoadIllusionDisplayData();
     bool IsIllusionFormSpell(uint32 spellID);
-    uint64 GetIllusionDisplayLookupKey(uint32 formSpellID, uint32 bodySet, uint32 tintID, bool helmOn);
-    bool TryGetIllusionDisplayID(uint32 formSpellID, uint32 bodySet, uint32 tintID, bool helmOn, uint32& displayIDOut);
-    uint32 GetIllusionDisplayIDWithFallback(uint32 formSpellID, uint32 bodySet, uint32 tintID, bool helmOn);
-    uint32 GetIllusionBodySetForEQArmorMaterial(uint32 eqArmorMaterial);
-    void LoadIllusionFaceData();
-    uint64 GetIllusionFaceLookupKey(uint32 baseDisplayID, uint32 faceIndex);
-    uint32 GetIllusionFaceDisplayIDForPlayer(Player* player, uint32 baseDisplayID);
-    uint32 GetIllusionGearDisplayIDForPlayer(Player* player, uint32 formSpellID);
     uint32 GetActiveShapeshiftModelIDForPlayer(Player* player);
+    void LoadIllusionCharacterData();
+    void LoadIllusionItemDisplayData();
+    void LoadIllusionGenericItemDisplayData();
+    uint64 GetIllusionGenericItemDisplayLookupKey(uint8 chrRaceID, uint8 gender, uint8 inventoryType, uint8 armorSubClass);
+    uint32 GetIllusionGenericItemDisplayID(uint8 chrRaceID, uint8 gender, uint8 inventoryType, uint8 armorSubClass);
+    uint64 GetIllusionNativeItemDisplayLookupKey(uint32 itemDisplayID, uint8 chrRaceID, uint8 gender);
+    uint8 GetIllusionHelmHairStyleForPlayer(Player* player);
+    uint32 GetIllusionNativeItemDisplayID(uint32 itemDisplayID, uint8 chrRaceID, uint8 gender);
+    const EverQuestIllusionCharacter* GetIllusionCharacterForRaceAndGender(uint32 eqRaceID, uint8 gender);
+    void GetMirrorImageItemDisplayIDsForPlayer(Player* player, uint8 chrRaceID, uint32* itemDisplayIDsOut);
+    uint64 CalculateIllusionCharacterGearSignature(Player* player, uint8 chrRaceID, uint8 faceByte);
+    void BuildMirrorImageDataPacketForPlayer(Player* subject, uint8 chrRaceID, uint8 eqFaceByte, WorldPacket& dataOut);
+    void SendMirrorImageDataToNearbyPlayers(Player* player, EverQuestPlayerIllusionState* illusionState);
+    bool TryGetIllusionCharacterMirrorDataForPlayer(Player* subject, uint8& chrRaceIDOut, uint8& eqFaceByteOut);
+    void ApplyIllusionCharacterDisplayIfChanged(Player* player, EverQuestPlayerIllusionState* illusionState);
     void ApplyIllusionGearDisplayIfChanged(Player* player, EverQuestPlayerIllusionState* illusionState);
     void ApplyIllusionGearDisplayOnFormAuraApply(Player* player, uint32 formSpellID);
     void HandleIllusionFormAuraRemove(Player* player, uint32 spellID);
@@ -2027,6 +2065,7 @@ public:
     bool DoesSpellApplyLevitation(SpellInfo const* spellInfo);
     bool IsLevitationBlockedByIllusionObjectForm(SpellInfo const* spellInfo, Unit* target);
     bool IsIllusionObjectFormBlockedByLevitation(uint32 spellID, Unit* target);
+    void ClearStaleMirrorImageFlagForPlayer(Player* player);
     bool IsSpellBlockedByMinTargetLevel(uint32 spellID, Unit* target, Unit* caster, bool isCastFromItem);
     bool IsSpellBlockedByMaxCreatureTargetLevel(uint32 spellID, Unit* target, Unit* caster);
     void CastWeaponProcSpell(Player* player, Unit* victim, uint32 spellID);

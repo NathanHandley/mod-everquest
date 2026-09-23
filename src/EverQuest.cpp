@@ -2896,7 +2896,7 @@ void EverQuestMod::LoadItemTemplateData()
 {
     ItemTemplatesByEntryID.clear();
     WornEffectSpellIDs.clear();
-    QueryResult queryResult = WorldDatabase.Query("SELECT ItemTemplateID, NPCEquipItemTemplateID, WornEffectSpellID, AllowedEQClassMask, EQArmorMaterial, IllusionTintID, NeverLootStack FROM mod_everquest_item_template ORDER BY ItemTemplateID;");
+    QueryResult queryResult = WorldDatabase.Query("SELECT ItemTemplateID, NPCEquipItemTemplateID, WornEffectSpellID, AllowedEQClassMask, NeverLootStack FROM mod_everquest_item_template ORDER BY ItemTemplateID;");
     if (queryResult)
     {
         do
@@ -2908,9 +2908,7 @@ void EverQuestMod::LoadItemTemplateData()
             everQuestItemTemplate.ItemTemplateEntryIDForNPCEquip = fields[1].Get<uint32>();
             everQuestItemTemplate.WornEffectSpellID = fields[2].Get<uint32>();
             everQuestItemTemplate.AllowedEQClassMask = fields[3].Get<uint32>();
-            everQuestItemTemplate.EQArmorMaterial = (uint32)std::max(0, fields[4].Get<int32>());
-            everQuestItemTemplate.IllusionTintID = (uint32)std::max(0, fields[5].Get<int32>());
-            everQuestItemTemplate.NeverLootStack = fields[6].Get<uint8>() != 0;
+            everQuestItemTemplate.NeverLootStack = fields[4].Get<uint8>() != 0;
             ItemTemplatesByEntryID[everQuestItemTemplate.ItemTemplateEntryID] = everQuestItemTemplate;
             if (everQuestItemTemplate.WornEffectSpellID != 0)
                 WornEffectSpellIDs.insert(everQuestItemTemplate.WornEffectSpellID);
@@ -4579,164 +4577,251 @@ void EverQuestMod::UpdateMovementCastSnareForPlayer(Player* player)
     player->RemoveAurasDueToSpell(ConfigSystemMovementCastSnareSpellID);
 }
 
-void EverQuestMod::LoadIllusionDisplayData()
-{
-    IllusionDisplayIDsByLookupKey.clear();
-    IllusionFormSpellIDs.clear();
-
-    QueryResult queryResult = WorldDatabase.Query("SELECT FormSpellID, BodySet, TintID, HelmOn, DisplayID FROM mod_everquest_illusion_display;");
-    if (!queryResult)
-    {
-        LOG_INFO("module.EverQuest", "EverQuestMod::LoadIllusionDisplayData found no mod_everquest_illusion_display rows, so illusion forms will not match worn gear");
-        return;
-    }
-    do
-    {
-        // Pull the data out
-        Field* fields = queryResult->Fetch();
-        uint32 formSpellID = fields[0].Get<uint32>();
-        uint32 bodySet = (uint32)std::max(0, fields[1].Get<int32>());
-        uint32 tintID = (uint32)std::max(0, fields[2].Get<int32>());
-        bool helmOn = fields[3].Get<bool>();
-        uint32 displayID = fields[4].Get<uint32>();
-        IllusionDisplayIDsByLookupKey[GetIllusionDisplayLookupKey(formSpellID, bodySet, tintID, helmOn)] = displayID;
-        IllusionFormSpellIDs.insert(formSpellID);
-    } while (queryResult->NextRow());
-}
-
 bool EverQuestMod::IsIllusionFormSpell(uint32 spellID)
 {
     return IllusionFormSpellIDs.find(spellID) != IllusionFormSpellIDs.end();
 }
 
-uint64 EverQuestMod::GetIllusionDisplayLookupKey(uint32 formSpellID, uint32 bodySet, uint32 tintID, bool helmOn)
+void EverQuestMod::LoadIllusionCharacterData()
 {
-    // Stored as (high 32 bits) | tint (20 bits, from bit 12) | body set (8 bits, from bit 4) | helm (bit 0)
-    return ((uint64)formSpellID << 32) | ((uint64)(tintID & 0xFFFFF) << 12) | ((uint64)(bodySet & 0xFF) << 4) | (uint64)(helmOn ? 1 : 0);
-}
-
-bool EverQuestMod::TryGetIllusionDisplayID(uint32 formSpellID, uint32 bodySet, uint32 tintID, bool helmOn, uint32& displayIDOut)
-{
-    auto displayItr = IllusionDisplayIDsByLookupKey.find(GetIllusionDisplayLookupKey(formSpellID, bodySet, tintID, helmOn));
-    if (displayItr == IllusionDisplayIDsByLookupKey.end())
-        return false;
-    displayIDOut = displayItr->second;
-    return true;
-}
-
-uint32 EverQuestMod::GetIllusionDisplayIDWithFallback(uint32 formSpellID, uint32 bodySet, uint32 tintID, bool helmOn)
-{
-    // If exact, don't use tint
-    uint32 displayID = 0;
-    if (TryGetIllusionDisplayID(formSpellID, bodySet, tintID, helmOn, displayID) == true)
-        return displayID;
-    if (TryGetIllusionDisplayID(formSpellID, bodySet, 0, helmOn, displayID) == true)
-        return displayID;
-
-    // Robe sets fall back to the base cloth set
-    if (bodySet >= 10)
-    {
-        if (TryGetIllusionDisplayID(formSpellID, 0, 0, helmOn, displayID) == true)
-            return displayID;
-    }
-
-    if (TryGetIllusionDisplayID(formSpellID, 0, 0, false, displayID) == true)
-        return displayID;
-    return 0;
-}
-
-uint32 EverQuestMod::GetIllusionBodySetForEQArmorMaterial(uint32 eqArmorMaterial)
-{
-    // 1-3 are leather/chain/plate, 10/16 are robe sets, and all else is cloth
-    if (eqArmorMaterial >= 1 && eqArmorMaterial <= 3)
-        return eqArmorMaterial;
-    if (eqArmorMaterial >= 10 && eqArmorMaterial <= 16)
-        return eqArmorMaterial;
-    return 0;
-}
-
-void EverQuestMod::LoadIllusionFaceData()
-{
-    IllusionFaceDisplayIDsByLookupKey.clear();
+    IllusionCharactersByRaceAndGenderKey.clear();
+    IllusionFormSpellIDs.clear();
     IllusionMaxFaceIndex = 0;
 
-    // Rows only exist for face indexes of 1 and up, as face 0 is the base display itself
-    QueryResult queryResult = WorldDatabase.Query("SELECT BaseDisplayID, FaceIndex, DisplayID FROM mod_everquest_illusion_face;");
+    QueryResult queryResult = WorldDatabase.Query("SELECT EQRaceID, Gender, ChrRaceID, DisplayID, AltDisplayID, FaceCount, IsRobeCapable, Scale FROM mod_everquest_illusion_character;");
     if (!queryResult)
     {
-        LOG_INFO("module.EverQuest", "EverQuestMod::LoadIllusionFaceData found no mod_everquest_illusion_face rows, so illusion forms will always use the base (0) face");
+        LOG_INFO("module.EverQuest", "EverQuestMod::LoadIllusionCharacterData found no mod_everquest_illusion_character rows, so illusion forms will use the pre-baked gear displays only");
         return;
     }
     do
     {
         // Pull the data out
         Field* fields = queryResult->Fetch();
-        uint32 baseDisplayID = fields[0].Get<uint32>();
-        uint32 faceIndex = (uint32)std::max(0, fields[1].Get<int32>());
-        uint32 displayID = fields[2].Get<uint32>();
-        IllusionFaceDisplayIDsByLookupKey[GetIllusionFaceLookupKey(baseDisplayID, faceIndex)] = displayID;
-        if (faceIndex > IllusionMaxFaceIndex)
-            IllusionMaxFaceIndex = faceIndex;
+        EverQuestIllusionCharacter illusionCharacter;
+        illusionCharacter.EQRaceID = fields[0].Get<uint32>();
+        illusionCharacter.Gender = fields[1].Get<uint8>();
+        illusionCharacter.ChrRaceID = fields[2].Get<uint8>();
+        illusionCharacter.DisplayID = fields[3].Get<uint32>();
+        illusionCharacter.AltDisplayID = fields[4].Get<uint32>();
+        illusionCharacter.FaceCount = fields[5].Get<uint32>();
+        illusionCharacter.IsRobeCapable = fields[6].Get<bool>();
+        illusionCharacter.Scale = fields[7].Get<float>();
+        if (illusionCharacter.Scale <= 0.0f)
+            illusionCharacter.Scale = 1.0f;
+        uint64 lookupKey = ((uint64)illusionCharacter.EQRaceID << 1) | (uint64)(illusionCharacter.Gender & 1);
+        IllusionCharactersByRaceAndGenderKey[lookupKey] = illusionCharacter;
+        if (illusionCharacter.FaceCount > 0 && illusionCharacter.FaceCount - 1 > IllusionMaxFaceIndex)
+            IllusionMaxFaceIndex = illusionCharacter.FaceCount - 1;
+    } while (queryResult->NextRow());
+
+    // The illusion form spells the mod dresses are the ones whose EQ race has a character model (spell data loads before this)
+    for (auto& spellDataBySpellID : SpellDataBySpellID)
+    {
+        uint32 eqRaceID = spellDataBySpellID.second.IllusionFormEQRaceID;
+        if (eqRaceID == 0)
+            continue;
+        if (IllusionCharactersByRaceAndGenderKey.find(((uint64)eqRaceID << 1) | 0) != IllusionCharactersByRaceAndGenderKey.end() ||
+            IllusionCharactersByRaceAndGenderKey.find(((uint64)eqRaceID << 1) | 1) != IllusionCharactersByRaceAndGenderKey.end())
+            IllusionFormSpellIDs.insert(spellDataBySpellID.first);
+    }
+}
+
+uint8 EverQuestMod::GetIllusionHelmHairStyleForPlayer(Player* player)
+{
+    if (player->HasPlayerFlag(PLAYER_FLAGS_HIDE_HELM))
+        return 0;
+    Item const* headItem = player->GetItemByPos(INVENTORY_SLOT_BAG_0, EQUIPMENT_SLOT_HEAD);
+    if (headItem == nullptr || headItem->GetTemplate() == nullptr || headItem->GetTemplate()->Class != ITEM_CLASS_ARMOR)
+        return 0;
+    switch (headItem->GetTemplate()->SubClass)
+    {
+        case ITEM_SUBCLASS_ARMOR_LEATHER: return 1;
+        case ITEM_SUBCLASS_ARMOR_MAIL: return 2;
+        case ITEM_SUBCLASS_ARMOR_PLATE: return 3;
+        default: return 0;
+    }
+}
+
+uint64 EverQuestMod::GetIllusionNativeItemDisplayLookupKey(uint32 itemDisplayID, uint8 chrRaceID, uint8 gender)
+{
+    return ((uint64)itemDisplayID << 16) | ((uint64)chrRaceID << 8) | (uint64)(gender & 1);
+}
+
+void EverQuestMod::LoadIllusionItemDisplayData()
+{
+    IllusionNativeItemDisplayIDsByLookupKey.clear();
+
+    QueryResult queryResult = WorldDatabase.Query("SELECT ItemDisplayInfoID, ChrRaceID, Gender, NativeItemDisplayInfoID FROM mod_everquest_illusion_item_display;");
+    if (!queryResult)
+    {
+        LOG_INFO("module.EverQuest", "EverQuestMod::LoadIllusionItemDisplayData found no mod_everquest_illusion_item_display rows, so illusion characters will wear the shared armor components");
+        return;
+    }
+    do
+    {
+        Field* fields = queryResult->Fetch();
+        uint32 itemDisplayID = fields[0].Get<uint32>();
+        uint8 chrRaceID = fields[1].Get<uint8>();
+        uint8 gender = fields[2].Get<uint8>();
+        uint32 nativeItemDisplayID = fields[3].Get<uint32>();
+        IllusionNativeItemDisplayIDsByLookupKey[GetIllusionNativeItemDisplayLookupKey(itemDisplayID, chrRaceID, gender)] = nativeItemDisplayID;
     } while (queryResult->NextRow());
 }
 
-uint64 EverQuestMod::GetIllusionFaceLookupKey(uint32 baseDisplayID, uint32 faceIndex)
+uint32 EverQuestMod::GetIllusionNativeItemDisplayID(uint32 itemDisplayID, uint8 chrRaceID, uint8 gender)
 {
-    // Stored as base display ID (32 bits, from bit 8) | face index (8 bits, from bit 0)
-    return ((uint64)baseDisplayID << 8) | (uint64)(faceIndex & 0xFF);
+    if (itemDisplayID == 0)
+        return 0;
+    auto nativeItr = IllusionNativeItemDisplayIDsByLookupKey.find(GetIllusionNativeItemDisplayLookupKey(itemDisplayID, chrRaceID, gender));
+    if (nativeItr == IllusionNativeItemDisplayIDsByLookupKey.end())
+        return itemDisplayID;
+    return nativeItr->second;
 }
 
-uint32 EverQuestMod::GetIllusionFaceDisplayIDForPlayer(Player* player, uint32 baseDisplayID)
+void EverQuestMod::LoadIllusionGenericItemDisplayData()
 {
-    // Face 0 is the base display itself, and any (base display, face) pair without a row falls back to the base display, which also covers players whose selected face is out of range for the current form's race
-    uint32 playerFaceID = GetIllusionFaceIDForPlayer(player);
-    if (playerFaceID == 0)
-        return baseDisplayID;
-    auto faceItr = IllusionFaceDisplayIDsByLookupKey.find(GetIllusionFaceLookupKey(baseDisplayID, playerFaceID));
-    if (faceItr == IllusionFaceDisplayIDsByLookupKey.end())
-        return baseDisplayID;
-    return faceItr->second;
-}
-
-uint32 EverQuestMod::GetIllusionGearDisplayIDForPlayer(Player* player, uint32 formSpellID)
-{
-    // Just use the chest to drive the outfit
-    uint32 bodySet = 0;
-    uint32 tintID = 0;
-    Item* chestItem = player->GetItemByPos(INVENTORY_SLOT_BAG_0, EQUIPMENT_SLOT_CHEST);
-    if (chestItem != nullptr)
+    IllusionGenericItemDisplayIDsByLookupKey.clear();
+    QueryResult queryResult = WorldDatabase.Query("SELECT ChrRaceID, Gender, InventoryType, ArmorSubClass, NativeItemDisplayInfoID FROM mod_everquest_illusion_generic_item_display;");
+    if (!queryResult)
     {
-        auto itemTemplateItr = ItemTemplatesByEntryID.find(chestItem->GetEntry());
-        if (itemTemplateItr != ItemTemplatesByEntryID.end())
+        LOG_INFO("module.EverQuest", "EverQuestMod::LoadIllusionGenericItemDisplayData found no mod_everquest_illusion_generic_item_display rows, so WoW armor worn in illusion forms will be hidden");
+        return;
+    }
+    do
+    {
+        Field* fields = queryResult->Fetch();
+        uint8 chrRaceID = fields[0].Get<uint8>();
+        uint8 gender = fields[1].Get<uint8>();
+        uint8 inventoryType = fields[2].Get<uint8>();
+        uint8 armorSubClass = fields[3].Get<uint8>();
+        uint32 nativeItemDisplayID = fields[4].Get<uint32>();
+        IllusionGenericItemDisplayIDsByLookupKey[GetIllusionGenericItemDisplayLookupKey(chrRaceID, gender, inventoryType, armorSubClass)] = nativeItemDisplayID;
+    } while (queryResult->NextRow());
+}
+
+uint64 EverQuestMod::GetIllusionGenericItemDisplayLookupKey(uint8 chrRaceID, uint8 gender, uint8 inventoryType, uint8 armorSubClass)
+{
+    return ((uint64)chrRaceID << 24) | ((uint64)(gender & 1) << 16) | ((uint64)inventoryType << 8) | (uint64)armorSubClass;
+}
+
+uint32 EverQuestMod::GetIllusionGenericItemDisplayID(uint8 chrRaceID, uint8 gender, uint8 inventoryType, uint8 armorSubClass)
+{
+    auto genericItr = IllusionGenericItemDisplayIDsByLookupKey.find(GetIllusionGenericItemDisplayLookupKey(chrRaceID, gender, inventoryType, armorSubClass));
+    if (genericItr == IllusionGenericItemDisplayIDsByLookupKey.end())
+        return 0;
+    return genericItr->second;
+}
+
+const EverQuestIllusionCharacter* EverQuestMod::GetIllusionCharacterForRaceAndGender(uint32 eqRaceID, uint8 gender)
+{
+    if (eqRaceID == 0)
+        return nullptr;
+    uint64 lookupKey = ((uint64)eqRaceID << 1) | (uint64)(gender & 1);
+    auto characterItr = IllusionCharactersByRaceAndGenderKey.find(lookupKey);
+    if (characterItr == IllusionCharactersByRaceAndGenderKey.end())
+        return nullptr;
+    return &characterItr->second;
+}
+
+void EverQuestMod::GetMirrorImageItemDisplayIDsForPlayer(Player* player, uint8 chrRaceID, uint32* itemDisplayIDsOut)
+{
+    // Slot order must match the client's SMSG_MIRRORIMAGE_DATA layout (see WorldSession::HandleMirrorImageDataRequest)
+    static EquipmentSlots const mirrorImageItemSlots[EQ_MIRROR_IMAGE_ITEM_SLOT_COUNT] =
+    {
+        EQUIPMENT_SLOT_HEAD,
+        EQUIPMENT_SLOT_SHOULDERS,
+        EQUIPMENT_SLOT_BODY,
+        EQUIPMENT_SLOT_CHEST,
+        EQUIPMENT_SLOT_WAIST,
+        EQUIPMENT_SLOT_LEGS,
+        EQUIPMENT_SLOT_FEET,
+        EQUIPMENT_SLOT_WRISTS,
+        EQUIPMENT_SLOT_HANDS,
+        EQUIPMENT_SLOT_BACK,
+        EQUIPMENT_SLOT_TABARD
+    };
+    for (int slotIndex = 0; slotIndex < EQ_MIRROR_IMAGE_ITEM_SLOT_COUNT; ++slotIndex)
+    {
+        EquipmentSlots equipmentSlot = mirrorImageItemSlots[slotIndex];
+        itemDisplayIDsOut[slotIndex] = 0;
+
+        // Head and shoulders stay empty until the phase 2 attachment models exist - EQ models carry no art for them, and a helm's geoset-hiding data would blank hair geoset 1, which is the entire EQ head mesh
+        if (equipmentSlot == EQUIPMENT_SLOT_HEAD || equipmentSlot == EQUIPMENT_SLOT_SHOULDERS)
+            continue;
+        if (equipmentSlot == EQUIPMENT_SLOT_BACK && player->HasPlayerFlag(PLAYER_FLAGS_HIDE_CLOAK))
+            continue;
+        Item const* equippedItem = player->GetItemByPos(INVENTORY_SLOT_BAG_0, equipmentSlot);
+        if (equippedItem == nullptr || equippedItem->GetTemplate() == nullptr)
+            continue;
+        ItemTemplate const* itemTemplate = equippedItem->GetTemplate();
+        if (ItemTemplatesByEntryID.find(itemTemplate->ItemId) != ItemTemplatesByEntryID.end())
         {
-            bodySet = GetIllusionBodySetForEQArmorMaterial(itemTemplateItr->second.EQArmorMaterial);
-            tintID = itemTemplateItr->second.IllusionTintID;
+            // An EQ item: its display, or the native one carrying this race's own EQ armor art (the shared components are laid out for the stock models)
+            itemDisplayIDsOut[slotIndex] = GetIllusionNativeItemDisplayID(itemTemplate->DisplayInfoID, chrRaceID, player->getGender());
+            continue;
         }
-        else
+
+        // A WoW item: its components draw garbage on the EQ layout, so it shows as the untinted native display of its armor material for the slot (cloth, leather, mail, plate; any robe as the basic robe), or as nothing when the slot has no EQ art
+        if (itemTemplate->Class == ITEM_CLASS_ARMOR && itemTemplate->SubClass >= ITEM_SUBCLASS_ARMOR_CLOTH && itemTemplate->SubClass <= ITEM_SUBCLASS_ARMOR_PLATE)
+            itemDisplayIDsOut[slotIndex] = GetIllusionGenericItemDisplayID(chrRaceID, player->getGender(), (uint8)itemTemplate->InventoryType, (uint8)itemTemplate->SubClass);
+    }
+}
+
+uint64 EverQuestMod::CalculateIllusionCharacterGearSignature(Player* player, uint8 chrRaceID, uint8 faceByte)
+{
+    // FNV-1a over everything the mirror packet carries that can change midsession, so a change forces a display flip
+    uint32 itemDisplayIDs[EQ_MIRROR_IMAGE_ITEM_SLOT_COUNT];
+    GetMirrorImageItemDisplayIDsForPlayer(player, chrRaceID, itemDisplayIDs);
+    uint64 signature = 14695981039346656037ull;
+    for (int slotIndex = 0; slotIndex < EQ_MIRROR_IMAGE_ITEM_SLOT_COUNT; ++slotIndex)
+    {
+        signature ^= (uint64)itemDisplayIDs[slotIndex];
+        signature *= 1099511628211ull;
+    }
+    signature ^= (uint64)faceByte;
+    signature *= 1099511628211ull;
+    signature ^= (uint64)GetIllusionHelmHairStyleForPlayer(player);
+    signature *= 1099511628211ull;
+    return signature;
+}
+
+void EverQuestMod::BuildMirrorImageDataPacketForPlayer(Player* subject, uint8 chrRaceID, uint8 eqFaceByte, WorldPacket& dataOut)
+{
+    // Field layout must match WorldSession::HandleMirrorImageDataRequest. The face byte carries the EQ face selection (the CharSections face rows blit the EQ head textures into the composite)
+    // Skin/hair/haircolor/facialhair bytes are pinned to zero since the converter points every EQ selection byte variation at the same generated section textures
+    uint32 itemDisplayIDs[EQ_MIRROR_IMAGE_ITEM_SLOT_COUNT];
+    GetMirrorImageItemDisplayIDsForPlayer(subject, chrRaceID, itemDisplayIDs);
+
+    dataOut.Initialize(SMSG_MIRRORIMAGE_DATA, 68);
+    dataOut << subject->GetGUID();
+    dataOut << uint32(subject->GetDisplayId());
+    dataOut << uint8(chrRaceID);
+    dataOut << uint8(subject->getGender());
+    dataOut << uint8(subject->getClass());
+    dataOut << uint8(0);             // skin
+    dataOut << uint8(eqFaceByte);    // face (carries the EQ face selection)
+    dataOut << uint8(GetIllusionHelmHairStyleForPlayer(subject)); // hair style selects the head geoset: 0 = bare head, 1-3 = the EQ helmed heads
+    dataOut << uint8(0);             // haircolor (helm textures untinted for players)
+    dataOut << uint8(0);             // facialhair
+    dataOut << uint32(subject->GetGuildId());
+    for (int slotIndex = 0; slotIndex < EQ_MIRROR_IMAGE_ITEM_SLOT_COUNT; ++slotIndex)
+        dataOut << uint32(itemDisplayIDs[slotIndex]);
+}
+
+bool EverQuestMod::TryGetIllusionCharacterMirrorDataForPlayer(Player* subject, uint8& chrRaceIDOut, uint8& eqFaceByteOut)
+{
+    {
+        std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+        auto illusionStateItr = PlayerIllusionStatesByPlayerGUID.find(subject->GetGUID());
+        if (illusionStateItr != PlayerIllusionStatesByPlayerGUID.end() && illusionStateItr->second.CharacterEntry != nullptr)
         {
-            ItemTemplate const* itemProto = chestItem->GetTemplate();
-            if (itemProto != nullptr && itemProto->Class == ITEM_CLASS_ARMOR)
-            {
-                switch (itemProto->SubClass)
-                {
-                    case ITEM_SUBCLASS_ARMOR_CLOTH: bodySet = 0; break;
-                    case ITEM_SUBCLASS_ARMOR_LEATHER: bodySet = 1; break;
-                    case ITEM_SUBCLASS_ARMOR_MAIL: bodySet = 2; break;
-                    case ITEM_SUBCLASS_ARMOR_PLATE: bodySet = 3; break;
-                    default: break;
-                }
-            }
+            chrRaceIDOut = illusionStateItr->second.CharacterEntry->ChrRaceID;
+            eqFaceByteOut = illusionStateItr->second.CharacterFaceByte;
+            return true;
         }
     }
-
-    // The helm shows when an armor head item is worn and the player isn't hiding it via the interface option
-    bool helmOn = false;
-    Item* headItem = player->GetItemByPos(INVENTORY_SLOT_BAG_0, EQUIPMENT_SLOT_HEAD);
-    if (headItem != nullptr && headItem->GetTemplate() != nullptr && headItem->GetTemplate()->Class == ITEM_CLASS_ARMOR &&
-        player->HasPlayerFlag(PLAYER_FLAGS_HIDE_HELM) == false)
-        helmOn = true;
-
-    return GetIllusionDisplayIDWithFallback(formSpellID, bodySet, tintID, helmOn);
+    return false;
 }
 
 uint32 EverQuestMod::GetActiveShapeshiftModelIDForPlayer(Player* player)
@@ -4746,6 +4831,51 @@ uint32 EverQuestMod::GetActiveShapeshiftModelIDForPlayer(Player* player)
     if (shapeshiftAuras.empty() == true)
         return 0;
     return player->GetModelForForm(player->GetShapeshiftForm(), shapeshiftAuras.front()->GetId());
+}
+
+void EverQuestMod::ApplyIllusionCharacterDisplayIfChanged(Player* player, EverQuestPlayerIllusionState* illusionState)
+{
+    const EverQuestIllusionCharacter* illusionCharacter = illusionState->CharacterEntry;
+
+    // The EQ face selection rides the hair style byte of the mirror packet (EQ heads bake the face into the head texture), and out-of-range selections fall back to the race's default face
+    uint32 selectedFaceID = GetIllusionFaceIDForPlayer(player);
+    if (selectedFaceID >= illusionCharacter->FaceCount)
+        selectedFaceID = 0;
+    illusionState->CharacterFaceByte = (uint8)selectedFaceID;
+
+    // The mirror flag must be on before any display change reaches the client, since the flag is what makes it request the packet
+    if (player->HasUnitFlag2(UNIT_FLAG2_MIRROR_IMAGE) == false)
+        player->SetUnitFlag2(UNIT_FLAG2_MIRROR_IMAGE);
+
+    // Something else stomping the model (a core transform reapply, a shapeshift ending) just needs the display taken back, and that display change alone makes every client re-request the mirror packet
+    uint64 gearSignature = CalculateIllusionCharacterGearSignature(player, illusionCharacter->ChrRaceID, illusionState->CharacterFaceByte);
+    uint32 desiredDisplayID = illusionState->CharacterUsingAltDisplay ? illusionCharacter->AltDisplayID : illusionCharacter->DisplayID;
+    bool isObjectScaleOff = std::fabs(player->GetObjectScale() - illusionCharacter->Scale) > 0.001f; // A core re-set of the same display resets the object scale to 1
+    if (player->GetDisplayId() != desiredDisplayID || isObjectScaleOff == true)
+    {
+        illusionState->CharacterGearSignature = gearSignature;
+        player->SetDisplayId(desiredDisplayID, illusionCharacter->Scale); // The size rides the object scale so held items and mounts follow it
+        SendMirrorImageDataToNearbyPlayers(player, illusionState);
+        return;
+    }
+
+    // The client only reapplies mirror packet data when the display id value actually changes, so flip between the two identical-model displays whenever something the packet carries has changed
+    if (gearSignature == illusionState->CharacterGearSignature)
+        return;
+    illusionState->CharacterGearSignature = gearSignature;
+    illusionState->CharacterUsingAltDisplay = !illusionState->CharacterUsingAltDisplay;
+    player->SetDisplayId(illusionState->CharacterUsingAltDisplay ? illusionCharacter->AltDisplayID : illusionCharacter->DisplayID, illusionCharacter->Scale);
+    SendMirrorImageDataToNearbyPlayers(player, illusionState);
+}
+
+void EverQuestMod::SendMirrorImageDataToNearbyPlayers(Player* player, EverQuestPlayerIllusionState* illusionState)
+{
+    // Handing every nearby client the mirror data BEFORE the batched display id change reaches them means the model is rebuilt with the data already in hand rather than after its own request round trip
+    if (player->IsInWorld() == false)
+        return;
+    WorldPacket data;
+    BuildMirrorImageDataPacketForPlayer(player, illusionState->CharacterEntry->ChrRaceID, illusionState->CharacterFaceByte, data);
+    player->SendMessageToSet(&data, true);
 }
 
 void EverQuestMod::ApplyIllusionGearDisplayIfChanged(Player* player, EverQuestPlayerIllusionState* illusionState)
@@ -4768,22 +4898,18 @@ void EverQuestMod::ApplyIllusionGearDisplayIfChanged(Player* player, EverQuestPl
 
         if (showFormModel == true)
         {
+            // Lift the mirror flag while the form shows, or the client would compose the shapeshift model as a dressed character
+            if (player->HasUnitFlag2(UNIT_FLAG2_MIRROR_IMAGE) == true)
+                player->RemoveUnitFlag2(UNIT_FLAG2_MIRROR_IMAGE);
             if (player->GetDisplayId() != shapeshiftModelID)
                 player->SetDisplayId(shapeshiftModelID, druidFormDisplayScale);
             return;
         }
     }
 
-    // A zero result means no one doesn't exist, so leave the core's transform display alone
-    uint32 gearDisplayID = GetIllusionGearDisplayIDForPlayer(player, illusionState->FormSpellID);
-    if (gearDisplayID == 0)
-        return;
-
-    // Swap in the player's selected face version of the display when one exists
-    uint32 faceDisplayID = GetIllusionFaceDisplayIDForPlayer(player, gearDisplayID);
-    if (faceDisplayID == player->GetDisplayId())
-        return;
-    player->SetDisplayId(faceDisplayID);
+    // The form renders as its race's dressable character model through the mirror image packet; a form without one keeps the core's transform display
+    if (illusionState->CharacterEntry != nullptr)
+        ApplyIllusionCharacterDisplayIfChanged(player, illusionState);
 }
 
 void EverQuestMod::ApplyIllusionGearDisplayOnFormAuraApply(Player* player, uint32 formSpellID)
@@ -4797,6 +4923,15 @@ void EverQuestMod::ApplyIllusionGearDisplayOnFormAuraApply(Player* player, uint3
     illusionState->FormSpellID = formSpellID;
     illusionState->RefreshTimerMS = 0;
 
+    // Forms whose EQ race has a character model version render dressed through the mirror image packet
+    illusionState->CharacterEntry = GetIllusionCharacterForRaceAndGender(GetSpellDataForSpellID(formSpellID).IllusionFormEQRaceID, player->getGender());
+    illusionState->CharacterUsingAltDisplay = false;
+    illusionState->CharacterGearSignature = 0;
+
+    // A leftover mirror flag from a previous form must not linger on a form without a character model
+    if (illusionState->CharacterEntry == nullptr && player->HasUnitFlag2(UNIT_FLAG2_MIRROR_IMAGE) == true)
+        player->RemoveUnitFlag2(UNIT_FLAG2_MIRROR_IMAGE);
+
     // Override the model with a gear-matched version
     ApplyIllusionGearDisplayIfChanged(player, illusionState);
 }
@@ -4807,6 +4942,7 @@ void EverQuestMod::HandleIllusionFormAuraRemove(Player* player, uint32 spellID)
         return;
 
     // Cleanup tracking
+    bool wasCharacterEntryActive = false;
     {
         std::lock_guard<std::mutex> lock(RuntimeStateMutex);
         auto illusionStateItr = PlayerIllusionStatesByPlayerGUID.find(player->GetGUID());
@@ -4817,8 +4953,13 @@ void EverQuestMod::HandleIllusionFormAuraRemove(Player* player, uint32 spellID)
             // A different form fell off, so the tracked form is still active and the next refresh cycle covers any display change
             return;
         }
+        wasCharacterEntryActive = illusionStateItr->second.CharacterEntry != nullptr;
         PlayerIllusionStatesByPlayerGUID.erase(illusionStateItr);
     }
+
+    // The flag removal lands in the same client update block as the core's display restore, so the plain model comes back clean (a swapped-in form below re-sets the flag if it also renders as a character)
+    if (wasCharacterEntryActive == true && player->HasUnitFlag2(UNIT_FLAG2_MIRROR_IMAGE) == true)
+        player->RemoveUnitFlag2(UNIT_FLAG2_MIRROR_IMAGE);
 
     // If there's another form, swap in
     for (auto const& appliedAuraItr : player->GetAppliedAuras())
@@ -5050,6 +5191,20 @@ bool EverQuestMod::IsIllusionObjectFormBlockedByLevitation(uint32 spellID, Unit*
     if (GetIllusionObjectClassForFormSpellID(spellID) == EQ_ILLUSION_OBJECT_CLASS_NONE)
         return false;
     return IsUnitLevitating(target);
+}
+
+void EverQuestMod::ClearStaleMirrorImageFlagForPlayer(Player* player)
+{
+    // The mirror flag can come back with a loaded character (unit fields save) after the illusion aura expired offline, and a flag without packet data behind it renders the player undressed
+    if (player->HasUnitFlag2(UNIT_FLAG2_MIRROR_IMAGE) == false)
+        return;
+    {
+        std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+        auto illusionStateItr = PlayerIllusionStatesByPlayerGUID.find(player->GetGUID());
+        if (illusionStateItr != PlayerIllusionStatesByPlayerGUID.end() && illusionStateItr->second.CharacterEntry != nullptr)
+            return;
+    }
+    player->RemoveUnitFlag2(UNIT_FLAG2_MIRROR_IMAGE);
 }
 
 bool EverQuestMod::IsSpellBlockedByMinTargetLevel(uint32 spellID, Unit* target, Unit* caster, bool isCastFromItem)
@@ -7814,27 +7969,40 @@ void EverQuestMod::ApplyCorpseIllusionNativeDisplayOnDeath(Player* player)
     // so while an illusion that persists through death is at play, make the native display the same as the illusion display while the body exists
     if (player->GetDisplayId() == player->GetNativeDisplayId())
         return;
+    uint8 corpseChrRaceID = 0;
     {
         std::lock_guard<std::mutex> lock(RuntimeStateMutex);
-        if (CorpseIllusionOriginalNativeDisplayByPlayerGUID.find(player->GetGUID()) != CorpseIllusionOriginalNativeDisplayByPlayerGUID.end())
+        if (CorpseIllusionRestoreDataByPlayerGUID.find(player->GetGUID()) != CorpseIllusionRestoreDataByPlayerGUID.end())
             return;
-        CorpseIllusionOriginalNativeDisplayByPlayerGUID[player->GetGUID()] = player->GetNativeDisplayId();
+
+        // Character-model illusions also need the corpse to carry the matching client-side race, since the client composes the corpse from its race byte and item fields; Player::CreateCorpse copies getRace(), so swap the fake race until the corpse exists
+        auto illusionStateItr = PlayerIllusionStatesByPlayerGUID.find(player->GetGUID());
+        if (illusionStateItr != PlayerIllusionStatesByPlayerGUID.end() && illusionStateItr->second.CharacterEntry != nullptr)
+            corpseChrRaceID = illusionStateItr->second.CharacterEntry->ChrRaceID;
+
+        EverQuestCorpseIllusionRestoreData& restoreData = CorpseIllusionRestoreDataByPlayerGUID[player->GetGUID()];
+        restoreData.NativeDisplayID = player->GetNativeDisplayId();
+        restoreData.AppliedChrRaceID = corpseChrRaceID;
     }
     player->SetNativeDisplayId(player->GetDisplayId());
+    if (corpseChrRaceID != 0)
+        player->setRace(corpseChrRaceID);
 }
 
 void EverQuestMod::RestoreNativeDisplayAfterCorpseIllusion(Player* player)
 {
-    uint32 originalNativeDisplayID = 0;
+    EverQuestCorpseIllusionRestoreData restoreData;
     {
         std::lock_guard<std::mutex> lock(RuntimeStateMutex);
-        auto storedItr = CorpseIllusionOriginalNativeDisplayByPlayerGUID.find(player->GetGUID());
-        if (storedItr == CorpseIllusionOriginalNativeDisplayByPlayerGUID.end())
+        auto storedItr = CorpseIllusionRestoreDataByPlayerGUID.find(player->GetGUID());
+        if (storedItr == CorpseIllusionRestoreDataByPlayerGUID.end())
             return;
-        originalNativeDisplayID = storedItr->second;
-        CorpseIllusionOriginalNativeDisplayByPlayerGUID.erase(storedItr);
+        restoreData = storedItr->second;
+        CorpseIllusionRestoreDataByPlayerGUID.erase(storedItr);
     }
-    player->SetNativeDisplayId(originalNativeDisplayID);
+    player->SetNativeDisplayId(restoreData.NativeDisplayID);
+    if (restoreData.AppliedChrRaceID != 0)
+        player->setRace(player->getRace(true));
 }
 
 void EverQuestMod::GrantLegacyAchievementIfEligible(Player* player)

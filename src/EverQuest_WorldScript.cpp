@@ -61,9 +61,10 @@ public:
         EverQuest->LoadItemWoWToEQSwapData();
         EverQuest->LoadSpellData();
         EverQuest->LoadSpellMovementCastSnareData();
-        EverQuest->LoadIllusionDisplayData();
-        EverQuest->LoadIllusionFaceData();
         EverQuest->LoadIllusionObjectData();
+        EverQuest->LoadIllusionCharacterData();
+        EverQuest->LoadIllusionItemDisplayData();
+        EverQuest->LoadIllusionGenericItemDisplayData();
         EverQuest->LoadQuestCompletionReputations();
         EverQuest->LoadQuestReactions();
         EverQuest->LoadQuestFactionRequirements();
