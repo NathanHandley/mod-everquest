@@ -100,6 +100,7 @@ EverQuestMod::EverQuestMod() :
     ConfigSystemAdventurerAuraSpellID(0),
     ConfigSystemMentorshipMentorAuraSpellID(0),
     ConfigSystemMentorshipApprenticeAuraSpellID(0),
+    ConfigSystemHearthstoneTetherSpellID(0),
     ConfigSystemFactionGoodClassMask(0),
     ConfigSystemFactionEvilClassMask(0),
     ConfigSystemFactionGoodRaceMask(0),
@@ -252,6 +253,8 @@ bool EverQuestMod::LoadConfigurationSystemDataFromDB()
                 ConfigSystemMentorshipMentorAuraSpellID = (uint32)atoi(value.c_str());
             else if (key == "MentorshipApprenticeAuraSpellID")
                 ConfigSystemMentorshipApprenticeAuraSpellID = (uint32)atoi(value.c_str());
+            else if (key == "HearthstoneTetherSpellID")
+                ConfigSystemHearthstoneTetherSpellID = (uint32)atoi(value.c_str());
             else if (key == "ClassAuraEnabled")
                 ConfigSystemClassAuraEnabled = atoi(value.c_str()) != 0;
             else if (key.rfind("ClassAuraSpellID", 0) == 0)
@@ -12543,13 +12546,42 @@ bool EverQuestMod::DoesPlayerHaveEQClassOfWOWClass(Player* player, uint8 wowClas
     return (GetCurrentSecondEQClassForPlayer(player) == mappedEQClassID);
 }
 
-void EverQuestMod::StorePositionAsLastGate(Player* player)
+const char* EverQuestMod::GetTetherColumnPrefix(uint8 tetherType)
+{
+    if (tetherType == EQ_TETHER_TYPE_HEARTHSTONE)
+        return "lasthearth";
+    return "lastgate";
+}
+
+const char* EverQuestMod::GetTetherDisplayName(uint8 tetherType)
+{
+    if (tetherType == EQ_TETHER_TYPE_HEARTHSTONE)
+        return "hearthstone";
+    return "gate";
+}
+
+uint8 EverQuestMod::GetTetherTypeForSpell(SpellInfo const* spellInfo)
+{
+    if (spellInfo == nullptr)
+        return EQ_TETHER_TYPE_NONE;
+    if (spellInfo->Id < ConfigSystemSpellDBCIDMin || spellInfo->Id > ConfigSystemSpellDBCIDMax)
+        return EQ_TETHER_TYPE_NONE;
+    if (spellInfo->Effects[EFFECT_0].Effect != SPELL_EFFECT_APPLY_AURA || spellInfo->Effects[EFFECT_0].ApplyAuraName != SPELL_AURA_DUMMY)
+        return EQ_TETHER_TYPE_NONE;
+    if (spellInfo->Effects[EFFECT_0].MiscValue == EQ_SPELLDUMMYTYPE_GATE)
+        return EQ_TETHER_TYPE_GATE;
+    if (spellInfo->Effects[EFFECT_0].MiscValue == EQ_SPELLDUMMYTYPE_HEARTHSTONETETHER)
+        return EQ_TETHER_TYPE_HEARTHSTONE;
+    return EQ_TETHER_TYPE_NONE;
+}
+
+void EverQuestMod::StorePositionAsTether(Player* player, uint8 tetherType, uint32 tetherAuraSpellID)
 {
     // Fail if there is no map, or if the map is invalid
     if (player->GetMap() == nullptr)
         return;
 
-    // Gather the new gate reference
+    // Gather the new tether reference
     float playerX = player->GetPosition().GetPositionX();
     float playerY = player->GetPosition().GetPositionY();
     float playerZ = player->GetPosition().GetPositionZ();
@@ -12558,17 +12590,20 @@ void EverQuestMod::StorePositionAsLastGate(Player* player)
     int zoneID = player->GetAreaId();
     uint32 guidCounter = player->GetGUID().GetCounter();
 
-    // Gates inside instances can only be returned to while the copy still exists (open world map will be zero here)
+    // Tethers inside instances can only be returned to while the copy still exists (open world map will be zero here)
     uint32 instanceID = player->GetMap()->GetInstanceId();
 
-    // Upsert only the last-gate columns so the class-controller and home-bind data sharing this row is preserved
-    CharacterDatabase.Execute("INSERT INTO `mod_everquest_character_settings` (`guid`, `lastgateMapId`, `lastgateZoneId`, `lastgatePosX`, `lastgatePosY`, `lastgatePosZ`, `lastgateOrientation`, `lastgateInstanceId`) VALUES ({}, {}, {}, {}, {}, {}, {}, {}) "
-        "ON DUPLICATE KEY UPDATE `lastgateMapId` = {}, `lastgateZoneId` = {}, `lastgatePosX` = {}, `lastgatePosY` = {}, `lastgatePosZ` = {}, `lastgateOrientation` = {}, `lastgateInstanceId` = {}",
-        guidCounter, mapID, zoneID, playerX, playerY, playerZ, playerOrientation, instanceID,
-        mapID, zoneID, playerX, playerY, playerZ, playerOrientation, instanceID);
+    // Upsert only this tether's columns so the class-controller, home-bind and other tether data sharing this row is preserved
+    std::string columnPrefix = GetTetherColumnPrefix(tetherType);
+    CharacterDatabase.Execute("INSERT INTO `mod_everquest_character_settings` (`guid`, `{0}MapId`, `{0}ZoneId`, `{0}PosX`, `{0}PosY`, `{0}PosZ`, `{0}Orientation`, `{0}InstanceId`) VALUES ({1}, {2}, {3}, {4}, {5}, {6}, {7}, {8}) "
+        "ON DUPLICATE KEY UPDATE `{0}MapId` = {2}, `{0}ZoneId` = {3}, `{0}PosX` = {4}, `{0}PosY` = {5}, `{0}PosZ` = {6}, `{0}Orientation` = {7}, `{0}InstanceId` = {8}",
+        columnPrefix, guidCounter, mapID, zoneID, playerX, playerY, playerZ, playerOrientation, instanceID);
+
+    // The write above is queued, so the area goes to the client addon from here rather than being read back
+    SendTetherAreaNameToPlayer(player, tetherType, zoneID, tetherAuraSpellID);
 }
 
-void EverQuestMod::SendPlayerToLastGate(Player* player)
+void EverQuestMod::SendPlayerToTether(Player* player, uint8 tetherType)
 {
     if (player == nullptr || player->GetSession() == nullptr)
         return;
@@ -12576,15 +12611,17 @@ void EverQuestMod::SendPlayerToLastGate(Player* player)
     // Fail if in combat
     if (player->IsInCombat() == true)
     {
-        ChatHandler(player->GetSession()).PSendSysMessage("Your gate tether broke due to being in combat!");
+        ChatHandler(player->GetSession()).PSendSysMessage("Your {} tether broke due to being in combat!", GetTetherDisplayName(tetherType));
         return;
     }
 
-    // Pull the last gate position
-    QueryResult queryResult = CharacterDatabase.Query("SELECT lastgateMapId, lastgateZoneId, lastgatePosX, lastgatePosY, lastgatePosZ, lastgateOrientation, lastgateInstanceId FROM mod_everquest_character_settings WHERE guid = {} AND lastgateMapId IS NOT NULL", player->GetGUID().GetCounter());
+    // Pull the tether position
+    std::string columnPrefix = GetTetherColumnPrefix(tetherType);
+    QueryResult queryResult = CharacterDatabase.Query("SELECT `{0}MapId`, `{0}ZoneId`, `{0}PosX`, `{0}PosY`, `{0}PosZ`, `{0}Orientation`, `{0}InstanceId` FROM mod_everquest_character_settings WHERE guid = {1} AND `{0}MapId` IS NOT NULL",
+        columnPrefix, player->GetGUID().GetCounter());
     if (!queryResult || queryResult->GetRowCount() == 0)
     {
-        ChatHandler(player->GetSession()).PSendSysMessage("No tethered gate could be found. Spell failed.");
+        ChatHandler(player->GetSession()).PSendSysMessage("No {} tether location could be found. Spell failed.", GetTetherDisplayName(tetherType));
         return;
     }
 
@@ -12597,20 +12634,20 @@ void EverQuestMod::SendPlayerToLastGate(Player* player)
     float posZ = fields[4].Get<float>();
     float orientation = fields[5].Get<float>();
 
-    // A row written before the gate remembered its instance has a null here, which reads back as zero and is treated as a copy that is gone
+    // A row written before the tether remembered its instance has a null here, which reads back as zero and is treated as a copy that is gone
     uint32 instanceId = fields[6].Get<uint32>();
 
     MapEntry const* mapEntry = sMapStore.LookupEntry(mapId);
     if (mapEntry == nullptr)
     {
-        ChatHandler(player->GetSession()).PSendSysMessage("No tethered gate could be found. Spell failed.");
+        ChatHandler(player->GetSession()).PSendSysMessage("No {} tether location could be found. Spell failed.", GetTetherDisplayName(tetherType));
         return;
     }
 
     // Returning to an instance needs to be queued because of map threading
     if (mapEntry->Instanceable() == true)
     {
-        QueuePendingGateReturn(player, mapId, instanceId, posX, posY, posZ, orientation);
+        QueuePendingGateReturn(player, tetherType, mapId, instanceId, posX, posY, posZ, orientation);
         return;
     }
 
@@ -12618,10 +12655,143 @@ void EverQuestMod::SendPlayerToLastGate(Player* player)
     player->TeleportTo({ mapId, {posX, posY, posZ, orientation} });
 }
 
-void EverQuestMod::QueuePendingGateReturn(Player* player, uint32 mapID, uint32 instanceID, float x, float y, float z, float orientation)
+void EverQuestMod::ApplyHearthstoneTether(Player* player)
+{
+    if (ConfigSystemHearthstoneTetherSpellID == 0)
+        return;
+    if (player == nullptr || player->GetSession() == nullptr)
+        return;
+
+    StorePositionAsTether(player, EQ_TETHER_TYPE_HEARTHSTONE, ConfigSystemHearthstoneTetherSpellID);
+
+    // Added directly rather than cast so none of the EverQuest spell handling (failure rolls, level limits and so on) can get in the way.  An existing tether is refreshed
+    player->AddAura(ConfigSystemHearthstoneTetherSpellID, player);
+}
+
+std::string EverQuestMod::GetTetherAreaName(Player* player, uint32 areaID)
+{
+    AreaTableEntry const* areaEntry = sAreaTableStore.LookupEntry(areaID);
+    if (areaEntry == nullptr)
+        return "an unknown place";
+
+    // Generated areas only carry an English name, so fall back to it when the client's language has none
+    LocaleConstant locale = player->GetSession()->GetSessionDbcLocale();
+    std::string areaName = areaEntry->area_name[locale];
+    if (areaName.empty() == true)
+        areaName = areaEntry->area_name[LOCALE_enUS];
+
+    // A sub area reads better with the zone it sits in beside it
+    if (areaEntry->zone != 0)
+    {
+        AreaTableEntry const* zoneEntry = sAreaTableStore.LookupEntry(areaEntry->zone);
+        if (zoneEntry != nullptr)
+        {
+            std::string zoneName = zoneEntry->area_name[locale];
+            if (zoneName.empty() == true)
+                zoneName = zoneEntry->area_name[LOCALE_enUS];
+            if (areaName.empty() == true)
+                areaName = zoneName;
+            else if (zoneName.empty() == false && zoneName != areaName)
+                areaName = fmt::format("{}, {}", areaName, zoneName);
+        }
+    }
+    if (areaName.empty() == true)
+        return "an unknown place";
+    return areaName;
+}
+
+void EverQuestMod::SendTetherAreaNameToPlayer(Player* player, uint8 tetherType, uint32 areaID, uint32 tetherAuraSpellID)
+{
+    if (player == nullptr || player->GetSession() == nullptr)
+        return;
+
+    vector<uint32> tetherAuraSpellIDs;
+    if (tetherAuraSpellID != 0)
+        tetherAuraSpellIDs.push_back(tetherAuraSpellID);
+    for (auto const& appliedAuraItr : player->GetAppliedAuras())
+    {
+        SpellInfo const* auraSpellInfo = appliedAuraItr.second->GetBase()->GetSpellInfo();
+        if (GetTetherTypeForSpell(auraSpellInfo) != tetherType)
+            continue;
+        if (std::find(tetherAuraSpellIDs.begin(), tetherAuraSpellIDs.end(), auraSpellInfo->Id) == tetherAuraSpellIDs.end())
+            tetherAuraSpellIDs.push_back(auraSpellInfo->Id);
+    }
+
+    std::string areaName = GetTetherAreaName(player, areaID);
+    for (uint32 auraSpellID : tetherAuraSpellIDs)
+    {
+        std::string addonMessage = fmt::format("EQTETHER\t{}\t{}", auraSpellID, areaName);
+        WorldPacket data;
+        ChatHandler::BuildChatPacket(data, CHAT_MSG_SYSTEM, LANG_ADDON, nullptr, nullptr, addonMessage);
+        player->GetSession()->SendPacket(&data);
+    }
+}
+
+void EverQuestMod::SendTetherLocationsToPlayer(Player* player, bool showChatMessage)
+{
+    if (player == nullptr || player->GetSession() == nullptr)
+        return;
+
+    // A bare prefix tells the addon to forget what it had, since a tether can end while the addon isn't listening
+    std::string clearMessage = "EQTETHER";
+    WorldPacket clearData;
+    ChatHandler::BuildChatPacket(clearData, CHAT_MSG_SYSTEM, LANG_ADDON, nullptr, nullptr, clearMessage);
+    player->GetSession()->SendPacket(&clearData);
+
+    // Only tethers still hanging on the character matter, since the stored position outlives the buff
+    bool hasGateTether = false;
+    bool hasHearthstoneTether = false;
+    for (auto const& appliedAuraItr : player->GetAppliedAuras())
+    {
+        uint8 tetherType = GetTetherTypeForSpell(appliedAuraItr.second->GetBase()->GetSpellInfo());
+        if (tetherType == EQ_TETHER_TYPE_GATE)
+            hasGateTether = true;
+        else if (tetherType == EQ_TETHER_TYPE_HEARTHSTONE)
+            hasHearthstoneTether = true;
+    }
+
+    // The addon asks on every loading screen, so the database is only asked when there is a tether to look up
+    uint32 gateAreaID = 0;
+    uint32 hearthstoneAreaID = 0;
+    if (hasGateTether == true || hasHearthstoneTether == true)
+    {
+        bool hasGateLocation = false;
+        bool hasHearthstoneLocation = false;
+        QueryResult queryResult = CharacterDatabase.Query("SELECT lastgateMapId, lastgateZoneId, lasthearthMapId, lasthearthZoneId FROM mod_everquest_character_settings WHERE guid = {}", player->GetGUID().GetCounter());
+        if (queryResult)
+        {
+            Field* fields = queryResult->Fetch();
+            hasGateLocation = fields[0].IsNull() == false;
+            gateAreaID = fields[1].IsNull() == true ? 0 : fields[1].Get<uint32>();
+            hasHearthstoneLocation = fields[2].IsNull() == false;
+            hearthstoneAreaID = fields[3].IsNull() == true ? 0 : fields[3].Get<uint32>();
+        }
+        hasGateTether = hasGateTether && hasGateLocation;
+        hasHearthstoneTether = hasHearthstoneTether && hasHearthstoneLocation;
+    }
+    if (hasGateTether == true)
+        SendTetherAreaNameToPlayer(player, EQ_TETHER_TYPE_GATE, gateAreaID, 0);
+    if (hasHearthstoneTether == true)
+        SendTetherAreaNameToPlayer(player, EQ_TETHER_TYPE_HEARTHSTONE, hearthstoneAreaID, 0);
+
+    if (showChatMessage == false)
+        return;
+    ChatHandler chatHandler(player->GetSession());
+    if (hasGateTether == true)
+        chatHandler.PSendSysMessage("Your gate tether returns you to |cff4CFF00{}|r.", GetTetherAreaName(player, gateAreaID));
+    else
+        chatHandler.PSendSysMessage("You have no gate tether.");
+    if (hasHearthstoneTether == true)
+        chatHandler.PSendSysMessage("Your hearthstone tether returns you to |cff4CFF00{}|r.", GetTetherAreaName(player, hearthstoneAreaID));
+    else
+        chatHandler.PSendSysMessage("You have no hearthstone tether.");
+}
+
+void EverQuestMod::QueuePendingGateReturn(Player* player, uint8 tetherType, uint32 mapID, uint32 instanceID, float x, float y, float z, float orientation)
 {
     EverQuestPendingGateReturn pendingGateReturn;
     pendingGateReturn.PlayerGUID = player->GetGUID();
+    pendingGateReturn.TetherType = tetherType;
     pendingGateReturn.MapID = mapID;
     pendingGateReturn.InstanceID = instanceID;
     pendingGateReturn.PositionX = x;
@@ -12680,7 +12850,7 @@ void EverQuestMod::ExecuteGateReturn(const EverQuestPendingGateReturn& pendingGa
 
     if (IsGateReturnInstanceStillAvailableForPlayer(player, pendingGateReturn.MapID, pendingGateReturn.InstanceID) == false)
     {
-        SendPlayerToGateReturnFallback(player, pendingGateReturn.MapID, pendingGateReturn.PositionX, pendingGateReturn.PositionY, pendingGateReturn.PositionZ, pendingGateReturn.Orientation);
+        SendPlayerToGateReturnFallback(player, pendingGateReturn.TetherType, pendingGateReturn.MapID, pendingGateReturn.PositionX, pendingGateReturn.PositionY, pendingGateReturn.PositionZ, pendingGateReturn.Orientation);
         return;
     }
 
@@ -12710,13 +12880,13 @@ bool EverQuestMod::IsGateReturnInstanceStillAvailableForPlayer(Player* player, u
     return sInstanceSaveMgr->PlayerGetDestinationInstanceId(player, mapID, player->GetDifficulty(mapEntry->IsRaid())) == instanceID;
 }
 
-void EverQuestMod::SendPlayerToGateReturnFallback(Player* player, uint32 mapID, float x, float y, float z, float orientation)
+void EverQuestMod::SendPlayerToGateReturnFallback(Player* player, uint8 tetherType, uint32 mapID, float x, float y, float z, float orientation)
 {
     // An EverQuest dungeon or raid instance is a clone of an open world zone, so the shared version of that zone is where the tether lands instead and the position held onto is a valid one over there
     uint32 openWorldMapID = GetOpenWorldMapIDForMapID(mapID);
     if (openWorldMapID != mapID)
     {
-        ChatHandler(player->GetSession()).PSendSysMessage("The private copy of the zone you gated from is gone, so your tether pulled you into the shared version of it.");
+        ChatHandler(player->GetSession()).PSendSysMessage("The private copy of the zone your {} tether was anchored in is gone, so your tether pulled you into the shared version of it.", GetTetherDisplayName(tetherType));
         player->TeleportTo({ openWorldMapID, { x, y, z, orientation } });
         return;
     }
@@ -12725,13 +12895,13 @@ void EverQuestMod::SendPlayerToGateReturnFallback(Player* player, uint32 mapID, 
     AreaTriggerTeleport const* entranceTeleport = sObjectMgr->GetMapEntranceTrigger(mapID);
     if (entranceTeleport != nullptr && entranceTeleport->target_mapId == mapID)
     {
-        ChatHandler(player->GetSession()).PSendSysMessage("The instance you gated from has been reset, so your tether pulled you to its entrance.");
+        ChatHandler(player->GetSession()).PSendSysMessage("The instance your {} tether was anchored in has been reset, so your tether pulled you to its entrance.", GetTetherDisplayName(tetherType));
         player->TeleportTo(entranceTeleport->target_mapId, entranceTeleport->target_X, entranceTeleport->target_Y, entranceTeleport->target_Z, entranceTeleport->target_Orientation);
         return;
     }
 
     // Nothing safe to aim at, so the tether fails outright rather than dropping the character somewhere unknown
-    ChatHandler(player->GetSession()).PSendSysMessage("Your gate tether broke, as the instance it was anchored to no longer exists.");
+    ChatHandler(player->GetSession()).PSendSysMessage("Your {} tether broke, as the instance it was anchored to no longer exists.", GetTetherDisplayName(tetherType));
 }
 
 // Reads the EverQuest bind point, returning false when the player has never bound in Norrath
@@ -12798,10 +12968,11 @@ void EverQuestMod::SetNewBindHome(Player* player, uint32 playerGUIDCounter, int 
 
 void EverQuestMod::DeletePlayerBindHome(ObjectGuid guid)
 {
-    // Clear only the home-bind and last-gate columns. The class-controller data sharing this row is left intact
+    // Clear only the home-bind and tether columns. The class-controller data sharing this row is left intact
     CharacterDatabase.Execute("UPDATE `mod_everquest_character_settings` SET "
         "`homebindMapId` = NULL, `homebindZoneId` = NULL, `homebindPosX` = NULL, `homebindPosY` = NULL, `homebindPosZ` = NULL, "
-        "`lastgateMapId` = NULL, `lastgateZoneId` = NULL, `lastgatePosX` = NULL, `lastgatePosY` = NULL, `lastgatePosZ` = NULL, `lastgateOrientation` = NULL, `lastgateInstanceId` = NULL "
+        "`lastgateMapId` = NULL, `lastgateZoneId` = NULL, `lastgatePosX` = NULL, `lastgatePosY` = NULL, `lastgatePosZ` = NULL, `lastgateOrientation` = NULL, `lastgateInstanceId` = NULL, "
+        "`lasthearthMapId` = NULL, `lasthearthZoneId` = NULL, `lasthearthPosX` = NULL, `lasthearthPosY` = NULL, `lasthearthPosZ` = NULL, `lasthearthOrientation` = NULL, `lasthearthInstanceId` = NULL "
         "WHERE guid = {}", guid.GetCounter());
 }
 

@@ -142,6 +142,7 @@ public:
             { "eqdruidform", HandleEQDruidFormCommand,          SEC_PLAYER, Console::No },
             { "eqauctionfilter", HandleEQAuctionFilterCommand,  SEC_PLAYER, Console::No },
             { "eqmentorship", HandleEQMentorshipCommand,        SEC_PLAYER, Console::No },
+            { "eqtether", HandleEQTetherCommand,                SEC_PLAYER, Console::No },
             { "class",  classCommandTable                                               },
             { "track",  trackCommandTable                                               },
             { "eqadventurer", adventurerCommandTable                                    },
@@ -879,6 +880,24 @@ public:
             PrintDruidFormSettingsToPlayer(handler, player);
         }
         handler->PSendSysMessage("These can also be set in the Interface Options window, under the EverQuest category.");
+        return true;
+    }
+
+    static bool HandleEQTetherCommand(ChatHandler* handler, const char* args)
+    {
+        if (EverQuest->IsEnabled == false)
+            return true;
+
+        // "sync" is what the client addon uses to learn where each tether leads without printing anything
+        bool showChatMessage = true;
+        if (*args)
+        {
+            std::string valueString = GetFirstCommandArg(args);
+            boost::algorithm::to_lower(valueString);
+            if (valueString == "sync")
+                showChatMessage = false;
+        }
+        EverQuest->SendTetherLocationsToPlayer(handler->GetPlayer(), showChatMessage);
         return true;
     }
 

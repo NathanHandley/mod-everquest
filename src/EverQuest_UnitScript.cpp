@@ -391,10 +391,15 @@ public:
             if (aurApp->GetBase()->GetEffect(0)->GetAuraType() != SPELL_AURA_DUMMY && aurApp->GetBase()->GetEffect(0)->GetAuraType() != SPELL_AURA_PERIODIC_DUMMY)
                 return;
 
-            // Handle gate recall
+            // Handle gate and hearthstone recall
             if (mode == AURA_REMOVE_BY_CANCEL && aurApp->GetBase()->GetEffect(0)->GetMiscValue() == EQ_SPELLDUMMYTYPE_GATE)
             {
-                EverQuest->SendPlayerToLastGate(unit->ToPlayer());
+                EverQuest->SendPlayerToTether(unit->ToPlayer(), EQ_TETHER_TYPE_GATE);
+                return;
+            }
+            if (mode == AURA_REMOVE_BY_CANCEL && aurApp->GetBase()->GetEffect(0)->GetMiscValue() == EQ_SPELLDUMMYTYPE_HEARTHSTONETETHER)
+            {
+                EverQuest->SendPlayerToTether(unit->ToPlayer(), EQ_TETHER_TYPE_HEARTHSTONE);
                 return;
             }
 

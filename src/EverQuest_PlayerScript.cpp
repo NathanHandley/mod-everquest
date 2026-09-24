@@ -670,6 +670,13 @@ public:
         // Remember how much of the auto attack swings were left before the core resets them at the end of this same cast.  This has to happen ahead of the EverQuest spell ID range check below, since WoW spells can be configured for it too
         EverQuest->StashSwingTimersBeforeSpellCast(player, spell);
 
+        // The Hearthstone is a WoW spell, so its tether has to be handled ahead of the EverQuest spell ID range check below
+        if (spell->m_spellInfo->Id == EQ_HEARTHSTONE_SPELL_ID && spell->IsTriggered() == false)
+        {
+            EverQuest->ApplyHearthstoneTether(player);
+            return;
+        }
+
         if (spell->m_spellInfo->Id < EverQuest->ConfigSystemSpellDBCIDMin || spell->m_spellInfo->Id > EverQuest->ConfigSystemSpellDBCIDMax)
             return;
 
@@ -699,7 +706,7 @@ public:
             if (triggeredSpellInfo->Effects[EFFECT_0].Effect == SPELL_EFFECT_APPLY_AURA && triggeredSpellInfo->Effects[EFFECT_0].ApplyAuraName == SPELL_AURA_DUMMY
                 && triggeredSpellInfo->Effects[EFFECT_0].MiscValue == EQ_SPELLDUMMYTYPE_GATE)
             {
-                EverQuest->StorePositionAsLastGate(player);
+                EverQuest->StorePositionAsTether(player, EQ_TETHER_TYPE_GATE, triggeredSpellInfo->Id);
                 return;
             }
         }
@@ -754,7 +761,9 @@ public:
                 // Triggered casts are tether-aura-only applications (like from the legacy stone), so they should not gate the player home
                 if (spell->IsTriggered() == false)
                 {
-                    EverQuest->StorePositionAsLastGate(player);
+                    // Only a gate that leaves a tether aura behind has a buff for the addon to label
+                    uint32 tetherAuraSpellID = spell->m_spellInfo->Effects[EFFECT_0].Effect == SPELL_EFFECT_APPLY_AURA ? spell->m_spellInfo->Id : 0;
+                    EverQuest->StorePositionAsTether(player, EQ_TETHER_TYPE_GATE, tetherAuraSpellID);
                     EverQuest->SendPlayerToEQBindHome(player);
                 }
             }
@@ -1023,7 +1032,7 @@ public:
         EverQuest->ClearRaidLowInstanceStateForPlayer(player->GetGUID());
         EverQuest->ClearInstanceDungeonStateForPlayer(player->GetGUID());
 
-        // A gate tether cancelled on the very tick the character logged out has nothing left to teleport
+        // A tether cancelled on the very tick the character logged out has nothing left to teleport
         EverQuest->ClearPendingGateReturnForPlayer(player->GetGUID());
 
         // Whether the last death was a player kill is only needed between that death and the spirit release that follows it

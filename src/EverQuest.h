@@ -54,7 +54,7 @@ class ByteBuffer;
 struct AreaTrigger;
 struct BuildValuesCachePosPointers;
 
-#define EQ_MOD_VERSION                              114
+#define EQ_MOD_VERSION                              115
 
 #define EQ_MOVEMENT_CAST_SNARE_DURATION_BUFFER_IN_MS 2000 // How much longer than the remaining cast time the casting slow is given, so a pushed-back cast keeps it
 
@@ -151,6 +151,7 @@ struct BuildValuesCachePosPointers;
 #define EQ_RACIAL_SKILL_ID_BLOODELF                 756
 #define EQ_RACIAL_SKILL_ID_DRAENEI                  760
 #define EQ_HEARTHSTONE_ITEM_ID                      6948
+#define EQ_HEARTHSTONE_SPELL_ID                     8690 // Cast by the Hearthstone item
 #define EQ_MASTER_TOTEM_ITEM_ID                     46978
 #define EQ_AUCTION_REALM_BOTH                       0
 #define EQ_AUCTION_REALM_NORRATH                    1
@@ -206,6 +207,12 @@ struct BuildValuesCachePosPointers;
 #define EQ_SPELLDUMMYTYPE_SUMMONPC                  20
 #define EQ_SPELLDUMMYTYPE_REMOVEDAMAGESHIELD        21
 #define EQ_SPELLDUMMYTYPE_HEALMELEEATTACKERS        22
+#define EQ_SPELLDUMMYTYPE_HEARTHSTONETETHER         23
+
+// Each tether type is remembered separately, so a character can hold a gate tether and a hearthstone tether at the same time
+#define EQ_TETHER_TYPE_NONE                         0
+#define EQ_TETHER_TYPE_GATE                         1
+#define EQ_TETHER_TYPE_HEARTHSTONE                  2
 
 #define EQ_ILLUSION_OBJECT_CLASS_NONE               0
 #define EQ_ILLUSION_OBJECT_CLASS_ANYOBJECT          1
@@ -657,6 +664,7 @@ class EverQuestPendingGateReturn
 {
 public:
     ObjectGuid PlayerGUID;
+    uint8 TetherType = EQ_TETHER_TYPE_GATE;
     uint32 MapID = 0;
     uint32 InstanceID = 0;
     float PositionX = 0;
@@ -1612,6 +1620,7 @@ public:
     uint32 ConfigSystemAdventurerAuraSpellID;
     uint32 ConfigSystemMentorshipMentorAuraSpellID;
     uint32 ConfigSystemMentorshipApprenticeAuraSpellID;
+    uint32 ConfigSystemHearthstoneTetherSpellID;
     bool ConfigSystemClassAuraEnabled = false;
     uint32 ConfigSystemClassAuraSpellIDs[EQ_CLASSAURA_SPELL_TYPE_COUNT] = { 0 };
     uint32 ConfigSystemClassAuraSpellIDMin = 0;
@@ -2416,14 +2425,21 @@ public:
     bool IsEQClassABaseEQClass(uint8 eqClassID);
     bool DoesPlayerHaveEQClassOfWOWClass(Player* player, uint8 wowClassID);
 
-    void StorePositionAsLastGate(Player* player);
-    void SendPlayerToLastGate(Player* player);
-    void QueuePendingGateReturn(Player* player, uint32 mapID, uint32 instanceID, float x, float y, float z, float orientation);
+    const char* GetTetherColumnPrefix(uint8 tetherType);
+    const char* GetTetherDisplayName(uint8 tetherType);
+    uint8 GetTetherTypeForSpell(SpellInfo const* spellInfo);
+    void StorePositionAsTether(Player* player, uint8 tetherType, uint32 tetherAuraSpellID);
+    void SendPlayerToTether(Player* player, uint8 tetherType);
+    void ApplyHearthstoneTether(Player* player);
+    std::string GetTetherAreaName(Player* player, uint32 areaID);
+    void SendTetherAreaNameToPlayer(Player* player, uint8 tetherType, uint32 areaID, uint32 tetherAuraSpellID);
+    void SendTetherLocationsToPlayer(Player* player, bool showChatMessage);
+    void QueuePendingGateReturn(Player* player, uint8 tetherType, uint32 mapID, uint32 instanceID, float x, float y, float z, float orientation);
     void ClearPendingGateReturnForPlayer(ObjectGuid playerGUID);
     void ProcessPendingGateReturns();
     void ExecuteGateReturn(const EverQuestPendingGateReturn& pendingGateReturn);
     bool IsGateReturnInstanceStillAvailableForPlayer(Player* player, uint32 mapID, uint32 instanceID);
-    void SendPlayerToGateReturnFallback(Player* player, uint32 mapID, float x, float y, float z, float orientation);
+    void SendPlayerToGateReturnFallback(Player* player, uint8 tetherType, uint32 mapID, float x, float y, float z, float orientation);
     bool TryGetEQBindHomePosition(Player* player, uint32& mapIDOut, float& xOut, float& yOut, float& zOut);
     void SendPlayerToEQBindHome(Player* player);
     void SetNewBindHome(Player* player);
