@@ -87,14 +87,15 @@ public:
 
         // Creature-cast charms follow extra limit rules
         Unit* target = spell->m_targets.GetUnitTarget();
-        if (EverQuest->IsCreatureCharmBlockedByCharmLimits(spell->GetSpellInfo()->Id, target, spell->GetCaster()) == true)
+        Unit* casterUnit = spell->GetCaster()->ToUnit();
+        if (EverQuest->IsCreatureCharmBlockedByCharmLimits(spell->GetSpellInfo()->Id, target, casterUnit) == true)
         {
             res = SPELL_FAILED_DONT_REPORT;
             return;
         }
 
         // Summoning a player needs another living player as the target
-        if (EverQuest->IsSummonPlayerSpellBlockedByTarget(spell->GetSpellInfo()->Id, target, spell->GetCaster()) == true)
+        if (EverQuest->IsSummonPlayerSpellBlockedByTarget(spell->GetSpellInfo()->Id, target, casterUnit) == true)
         {
             res = SPELL_FAILED_BAD_TARGETS;
             return;
@@ -102,7 +103,7 @@ public:
 
         // A zone that takes a key refuses anyone summoned in without one, and the caster is the one who needs to hear why
         std::string requiredKeyDeniedMessage;
-        if (EverQuest->IsSummonPlayerSpellBlockedByRequiredKey(spell->GetSpellInfo(), target, spell->GetCaster(), requiredKeyDeniedMessage) == true)
+        if (EverQuest->IsSummonPlayerSpellBlockedByRequiredKey(spell->GetSpellInfo(), target, casterUnit, requiredKeyDeniedMessage) == true)
         {
             if (spell->GetCaster()->IsPlayer() == true)
                 ChatHandler(spell->GetCaster()->ToPlayer()->GetSession()).PSendSysMessage(requiredKeyDeniedMessage);
@@ -111,7 +112,7 @@ public:
         }
 
         // Levitation on top of an object illusion form crashes the client, so it is refused while the form is up
-        Unit* levitationTarget = (target != nullptr) ? target : spell->GetCaster();
+        Unit* levitationTarget = (target != nullptr) ? target : casterUnit;
         if (EverQuest->IsLevitationBlockedByIllusionObjectForm(spell->GetSpellInfo(), levitationTarget) == true)
         {
             if (spell->GetCaster()->IsPlayer() == true)
@@ -128,9 +129,9 @@ public:
         // Enforce buff restriction up front to avoid mana/cooldown triggers
         if (target == nullptr)
             return;
-        if (EverQuest->IsSpellBlockedByMinTargetLevel(spell->GetSpellInfo()->Id, target, spell->GetCaster(), spell->m_CastItem != nullptr) == true)
+        if (EverQuest->IsSpellBlockedByMinTargetLevel(spell->GetSpellInfo()->Id, target, casterUnit, spell->m_CastItem != nullptr) == true)
             res = SPELL_FAILED_LOWLEVEL;
-        else if (EverQuest->IsSpellBlockedByMaxCreatureTargetLevel(spell->GetSpellInfo()->Id, target, spell->GetCaster()) == true)
+        else if (EverQuest->IsSpellBlockedByMaxCreatureTargetLevel(spell->GetSpellInfo()->Id, target, casterUnit) == true)
             res = SPELL_FAILED_HIGHLEVEL;
     }
 
@@ -177,7 +178,7 @@ public:
             targetInfo.effectMask = targetInfo.effectMask & (uint8)(~bossSilenceProtectedEffectMask);
 
         // A WoW stun is held to the same level rule the EverQuest stun spells already follow
-        uint8 creatureStunProtectedEffectMask = EverQuest->GetCreatureStunProtectedEffectMaskForTarget(spellInfo, target, spell->GetCaster());
+        uint8 creatureStunProtectedEffectMask = EverQuest->GetCreatureStunProtectedEffectMaskForTarget(spellInfo, target, spell->GetCaster()->ToUnit());
         if (creatureStunProtectedEffectMask != 0)
             targetInfo.effectMask = targetInfo.effectMask & (uint8)(~creatureStunProtectedEffectMask);
 
@@ -197,7 +198,7 @@ public:
         if (pvpCharmImmuneEffectMask != 0)
         {
             uint8 firstImmuneEffectBit = (uint8)(pvpCharmImmuneEffectMask & (uint8)(~pvpCharmImmuneEffectMask + 1));
-            Unit* immuneReportCaster = (spell->GetOriginalCaster() != nullptr) ? spell->GetOriginalCaster() : spell->GetCaster();
+            Unit* immuneReportCaster = (spell->GetOriginalCaster() != nullptr) ? spell->GetOriginalCaster() : spell->GetCaster()->ToUnit();
             if ((effectMask & firstImmuneEffectBit) != 0 && immuneReportCaster != nullptr)
                 immuneReportCaster->SendSpellMiss(target, spellInfo->Id, SPELL_MISS_IMMUNE);
             targetInfo.effectMask = targetInfo.effectMask & (uint8)(~pvpCharmImmuneEffectMask);

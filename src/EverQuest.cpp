@@ -6000,7 +6000,7 @@ uint8 EverQuestMod::GetPvPEQCharmImmuneEffectMaskForTarget(Spell* spell, Unit* t
     // A chained charm is cast by the unit it lands on, so the player behind it is the original caster
     Unit* caster = spell->GetOriginalCaster();
     if (caster == nullptr)
-        caster = spell->GetCaster();
+        caster = spell->GetCaster()->ToUnit();
     SpellInfo const* spellInfo = spell->GetSpellInfo();
     if (IsEQCharmBlockedInPvP(spellInfo, target, caster) == false)
         return 0;
