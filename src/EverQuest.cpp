@@ -4591,7 +4591,7 @@ void EverQuestMod::LoadIllusionCharacterData()
     IllusionFormSpellIDs.clear();
     IllusionMaxFaceIndex = 0;
 
-    QueryResult queryResult = WorldDatabase.Query("SELECT EQRaceID, Gender, ChrRaceID, DisplayID, AltDisplayID, FaceCount, IsRobeCapable, Scale FROM mod_everquest_illusion_character;");
+    QueryResult queryResult = WorldDatabase.Query("SELECT EQRaceID, Gender, ChrRaceID, DisplayID, AltDisplayID, FaceCount, IsRobeCapable, Scale, CorpseDisplayID FROM mod_everquest_illusion_character;");
     if (!queryResult)
     {
         LOG_INFO("module.EverQuest", "EverQuestMod::LoadIllusionCharacterData found no mod_everquest_illusion_character rows, so illusion forms will use the pre-baked gear displays only");
@@ -4612,6 +4612,7 @@ void EverQuestMod::LoadIllusionCharacterData()
         illusionCharacter.Scale = fields[7].Get<float>();
         if (illusionCharacter.Scale <= 0.0f)
             illusionCharacter.Scale = 1.0f;
+        illusionCharacter.CorpseDisplayID = fields[8].Get<uint32>();
         uint64 lookupKey = ((uint64)illusionCharacter.EQRaceID << 1) | (uint64)(illusionCharacter.Gender & 1);
         IllusionCharactersByRaceAndGenderKey[lookupKey] = illusionCharacter;
         if (illusionCharacter.FaceCount > 0 && illusionCharacter.FaceCount - 1 > IllusionMaxFaceIndex)
@@ -7968,28 +7969,75 @@ void EverQuestMod::AddRacialGuiseItemForPlayer(Player* player)
 
 void EverQuestMod::ApplyCorpseIllusionNativeDisplayOnDeath(Player* player)
 {
-    // Corspe object copies the native display id at creation and clients only pick the corpse model from the first recieved packet and nothing updates it
-    // so while an illusion that persists through death is at play, make the native display the same as the illusion display while the body exists
-    if (player->GetDisplayId() == player->GetNativeDisplayId())
-        return;
-    uint8 corpseChrRaceID = 0;
+    // The corpse object copies the native display id at creation, and clients only pick the corpse model from the first received packet
+    // (nothing updates it), so while an illusion that persists through death is at play, make the native display the illusion's model
+    // while the body exists.  A dressed character-model illusion is handled when its corpse is placed instead (see
+    // ApplyIllusionCharacterLookToNewCorpse), since its look lives in the corpse's appearance and item fields too
+    uint32 corpseDisplayID = player->GetDisplayId();
     {
         std::lock_guard<std::mutex> lock(RuntimeStateMutex);
         if (CorpseIllusionRestoreDataByPlayerGUID.find(player->GetGUID()) != CorpseIllusionRestoreDataByPlayerGUID.end())
             return;
-
-        // Character-model illusions also need the corpse to carry the matching client-side race, since the client composes the corpse from its race byte and item fields; Player::CreateCorpse copies getRace(), so swap the fake race until the corpse exists
         auto illusionStateItr = PlayerIllusionStatesByPlayerGUID.find(player->GetGUID());
         if (illusionStateItr != PlayerIllusionStatesByPlayerGUID.end() && illusionStateItr->second.CharacterEntry != nullptr)
-            corpseChrRaceID = illusionStateItr->second.CharacterEntry->ChrRaceID;
-
+            return;
+        if (corpseDisplayID == player->GetNativeDisplayId())
+            return;
         EverQuestCorpseIllusionRestoreData& restoreData = CorpseIllusionRestoreDataByPlayerGUID[player->GetGUID()];
         restoreData.NativeDisplayID = player->GetNativeDisplayId();
-        restoreData.AppliedChrRaceID = corpseChrRaceID;
     }
-    player->SetNativeDisplayId(player->GetDisplayId());
-    if (corpseChrRaceID != 0)
-        player->setRace(corpseChrRaceID);
+    player->SetNativeDisplayId(corpseDisplayID);
+}
+
+void EverQuestMod::ApplyIllusionCharacterLookToNewCorpse(Corpse* corpse)
+{
+    // A player's new corpse is dressed by the client from its display, race/appearance bytes and item fields, which Player::CreateCorpse copies
+    // from the player's real race, looks and gear.  While a death-persistent character-model illusion is active (a guise), those fields get the
+    // illusion's values instead, the same ones its mirror image packet carries, so the corpse keeps the living look (face, helm, EQ gear).  This
+    // runs when the corpse is registered with the map, after CreateCorpse has filled the fields and before the corpse is saved or sent to clients
+    if (corpse == nullptr || corpse->GetType() == CORPSE_BONES)
+        return;
+    Player* owner = ObjectAccessor::FindPlayer(corpse->GetOwnerGUID());
+    if (owner == nullptr || owner->IsAlive() == true || owner->GetMap() != corpse->GetMap())
+        return;
+    EverQuestIllusionCharacter const* illusionCharacter = nullptr;
+    uint8 faceByte = 0;
+    {
+        std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+        auto illusionStateItr = PlayerIllusionStatesByPlayerGUID.find(owner->GetGUID());
+        if (illusionStateItr == PlayerIllusionStatesByPlayerGUID.end() || illusionStateItr->second.CharacterEntry == nullptr)
+            return;
+        illusionCharacter = illusionStateItr->second.CharacterEntry;
+        faceByte = illusionStateItr->second.CharacterFaceByte;
+    }
+    if (illusionCharacter->CorpseDisplayID == 0)
+        return;
+
+    corpse->SetUInt32Value(CORPSE_FIELD_DISPLAY_ID, illusionCharacter->CorpseDisplayID);
+    corpse->SetByteValue(CORPSE_FIELD_BYTES_1, 1, illusionCharacter->ChrRaceID);
+    corpse->SetByteValue(CORPSE_FIELD_BYTES_1, 3, 0); // skin
+    uint8 hairStyle = GetIllusionHelmHairStyleForPlayer(owner); // selects the head geoset: bare head, or the worn helm's helmed head
+    corpse->SetUInt32Value(CORPSE_FIELD_BYTES_2, (uint32)faceByte | ((uint32)hairStyle << 8)); // face, hair style, hair color 0, facial hair 0
+
+    // The mirror image item displays, at their equipment slots (a corpse item field is the display id with the inventory type in the top byte)
+    static EquipmentSlots const mirrorImageItemSlots[EQ_MIRROR_IMAGE_ITEM_SLOT_COUNT] =
+    {
+        EQUIPMENT_SLOT_HEAD, EQUIPMENT_SLOT_SHOULDERS, EQUIPMENT_SLOT_BODY, EQUIPMENT_SLOT_CHEST, EQUIPMENT_SLOT_WAIST, EQUIPMENT_SLOT_LEGS,
+        EQUIPMENT_SLOT_FEET, EQUIPMENT_SLOT_WRISTS, EQUIPMENT_SLOT_HANDS, EQUIPMENT_SLOT_BACK, EQUIPMENT_SLOT_TABARD
+    };
+    uint32 itemDisplayIDs[EQ_MIRROR_IMAGE_ITEM_SLOT_COUNT];
+    GetMirrorImageItemDisplayIDsForPlayer(owner, illusionCharacter->ChrRaceID, itemDisplayIDs);
+    for (uint8 equipmentSlot = 0; equipmentSlot < EQUIPMENT_SLOT_END; ++equipmentSlot)
+        corpse->SetUInt32Value(CORPSE_FIELD_ITEM + equipmentSlot, 0);
+    for (int slotIndex = 0; slotIndex < EQ_MIRROR_IMAGE_ITEM_SLOT_COUNT; ++slotIndex)
+    {
+        if (itemDisplayIDs[slotIndex] == 0)
+            continue;
+        Item const* equippedItem = owner->GetItemByPos(INVENTORY_SLOT_BAG_0, mirrorImageItemSlots[slotIndex]);
+        if (equippedItem == nullptr || equippedItem->GetTemplate() == nullptr)
+            continue;
+        corpse->SetUInt32Value(CORPSE_FIELD_ITEM + mirrorImageItemSlots[slotIndex], itemDisplayIDs[slotIndex] | ((uint32)equippedItem->GetTemplate()->InventoryType << 24));
+    }
 }
 
 void EverQuestMod::RestoreNativeDisplayAfterCorpseIllusion(Player* player)
@@ -8004,8 +8052,6 @@ void EverQuestMod::RestoreNativeDisplayAfterCorpseIllusion(Player* player)
         CorpseIllusionRestoreDataByPlayerGUID.erase(storedItr);
     }
     player->SetNativeDisplayId(restoreData.NativeDisplayID);
-    if (restoreData.AppliedChrRaceID != 0)
-        player->setRace(player->getRace(true));
 }
 
 void EverQuestMod::GrantLegacyAchievementIfEligible(Player* player)

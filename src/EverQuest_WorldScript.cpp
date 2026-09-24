@@ -159,7 +159,21 @@ public:
     }
 };
 
+class EverQuest_WorldObjectScript : public WorldObjectScript
+{
+public:
+    EverQuest_WorldObjectScript() : WorldObjectScript("EverQuest_WorldObjectScript", { WORLDOBJECTHOOK_ON_WORLD_OBJECT_SET_MAP }) {}
+
+    void OnWorldObjectSetMap(WorldObject* object, Map* /*map*/) override
+    {
+        if (EverQuest->IsEnabled == false || object == nullptr || object->GetTypeId() != TYPEID_CORPSE)
+            return;
+        EverQuest->ApplyIllusionCharacterLookToNewCorpse(object->ToCorpse());
+    }
+};
+
 void AddEverQuestWorldScripts()
 {
     new EverQuest_WorldScript();
+    new EverQuest_WorldObjectScript();
 }

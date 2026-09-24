@@ -54,7 +54,7 @@ class ByteBuffer;
 struct AreaTrigger;
 struct BuildValuesCachePosPointers;
 
-#define EQ_MOD_VERSION                              115
+#define EQ_MOD_VERSION                              116
 
 #define EQ_MOVEMENT_CAST_SNARE_DURATION_BUFFER_IN_MS 2000 // How much longer than the remaining cast time the casting slow is given, so a pushed-back cast keeps it
 
@@ -915,6 +915,7 @@ public:
     uint32 FaceCount = 0;
     bool IsRobeCapable = false;
     float Scale = 1.0f; // Object scale applied with the display and the race's display rows stay at scale 1 (see the converter's GetDBCDisplayScale)
+    uint32 CorpseDisplayID = 0;
 };
 
 class EverQuestPlayerIllusionState
@@ -932,7 +933,6 @@ class EverQuestCorpseIllusionRestoreData
 {
 public:
     uint32 NativeDisplayID = 0;
-    uint8 AppliedChrRaceID = 0; // Non-zero when the player's race was temporarily swapped so the corpse composes as the dressed character
 };
 
 // These need to sync with the converter's values (ClassAuraSpellType.cs)
@@ -2251,6 +2251,7 @@ public:
     void AddMasterTotemForShaman(Player* player);
     void AddRacialGuiseItemForPlayer(Player* player);
     void ApplyCorpseIllusionNativeDisplayOnDeath(Player* player);
+    void ApplyIllusionCharacterLookToNewCorpse(Corpse* corpse);
     void RestoreNativeDisplayAfterCorpseIllusion(Player* player);
     void GrantLegacyAchievementIfEligible(Player* player);
     void ApplyAdventurerAuraStateOnLogin(Player* player);
