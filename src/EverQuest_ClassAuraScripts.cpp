@@ -22,6 +22,7 @@
 #include "SpellMgr.h"
 #include "SpellScript.h"
 #include "Unit.h"
+#include "WorldPacket.h"
 #include "EverQuest.h"
 #include <algorithm>
 #include <limits>
@@ -354,7 +355,7 @@ static bool IsClassAuraMonkSwingReplacingAbilityProc(ProcEventInfo& eventInfo)
 }
 
 // Monk "Agile Fighter": the proc row on the armor aura already rolled the double attack, and in light armor some of those become a triple.
-static void DoClassAuraMonkDoubleAttack(Unit* monk, ProcEventInfo& eventInfo, uint32 tripleChancePercent)
+static void DoClassAuraMonkDoubleAttack(Unit* monk, ProcEventInfo& eventInfo, uint32 armorAuraSpellID, uint32 tripleChancePercent)
 {
     if (EverQuest->IsClassAuraSystemEnabled() == false || IsClassAuraPeriodicTickProc(eventInfo) == true)
         return;
@@ -369,14 +370,32 @@ static void DoClassAuraMonkDoubleAttack(Unit* monk, ProcEventInfo& eventInfo, ui
     Unit* victim = eventInfo.GetProcTarget();
     if (victim == nullptr || victim->IsAlive() == false)
         return;
+    // A swing replacing ability that also strikes nearby enemies (Cleave) procs once per enemy hit, but it still only consumed the one swing, so only the enemy that swing
+    // was aimed at rolls
+    if ((eventInfo.GetTypeMask() & PROC_FLAG_DONE_MELEE_AUTO_ATTACK) == 0)
+    {
+        Spell const* procSpell = eventInfo.GetProcSpell();
+        if (procSpell != nullptr && procSpell->m_targets.GetUnitTargetGUID().IsEmpty() == false && procSpell->m_targets.GetUnitTargetGUID() != victim->GetGUID())
+            return;
+    }
     int32 extraAttackCount = 1;
     if (tripleChancePercent > 0 && roll_chance_i((int32)tripleChancePercent) == true)
         extraAttackCount = 2;
     // The extra swings are aimed at whoever the core last recorded damage against, which an ability that was fully absorbed never sets, so it is pinned to the proc target here
     monk->SetLastDamagedTargetGuid(victim->GetGUID());
-    // Thrash has one die side, which the core adds on top of the custom base points, so the base points sit one below the swing count
-    int32 extraAttackBasePoints = extraAttackCount - 1;
-    monk->CastCustomSpell(monk, EQ_SPELL_ID_THRASH, &extraAttackBasePoints, nullptr, nullptr, true);
+    // Queued the same way an extra attack effect would, with the armor aura standing in as the source, so the swings drain next update and never chain into more
+    monk->AddExtraAttacks((uint32)extraAttackCount);
+    monk->SetLastExtraAttackSpell(armorAuraSpellID);
+    // The combat log line an extra attack effect sends, credited to the armor aura so it reads "gains 1 extra attack through Unburdened Agility"
+    WorldPacket data(SMSG_SPELLLOGEXECUTE, 8 + 4 + 4 + 4 + 4 + 8 + 4);
+    data << monk->GetPackGUID();
+    data << uint32(armorAuraSpellID);
+    data << uint32(1);                                  // Effect count
+    data << uint32(SPELL_EFFECT_ADD_EXTRA_ATTACKS);
+    data << uint32(1);                                  // Target count for this effect (Spell::InitEffectExecuteData always leads with it)
+    data << monk->GetPackGUID();
+    data << uint32(extraAttackCount);
+    monk->SendMessageToSet(&data, true);
 }
 
 class EverQuest_ClassAuraMonkLightArmorAuraScript : public AuraScript
@@ -386,7 +405,7 @@ class EverQuest_ClassAuraMonkLightArmorAuraScript : public AuraScript
     void HandleProc(ProcEventInfo& eventInfo)
     {
         PreventDefaultAction();
-        DoClassAuraMonkDoubleAttack(GetTarget(), eventInfo, EverQuest->ConfigSystemClassAuraMonkDoubleToTripleAttackChancePercent);
+        DoClassAuraMonkDoubleAttack(GetTarget(), eventInfo, GetId(), EverQuest->ConfigSystemClassAuraMonkDoubleToTripleAttackChancePercent);
     }
 
     void Register() override
@@ -402,7 +421,7 @@ class EverQuest_ClassAuraMonkHeavyArmorAuraScript : public AuraScript
     void HandleProc(ProcEventInfo& eventInfo)
     {
         PreventDefaultAction();
-        DoClassAuraMonkDoubleAttack(GetTarget(), eventInfo, 0);
+        DoClassAuraMonkDoubleAttack(GetTarget(), eventInfo, GetId(), 0);
     }
 
     void Register() override

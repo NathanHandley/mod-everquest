@@ -413,7 +413,6 @@ struct BuildValuesCachePosPointers;
 #define EQ_CLASS_AURA_GEAR_REFRESH_INTERVAL_MS      2000    // Gear and pet based class auras rescan on this interval since some ways they change have no hook
 #define EQ_CLASS_AURA_MANA_CHECK_INTERVAL_MS        500     // How often the Enchanter mana threshold is checked
 #define EQ_SPELL_ID_AUTO_SHOT                       75
-#define EQ_SPELL_ID_THRASH                          21919   // The Thrash Blade's extra attack proc, cast by the mod for the Monk's double and triple attacks
 #define EQ_SPELL_ID_BLOCK                           107     // The WoW passive that grants the block skill (the only spell with SPELL_EFFECT_BLOCK)
 
 #define EQ_MIRROR_IMAGE_ITEM_SLOT_COUNT             11      // Visible equipment slots carried by SMSG_MIRRORIMAGE_DATA, in packet order
