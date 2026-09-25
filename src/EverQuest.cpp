@@ -101,6 +101,7 @@ EverQuestMod::EverQuestMod() :
     ConfigSystemMentorshipMentorAuraSpellID(0),
     ConfigSystemMentorshipApprenticeAuraSpellID(0),
     ConfigSystemHearthstoneTetherSpellID(0),
+    ConfigSystemPriestOfDiscordPortalCooldownSpellID(0),
     ConfigSystemFactionGoodClassMask(0),
     ConfigSystemFactionEvilClassMask(0),
     ConfigSystemFactionGoodRaceMask(0),
@@ -255,6 +256,8 @@ bool EverQuestMod::LoadConfigurationSystemDataFromDB()
                 ConfigSystemMentorshipApprenticeAuraSpellID = (uint32)atoi(value.c_str());
             else if (key == "HearthstoneTetherSpellID")
                 ConfigSystemHearthstoneTetherSpellID = (uint32)atoi(value.c_str());
+            else if (key == "PriestOfDiscordPortalCooldownSpellID")
+                ConfigSystemPriestOfDiscordPortalCooldownSpellID = (uint32)atoi(value.c_str());
             else if (key == "ClassAuraEnabled")
                 ConfigSystemClassAuraEnabled = atoi(value.c_str()) != 0;
             else if (key.rfind("ClassAuraSpellID", 0) == 0)

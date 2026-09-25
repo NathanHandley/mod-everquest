@@ -14,9 +14,13 @@
 //  You should have received a copy of the GNU General Public License
 //  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+#include "Chat.h"
 #include "Configuration/Config.h"
 #include "ObjectMgr.h"
+#include "Player.h"
 #include "ScriptMgr.h"
+#include "SpellInfo.h"
+#include "SpellMgr.h"
 #include "Transport.h"
 
 #include "EverQuest.h"
@@ -194,7 +198,39 @@ public:
     }
 };
 
+class EverQuest_PoDCooldownTeleportScript : public GameObjectScript
+{
+public:
+    EverQuest_PoDCooldownTeleportScript() : GameObjectScript("EverQuest_PoDCooldownTeleportScript") {}
+
+    bool OnGossipHello(Player* player, GameObject* /*go*/) override
+    {
+        if (EverQuest->IsEnabled == false)
+            return false;
+        uint32 cooldownSpellID = EverQuest->ConfigSystemPriestOfDiscordPortalCooldownSpellID;
+        if (cooldownSpellID == 0 || player->HasAura(cooldownSpellID) == false)
+            return false;
+
+        const char* spellName = nullptr;
+        if (SpellInfo const* spellInfo = sSpellMgr->GetSpellInfo(cooldownSpellID))
+        {
+            uint8 localeIndex = static_cast<uint8>(player->GetSession()->GetSessionDbcLocale());
+            spellName = spellInfo->SpellName[localeIndex];
+            if (spellName == nullptr || spellName[0] == '\0')
+                spellName = spellInfo->SpellName[0];
+        }
+        if (spellName == nullptr || spellName[0] == '\0')
+            ChatHandler(player->GetSession()).PSendSysMessage("|cffFF0000You cannot use this while your portal magic is recovering.|r");
+        else
+            ChatHandler(player->GetSession()).PSendSysMessage("|cffFF0000You cannot use this while under the effect of {}.|r", spellName);
+
+        // Returning true stops the use entirely, so the object doesn't animate and the teleport smart script never runs
+        return true;
+    }
+};
+
 void AddEverQuestAllGameObjectScripts()
 {
     new EverQuest_AllGameObjectScript();
+    new EverQuest_PoDCooldownTeleportScript();
 }

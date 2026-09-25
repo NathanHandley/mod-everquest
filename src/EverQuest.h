@@ -54,7 +54,7 @@ class ByteBuffer;
 struct AreaTrigger;
 struct BuildValuesCachePosPointers;
 
-#define EQ_MOD_VERSION                              117
+#define EQ_MOD_VERSION                              118
 
 #define EQ_MOVEMENT_CAST_SNARE_DURATION_BUFFER_IN_MS 2000 // How much longer than the remaining cast time the casting slow is given, so a pushed-back cast keeps it
 
@@ -1623,6 +1623,7 @@ public:
     uint32 ConfigSystemMentorshipMentorAuraSpellID;
     uint32 ConfigSystemMentorshipApprenticeAuraSpellID;
     uint32 ConfigSystemHearthstoneTetherSpellID;
+    uint32 ConfigSystemPriestOfDiscordPortalCooldownSpellID;
     bool ConfigSystemClassAuraEnabled = false;
     uint32 ConfigSystemClassAuraSpellIDs[EQ_CLASSAURA_SPELL_TYPE_COUNT] = { 0 };
     uint32 ConfigSystemClassAuraSpellIDMin = 0;
