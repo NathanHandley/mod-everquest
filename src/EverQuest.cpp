@@ -2939,7 +2939,9 @@ bool EverQuestMod::IsItemEquipAuraSpell(SpellInfo const* spellInfo)
     if (IsWornEffectSpell(spellInfo->Id) == true)
         return true;
 
-    // Instrument focus spells are a generated dummy aura, and the focus dummy types belong to nothing else
+    // Instrument focus spells are a generated dummy aura.  The focus dummy type values are also used by stock WOW dummy auras (Glyph of Life Tap is MiscValue 8), so only generated spells count
+    if (spellInfo->Id < ConfigSystemSpellDBCIDMin || spellInfo->Id > ConfigSystemSpellDBCIDMax)
+        return false;
     for (uint8 i = 0; i < MAX_SPELL_EFFECTS; ++i)
     {
         if (spellInfo->Effects[i].ApplyAuraName != SPELL_AURA_DUMMY)
@@ -13911,6 +13913,10 @@ uint32 EverQuestMod::CalculateSpellFocusBoostValue(Unit* caster, uint32 spellID)
     {
         Aura* aura = aurIter.second;
         SpellInfo const* auraInfo = aura->GetSpellInfo();
+
+        // Stock WOW dummy auras reuse the focus dummy type values, so only generated spells can be instruments
+        if (auraInfo->Id < ConfigSystemSpellDBCIDMin || auraInfo->Id > ConfigSystemSpellDBCIDMax)
+            continue;
         for (uint8 effIndex = 0; effIndex < MAX_SPELL_EFFECTS; ++effIndex)
         {
             // Focus auras are always dummy
