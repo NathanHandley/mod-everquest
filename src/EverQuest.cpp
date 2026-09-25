@@ -612,7 +612,7 @@ void EverQuestMod::LoadConfigurationFile()
 void EverQuestMod::LoadCreatureData()
 {
     CreaturesByTemplateID.clear();
-    QueryResult queryResult = WorldDatabase.Query("SELECT CreatureTemplateID, CanShowHeldLootItems, CanShowHeldLootShields, SpawnLimit, RangedAttackEnabled, RangedAttackMinRange, RangedAttackMaxRange, RangedAttackDamageModPct, AgroSocialDistanceMod, EnrageEnabled, EnrageHPPct, EnrageDurationInMS, EnrageCooldownInMS, FlurryEnabled, FlurryChancePct, RampageEnabled, RampageChancePct, RampageRange, RampageDamagePct, WildRampageEnabled, WildRampageChancePct, WildRampageMaxTargets, WildRampageDamagePct, AttackRoundTimeInMS, DifficultyType, GossipIsOnlyFromHailText FROM mod_everquest_creature ORDER BY CreatureTemplateID;");
+    QueryResult queryResult = WorldDatabase.Query("SELECT CreatureTemplateID, CanShowHeldLootItems, CanShowHeldLootShields, SpawnLimit, RangedAttackEnabled, RangedAttackMinRange, RangedAttackMaxRange, RangedAttackDamageModPct, AgroSocialDistanceMod, EnrageEnabled, EnrageHPPct, EnrageDurationInMS, EnrageCooldownInMS, FlurryEnabled, FlurryChancePct, RampageEnabled, RampageChancePct, RampageRange, RampageDamagePct, WildRampageEnabled, WildRampageChancePct, WildRampageMaxTargets, WildRampageDamagePct, AttackRoundTimeInMS, DifficultyType, GossipIsOnlyFromHailText, SpellDamageMultiplier FROM mod_everquest_creature ORDER BY CreatureTemplateID;");
     if (queryResult)
     {
         do
@@ -646,6 +646,7 @@ void EverQuestMod::LoadCreatureData()
             everQuestCreature.AttackRoundTimeInMS = fields[23].Get<uint32>();
             everQuestCreature.DifficultyType = fields[24].Get<uint32>();
             everQuestCreature.GossipIsOnlyFromHailText = fields[25].Get<bool>();
+            everQuestCreature.SpellDamageMultiplier = fields[26].Get<float>();
             CreaturesByTemplateID[everQuestCreature.CreatureTemplateID] = everQuestCreature;
         } while (queryResult->NextRow());
     }
@@ -9952,6 +9953,18 @@ void EverQuestMod::ApplyCreatureCombatAbilityDamageMod(Unit* attacker, uint32& d
     if (state == nullptr || state->ActiveSwingDamageModPct == 100)
         return;
     damage = damage * state->ActiveSwingDamageModPct / 100;
+}
+
+float EverQuestMod::GetCreatureSpellDamageMultiplier(Unit const* attacker)
+{
+    if (attacker == nullptr || attacker->IsCreature() == false || attacker->IsCharmedOwnedByPlayerOrPlayer() == true)
+        return 1.0f;
+    unordered_map<uint32, EverQuestCreature>::const_iterator creatureIterator = CreaturesByTemplateID.find(attacker->GetEntry());
+    if (creatureIterator == CreaturesByTemplateID.end())
+        return 1.0f;
+    if (creatureIterator->second.SpellDamageMultiplier < 0.0f)
+        return 0.0f;
+    return creatureIterator->second.SpellDamageMultiplier;
 }
 
 void EverQuestMod::RemoveCreatureUnstickState(Creature* creature)

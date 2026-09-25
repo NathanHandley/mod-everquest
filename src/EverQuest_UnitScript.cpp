@@ -441,6 +441,14 @@ public:
 
         uint32 spellID = spellInfo->Id;
 
+        // Per creature hand tuned spell damage (bosses mostly).  This hook also carries periodic heal ticks, which must not scale, so the spell has to be a periodic damage one landing on a non-friendly target
+        if (target != nullptr && EverQuestSpellTalentAlignment::DoesSpellInfoDealPeriodicDamage(spellInfo) == true && attacker->IsFriendlyTo(target) == false)
+        {
+            float creatureSpellDamageMultiplier = EverQuest->GetCreatureSpellDamageMultiplier(attacker);
+            if (creatureSpellDamageMultiplier != 1.0f)
+                damage = uint32(std::round(float(damage) * creatureSpellDamageMultiplier));
+        }
+
         // A life-for-mana spell takes exactly what its tooltip says off its caster, so none of the adds below may touch it
         if (EverQuest->IsSpellDamageFixed(spellID) == true)
             return;
@@ -616,6 +624,14 @@ public:
             return;
 
         TryApplyBashKickStunForbearanceOnSuppressedStun(target, attacker, spellInfo);
+
+        // Per creature hand tuned spell damage (bosses mostly)
+        if (damage > 0)
+        {
+            float creatureSpellDamageMultiplier = EverQuest->GetCreatureSpellDamageMultiplier(attacker);
+            if (creatureSpellDamageMultiplier != 1.0f)
+                damage = int32(std::round(float(damage) * creatureSpellDamageMultiplier));
+        }
 
         // A life-for-mana spell takes exactly what its tooltip says off its caster, so none of the adds below may touch it
         if (EverQuest->IsSpellDamageFixed(spellInfo->Id) == true)

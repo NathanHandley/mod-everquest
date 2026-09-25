@@ -54,7 +54,7 @@ class ByteBuffer;
 struct AreaTrigger;
 struct BuildValuesCachePosPointers;
 
-#define EQ_MOD_VERSION                              116
+#define EQ_MOD_VERSION                              117
 
 #define EQ_MOVEMENT_CAST_SNARE_DURATION_BUFFER_IN_MS 2000 // How much longer than the remaining cast time the casting slow is given, so a pushed-back cast keeps it
 
@@ -510,6 +510,7 @@ public:
     uint32 AttackRoundTimeInMS = 0;
     uint32 DifficultyType = EQ_CREATURE_DIFFICULTY_NORMAL;
     bool GossipIsOnlyFromHailText = false;
+    float SpellDamageMultiplier = 1.0f;
 };
 
 class EverQuestCreatureSpawnPoint
@@ -2322,6 +2323,7 @@ public:
     bool IsCreatureEnragedForRiposte(Unit const* unit, Unit const* attacker);
     void TryDoCreatureEnrageRiposteCounter(Unit* victim, Unit* attacker);
     void ApplyCreatureCombatAbilityDamageMod(Unit* attacker, uint32& damage);
+    float GetCreatureSpellDamageMultiplier(Unit const* attacker);
     void RemoveCreatureUnstickState(Creature* creature);
     void CalculateUnstickTeleportPosition(Creature* creature, Unit* victim, float& xOut, float& yOut, float& zOut);
     void UpdateCreatureUnstick(Creature* creature, uint32 diff);
