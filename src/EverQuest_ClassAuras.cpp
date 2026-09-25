@@ -63,7 +63,8 @@ static const char* EQ_CLASSAURA_SPELL_TYPE_NAMES[EQ_CLASSAURA_SPELL_TYPE_COUNT] 
     "MagicianDetonateSummoned", "MagicianDetonateSummonedBlast",
     "ClericRadiance", "ClericRadianceFreeMana",
     "WizardIntensifiedSkyfall",
-    "ShadowKnightBloodDebtVitality"
+    "ShadowKnightBloodDebtVitality",
+    "DruidNaturesBalanceShadow", "DruidNaturesBalanceArcane"
 };
 
 struct EverQuestClassAuraToggle
@@ -1199,23 +1200,33 @@ void EverQuestMod::ApplyClassAuraPaladinUndeadDemonDamageBonus(Unit* attacker, U
 // How long after a cast is 'priced' its damage can still be paid that bonus
 static const uint32 EQ_CLASSAURA_DRUID_NATURES_BALANCE_PAYOUT_WINDOW_IN_MS = 5000;
 
+// Every element that builds and spends stacks.  Holy and physical take no part
+static const uint32 EQ_CLASSAURA_DRUID_NATURES_BALANCE_TYPES[] =
+{
+    EQ_CLASSAURA_SPELL_DRUID_NATURES_BALANCE_FIRE, EQ_CLASSAURA_SPELL_DRUID_NATURES_BALANCE_COLD, EQ_CLASSAURA_SPELL_DRUID_NATURES_BALANCE_NATURE,
+    EQ_CLASSAURA_SPELL_DRUID_NATURES_BALANCE_SHADOW, EQ_CLASSAURA_SPELL_DRUID_NATURES_BALANCE_ARCANE
+};
+
 static uint32 GetClassAuraDruidNaturesBalanceTypeForSpell(SpellInfo const* spellInfo)
 {
-    uint32 elementMask = spellInfo->GetSchoolMask() & (SPELL_SCHOOL_MASK_FIRE | SPELL_SCHOOL_MASK_FROST | SPELL_SCHOOL_MASK_NATURE);
+    uint32 elementMask = spellInfo->GetSchoolMask() & (SPELL_SCHOOL_MASK_FIRE | SPELL_SCHOOL_MASK_FROST | SPELL_SCHOOL_MASK_NATURE | SPELL_SCHOOL_MASK_SHADOW | SPELL_SCHOOL_MASK_ARCANE);
     if (elementMask == SPELL_SCHOOL_MASK_FIRE)
         return EQ_CLASSAURA_SPELL_DRUID_NATURES_BALANCE_FIRE;
     if (elementMask == SPELL_SCHOOL_MASK_FROST)
         return EQ_CLASSAURA_SPELL_DRUID_NATURES_BALANCE_COLD;
     if (elementMask == SPELL_SCHOOL_MASK_NATURE)
         return EQ_CLASSAURA_SPELL_DRUID_NATURES_BALANCE_NATURE;
+    if (elementMask == SPELL_SCHOOL_MASK_SHADOW)
+        return EQ_CLASSAURA_SPELL_DRUID_NATURES_BALANCE_SHADOW;
+    if (elementMask == SPELL_SCHOOL_MASK_ARCANE)
+        return EQ_CLASSAURA_SPELL_DRUID_NATURES_BALANCE_ARCANE;
     return EQ_CLASSAURA_SPELL_TYPE_COUNT;
 }
 
 uint32 EverQuestMod::GetClassAuraDruidNaturesBalanceBonusPercent(Player* druid, uint32 castBalanceType)
 {
-    uint32 balanceTypes[3] = { EQ_CLASSAURA_SPELL_DRUID_NATURES_BALANCE_FIRE, EQ_CLASSAURA_SPELL_DRUID_NATURES_BALANCE_COLD, EQ_CLASSAURA_SPELL_DRUID_NATURES_BALANCE_NATURE };
     uint32 stackCount = 0;
-    for (uint32 balanceType : balanceTypes)
+    for (uint32 balanceType : EQ_CLASSAURA_DRUID_NATURES_BALANCE_TYPES)
     {
         if (balanceType == castBalanceType)
             continue;
@@ -1231,8 +1242,7 @@ uint32 EverQuestMod::GetClassAuraDruidNaturesBalanceBonusPercent(Player* druid, 
 
 void EverQuestMod::RemoveClassAuraDruidNaturesBalanceStacks(Player* druid, uint32 castBalanceType)
 {
-    uint32 balanceTypes[3] = { EQ_CLASSAURA_SPELL_DRUID_NATURES_BALANCE_FIRE, EQ_CLASSAURA_SPELL_DRUID_NATURES_BALANCE_COLD, EQ_CLASSAURA_SPELL_DRUID_NATURES_BALANCE_NATURE };
-    for (uint32 balanceType : balanceTypes)
+    for (uint32 balanceType : EQ_CLASSAURA_DRUID_NATURES_BALANCE_TYPES)
     {
         if (balanceType == castBalanceType)
             continue;
