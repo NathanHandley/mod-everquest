@@ -411,6 +411,10 @@ public:
         if (curSpell.CasterVisualKitID != 0 && caster != nullptr && caster->IsPlayer() == false)
             caster->SendPlaySpellVisual(curSpell.CasterVisualKitID);
 
+        // A game object cast has no unit caster, and everything below acts on the caster
+        if (caster == nullptr)
+            return;
+
         // Creatures casting gate return to where they last gained aggro
         if (caster->IsCreature() == true && spell->IsTriggered() == false
             && (spellInfo->Effects[EFFECT_0].Effect == SPELL_EFFECT_DUMMY || (spellInfo->Effects[EFFECT_0].Effect == SPELL_EFFECT_APPLY_AURA && spellInfo->Effects[EFFECT_0].ApplyAuraName == SPELL_AURA_DUMMY))
