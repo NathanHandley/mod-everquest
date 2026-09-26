@@ -784,11 +784,16 @@ public:
         EverQuest->RefreshBearFormArmorShiftForPlayer(unit->ToPlayer());
     }
 
-    // A druid can pick what each of their shapeshift forms looks like, and this is where the core's pick gets replaced with theirs
     void OnDisplayIdChange(Unit* unit, uint32 displayId) override
     {
         if (EverQuest->IsEnabled == false)
             return;
+        if (unit != nullptr && unit->IsPlayer() == true)
+        {
+            uint8 nativeGender = unit->GetByteValue(PLAYER_BYTES_3, PLAYER_BYTES_3_OFFSET_GENDER);
+            if (unit->getGender() > GENDER_FEMALE && nativeGender <= GENDER_FEMALE)
+                unit->SetByteValue(UNIT_FIELD_BYTES_0, 2, nativeGender); // byte 2 = gender, as Unit::SetDisplayId writes it
+        }
         EverQuest->ApplyDruidFormDisplayForPlayerOnDisplayChange(unit, displayId);
     }
 
