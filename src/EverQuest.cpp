@@ -153,6 +153,9 @@ EverQuestMod::EverQuestMod() :
     ConfigCreatureEmotesEnabled(true),
     ConfigCreatureEmotesAmbientEnabled(true),
     ConfigCreatureWornEffectsHideAuraIcons(true),
+    ConfigCreatureWorldBossHealthMultiplier(2.5f),
+    ConfigCreatureWorldBossDamageMultiplier(1.5f),
+    ConfigCreatureWorldBossLootMultiplier(2),
     ConfigIllusionGearRefreshTimeInMS(1000),
     ConfigShowClassMessageOnLogin(true),
     ConfigSecondaryExpPoolGainPercent(25.0f),
@@ -544,6 +547,11 @@ void EverQuestMod::LoadConfigurationFile()
 
     // Creature worn effects
     ConfigCreatureWornEffectsHideAuraIcons = sConfigMgr->GetOption<bool>("EverQuest.CreatureWornEffects.HideAuraIcons", true);
+    ConfigCreatureWorldBossHealthMultiplier = sConfigMgr->GetOption<float>("EverQuest.CreatureWorldBoss.HealthMultiplier", 2.5f);
+    if (ConfigCreatureWorldBossHealthMultiplier <= 0.0f)
+        ConfigCreatureWorldBossHealthMultiplier = 1.0f;
+    ConfigCreatureWorldBossDamageMultiplier = std::max(0.0f, sConfigMgr->GetOption<float>("EverQuest.CreatureWorldBoss.DamageMultiplier", 1.5f));
+    ConfigCreatureWorldBossLootMultiplier = std::max<uint32>(1, sConfigMgr->GetOption<uint32>("EverQuest.CreatureWorldBoss.LootMultiplier", 2));
 
     // Illusion
     ConfigIllusionGearRefreshTimeInMS = sConfigMgr->GetOption<uint32>("EverQuest.Illusion.GearRefreshTimeInMS", 1000);
@@ -9968,7 +9976,59 @@ float EverQuestMod::GetCreatureSpellDamageMultiplier(Unit const* attacker)
         return 1.0f;
     if (creatureIterator->second.SpellDamageMultiplier < 0.0f)
         return 0.0f;
-    return creatureIterator->second.SpellDamageMultiplier;
+    float spellDamageMultiplier = creatureIterator->second.SpellDamageMultiplier;
+    if (IsEQWorldBossTierCreature(attacker) == true)
+        spellDamageMultiplier *= ConfigCreatureWorldBossDamageMultiplier;
+    return spellDamageMultiplier;
+}
+
+bool EverQuestMod::IsEQWorldBossTierCreature(Unit const* unit)
+{
+    if (unit == nullptr || unit->IsCreature() == false)
+        return false;
+    Map* map = unit->FindMap();
+    if (map == nullptr || map->Instanceable() == true)
+        return false;
+    unordered_map<uint32, EverQuestCreature>::const_iterator creatureIterator = CreaturesByTemplateID.find(unit->GetEntry());
+    if (creatureIterator == CreaturesByTemplateID.end())
+        return false;
+    return creatureIterator->second.DifficultyType == EQ_CREATURE_DIFFICULTY_RAIDBOSS || creatureIterator->second.DifficultyType == EQ_CREATURE_DIFFICULTY_RAIDMINIBOSS;
+}
+
+void EverQuestMod::ApplyWorldBossHealthMultiplier(Creature* creature)
+{
+    if (ConfigCreatureWorldBossHealthMultiplier == 1.0f)
+        return;
+    if (IsEQWorldBossTierCreature(creature) == false)
+        return;
+    double scaledHealth = double(creature->GetCreateHealth()) * double(ConfigCreatureWorldBossHealthMultiplier);
+    uint32 health = uint32(std::clamp(scaledHealth, 1.0, 2000000000.0));
+    creature->SetCreateHealth(health);
+    creature->SetStatFlatModifier(UNIT_MOD_HEALTH, BASE_VALUE, float(health));
+    creature->SetMaxHealth(health);
+    creature->SetHealth(health);
+    creature->ResetPlayerDamageReq();
+}
+
+void EverQuestMod::ApplyWorldBossMeleeDamageMultiplier(Unit* attacker, uint32& damage)
+{
+    if (damage == 0 || ConfigCreatureWorldBossDamageMultiplier == 1.0f)
+        return;
+    if (attacker == nullptr || attacker->IsCharmedOwnedByPlayerOrPlayer() == true)
+        return;
+    if (IsEQWorldBossTierCreature(attacker) == false)
+        return;
+    double scaledDamage = double(damage) * double(ConfigCreatureWorldBossDamageMultiplier);
+    damage = uint32(std::clamp(std::round(scaledDamage), 0.0, 2000000000.0));
+}
+
+uint32 EverQuestMod::GetWorldBossLootRollPassCount(Creature* creature)
+{
+    if (ConfigCreatureWorldBossLootMultiplier <= 1)
+        return 1;
+    if (IsEQWorldBossTierCreature(creature) == false)
+        return 1;
+    return ConfigCreatureWorldBossLootMultiplier;
 }
 
 void EverQuestMod::RemoveCreatureUnstickState(Creature* creature)
@@ -13203,8 +13263,36 @@ void EverQuestMod::RollLootItemsForCreature(Creature* creature)
     if (creatureLootGroups == CreatureLootGroupsByCreatureTemplateID.end())
         return;
 
+    // The normal roll, always kept whole
+    RollLootTableIntoCounts(creatureLootGroups->second, *counts);
+
+    // An open world raid boss rolls its whole loot table again for each extra pass (EverQuest.CreatureWorldBoss.LootMultiplier).  Every pass is a
+    // complete, independent EQ roll pooled into the same corpse.  A corpse only has MAX_NR_LOOT_ITEMS loot window slots and the core silently drops
+    // anything past them, so the bonus passes only add what still fits, which means an unlucky big roll loses bonus items and never the normal drop
+    uint32 lootRollPassCount = GetWorldBossLootRollPassCount(creature);
+    if (lootRollPassCount > 1)
+    {
+        uint32 usedLootWindowSlots = 0;
+        for (const auto& itemCount : *counts)
+            usedLootWindowSlots += GetLootWindowSlotCountForItem(itemCount.first, itemCount.second);
+        for (uint32 lootRollPass = 1; lootRollPass < lootRollPassCount; lootRollPass++)
+        {
+            unordered_map<uint32, uint32> bonusCounts;
+            RollLootTableIntoCounts(creatureLootGroups->second, bonusCounts);
+            AddBonusLootCountsWithinLootWindow(bonusCounts, *counts, usedLootWindowSlots);
+        }
+    }
+
+    // Track preloaded items for visuals and OnItemRoll checks
+    for (const auto& itemCount : *counts)
+        preloadedItemIDs->push_back(itemCount.first);
+}
+
+// One complete EQ roll of a creature's loot table (EQEMU NPC::AddLootTable)
+void EverQuestMod::RollLootTableIntoCounts(const vector<EverQuestCreatureLootGroup>& lootGroups, unordered_map<uint32, uint32>& counts)
+{
     // Each loot group (lootdrop reference) is processed based on the group multiplier
-    for (const EverQuestCreatureLootGroup& lootGroup : creatureLootGroups->second)
+    for (const EverQuestCreatureLootGroup& lootGroup : lootGroups)
     {
         uint32 groupMultiplier = std::max(lootGroup.GroupMultiplier, 1u);
         for (uint32 t = 0; t < groupMultiplier; t++)
@@ -13216,13 +13304,42 @@ void EverQuestMod::RollLootItemsForCreature(Creature* creature)
             if (t >= lootGroup.GroupMultiplierMin && lootGroup.GroupProbability < 100.0f && float(rand_chance()) > lootGroup.GroupProbability)
                 continue;
 
-            RollLootGroupIntoCounts(lootGroup, *counts);
+            RollLootGroupIntoCounts(lootGroup, counts);
         }
     }
+}
 
-    // Track preloaded items for visuals and OnItemRoll checks
-    for (const auto& itemCount : *counts)
-        preloadedItemIDs->push_back(itemCount.first);
+uint32 EverQuestMod::GetLootWindowSlotCountForItem(uint32 itemTemplateID, uint32 count)
+{
+    if (count == 0)
+        return 0;
+    ItemTemplate const* itemTemplate = sObjectMgr->GetItemTemplate(itemTemplateID);
+    if (itemTemplate == nullptr)
+        return 0;
+    uint32 maxStackSize = std::max<uint32>(1, itemTemplate->GetMaxStackSize());
+    uint32 dropCount = std::min<uint32>(count, 255);
+    return (dropCount + maxStackSize - 1) / maxStackSize;
+}
+
+void EverQuestMod::AddBonusLootCountsWithinLootWindow(const unordered_map<uint32, uint32>& bonusCounts, unordered_map<uint32, uint32>& counts, uint32& usedLootWindowSlots)
+{
+    for (const auto& bonusItemCount : bonusCounts)
+    {
+        uint32 itemTemplateID = bonusItemCount.first;
+        for (uint32 copy = 0; copy < bonusItemCount.second; copy++)
+        {
+            uint32 currentCount = 0;
+            unordered_map<uint32, uint32>::const_iterator existingCount = counts.find(itemTemplateID);
+            if (existingCount != counts.end())
+                currentCount = existingCount->second;
+            uint32 slotsBefore = GetLootWindowSlotCountForItem(itemTemplateID, currentCount);
+            uint32 slotsAfter = GetLootWindowSlotCountForItem(itemTemplateID, currentCount + 1);
+            if (usedLootWindowSlots + (slotsAfter - slotsBefore) > MAX_NR_LOOT_ITEMS)
+                break;
+            counts[itemTemplateID] = currentCount + 1;
+            usedLootWindowSlots += slotsAfter - slotsBefore;
+        }
+    }
 }
 
 void EverQuestMod::RollLootGroupIntoCounts(const EverQuestCreatureLootGroup& lootGroup, unordered_map<uint32, uint32>& counts)

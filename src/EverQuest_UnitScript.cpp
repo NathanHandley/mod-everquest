@@ -687,6 +687,9 @@ public:
         // Rampage and wild rampage swings can carry a damage percent modifier
         EverQuest->ApplyCreatureCombatAbilityDamageMod(attacker, damage);
 
+        // Open world raid bosses hit harder than their instanced copies
+        EverQuest->ApplyWorldBossMeleeDamageMultiplier(attacker, damage);
+
         // Class auras: the Bard's instrument bonus and the Paladin's double damage against undead and demons
         EverQuest->ApplyClassAuraMeleeDamageMods(attacker, target, damage);
 

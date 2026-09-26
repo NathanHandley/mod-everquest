@@ -763,6 +763,35 @@ EverQuest.CreatureMovementSounds.Enabled = True
 EverQuest.CreatureWornEffects.HideAuraIcons = True
 
 ###################################################################################################
+# Creature World Boss Settings
+#
+#	These apply to EverQuest raid bosses and raid mini bosses while they are in the shared open world
+#	(any map that is not an instance).  The same creatures in the instanced raid and dungeon copies keep
+#	their normal health, damage and loot.
+#
+# 	EverQuest.CreatureWorldBoss.HealthMultiplier
+#		Multiplies the boss's health
+#	Default: 2.5
+#
+# 	EverQuest.CreatureWorldBoss.DamageMultiplier
+#		Multiplies the boss's melee damage and its spell damage (breaths, nukes, damage over time, procs,
+#		weapon damage abilities).  It multiplies on top of the per creature spell damage multiplier the
+#		converter writes (CreatureTemplates.csv spell_damage_multiplier plus the difficulty type add)
+#	Default: 1.5
+#
+# 	EverQuest.CreatureWorldBoss.LootMultiplier
+#		How many times the boss's whole EQ loot table is rolled.  Each pass is a complete, independent roll
+#		(every loot group, its multiplier and its probability), and everything the passes drop is pooled
+#		into the one corpse.  Coin is not affected.  1 turns it off
+#	Default: 2
+#
+###################################################################################################
+
+EverQuest.CreatureWorldBoss.HealthMultiplier = 2.5
+EverQuest.CreatureWorldBoss.DamageMultiplier = 1.5
+EverQuest.CreatureWorldBoss.LootMultiplier = 2
+
+###################################################################################################
 #
 # 	EverQuest.Illusion.GearRefreshTimeInMS
 #		How often, in milliseconds, an illusioned player's gear-matched display is revalidated. This

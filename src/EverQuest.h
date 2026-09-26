@@ -1770,6 +1770,9 @@ public:
     bool ConfigCreatureEmotesAmbientEnabled;
     bool ConfigCreatureMovementSoundsEnabled;
     bool ConfigCreatureWornEffectsHideAuraIcons;
+    float ConfigCreatureWorldBossHealthMultiplier;
+    float ConfigCreatureWorldBossDamageMultiplier;
+    uint32 ConfigCreatureWorldBossLootMultiplier;
     uint32 ConfigIllusionGearRefreshTimeInMS;
     bool ConfigShowClassMessageOnLogin;
     float ConfigSecondaryExpPoolGainPercent;
@@ -2328,6 +2331,10 @@ public:
     void TryDoCreatureEnrageRiposteCounter(Unit* victim, Unit* attacker);
     void ApplyCreatureCombatAbilityDamageMod(Unit* attacker, uint32& damage);
     float GetCreatureSpellDamageMultiplier(Unit const* attacker);
+    bool IsEQWorldBossTierCreature(Unit const* unit);
+    void ApplyWorldBossHealthMultiplier(Creature* creature);
+    void ApplyWorldBossMeleeDamageMultiplier(Unit* attacker, uint32& damage);
+    uint32 GetWorldBossLootRollPassCount(Creature* creature);
     void RemoveCreatureUnstickState(Creature* creature);
     void CalculateUnstickTeleportPosition(Creature* creature, Unit* victim, float& xOut, float& yOut, float& zOut);
     void UpdateCreatureUnstick(Creature* creature, uint32 diff);
@@ -2458,6 +2465,9 @@ public:
     Creature* GetNearestLoadedCreatureWithEntryID(Map* map, uint32 entryID, WorldObject* referenceObject);
     void RollLootItemsForCreature(Creature* creature);
     void RollLootGroupIntoCounts(const EverQuestCreatureLootGroup& lootGroup, unordered_map<uint32, uint32>& counts);
+    void RollLootTableIntoCounts(const vector<EverQuestCreatureLootGroup>& lootGroups, unordered_map<uint32, uint32>& counts);
+    uint32 GetLootWindowSlotCountForItem(uint32 itemTemplateID, uint32 count);
+    void AddBonusLootCountsWithinLootWindow(const unordered_map<uint32, uint32>& bonusCounts, unordered_map<uint32, uint32>& counts, uint32& usedLootWindowSlots);
     void SpawnCreature(uint32 entryID, Map* map, float x, float y, float z, float orientation, bool enforceUniqueSpawn);
     void ExecutePendingReactionSpawn(const EverQuestPendingReactionSpawn& pendingSpawn);
     void ProcessPendingReactionSpawnCreations();

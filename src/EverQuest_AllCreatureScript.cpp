@@ -30,6 +30,14 @@ class EverQuest_AllCreatureScript : public AllCreatureScript
 public:
     EverQuest_AllCreatureScript() : AllCreatureScript("EverQuest_AllCreatureScript") {}
 
+    // The end of Creature::SelectLevel (spawn, respawn and entry changes), right after the core set full health from the base stats
+    void OnCreatureSelectLevel(CreatureTemplate const* /*cinfo*/, Creature* creature) override
+    {
+        if (EverQuest->IsEnabled == false || creature == nullptr)
+            return;
+        EverQuest->ApplyWorldBossHealthMultiplier(creature);
+    }
+
     void OnCreatureAddWorld(Creature* creature) override
     {
         if (EverQuest->IsEnabled == false)
