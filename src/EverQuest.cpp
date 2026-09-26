@@ -31,6 +31,7 @@
 #include "Formulas.h"
 #include "GameTime.h"
 #include "Guild.h"
+#include "GuildMgr.h"
 #include "LFGMgr.h"
 #include "LootMgr.h"
 #include "Mail.h"
@@ -156,6 +157,7 @@ EverQuestMod::EverQuestMod() :
     ConfigCreatureWorldBossHealthMultiplier(2.5f),
     ConfigCreatureWorldBossDamageMultiplier(1.5f),
     ConfigCreatureWorldBossLootMultiplier(2),
+    ConfigCreatureWorldBossKillAnnouncementEnabled(true),
     ConfigIllusionGearRefreshTimeInMS(1000),
     ConfigShowClassMessageOnLogin(true),
     ConfigSecondaryExpPoolGainPercent(25.0f),
@@ -552,6 +554,7 @@ void EverQuestMod::LoadConfigurationFile()
         ConfigCreatureWorldBossHealthMultiplier = 1.0f;
     ConfigCreatureWorldBossDamageMultiplier = std::max(0.0f, sConfigMgr->GetOption<float>("EverQuest.CreatureWorldBoss.DamageMultiplier", 1.5f));
     ConfigCreatureWorldBossLootMultiplier = std::max<uint32>(1, sConfigMgr->GetOption<uint32>("EverQuest.CreatureWorldBoss.LootMultiplier", 2));
+    ConfigCreatureWorldBossKillAnnouncementEnabled = sConfigMgr->GetOption<bool>("EverQuest.CreatureWorldBoss.KillAnnouncementEnabled", true);
 
     // Illusion
     ConfigIllusionGearRefreshTimeInMS = sConfigMgr->GetOption<uint32>("EverQuest.Illusion.GearRefreshTimeInMS", 1000);
@@ -10029,6 +10032,57 @@ uint32 EverQuestMod::GetWorldBossLootRollPassCount(Creature* creature)
     if (IsEQWorldBossTierCreature(creature) == false)
         return 1;
     return ConfigCreatureWorldBossLootMultiplier;
+}
+
+void EverQuestMod::QueueWorldBossKillAnnouncement(Creature* deadCreature, Unit* killer)
+{
+    if (ConfigCreatureWorldBossKillAnnouncementEnabled == false)
+        return;
+    // Only the full raid bosses are announced, not the raid mini bosses
+    if (IsEQWorldBossTierCreature(deadCreature) == false)
+        return;
+    if (CreaturesByTemplateID.at(deadCreature->GetEntry()).DifficultyType != EQ_CREATURE_DIFFICULTY_RAIDBOSS)
+        return;
+    // Pets, totems and charmed creatures credit the player controlling them, and a boss killed by nothing a player controls is not announced
+    if (killer == nullptr)
+        return;
+    Player* killerPlayer = killer->GetCharmerOrOwnerPlayerOrPlayerItself();
+    if (killerPlayer == nullptr)
+        return;
+
+    // This runs on a map thread, so only copy the names off here.  Sending to every session and looking up the guild happen on the world thread
+    EverQuestPendingWorldBossKillAnnouncement announcement;
+    announcement.CreatureName = deadCreature->GetName();
+    announcement.KillerPlayerName = killerPlayer->GetName();
+    announcement.KillerGuildID = killerPlayer->GetGuildId();
+    std::lock_guard<std::mutex> lock(PendingWorldBossKillAnnouncementsMutex);
+    PendingWorldBossKillAnnouncements.push_back(announcement);
+}
+
+void EverQuestMod::ProcessPendingWorldBossKillAnnouncements()
+{
+    vector<EverQuestPendingWorldBossKillAnnouncement> announcementsToSend;
+    {
+        std::lock_guard<std::mutex> lock(PendingWorldBossKillAnnouncementsMutex);
+        if (PendingWorldBossKillAnnouncements.empty() == true)
+            return;
+        announcementsToSend.swap(PendingWorldBossKillAnnouncements);
+    }
+
+    for (const EverQuestPendingWorldBossKillAnnouncement& announcement : announcementsToSend)
+    {
+        std::string guildName;
+        if (announcement.KillerGuildID != 0)
+            guildName = sGuildMgr->GetGuildNameById(announcement.KillerGuildID);
+        std::string message;
+        if (guildName.empty() == true)
+            message = Acore::StringFormat("{} received a killing blow by player {}", announcement.CreatureName, announcement.KillerPlayerName);
+        else
+            message = Acore::StringFormat("{} has been slain by guild {}", announcement.CreatureName, guildName);
+        WorldPacket data;
+        ChatHandler::BuildChatPacket(data, CHAT_MSG_SYSTEM, LANG_UNIVERSAL, nullptr, nullptr, message);
+        sWorldSessionMgr->SendGlobalMessage(&data);
+    }
 }
 
 void EverQuestMod::RemoveCreatureUnstickState(Creature* creature)

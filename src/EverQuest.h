@@ -674,6 +674,14 @@ public:
     float Orientation = 0;
 };
 
+class EverQuestPendingWorldBossKillAnnouncement
+{
+public:
+    std::string CreatureName;
+    std::string KillerPlayerName;
+    uint32 KillerGuildID = 0;
+};
+
 class EverQuestLoadedCreatureEquippedVisualItems
 {
 public:
@@ -1773,6 +1781,7 @@ public:
     float ConfigCreatureWorldBossHealthMultiplier;
     float ConfigCreatureWorldBossDamageMultiplier;
     uint32 ConfigCreatureWorldBossLootMultiplier;
+    bool ConfigCreatureWorldBossKillAnnouncementEnabled;
     uint32 ConfigIllusionGearRefreshTimeInMS;
     bool ConfigShowClassMessageOnLogin;
     float ConfigSecondaryExpPoolGainPercent;
@@ -1839,6 +1848,8 @@ public:
     vector<EverQuestPendingReactionSpawn> ReactionSpawnsPendingCreation;
     std::mutex PendingGateReturnsMutex;
     vector<EverQuestPendingGateReturn> PendingGateReturns;
+    std::mutex PendingWorldBossKillAnnouncementsMutex;
+    vector<EverQuestPendingWorldBossKillAnnouncement> PendingWorldBossKillAnnouncements;
     std::atomic<uint32> ReactionSpawnedCreatureCount{ 0 };
     std::mutex EventSpawnLifetimesMutex;
     unordered_map<uint64, vector<EverQuestEventSpawnLifetime>> EventSpawnLifetimesByMapInstanceKey;
@@ -2335,6 +2346,8 @@ public:
     void ApplyWorldBossHealthMultiplier(Creature* creature);
     void ApplyWorldBossMeleeDamageMultiplier(Unit* attacker, uint32& damage);
     uint32 GetWorldBossLootRollPassCount(Creature* creature);
+    void QueueWorldBossKillAnnouncement(Creature* deadCreature, Unit* killer);
+    void ProcessPendingWorldBossKillAnnouncements();
     void RemoveCreatureUnstickState(Creature* creature);
     void CalculateUnstickTeleportPosition(Creature* creature, Unit* victim, float& xOut, float& yOut, float& zOut);
     void UpdateCreatureUnstick(Creature* creature, uint32 diff);

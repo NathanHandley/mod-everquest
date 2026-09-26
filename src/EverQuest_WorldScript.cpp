@@ -101,6 +101,7 @@ public:
         EverQuest->ProcessPendingGateReturns();
         EverQuest->ProcessPendingReactionSpawnCreations();
         EverQuest->ProcessPendingReactionSpawnGridRemovals();
+        EverQuest->ProcessPendingWorldBossKillAnnouncements();
     }
 
     // The module writes through the asynchronous database queues and depends on those writes landing in the order they were queued (a class

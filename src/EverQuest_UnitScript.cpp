@@ -160,6 +160,7 @@ public:
             return;
 
         EverQuest->BindRaidInstanceOnCreatureKill(creature, killer);
+        EverQuest->QueueWorldBossKillAnnouncement(creature, killer);
 
         // TAKP fires 'OnDeath' at death and 'AfterDeath' right after the corpse forms, so both fire here in order
         EverQuest->DoCreatureEmoteEvent(creature, EQ_CREATURE_EMOTE_EVENT_ONDEATH, killer);
