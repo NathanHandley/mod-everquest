@@ -54,7 +54,7 @@ class ByteBuffer;
 struct AreaTrigger;
 struct BuildValuesCachePosPointers;
 
-#define EQ_MOD_VERSION                              118
+#define EQ_MOD_VERSION                              119
 
 #define EQ_MOVEMENT_CAST_SNARE_DURATION_BUFFER_IN_MS 2000 // How much longer than the remaining cast time the casting slow is given, so a pushed-back cast keeps it
 
@@ -469,6 +469,7 @@ public:
     float ManaGainSpellPowerCoefficient = 0.0f;
     bool DamageIsFixed = false;
     float IntensifyingRampStartMultipliers[3] = { 0.0f, 0.0f, 0.0f }; // Per spell effect index.  First tick as a fraction of the average tick for an EQ intensifying ("Splurt") formula, 0 = no ramp
+    uint32 CasterVisualKitID = 0; // SpellVisualKit played on a creature caster when the spell goes off (instant dragon breaths, whose own visual leaves it out)
 };
 
 class EverQuestIllusionObject

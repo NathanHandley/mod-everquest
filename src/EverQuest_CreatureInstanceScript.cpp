@@ -21,6 +21,7 @@
 #include "EventMap.h"
 #include "MotionMaster.h"
 #include "MoveSplineInit.h"
+#include "SmartAI.h"
 
 #include "EverQuest.h"
 
@@ -34,9 +35,18 @@ class EverQuest_CreatureInstanceScript : public CreatureScript
 public:
     EverQuest_CreatureInstanceScript() : CreatureScript("EverQuest_CreatureInstanceScript") {}
 
-    struct EverQuest_CreatureInstanceScriptAI : public ScriptedAI
+    // Built on SmartAI rather than ScriptedAI because a spawn level ScriptName replaces the template's AI outright
+    struct EverQuest_CreatureInstanceScriptAI : public SmartAI
     {
-        EverQuest_CreatureInstanceScriptAI(Creature* creature) : ScriptedAI(creature) {}
+        EverQuest_CreatureInstanceScriptAI(Creature* creature) : SmartAI(creature) {}
+
+        // SmartAI's InitializeAI loads the smart scripts but, unlike the base UnitAI one, never calls Reset(), which is what starts the EQ movement
+        void InitializeAI() override
+        {
+            SmartAI::InitializeAI();
+            if (me->isDead() == false)
+                Reset();
+        }
 
         // Shared Data
         uint32 MovementType = EQ_CREATURE_MOVEMENT_NO_CUSTOM;
@@ -401,6 +411,7 @@ public:
 
         void MovementInform(uint32 type, uint32 id) override
         {
+            SmartAI::MovementInform(type, id);
             if (type == WAYPOINT_MOTION_TYPE)
             {
                 if (CreatureInstanceData.DespawnAtWaypointNum != -1 && id == static_cast<uint32>(CreatureInstanceData.DespawnAtWaypointNum))
@@ -416,9 +427,7 @@ public:
             if (EverQuest->IsCreatureInReactionWalk(me->GetGUID()) == true)
             {
                 events.CancelEvent(EVENT_PAUSE_DONE);
-                if (!UpdateVictim())
-                    return;
-                DoMeleeAttackIfReady();
+                SmartAI::UpdateAI(diff);
                 return;
             }
 
@@ -438,14 +447,13 @@ public:
                         WaypointAndRoamTargetTravelPosition.GetPositionY(), WaypointAndRoamTargetTravelPosition.GetPositionZ(), EQ_MOVE_PHASE_TRAVELING);
             }
 
-            if (!UpdateVictim())
-                return;
-
-            DoMeleeAttackIfReady();
+            // Victim selection, smart script events (spells and the rest) and melee
+            SmartAI::UpdateAI(diff);
         }
 
-        void JustEngagedWith(Unit* /*who*/) override
+        void JustEngagedWith(Unit* who) override
         {
+            SmartAI::JustEngagedWith(who);
             events.CancelEvent(EVENT_PAUSE_DONE);
             if (MovementType == EQ_CREATURE_MOVEMENT_NO_CUSTOM)
                 return;
@@ -463,9 +471,19 @@ public:
 
         void EnterEvadeMode(EvadeReason why) override
         {
-            ScriptedAI::EnterEvadeMode(why);
+            // SmartAI can decline to evade (evade suppressed or disabled by script, charmed, owned, following), in which case there is nothing to take over
+            bool wasInEvadeMode = me->IsInEvadeMode();
+            SmartAI::EnterEvadeMode(why);
+            if (wasInEvadeMode == true || me->IsInEvadeMode() == false)
+                return;
+
+            // The CreatureAI evade this used to run called Reset(), SmartAI's does not
+            Reset();
             if (MovementType == EQ_CREATURE_MOVEMENT_NO_CUSTOM)
                 return;
+
+            // The path below replaces SmartAI's move home, so JustReachedHome never comes to reset the smart script events and it has to be done here
+            GetScript()->OnReset();
 
             // Restore any prior states
             WaypointCurrentTargetWaypointIndex = PreAgroCurrentTargetIdx;

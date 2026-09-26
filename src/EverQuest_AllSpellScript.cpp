@@ -406,6 +406,11 @@ public:
             return;
         EverQuestSpell curSpell = EverQuest->GetSpellDataForSpellID(spellInfo->Id);
 
+        // Dragon breaths are instant like EQ, and an instant cast would mirror the breath onto the target, so the converter leaves it out of the spell's
+        // own visual and it is played on the breathing creature here.  Player casters are skipped outright so the breath can never show on a player
+        if (curSpell.CasterVisualKitID != 0 && caster != nullptr && caster->IsPlayer() == false)
+            caster->SendPlaySpellVisual(curSpell.CasterVisualKitID);
+
         // Creatures casting gate return to where they last gained aggro
         if (caster->IsCreature() == true && spell->IsTriggered() == false
             && (spellInfo->Effects[EFFECT_0].Effect == SPELL_EFFECT_DUMMY || (spellInfo->Effects[EFFECT_0].Effect == SPELL_EFFECT_APPLY_AURA && spellInfo->Effects[EFFECT_0].ApplyAuraName == SPELL_AURA_DUMMY))
