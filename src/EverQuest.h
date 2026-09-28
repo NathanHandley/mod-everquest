@@ -408,6 +408,7 @@ struct BuildValuesCachePosPointers;
 #define EQ_PLAYER_CUSTOMDATA_QUESTFACTION           "EQQuestFaction"
 #define EQ_PLAYER_CUSTOMDATA_MOVEWHILECASTING       "EQMoveWhileCasting"
 #define EQ_PLAYER_CUSTOMDATA_ITEMENCHANTMEMORY      "EQItemEnchantMemory"
+#define EQ_PLAYER_CUSTOMDATA_CLIENTMOVESTATE        "EQClientMoveState"
 #define EQ_ITEM_ENCHANT_MEMORY_MAX_PER_CHARACTER    100     // Ceiling on enchantments one character can have owed back to them
 #define EQ_QUEST_FACTION_RECHECK_INTERVAL_IN_MS     1000
 #define EQ_CLASS_AURA_GEAR_REFRESH_INTERVAL_MS      2000    // Gear and pet based class auras rescan on this interval since some ways they change have no hook
@@ -1022,6 +1023,14 @@ enum EverQuestClassAuraSpellType : uint32
     EQ_CLASSAURA_SPELL_DRUID_NATURES_BALANCE_SHADOW = 71,
     EQ_CLASSAURA_SPELL_DRUID_NATURES_BALANCE_ARCANE = 72,
     EQ_CLASSAURA_SPELL_TYPE_COUNT = 73
+};
+
+class EverQuestPlayerClientMoveState : public DataMap::Base
+{
+public:
+    bool ClientRooted = false;
+    bool ClientHovering = false;
+    bool HoverHeldBack = false;     // The player has hover, but the client was kept off it until the root ends
 };
 
 class EverQuestPlayerMoveWhileCastingState : public DataMap::Base

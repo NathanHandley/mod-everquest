@@ -253,6 +253,173 @@ static bool HandleGetMirrorImageDataPacketReceive(WorldSession* session, WorldPa
     return false;
 }
 
+// The 3.3.5a client hard locks (100% of one core, forever) when its own active mover carries ROOT and HOVER at the same time while any turn, pitch, fall or ascend/descend bit is up, which
+// is simply a levitating player getting rooted or stunned while holding a turn key.  CMovement::Update (Wow.exe 0x6F09F0) steps the mover in its own loop (0x6EAC40) until the step's consumed time
+// reaches the target.  With no displacement that loop normally bails out, except while hovering (0x6EAD73), and then the local player's collide step (0x762E00) returns zero consumed time as soon
+// as it sees ROOT (0x762F25), so the loop never finishes.  EQ levitation is hover, and spells like Whirlbolt root and levitate together, so the client is never allowed to have both: hover is
+// taken off the client for as long as it is rooted and put back after the unroot.  The core only tracks the player's own flags from what the client reports back, and never checks hover there,
+// so only the client's side changes.  Everything that roots, stuns or hovers the player reaches the client through these few packets, which is why this sits on the way out rather than on auras
+static thread_local bool IsSendingOwnClientMovePacket = false;
+
+class EverQuestOwnClientMovePacketGuard
+{
+public:
+    EverQuestOwnClientMovePacketGuard() { IsSendingOwnClientMovePacket = true; }
+    ~EverQuestOwnClientMovePacketGuard() { IsSendingOwnClientMovePacket = false; }
+};
+
+static void SendOwnClientMovePacket(WorldSession* session, WorldPacket const& packet)
+{
+    EverQuestOwnClientMovePacketGuard guard;
+    session->SendPacket(&packet);
+}
+
+// Field layout must match Unit::SetHover
+static void SendPlayerClientHoverPacket(WorldSession* session, Player* player, bool enable)
+{
+    WorldPacket data(enable == true ? SMSG_MOVE_SET_HOVER : SMSG_MOVE_UNSET_HOVER, player->GetPackGUID().size() + 4);
+    data << player->GetPackGUID();
+    data << uint32(session->GetOrderCounter());
+    SendOwnClientMovePacket(session, data);
+    session->IncrementOrderCounter();
+}
+
+// Sent once from Player::SendInitialPacketsAfterAddToMap, and carries root and hover together when the player comes into the world rooted and levitating.  Each entry is a length byte, then
+// the opcode and payload of an ordinary move packet
+static bool HandleMultipleMovesPacketSend(WorldSession* session, Player* player, WorldPacket const& packet)
+{
+    EverQuestPlayerClientMoveState* state = player->CustomData.GetDefault<EverQuestPlayerClientMoveState>(EQ_PLAYER_CUSTOMDATA_CLIENTMOVESTATE);
+    uint64 playerRawGUID = player->GetGUID().GetRawValue();
+    bool hasRoot = false;
+    bool hasHover = false;
+    size_t hoverEntryPosition = 0;
+    size_t hoverEntryLength = 0;
+    size_t position = 4;
+    while (position < packet.size())
+    {
+        size_t entryLength = size_t(packet.read<uint8>(position)) + 1;
+        if (position + entryLength > packet.size())
+            return true;
+        uint16 entryOpcode = packet.read<uint16>(position + 1);
+        uint64 entryRawGUID = 0;
+        ReadPackedGUIDAtPosition(packet, position + 3, entryRawGUID);
+        if (entryRawGUID == playerRawGUID)
+        {
+            if (entryOpcode == SMSG_FORCE_MOVE_ROOT)
+                hasRoot = true;
+            else if (entryOpcode == SMSG_MOVE_SET_HOVER)
+            {
+                hasHover = true;
+                hoverEntryPosition = position;
+                hoverEntryLength = entryLength;
+            }
+        }
+        position += entryLength;
+    }
+
+    state->ClientRooted = hasRoot;
+    state->ClientHovering = hasHover && hasRoot == false;
+    state->HoverHeldBack = hasHover && hasRoot;
+    if (state->HoverHeldBack == false)
+        return true;
+
+    WorldPacket filteredPacket(SMSG_MULTIPLE_MOVES, packet.size());
+    filteredPacket << uint32(0);
+    filteredPacket.append(packet.contents() + 4, hoverEntryPosition - 4);
+    filteredPacket.append(packet.contents() + hoverEntryPosition + hoverEntryLength, packet.size() - hoverEntryPosition - hoverEntryLength);
+    filteredPacket.put<uint32>(0, uint32(filteredPacket.size() - 4));
+    SendOwnClientMovePacket(session, filteredPacket);
+    return false;
+}
+
+static bool HandleRootOrHoverPacketSend(WorldSession* session, WorldPacket const& packet)
+{
+    if (IsSendingOwnClientMovePacket == true || EverQuest->IsEnabled == false)
+        return true;
+    Player* player = session->GetPlayer();
+    if (player == nullptr)
+        return true;
+
+    uint16 opcode = packet.GetOpcode();
+    try
+    {
+        if (opcode == SMSG_MULTIPLE_MOVES)
+            return HandleMultipleMovesPacketSend(session, player, packet);
+        uint64 rawGUID = 0;
+        ReadPackedGUIDAtPosition(packet, 0, rawGUID);
+        if (rawGUID != player->GetGUID().GetRawValue())
+            return true;
+    }
+    catch (ByteBufferException const&)
+    {
+        return true;
+    }
+
+    EverQuestPlayerClientMoveState* state = player->CustomData.GetDefault<EverQuestPlayerClientMoveState>(EQ_PLAYER_CUSTOMDATA_CLIENTMOVESTATE);
+    switch (opcode)
+    {
+        case SMSG_FORCE_MOVE_ROOT:
+        {
+            state->ClientRooted = true;
+            if (state->ClientHovering == false)
+                return true;
+            // The hover has to be gone before the root lands, so the root is resent behind it
+            SendPlayerClientHoverPacket(session, player, false);
+            state->ClientHovering = false;
+            state->HoverHeldBack = true;
+            SendOwnClientMovePacket(session, packet);
+            return false;
+        }
+        case SMSG_FORCE_MOVE_UNROOT:
+        {
+            state->ClientRooted = false;
+            if (state->HoverHeldBack == false)
+                return true;
+            // And comes back only once the unroot is on its way
+            state->HoverHeldBack = false;
+            SendOwnClientMovePacket(session, packet);
+            if (player->HasAuraType(SPELL_AURA_HOVER) == true)
+            {
+                SendPlayerClientHoverPacket(session, player, true);
+                state->ClientHovering = true;
+            }
+            return false;
+        }
+        case SMSG_MOVE_SET_HOVER:
+        {
+            if (state->ClientRooted == true)
+            {
+                state->HoverHeldBack = true;
+                return false;
+            }
+            state->ClientHovering = true;
+            return true;
+        }
+        case SMSG_MOVE_UNSET_HOVER:
+        {
+            state->ClientHovering = false;
+            state->HoverHeldBack = false;
+            return true;
+        }
+        default:
+            return true;
+    }
+}
+
+static void ResetPlayerClientMoveState(WorldSession* session)
+{
+    // A new world rebuilds the client's own mover from scratch, and the initial move packets that follow re-establish root and hover
+    Player* player = session->GetPlayer();
+    if (player == nullptr)
+        return;
+    EverQuestPlayerClientMoveState* state = player->CustomData.Get<EverQuestPlayerClientMoveState>(EQ_PLAYER_CUSTOMDATA_CLIENTMOVESTATE);
+    if (state == nullptr)
+        return;
+    state->ClientRooted = false;
+    state->ClientHovering = false;
+    state->HoverHeldBack = false;
+}
+
 class EverQuest_ServerScript : public ServerScript
 {
 public:
@@ -311,6 +478,13 @@ public:
     bool CanPacketSend(WorldSession* session, WorldPacket const& packet) override
     {
         uint16 opcode = packet.GetOpcode();
+        if (opcode == SMSG_FORCE_MOVE_ROOT || opcode == SMSG_FORCE_MOVE_UNROOT || opcode == SMSG_MOVE_SET_HOVER || opcode == SMSG_MOVE_UNSET_HOVER || opcode == SMSG_MULTIPLE_MOVES)
+            return HandleRootOrHoverPacketSend(session, packet);
+        if (opcode == SMSG_NEW_WORLD || opcode == SMSG_LOGIN_VERIFY_WORLD)
+        {
+            ResetPlayerClientMoveState(session);
+            return true;
+        }
         if (opcode == MSG_LIST_STABLED_PETS)
             return EverQuest->HandleMentorshipStablePacketSend(session, packet);
         if (opcode == SMSG_AUCTION_LIST_RESULT)
