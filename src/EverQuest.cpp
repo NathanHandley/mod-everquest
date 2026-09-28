@@ -17555,6 +17555,36 @@ void EverQuestMod::AdjustTalentPointsForMentorship(Player const* player, uint32&
     talentPointsForLevel = adjustedPoints < 0 ? 0 : (uint32)adjustedPoints;
 }
 
+void EverQuestMod::AdjustPetTalentPointsForMentorship(Pet* pet, uint8 level, uint8& talentPointsForLevel)
+{
+    // Pet::InitTalentForLevel wipes every pet talent the moment more are spent than the standing level allows, so a hunter pet dragged down with a mentor
+    // (or only brought back to owner-5 by Pet::SynchronizeLevelWithOwner before RestorePetLevelAfterMentorshipForPlayer finishes the job) would lose its whole build.
+    // The pet's talent points are therefore held at the level it really stands at, which also stops an apprentice's raised pet from spending points it never earned
+    if (pet == nullptr || pet->getPetType() != HUNTER_PET || pet->GetCharmInfo() == nullptr)
+        return;
+    uint32 petNumber = pet->GetCharmInfo()->GetPetNumber();
+    if (petNumber == 0)
+        return;
+    Player* owner = pet->GetOwner();
+    if (owner == nullptr)
+        return;
+
+    // The controller data is written before the level moves and cleared only after the pet has been put back, so it covers the whole window, including a pet loaded after a crash left it saved at the borrowed level
+    EverQuestPlayerControllerData* controllerData = GetOrLoadActivePlayerClassControllerData(owner);
+    if (controllerData == nullptr || controllerData->MentorshipRole == EQ_MENTORSHIP_ROLE_NONE)
+        return;
+    uint32 mentorshipPetNumber = controllerData->MentorshipPetNumber;
+    uint8 petRealLevel = controllerData->MentorshipPetRealLevel;
+    if (mentorshipPetNumber != petNumber || petRealLevel == 0 || petRealLevel == level)
+        return;
+
+    // Mirrors the base pet talent formula in Pet::GetMaxTalentPointsForLevel, applied as a difference so points from owner auras (Beast Mastery) are kept
+    int32 realBasePoints = petRealLevel >= 20 ? ((int32)petRealLevel - 16) / 4 : 0;
+    int32 standingBasePoints = level >= 20 ? ((int32)level - 16) / 4 : 0;
+    int32 adjustedPoints = (int32)talentPointsForLevel + (realBasePoints - standingBasePoints);
+    talentPointsForLevel = adjustedPoints < 0 ? 0 : (adjustedPoints > 255 ? 255 : (uint8)adjustedPoints);
+}
+
 uint8 EverQuestMod::GetEarnedLevelForPlayer(Player* player)
 {
     if (player == nullptr)

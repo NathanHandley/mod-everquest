@@ -2634,6 +2634,7 @@ public:
     bool IsPlayerMentorshipLevelAdjusted(Player* player);
     bool TryGetMentorshipRealLevelForPlayer(Player const* player, uint8& outRealLevel);
     void AdjustTalentPointsForMentorship(Player const* player, uint32& talentPointsForLevel);
+    void AdjustPetTalentPointsForMentorship(Pet* pet, uint8 level, uint8& talentPointsForLevel);
     bool IsQuestBlockedByMentorshipForPlayer(Player* player, Quest const* quest);
     bool IsTrainerInteractionBlockedByMentorshipForPlayer(Player* player);
     bool HandleMentorshipTrainerPacketReceive(WorldSession* session, WorldPacket const& packet);

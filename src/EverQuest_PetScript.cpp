@@ -59,6 +59,15 @@ public:
         }
     }
 
+    void OnCalculateMaxTalentPointsForLevel(Pet* pet, uint8 level, uint8& points) override
+    {
+        if (EverQuest->IsEnabled == false)
+            return;
+
+        // Keep the pet's own talent points during its owner's mentorship
+        EverQuest->AdjustPetTalentPointsForMentorship(pet, level, points);
+    }
+
     void OnPetAddToWorld(Pet* pet) override
     {
         if (EverQuest->IsEnabled == false)
