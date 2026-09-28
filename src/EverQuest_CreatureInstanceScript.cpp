@@ -64,6 +64,7 @@ public:
 
         // Agro
         Position LastAgroPosition;
+        bool HasAgroSnapshot = false;
         uint32 PreAgroCurrentTargetIdx = 0;
         uint32 PreAgroPriorTargetIdx = 0;
         uint32 PreAgroFinalTargetIdx = 0;
@@ -129,7 +130,8 @@ public:
             else
                 MovementType = EQ_CREATURE_MOVEMENT_NO_CUSTOM;
 
-            if (MovementType != EQ_CREATURE_MOVEMENT_NO_CUSTOM)
+            // A charmed creature follows its charmer, and gets its movement back when the charm ends
+            if (MovementType != EQ_CREATURE_MOVEMENT_NO_CUSTOM && me->IsCharmed() == false)
                 PerformMovementToNewPoint();
         }
 
@@ -419,8 +421,28 @@ public:
             }
         }
 
+        void OnCharmed(bool apply) override
+        {
+            // Stop the EQ movement before SmartAI puts the creature on its charmer's follow, or the next pause or spline end check would send it back to roaming.  The pre-charm agro snapshot is dropped
+            // too, since the creature won't be anywhere near it once released
+            if (me->IsCharmed() == true)
+            {
+                events.Reset();
+                ActiveMovePhase = EQ_MOVE_PHASE_NONE;
+                HasAgroSnapshot = false;
+            }
+            SmartAI::OnCharmed(apply);
+        }
+
         void UpdateAI(uint32 diff) override
         {
+            // While charmed, the charmer owns the movement, so only SmartAI (charmed melee) runs
+            if (me->IsCharmed() == true)
+            {
+                SmartAI::UpdateAI(diff);
+                return;
+            }
+
             events.Update(diff);
 
             // A gossip or quest reaction walk owns this creature's movement until it arrives, so the waypoint and roaming logic has to stay out of the way or the two generators fight over the spline
@@ -454,6 +476,11 @@ public:
         void JustEngagedWith(Unit* who) override
         {
             SmartAI::JustEngagedWith(who);
+
+            // A charmed creature fights under its charmer's commands, and clearing the motion master here would drop its chase
+            if (me->IsCharmed() == true)
+                return;
+
             events.CancelEvent(EVENT_PAUSE_DONE);
             if (MovementType == EQ_CREATURE_MOVEMENT_NO_CUSTOM)
                 return;
@@ -465,6 +492,7 @@ public:
             PreAgroTravelPosition = WaypointAndRoamTargetTravelPosition;
 
             LastAgroPosition = me->GetPosition();
+            HasAgroSnapshot = true;
             me->GetMotionMaster()->Clear(false);
             ActiveMovePhase = EQ_MOVE_PHASE_AGRO;
         }
@@ -484,6 +512,11 @@ public:
 
             // The path below replaces SmartAI's move home, so JustReachedHome never comes to reset the smart script events and it has to be done here
             GetScript()->OnReset();
+
+            // Without a snapshot (the evade after a charm ends with nothing to fight), the fresh movement Reset() just started is the right one
+            if (HasAgroSnapshot == false)
+                return;
+            HasAgroSnapshot = false;
 
             // Restore any prior states
             WaypointCurrentTargetWaypointIndex = PreAgroCurrentTargetIdx;
