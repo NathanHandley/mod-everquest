@@ -467,6 +467,7 @@ public:
             return;
 
         EverQuest->RestoreInstanceValidityOutsideInstances(player);
+        EverQuest->ProcessEQFearBreakChecksForPlayer(player, p_time);
         EverQuest->ProcessLevelCapStateForPlayer(player);
         EverQuest->UpdateMentorshipForPlayer(player, p_time);
         EverQuest->UpdatePlayerIllusionGearDisplay(player, p_time);

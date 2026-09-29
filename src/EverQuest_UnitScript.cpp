@@ -251,6 +251,13 @@ public:
             return;
         }
 
+        // Creature stun, fear, charm or mesmerize on a player: start the player's immunity to it, or take it back off if they already are
+        if (EverQuest->HandleCreatureLossOfControlOnPlayerAuraApply(unit, aura) == true)
+        {
+            unit->RemoveAura(aura);
+            return;
+        }
+
         EverQuest->TrackEQHasteAurasAndEnforceCapOnAuraApply(unit, aura);
 
         // Raw attack power buffs do not add together, only the strongest one on the unit applies

@@ -172,6 +172,18 @@ public:
         if (bossInterruptProtectedEffectMask != 0)
             targetInfo.effectMask = targetInfo.effectMask & (uint8)(~bossInterruptProtectedEffectMask);
 
+        // A player recently put under a creature's stun, fear, charm or mesmerize by an ability that does more than that is immune to more of it for a while
+        bool isWholeSpellLossOfControlImmune = false;
+        uint8 lossOfControlImmuneEffectMask = EverQuest->GetCreatureLossOfControlImmuneEffectMaskForTarget(spell, target, isWholeSpellLossOfControlImmune);
+        if (lossOfControlImmuneEffectMask != 0)
+        {
+            // Every effect adds the target on its own, so only the call carrying the first immune effect reports
+            uint8 firstImmuneEffectBit = (uint8)(lossOfControlImmuneEffectMask & (uint8)(~lossOfControlImmuneEffectMask + 1));
+            if (isWholeSpellLossOfControlImmune == true && (effectMask & firstImmuneEffectBit) != 0 && spell->GetOriginalCaster() != nullptr)
+                spell->GetOriginalCaster()->SendSpellMiss(target, spellInfo->Id, SPELL_MISS_IMMUNE);
+            targetInfo.effectMask = targetInfo.effectMask & (uint8)(~lossOfControlImmuneEffectMask);
+        }
+
         // An EverQuest boss is never silenced
         uint8 bossSilenceProtectedEffectMask = EverQuest->GetBossSilenceProtectedEffectMaskForTarget(spellInfo, target);
         if (bossSilenceProtectedEffectMask != 0)

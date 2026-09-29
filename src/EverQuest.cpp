@@ -132,6 +132,8 @@ EverQuestMod::EverQuestMod() :
     ConfigSpellBardFearDiminishingReturnsResetTimeInMS(15000),
     ConfigSpellPvPChainedCrowdControlDiminishingReturnsEnabled(true),
     ConfigSpellPvPCrowdControlMaxDurationInMS(10000),
+    ConfigSpellFearBreakCheckChance(75),
+    ConfigSpellCreatureLossOfControlPlayerImmunityMultiplier(4.0f),
     ConfigSpellPvPSnareDiminishingReturnsEnabled(true),
     ConfigSpellPvPSilenceCancelsBardSongsEnabled(true),
     ConfigSpellPvPEQCharmImmunityEnabled(true),
@@ -487,6 +489,8 @@ void EverQuestMod::LoadConfigurationFile()
     ConfigSpellBardFearDiminishingReturnsResetTimeInMS = sConfigMgr->GetOption<uint32>("EverQuest.Spells.BardFearDiminishingReturnsResetTimeInMS", 15000);
     ConfigSpellPvPChainedCrowdControlDiminishingReturnsEnabled = sConfigMgr->GetOption<bool>("EverQuest.Spells.PvPChainedCrowdControlDiminishingReturnsEnabled", true);
     ConfigSpellPvPCrowdControlMaxDurationInMS = sConfigMgr->GetOption<uint32>("EverQuest.Spells.PvPCrowdControlMaxDurationInMS", 10000);
+    ConfigSpellFearBreakCheckChance = std::min<uint32>(100, sConfigMgr->GetOption<uint32>("EverQuest.Spells.FearBreakCheckChance", 75));
+    ConfigSpellCreatureLossOfControlPlayerImmunityMultiplier = std::max(0.0f, sConfigMgr->GetOption<float>("EverQuest.Spells.CreatureLossOfControlPlayerImmunityMultiplier", 4.0f));
     ConfigSpellPvPSnareDiminishingReturnsEnabled = sConfigMgr->GetOption<bool>("EverQuest.Spells.PvPSnareDiminishingReturnsEnabled", true);
     ConfigSpellPvPSilenceCancelsBardSongsEnabled = sConfigMgr->GetOption<bool>("EverQuest.Spells.PvPSilenceCancelsBardSongsEnabled", true);
     ConfigSpellPvPEQCharmImmunityEnabled = sConfigMgr->GetOption<bool>("EverQuest.Spells.PvPEQCharmImmunityEnabled", true);
@@ -4373,7 +4377,7 @@ void EverQuestMod::LoadSpellData()
 {
     SpellDataBySpellID.clear();
     BardSongTickSpellIDs.clear();
-    QueryResult queryResult = WorldDatabase.Query("SELECT SpellID, AuraDurationBaseInMS, AuraDurationAddPerLevelInMS, AuraDurationMaxInMS, AuraDurationCalcMinLevel, AuraDurationCalcMaxLevel, RecourseSpellID, SpellIDCastOnMeleeAttacker, FocusBoostType, PeriodicAuraSpellID, PeriodicAuraSpellRadius, MaleFormSpellID, FemaleFormSpellID, EffectFailChancePercent, EffectFailableType, StunUsesBashKickChance, SpellIDCastOnTargetWhenStunLands, AuraStaysOnSecondaryClassSwitch, MinTargetLevel, MaxCreatureTargetLevel, ResistDiff, HasteType, ModFactionRepValue, IllusionFormAlignment, IllusionFormEQRaceID, PersistOnClassChange, IllusionObjectClass, ManaGainSpellPowerCoefficient, DamageIsFixed, IntensifyingRampStartMultiplier1, IntensifyingRampStartMultiplier2, IntensifyingRampStartMultiplier3, CasterVisualKitID FROM mod_everquest_spell ORDER BY SpellID;");
+    QueryResult queryResult = WorldDatabase.Query("SELECT SpellID, AuraDurationBaseInMS, AuraDurationAddPerLevelInMS, AuraDurationMaxInMS, AuraDurationCalcMinLevel, AuraDurationCalcMaxLevel, RecourseSpellID, SpellIDCastOnMeleeAttacker, FocusBoostType, PeriodicAuraSpellID, PeriodicAuraSpellRadius, MaleFormSpellID, FemaleFormSpellID, EffectFailChancePercent, EffectFailableType, StunUsesBashKickChance, SpellIDCastOnTargetWhenStunLands, AuraStaysOnSecondaryClassSwitch, MinTargetLevel, MaxCreatureTargetLevel, ResistDiff, HasteType, ModFactionRepValue, IllusionFormAlignment, IllusionFormEQRaceID, PersistOnClassChange, IllusionObjectClass, ManaGainSpellPowerCoefficient, DamageIsFixed, IntensifyingRampStartMultiplier1, IntensifyingRampStartMultiplier2, IntensifyingRampStartMultiplier3, CasterVisualKitID, CreatureLossOfControlGrantsImmunity FROM mod_everquest_spell ORDER BY SpellID;");
     if (queryResult)
     {
         do
@@ -4414,6 +4418,7 @@ void EverQuestMod::LoadSpellData()
             everQuestSpell.IntensifyingRampStartMultipliers[1] = fields[30].Get<float>();
             everQuestSpell.IntensifyingRampStartMultipliers[2] = fields[31].Get<float>();
             everQuestSpell.CasterVisualKitID = fields[32].Get<uint32>();
+            everQuestSpell.CreatureLossOfControlGrantsImmunity = fields[33].Get<uint8>() != 0;
             SpellDataBySpellID[everQuestSpell.SpellID] = everQuestSpell;
             if (everQuestSpell.PeriodicAuraSpellID != 0)
                 BardSongTickSpellIDs.insert(everQuestSpell.PeriodicAuraSpellID);
@@ -5784,6 +5789,203 @@ uint8 EverQuestMod::GetPvPChainedCrowdControlImmuneEffectMaskForTarget(Spell* sp
         if (spellInfo->Effects[i].IsUnitOwnedAuraEffect() == true)
             immuneEffectMask |= (uint8)(1 << i);
     return immuneEffectMask;
+}
+
+uint32 EverQuestMod::GetLossOfControlCategoryForSpellEffect(SpellInfo const* spellInfo, uint8 effectIndex)
+{
+    if (spellInfo == nullptr || effectIndex >= MAX_SPELL_EFFECTS)
+        return EQ_LOSS_OF_CONTROL_NONE;
+    SpellEffectInfo const& effectInfo = spellInfo->Effects[effectIndex];
+    if (effectInfo.IsAura() == false)
+        return EQ_LOSS_OF_CONTROL_NONE;
+    switch (effectInfo.ApplyAuraName)
+    {
+        case SPELL_AURA_MOD_FEAR:
+            return EQ_LOSS_OF_CONTROL_FEAR;
+        case SPELL_AURA_MOD_CHARM:
+        case SPELL_AURA_MOD_POSSESS:
+        case SPELL_AURA_AOE_CHARM:
+            return EQ_LOSS_OF_CONTROL_CHARM;
+        case SPELL_AURA_MOD_CONFUSE:
+            return EQ_LOSS_OF_CONTROL_CONFUSE;
+        case SPELL_AURA_MOD_STUN:
+        {
+            // The converter's EQ mesmerize is a stun aura carrying the knockout (incapacitate) mechanic
+            uint32 mechanic = effectInfo.Mechanic != MECHANIC_NONE ? uint32(effectInfo.Mechanic) : uint32(spellInfo->Mechanic);
+            if (mechanic == MECHANIC_KNOCKOUT || mechanic == MECHANIC_SLEEP || mechanic == MECHANIC_SAPPED || mechanic == MECHANIC_POLYMORPH)
+                return EQ_LOSS_OF_CONTROL_MESMERIZE;
+            return EQ_LOSS_OF_CONTROL_STUN;
+        }
+        default:
+            return EQ_LOSS_OF_CONTROL_NONE;
+    }
+}
+
+// An EverQuest spell a creature that no player controls lands on a player.  The caster is the aura's / spell's original caster, since a chained stun
+// is cast by the player on themself on the creature's behalf
+bool EverQuestMod::IsEQCreatureLossOfControlOnPlayer(SpellInfo const* spellInfo, Unit* caster, Unit* target)
+{
+    if (spellInfo == nullptr || caster == nullptr || target == nullptr || target->IsPlayer() == false)
+        return false;
+    if (caster == target || caster->IsCreature() == false || caster->IsCharmedOwnedByPlayerOrPlayer() == true)
+        return false;
+    if (spellInfo->Id < ConfigSystemSpellDBCIDMin || spellInfo->Id > ConfigSystemSpellDBCIDMax)
+        return false;
+    return IsSpellAnEQSpell(spellInfo->Id);
+}
+
+// Effects of a creature's EverQuest spell that would take away a kind of control the player is currently immune to (they were recently put under it
+// by an ability that does more than take control away).  The rest of the spell still lands
+uint8 EverQuestMod::GetCreatureLossOfControlImmuneEffectMaskForTarget(Spell* spell, Unit* target, bool& isWholeSpellImmune)
+{
+    isWholeSpellImmune = false;
+    if (ConfigSpellCreatureLossOfControlPlayerImmunityMultiplier <= 0.0f)
+        return 0;
+    if (spell == nullptr || target == nullptr || target->IsPlayer() == false)
+        return 0;
+    EverQuestPlayerLossOfControlImmunityState* immunityState = target->CustomData.Get<EverQuestPlayerLossOfControlImmunityState>(EQ_PLAYER_CUSTOMDATA_LOSSOFCONTROLIMMUNITY);
+    if (immunityState == nullptr)
+        return 0;
+    SpellInfo const* spellInfo = spell->GetSpellInfo();
+    Unit* caster = spell->GetOriginalCaster();
+    if (caster == nullptr && spell->GetCaster() != nullptr)
+        caster = spell->GetCaster()->ToUnit();
+    if (IsEQCreatureLossOfControlOnPlayer(spellInfo, caster, target) == false)
+        return 0;
+
+    uint64 nowMS = uint64(GameTime::GetGameTimeMS().count());
+    uint8 immuneEffectMask = 0;
+    uint8 allEffectMask = 0;
+    for (uint8 i = 0; i < MAX_SPELL_EFFECTS; ++i)
+    {
+        if (spellInfo->Effects[i].Effect == 0)
+            continue;
+        allEffectMask |= (uint8)(1 << i);
+        uint32 category = GetLossOfControlCategoryForSpellEffect(spellInfo, i);
+        if (category != EQ_LOSS_OF_CONTROL_NONE && immunityState->ImmuneUntilGameTimeMS[category] > nowMS)
+            immuneEffectMask |= (uint8)(1 << i);
+    }
+    isWholeSpellImmune = (immuneEffectMask != 0 && immuneEffectMask == allEffectMask);
+    return immuneEffectMask;
+}
+
+// Returns true when the aura should come back off.  Starts the player's immunity when a creature lands control from an ability flagged by the
+// converter (one that does more than take control away), and removes control that arrives while immune without a spell to strip it from (an aura
+// linked chain adds its aura directly).  Control that came in through a spell was already stripped in OnScaleAuraUnitAdd
+bool EverQuestMod::HandleCreatureLossOfControlOnPlayerAuraApply(Unit* target, Aura* aura)
+{
+    if (ConfigSpellCreatureLossOfControlPlayerImmunityMultiplier <= 0.0f)
+        return false;
+    if (target == nullptr || aura == nullptr || aura->GetType() != UNIT_AURA_TYPE || target->IsPlayer() == false)
+        return false;
+    SpellInfo const* spellInfo = aura->GetSpellInfo();
+    Unit* caster = aura->GetCaster();
+    if (IsEQCreatureLossOfControlOnPlayer(spellInfo, caster, target) == false)
+        return false;
+
+    bool categoryPresent[EQ_LOSS_OF_CONTROL_CATEGORY_COUNT] = { false, false, false, false, false, false };
+    bool hasLossOfControl = false;
+    for (uint8 i = 0; i < MAX_SPELL_EFFECTS; ++i)
+    {
+        if (aura->HasEffect(i) == false)
+            continue;
+        uint32 category = GetLossOfControlCategoryForSpellEffect(spellInfo, i);
+        if (category == EQ_LOSS_OF_CONTROL_NONE)
+            continue;
+        categoryPresent[category] = true;
+        hasLossOfControl = true;
+    }
+    if (hasLossOfControl == false)
+        return false;
+
+    uint64 nowMS = uint64(GameTime::GetGameTimeMS().count());
+    EverQuestPlayerLossOfControlImmunityState* immunityState = target->CustomData.Get<EverQuestPlayerLossOfControlImmunityState>(EQ_PLAYER_CUSTOMDATA_LOSSOFCONTROLIMMUNITY);
+    if (immunityState != nullptr)
+    {
+        for (uint32 category = 1; category < EQ_LOSS_OF_CONTROL_CATEGORY_COUNT; ++category)
+        {
+            if (categoryPresent[category] == true && immunityState->ImmuneUntilGameTimeMS[category] > nowMS)
+            {
+                caster->SendSpellMiss(target, spellInfo->Id, SPELL_MISS_IMMUNE);
+                return true;
+            }
+        }
+    }
+
+    if (GetSpellDataForSpellID(spellInfo->Id).CreatureLossOfControlGrantsImmunity == false)
+        return false;
+    int32 maxDurationInMS = aura->GetMaxDuration();
+    if (maxDurationInMS <= 0)
+        return false;
+    uint64 immuneUntilMS = nowMS + uint64(double(maxDurationInMS) * double(ConfigSpellCreatureLossOfControlPlayerImmunityMultiplier));
+    if (immunityState == nullptr)
+        immunityState = target->CustomData.GetDefault<EverQuestPlayerLossOfControlImmunityState>(EQ_PLAYER_CUSTOMDATA_LOSSOFCONTROLIMMUNITY);
+    for (uint32 category = 1; category < EQ_LOSS_OF_CONTROL_CATEGORY_COUNT; ++category)
+        if (categoryPresent[category] == true && immunityState->ImmuneUntilGameTimeMS[category] < immuneUntilMS)
+            immunityState->ImmuneUntilGameTimeMS[category] = immuneUntilMS;
+    return false;
+}
+
+// The same resist roll the spell got when it was cast, including its EQ resist adjustment (see EverQuest_ResistDiffSpellScript)
+SpellMissInfo EverQuestMod::RollEQSpellHitResultWithResistDiff(Unit* caster, Unit* target, SpellInfo const* spellInfo)
+{
+    int32 resistDiff = GetSpellDataForSpellID(spellInfo->Id).ResistDiff;
+    bool addedResistAdjustment = false;
+    if (resistDiff != 0 && ConfigSystemResistAdjustmentSpellID != 0)
+    {
+        int32 hitChanceMod = std::clamp<int32>((-resistDiff) / 2, -100, 100);
+        caster->CastCustomSpell(ConfigSystemResistAdjustmentSpellID, SPELLVALUE_BASE_POINT0, hitChanceMod, caster, true);
+        addedResistAdjustment = true;
+    }
+    SpellMissInfo hitResult = caster->SpellHitResult(target, spellInfo, false);
+    if (addedResistAdjustment == true)
+        caster->RemoveAurasDueToSpell(ConfigSystemResistAdjustmentSpellID);
+    return hitResult;
+}
+
+// TAKP Spells:FearBreakCheckChance.  Each 6 second tick of an EverQuest fear on a player has this chance of a fresh resist roll, and a resist breaks
+// the fear.  Called from the player's update right after its auras advanced by diff, so a tick boundary crossed in this update is a tick
+void EverQuestMod::ProcessEQFearBreakChecksForPlayer(Player* player, uint32 diff)
+{
+    if (ConfigSpellFearBreakCheckChance == 0 || player == nullptr || player->IsAlive() == false)
+        return;
+    Unit::AuraEffectList const& fearAuraEffects = player->GetAuraEffectsByType(SPELL_AURA_MOD_FEAR);
+    if (fearAuraEffects.empty() == true)
+        return;
+
+    // Decide first, remove after, since removing changes the list being walked
+    vector<Aura*> brokenFearAuras;
+    for (Unit::AuraEffectList::const_iterator fearIter = fearAuraEffects.begin(); fearIter != fearAuraEffects.end(); ++fearIter)
+    {
+        Aura* fearAura = (*fearIter)->GetBase();
+        if (fearAura == nullptr || fearAura->IsRemoved() == true)
+            continue;
+        if (std::find(brokenFearAuras.begin(), brokenFearAuras.end(), fearAura) != brokenFearAuras.end())
+            continue;
+        SpellInfo const* spellInfo = fearAura->GetSpellInfo();
+        if (spellInfo->Id < ConfigSystemSpellDBCIDMin || spellInfo->Id > ConfigSystemSpellDBCIDMax || IsSpellAnEQSpell(spellInfo->Id) == false)
+            continue;
+        int32 maxDurationInMS = fearAura->GetMaxDuration();
+        int32 durationInMS = fearAura->GetDuration();
+        if (maxDurationInMS <= 0 || durationInMS < 0)
+            continue;
+        uint32 elapsedInMS = uint32(maxDurationInMS - durationInMS);
+        uint32 elapsedBeforeInMS = elapsedInMS > diff ? elapsedInMS - diff : 0;
+        if (elapsedInMS / EQ_FEAR_BREAK_CHECK_INTERVAL_IN_MS <= elapsedBeforeInMS / EQ_FEAR_BREAK_CHECK_INTERVAL_IN_MS)
+            continue;
+        if (roll_chance_i(int32(ConfigSpellFearBreakCheckChance)) == false)
+            continue;
+
+        // A fear whose caster is gone has no one to roll against, so it runs out on its own
+        Unit* caster = fearAura->GetCaster();
+        if (caster == nullptr)
+            continue;
+        if (RollEQSpellHitResultWithResistDiff(caster, player, spellInfo) != SPELL_MISS_NONE)
+            brokenFearAuras.push_back(fearAura);
+    }
+    for (Aura* brokenFearAura : brokenFearAuras)
+        if (brokenFearAura->IsRemoved() == false)
+            player->RemoveAura(brokenFearAura->GetId(), brokenFearAura->GetCasterGUID(), 0, AURA_REMOVE_BY_ENEMY_SPELL);
 }
 
 bool EverQuestMod::HandlePvPChainedCrowdControlDiminishingReturnsOnAuraApply(Unit* target, Aura* aura)

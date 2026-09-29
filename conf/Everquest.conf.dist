@@ -435,6 +435,23 @@ EverQuest.Spells.BardFearDiminishingReturnsResetTimeInMS = 15000
 #		has still land.  Charms on creatures, and creature cast charms on players, are not affected
 #	Default: True (EverQuest charms do not work in pvp)
 #
+# 	EverQuest.Spells.FearBreakCheckChance
+#		Chance (0-100) that a player under an EverQuest fear gets a fresh resist roll against it on each
+#		6 second tick (TAKP Spells:FearBreakCheckChance).  If that roll resists, the fear breaks right
+#		away.  The roll uses the fear's own resist type and resist adjustment, so an unresistable fear
+#		never breaks this way.  0 turns it off
+#	Default: 75
+#
+# 	EverQuest.Spells.CreatureLossOfControlPlayerImmunityMultiplier
+#		When an EverQuest creature ability that does more than take control away (a breath that damages
+#		and stuns, for example) lands its stun, fear, charm or mesmerize on a player, the player becomes
+#		immune to that same kind of control from creatures for this many times the control's full
+#		duration (counted from when it landed).  While immune the rest of the ability still lands.
+#		Abilities that only take control away are not covered here, the converter gives them a longer
+#		recast instead (CREATURE_SPELL_LOSS_OF_CONTROL_ONLY_RECAST_MULTIPLIER).  Only EverQuest spells
+#		cast by creatures that no player controls are affected.  0 turns it off
+#	Default: 4
+#
 ###################################################################################################
 
 EverQuest.Spells.PvPChainedCrowdControlDiminishingReturnsEnabled = True
@@ -442,6 +459,8 @@ EverQuest.Spells.PvPCrowdControlMaxDurationInMS = 10000
 EverQuest.Spells.PvPSnareDiminishingReturnsEnabled = True
 EverQuest.Spells.PvPSilenceCancelsBardSongsEnabled = True
 EverQuest.Spells.PvPEQCharmImmunityEnabled = True
+EverQuest.Spells.FearBreakCheckChance = 75
+EverQuest.Spells.CreatureLossOfControlPlayerImmunityMultiplier = 4
 
 ###################################################################################################
 #
