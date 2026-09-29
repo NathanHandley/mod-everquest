@@ -1769,6 +1769,7 @@ public:
     bool ConfigSpellPvPSnareDiminishingReturnsEnabled;
     bool ConfigSpellPvPSilenceCancelsBardSongsEnabled;
     bool ConfigSpellPvPEQCharmImmunityEnabled;
+    bool ConfigSpellUnflaggedCasterSkipsPvPAlliesEnabled;
     bool ConfigSpellNoSwingTimerResetForEQSpells;
     bool ConfigSpellNoSwingTimerResetForWoWSpells;
     bool ConfigSpellMovementCastSnareEnabled;
@@ -2167,6 +2168,8 @@ public:
     void ProcessEQFearBreakChecksForPlayer(Player* player, uint32 diff);
     SpellMissInfo RollEQSpellHitResultWithResistDiff(Unit* caster, Unit* target, SpellInfo const* spellInfo);
     bool IsPvPEQCharmAuraApplication(Unit* target, Aura* aura);
+    bool WouldAssistFlagUnflaggedPlayerForPvP(Player* caster, Unit* target);
+    bool IsFriendlySpellTargetSkippedToAvoidPvPFlag(Spell* spell, Unit* target);
     uint64 GetAuraEffectTrackingKeyForUnit(Unit* unit);
     AuraEffect* GetTrackedAuraEffectOnUnit(Unit* unit, uint32 spellID, uint8 effectIndex, ObjectGuid casterGUID);
     void TrackEQHasteAurasAndEnforceCapOnAuraApply(Unit* unit, Aura* aura);

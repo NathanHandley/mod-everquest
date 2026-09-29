@@ -578,6 +578,10 @@ class EverQuest_ClassAuraShamanAuraScript : public AuraScript
             return;
         if (shaman->IsFriendlyTo(healTarget) == false)
             return;
+
+        // The heal may not have been the shaman's own choice (a Healing Stream Totem tick, or an Earth Shield on someone who flagged since) and the vigor is the shaman's own cast, so it would flag them
+        if (EverQuest->WouldAssistFlagUnflaggedPlayerForPvP(shaman->ToPlayer(), healTarget) == true)
+            return;
         uint32 vigorSpellID = EverQuest->GetClassAuraSpellID(EQ_CLASSAURA_SPELL_SHAMAN_VIGOR);
         if (vigorSpellID == 0)
             return;

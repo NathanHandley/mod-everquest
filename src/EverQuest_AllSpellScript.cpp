@@ -145,6 +145,13 @@ public:
         if (spellInfo == nullptr)
             return;
 
+        // A flagged ally an unflagged player's group spell or bard song only swept over is passed by, and marking the target processed makes the core skip it without a miss message
+        if (EverQuest->IsFriendlySpellTargetSkippedToAvoidPvPFlag(spell, target) == true)
+        {
+            targetInfo.processed = true;
+            return;
+        }
+
         // An object illusion form and levitation crash the client the instant they overlap, so neither is ever allowed to land together
         if (EverQuest->IsLevitationBlockedByIllusionObjectForm(spellInfo, target) == true)
         {

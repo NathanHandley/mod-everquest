@@ -136,16 +136,11 @@ class EverQuest_BardSongAuraScript: public AuraScript
             return validTargets;
         }
 
-        // Do large groups otherwise
+        // Do large groups otherwise and every cell the radius reaches is searched not just the one the bard stands in
         std::list<Unit*> targetCandidates;
         Acore::AnyUnitInObjectRangeCheck u_check(caster, radius);
         Acore::UnitListSearcher<Acore::AnyUnitInObjectRangeCheck> searcher(caster, targetCandidates, u_check);
-        TypeContainerVisitor<Acore::UnitListSearcher<Acore::AnyUnitInObjectRangeCheck>, GridTypeMapContainer> visitor(searcher);
-        float x = caster->GetPositionX();
-        float y = caster->GetPositionY();
-        CellCoord cellCoord = Acore::ComputeCellCoord(x, y);
-        Cell cell(cellCoord);
-        caster->GetMap()->Visit(cell, visitor);        
+        Cell::VisitObjects(caster, searcher, radius);
         if (bardTargetType == EQ_BARDSONGAURATARGET_FRIENDLYPARTY)
         {
             // Always include self
@@ -232,6 +227,10 @@ class EverQuest_BardSongAuraScript: public AuraScript
         // Cast the spell
         for (Unit* target : validTargets)
         {
+            // Party members are picked by the song, not the bard, and each pulse is aimed straight at them
+            if (targetType == EQ_BARDSONGAURATARGET_FRIENDLYPARTY && EverQuest->WouldAssistFlagUnflaggedPlayerForPvP(caster->ToPlayer(), target) == true)
+                continue;
+
             // Allow proper refresh behavior, even across two bards
             Aura* existingAura = target->GetOwnedAura(effectSpellID);
             if (existingAura != nullptr && existingAura->GetCasterGUID() != caster->GetGUID() && existingAura->GetCaster() == nullptr)

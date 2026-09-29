@@ -137,6 +137,7 @@ EverQuestMod::EverQuestMod() :
     ConfigSpellPvPSnareDiminishingReturnsEnabled(true),
     ConfigSpellPvPSilenceCancelsBardSongsEnabled(true),
     ConfigSpellPvPEQCharmImmunityEnabled(true),
+    ConfigSpellUnflaggedCasterSkipsPvPAlliesEnabled(true),
     ConfigSpellNoSwingTimerResetForEQSpells(true),
     ConfigSpellNoSwingTimerResetForWoWSpells(false),
     ConfigSpellMovementCastSnareEnabled(true),
@@ -494,6 +495,7 @@ void EverQuestMod::LoadConfigurationFile()
     ConfigSpellPvPSnareDiminishingReturnsEnabled = sConfigMgr->GetOption<bool>("EverQuest.Spells.PvPSnareDiminishingReturnsEnabled", true);
     ConfigSpellPvPSilenceCancelsBardSongsEnabled = sConfigMgr->GetOption<bool>("EverQuest.Spells.PvPSilenceCancelsBardSongsEnabled", true);
     ConfigSpellPvPEQCharmImmunityEnabled = sConfigMgr->GetOption<bool>("EverQuest.Spells.PvPEQCharmImmunityEnabled", true);
+    ConfigSpellUnflaggedCasterSkipsPvPAlliesEnabled = sConfigMgr->GetOption<bool>("EverQuest.Spells.UnflaggedCasterSkipsPvPAlliesEnabled", true);
     ConfigSpellNoSwingTimerResetForEQSpells = sConfigMgr->GetOption<bool>("EverQuest.Spells.NoSwingTimerResetForEQSpells", true);
     ConfigSpellNoSwingTimerResetForWoWSpells = sConfigMgr->GetOption<bool>("EverQuest.Spells.NoSwingTimerResetForWoWSpells", false);
 
@@ -6239,6 +6241,40 @@ bool EverQuestMod::IsPvPEQCharmAuraApplication(Unit* target, Aura* aura)
     if (auraApplication == nullptr)
         return false;
     return (auraApplication->GetEffectMask() & GetEQCharmEffectMask(spellInfo)) != 0;
+}
+
+bool EverQuestMod::WouldAssistFlagUnflaggedPlayerForPvP(Player* caster, Unit* target)
+{
+    if (ConfigSpellUnflaggedCasterSkipsPvPAlliesEnabled == false)
+        return false;
+    if (caster == nullptr || target == nullptr || target == caster)
+        return false;
+    if (caster->IsPvP() == true)
+        return false;
+    if (target->GetOwnerGUID() == caster->GetGUID())
+        return false;
+    if (caster->IsFriendlyTo(target) == false)
+        return false;
+    return target->IsPvP() == true || target->HasUnitState(UNIT_STATE_ATTACK_PLAYER) == true;
+}
+
+bool EverQuestMod::IsFriendlySpellTargetSkippedToAvoidPvPFlag(Spell* spell, Unit* target)
+{
+    if (ConfigSpellUnflaggedCasterSkipsPvPAlliesEnabled == false)
+        return false;
+    if (spell == nullptr || target == nullptr)
+        return false;
+    Player* caster = spell->GetCaster()->ToPlayer();
+    if (caster == nullptr)
+        return false;
+    SpellInfo const* spellInfo = spell->GetSpellInfo();
+    if (spellInfo == nullptr || spellInfo->Id < ConfigSystemSpellDBCIDMin || spellInfo->Id > ConfigSystemSpellDBCIDMax)
+        return false;
+    if (IsSpellAnEQSpell(spellInfo->Id) == false && BardSongTickSpellIDs.find(spellInfo->Id) == BardSongTickSpellIDs.end())
+        return false;
+    if (spell->m_targets.GetUnitTargetGUID() == target->GetGUID())
+        return false;
+    return WouldAssistFlagUnflaggedPlayerForPvP(caster, target);
 }
 
 static const uint64 EQ_AURA_EFFECT_TRACKING_KEY_PLAYERS = UINT64_MAX;

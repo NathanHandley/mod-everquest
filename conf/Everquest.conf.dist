@@ -435,6 +435,15 @@ EverQuest.Spells.BardFearDiminishingReturnsResetTimeInMS = 15000
 #		has still land.  Charms on creatures, and creature cast charms on players, are not affected
 #	Default: True (EverQuest charms do not work in pvp)
 #
+# 	EverQuest.Spells.UnflaggedCasterSkipsPvPAlliesEnabled
+#		If true, a player who is not pvp flagged never gets flagged by helping someone they did not
+#		pick.  Their EverQuest group spells, beneficial area spells and bard song pulses pass over
+#		allies who are pvp flagged or fighting players, unless that ally is the spell's chosen target
+#		(which still flags, as it is a choice).  The Shaman Spirit Channeler vigor is also not given to
+#		such an ally, so a Healing Stream Totem tick can no longer flag the shaman.  WoW spells are
+#		unchanged, and nothing changes once the caster is flagged
+#	Default: True (unflagged players are not flagged by area help they did not aim)
+#
 # 	EverQuest.Spells.FearBreakCheckChance
 #		Chance (0-100) that a player under an EverQuest fear gets a fresh resist roll against it on each
 #		6 second tick (TAKP Spells:FearBreakCheckChance).  If that roll resists, the fear breaks right
@@ -459,6 +468,7 @@ EverQuest.Spells.PvPCrowdControlMaxDurationInMS = 10000
 EverQuest.Spells.PvPSnareDiminishingReturnsEnabled = True
 EverQuest.Spells.PvPSilenceCancelsBardSongsEnabled = True
 EverQuest.Spells.PvPEQCharmImmunityEnabled = True
+EverQuest.Spells.UnflaggedCasterSkipsPvPAlliesEnabled = True
 EverQuest.Spells.FearBreakCheckChance = 75
 EverQuest.Spells.CreatureLossOfControlPlayerImmunityMultiplier = 4
 
