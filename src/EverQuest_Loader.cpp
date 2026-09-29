@@ -51,6 +51,7 @@ void AddEverQuestCreatureInstanceScripts();
 void AddEverQuestGossipScripts();
 void AddEverQuestMiscScripts();
 void AddEverQuestAreaTriggerScripts();
+void AddEverQuestSpellEffectScripts();
 
 void Addmod_everquestScripts()
 {
@@ -91,4 +92,5 @@ void Addmod_everquestScripts()
     AddEverQuestGossipScripts();
     AddEverQuestMiscScripts();
     AddEverQuestAreaTriggerScripts();
+    AddEverQuestSpellEffectScripts();
 }

@@ -48,6 +48,14 @@ class EverQuest_FocusBoostAuraScript: public AuraScript
             auraType == SPELL_AURA_PERIODIC_LEECH || auraType == SPELL_AURA_PERIODIC_HEAL)
             return;
 
+        // A memory blur chance and a lull's assist radius aren't strengths, and a bigger lull radius would only make the song worse
+        if (auraType == SPELL_AURA_DUMMY && (aurEff->GetMiscValue() == EQ_SPELLDUMMYTYPE_WIPEHATELIST || aurEff->GetMiscValue() == EQ_SPELLDUMMYTYPE_HARMONY))
+            return;
+
+        // Nor is a lull's aggro radius, which the lull script works out on its own
+        if (auraType == SPELL_AURA_MOD_DETECT_RANGE)
+            return;
+
         uint32 boostPercent = EverQuest->CalculateSpellFocusBoostValue(caster, spellID);
 
         // Always round up

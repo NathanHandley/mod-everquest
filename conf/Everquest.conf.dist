@@ -451,6 +451,13 @@ EverQuest.Spells.BardFearDiminishingReturnsResetTimeInMS = 15000
 #		never breaks this way.  0 turns it off
 #	Default: 75
 #
+# 	EverQuest.Spells.BlindBreakCheckChance
+#		Chance (0-100) that anyone under an EverQuest blind gets a fresh resist roll against it on each
+#		6 second tick (TAKP Spells:BlindBreakCheckChance).  If that roll resists, the blind breaks right
+#		away.  Like the fear roll, it uses the blind's own resist type and resist adjustment, so an
+#		unresistable blind never breaks this way.  0 turns it off
+#	Default: 75
+#
 # 	EverQuest.Spells.CreatureLossOfControlPlayerImmunityMultiplier
 #		When an EverQuest creature ability that does more than take control away (a breath that damages
 #		and stuns, for example) lands its stun, fear, charm or mesmerize on a player, the player becomes
@@ -470,6 +477,7 @@ EverQuest.Spells.PvPSilenceCancelsBardSongsEnabled = True
 EverQuest.Spells.PvPEQCharmImmunityEnabled = True
 EverQuest.Spells.UnflaggedCasterSkipsPvPAlliesEnabled = True
 EverQuest.Spells.FearBreakCheckChance = 75
+EverQuest.Spells.BlindBreakCheckChance = 75
 EverQuest.Spells.CreatureLossOfControlPlayerImmunityMultiplier = 4
 
 ###################################################################################################

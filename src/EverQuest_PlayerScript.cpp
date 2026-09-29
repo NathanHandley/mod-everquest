@@ -780,6 +780,10 @@ public:
             {
                 EverQuest->ProcessSummonPlayerToCaster(player, spell->m_targets.GetUnitTarget());
             }
+            else if (spell->m_spellInfo->Effects[EFFECT_0].MiscValue == EQ_SPELLDUMMYTYPE_TRUENORTH) // Face north
+            {
+                EverQuest->TurnPlayerToFaceNorth(player);
+            }
         }
     }
 
@@ -916,6 +920,9 @@ public:
 
         // Grant the adventurer feat of strength if another character on this account earned it
         EverQuest->GrantAdventurerAchievementIfAccountEarned(player);
+
+        // Grant the discovery achievement for the Priest of Discord nearest the character's start location
+        EverQuest->GrantStartAchievementIfMissing(player);
 
         // Put the adventurer aura back if the character never did anything to lose it (it is granted here for new characters too)
         EverQuest->ApplyAdventurerAuraStateOnLogin(player);

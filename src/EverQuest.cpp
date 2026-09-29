@@ -93,6 +93,7 @@ EverQuestMod::EverQuestMod() :
     ConfigDeathKnightsStartLikeOtherClasses(false),
     ConfigSystemInvisVsUndeadDetectSpellID(0),
     ConfigSystemResistAdjustmentSpellID(0),
+    ConfigSystemBlindWanderSpellID(0),
     ConfigSystemRoguePoisonMarkerSpellID(0),
     ConfigSystemLegacyAchievementID(0),
     ConfigSystemItemTemplateIDMin(0),
@@ -133,6 +134,7 @@ EverQuestMod::EverQuestMod() :
     ConfigSpellPvPChainedCrowdControlDiminishingReturnsEnabled(true),
     ConfigSpellPvPCrowdControlMaxDurationInMS(10000),
     ConfigSpellFearBreakCheckChance(75),
+    ConfigSpellBlindBreakCheckChance(75),
     ConfigSpellCreatureLossOfControlPlayerImmunityMultiplier(4.0f),
     ConfigSpellPvPSnareDiminishingReturnsEnabled(true),
     ConfigSpellPvPSilenceCancelsBardSongsEnabled(true),
@@ -396,6 +398,8 @@ bool EverQuestMod::LoadConfigurationSystemDataFromDB()
                 ConfigSystemRangedAttackSpellID = (uint32)atoi(value.c_str());
             else if (key == "ResistAdjustmentSpellID")
                 ConfigSystemResistAdjustmentSpellID = (uint32)atoi(value.c_str());
+            else if (key == "BlindWanderSpellID")
+                ConfigSystemBlindWanderSpellID = (uint32)atoi(value.c_str());
             else if (key == "RoguePoisonMarkerSpellID")
                 ConfigSystemRoguePoisonMarkerSpellID = (uint32)atoi(value.c_str());
             else if (key == "QuestSQLIDMin")
@@ -491,6 +495,7 @@ void EverQuestMod::LoadConfigurationFile()
     ConfigSpellPvPChainedCrowdControlDiminishingReturnsEnabled = sConfigMgr->GetOption<bool>("EverQuest.Spells.PvPChainedCrowdControlDiminishingReturnsEnabled", true);
     ConfigSpellPvPCrowdControlMaxDurationInMS = sConfigMgr->GetOption<uint32>("EverQuest.Spells.PvPCrowdControlMaxDurationInMS", 10000);
     ConfigSpellFearBreakCheckChance = std::min<uint32>(100, sConfigMgr->GetOption<uint32>("EverQuest.Spells.FearBreakCheckChance", 75));
+    ConfigSpellBlindBreakCheckChance = std::min<uint32>(100, sConfigMgr->GetOption<uint32>("EverQuest.Spells.BlindBreakCheckChance", 75));
     ConfigSpellCreatureLossOfControlPlayerImmunityMultiplier = std::max(0.0f, sConfigMgr->GetOption<float>("EverQuest.Spells.CreatureLossOfControlPlayerImmunityMultiplier", 4.0f));
     ConfigSpellPvPSnareDiminishingReturnsEnabled = sConfigMgr->GetOption<bool>("EverQuest.Spells.PvPSnareDiminishingReturnsEnabled", true);
     ConfigSpellPvPSilenceCancelsBardSongsEnabled = sConfigMgr->GetOption<bool>("EverQuest.Spells.PvPSilenceCancelsBardSongsEnabled", true);
@@ -5683,6 +5688,10 @@ DiminishingGroup EverQuestMod::GetEQCrowdControlDiminishingGroup(SpellInfo const
     if (IsSpellAnEQSpell(spellInfo->Id) == false)
         return DIMINISHING_NONE;
     DiminishingGroup group = GetDiminishingReturnsGroupForSpell(spellInfo, false);
+
+    // The core has no group for the disoriented mechanic an EQ blind carries, and a blackout is crowd control in pvp like any other
+    if (group == DIMINISHING_NONE && spellInfo->HasAura(SPELL_AURA_SCREEN_EFFECT) == true)
+        return DIMINISHING_DISORIENT;
     if (group == DIMINISHING_TAUNT || GetDiminishingReturnsGroupType(group) == DRTYPE_NONE)
         return DIMINISHING_NONE;
     return group;
@@ -5988,6 +5997,158 @@ void EverQuestMod::ProcessEQFearBreakChecksForPlayer(Player* player, uint32 diff
     for (Aura* brokenFearAura : brokenFearAuras)
         if (brokenFearAura->IsRemoved() == false)
             player->RemoveAura(brokenFearAura->GetId(), brokenFearAura->GetCasterGUID(), 0, AURA_REMOVE_BY_ENEMY_SPELL);
+}
+
+bool EverQuestMod::RollEQBlindBreakCheck(Unit* caster, Unit* target, SpellInfo const* spellInfo)
+{
+    // A blind whose caster is gone has no one to roll against, so it runs out on its own
+    if (ConfigSpellBlindBreakCheckChance == 0 || caster == nullptr || target == nullptr || spellInfo == nullptr)
+        return false;
+    if (spellInfo->Id < ConfigSystemSpellDBCIDMin || spellInfo->Id > ConfigSystemSpellDBCIDMax || IsSpellAnEQSpell(spellInfo->Id) == false)
+        return false;
+    if (roll_chance_i(int32(ConfigSpellBlindBreakCheckChance)) == false)
+        return false;
+    return RollEQSpellHitResultWithResistDiff(caster, target, spellInfo) != SPELL_MISS_NONE;
+}
+
+bool EverQuestMod::IsBlindWanderAllowedForUnit(Unit* target)
+{
+    if (ConfigSystemBlindWanderSpellID == 0 || target == nullptr || target->IsAlive() == false)
+        return false;
+    Creature* creature = target->ToCreature();
+    if (creature == nullptr)
+        return false;
+    if (creature->isWorldBoss() == true || creature->IsDungeonBoss() == true || IsEQBossTierCreature(creature) == true)
+        return false;
+    return true;
+}
+
+void EverQuestMod::ApplyBlindWander(Unit* target, Aura* blindAura)
+{
+    if (blindAura == nullptr || IsBlindWanderAllowedForUnit(target) == false)
+        return;
+
+    // Also called on each blind tick, to catch a blind that was refreshed.  Adding it again refreshes it, so an earlier blind that outlasts this one keeps its longer wander
+    int32 priorWanderDurationInMS = 0;
+    if (Aura* priorWanderAura = target->GetAura(ConfigSystemBlindWanderSpellID))
+    {
+        if (priorWanderAura->GetDuration() >= blindAura->GetDuration())
+            return;
+        priorWanderDurationInMS = priorWanderAura->GetDuration();
+    }
+    Aura* wanderAura = target->AddAura(ConfigSystemBlindWanderSpellID, target);
+    if (wanderAura == nullptr)
+        return;
+    int32 wanderDurationInMS = std::max(priorWanderDurationInMS, blindAura->GetDuration());
+    if (wanderDurationInMS > 0)
+    {
+        wanderAura->SetMaxDuration(wanderDurationInMS);
+        wanderAura->SetDuration(wanderDurationInMS);
+    }
+}
+
+void EverQuestMod::RemoveBlindWanderIfNoBlindRemains(Unit* target, Aura* removedBlindAura)
+{
+    if (ConfigSystemBlindWanderSpellID == 0 || target == nullptr || target->HasAura(ConfigSystemBlindWanderSpellID) == false)
+        return;
+    Unit::AuraEffectList const& screenAuraEffects = target->GetAuraEffectsByType(SPELL_AURA_SCREEN_EFFECT);
+    for (AuraEffect const* screenAuraEffect : screenAuraEffects)
+    {
+        if (screenAuraEffect == nullptr || screenAuraEffect->GetBase() == removedBlindAura || screenAuraEffect->GetBase()->IsRemoved() == true)
+            continue;
+        uint32 screenSpellID = screenAuraEffect->GetId();
+        if (screenSpellID >= ConfigSystemSpellDBCIDMin && screenSpellID <= ConfigSystemSpellDBCIDMax && IsSpellAnEQSpell(screenSpellID) == true)
+            return;
+    }
+    target->RemoveAurasDueToSpell(ConfigSystemBlindWanderSpellID);
+}
+
+int32 EverQuestMod::GetWipeHateListChanceOnLanding(Unit* target, int32 baseChance)
+{
+    if (target == nullptr || baseChance <= 0)
+        return 0;
+    uint8 targetLevel = target->GetLevel();
+    if (targetLevel < EQ_WIPE_HATE_LIST_FULL_CHANCE_BELOW_LEVEL)
+        return 100;
+    float chance = float(baseChance);
+    if (targetLevel < EQ_WIPE_HATE_LIST_LEVEL_BONUS_MAX_LEVEL)
+        chance += -2.08333f * float(targetLevel) + 135.4167f;
+    else
+        chance += 25.0f;
+    return std::clamp<int32>(int32(chance), 0, 100);
+}
+
+void EverQuestMod::RollWipeHateListOnUnit(Unit* caster, Unit* target, int32 chance)
+{
+    if (target == nullptr || target->IsAlive() == false || chance <= 0)
+        return;
+    if (roll_chance_i(chance) == false)
+        return;
+    if (Player* player = target->ToPlayer())
+    {
+        ChatHandler(player->GetSession()).SendSysMessage("Your mind fogs. Who are my friends? Who are my enemies?... it was all so clear a moment ago...");
+        return;
+    }
+    Creature* creature = target->ToCreature();
+    if (creature == nullptr || creature->GetCharmerOrOwnerGUID().IsEmpty() == false || creature->IsInCombat() == false)
+        return;
+
+    // Evading resets a boss fight here, which a memory blur never did in EQ
+    if (creature->isWorldBoss() == true || creature->IsDungeonBoss() == true)
+        return;
+
+    // Evading also drops the tap and heals, so only whoever tapped the creature (or a creature caster) can make it forget.  A caster that has left
+    // the map can't be checked, so a tapped creature keeps its fight then
+    if (creature->hasLootRecipient() == true)
+    {
+        if (caster == nullptr)
+            return;
+        Player* casterPlayer = caster->GetCharmerOrOwnerPlayerOrPlayerItself();
+        if (casterPlayer != nullptr && creature->isTappedBy(casterPlayer) == false)
+            return;
+    }
+
+    // Evading strips auras, and this runs inside a spell hit or an aura apply or tick, so the evade waits for the creature's next update
+    creature->m_Events.AddEventAtOffset(new EverQuestWipeHateListEvent(creature), 1ms);
+}
+
+bool EverQuestWipeHateListEvent::Execute(uint64 /*eventTime*/, uint32 /*diff*/)
+{
+    if (Owner->IsAlive() == false || Owner->IsInCombat() == false || Owner->IsInEvadeMode() == true)
+        return true;
+    if (Owner->GetCharmerOrOwnerGUID().IsEmpty() == false || Owner->IsAIEnabled == false || Owner->AI() == nullptr)
+        return true;
+    Owner->AI()->EnterEvadeMode(CreatureAI::EVADE_REASON_OTHER);
+    return true;
+}
+
+void EverQuestMod::TurnPlayerToFaceNorth(Player* player)
+{
+    if (player == nullptr || player->IsAlive() == false)
+        return;
+    if (player->IsInFlight() == true || player->GetVehicle() != nullptr || player->GetTransport() != nullptr || player->IsCharmed() == true
+        || player->IsFalling() == true || player->HasUnitState(UNIT_STATE_STUNNED | UNIT_STATE_CONFUSED | UNIT_STATE_FLEEING) == true)
+    {
+        ChatHandler(player->GetSession()).SendSysMessage("You can't get your bearings right now.");
+        return;
+    }
+    player->NearTeleportTo(player->GetPositionX(), player->GetPositionY(), player->GetPositionZ(), 0.0f, true);
+}
+
+SpellCastResult EverQuestMod::GetCallPetCastResult(Unit* caster)
+{
+    if (caster == nullptr)
+        return SPELL_FAILED_DONT_REPORT;
+    Guardian* pet = caster->GetGuardianPet();
+    if (pet == nullptr || pet->IsAlive() == false)
+        return SPELL_FAILED_NO_PET;
+    if (pet->GetThreatMgr().IsThreateningAnyone() == true)
+    {
+        if (Player* player = caster->ToPlayer())
+            ChatHandler(player->GetSession()).SendSysMessage("Your pet is the focus of something's attention.");
+        return SPELL_FAILED_DONT_REPORT;
+    }
+    return SPELL_CAST_OK;
 }
 
 bool EverQuestMod::HandlePvPChainedCrowdControlDiminishingReturnsOnAuraApply(Unit* target, Aura* aura)
@@ -10618,6 +10779,8 @@ void EverQuestMod::DoScaledSocialAggroSearch(Creature* caller, Unit* victim, flo
 
         if (IsBlockedByAgroZDistance(assistant, victim, maxAgroZDistance) == true)
             continue;
+        if (IsCreatureAssistBlockedByHarmony(assistant, caller) == true)
+            continue;
         assistantGUIDs.push_back(assistant->GetGUID());
     }
 
@@ -10641,7 +10804,23 @@ void EverQuestMod::ApplyScaledCreatureSocialAggroOnEngage(Creature* creature, Un
     float scale = 1.0f;
     float maxAgroZDistance = -1.0f;
     if (IsSocialAggroOverrideNeededForCreature(creature, scale, maxAgroZDistance) == false)
+    {
+        // While something is lulled, the calls this creature would leave to the core are answered by the mod instead, after the core's usual delay
+        if (IsHarmonySocialAggroTakeoverNeeded(creature) == false)
+            return;
+        creature->SetNoCallAssistance(true);
+
+        // With periodic calls turned off there is no later update to make the call from, so it's made now
+        if (sWorld->getIntConfig(CONFIG_CREATURE_FAMILY_ASSISTANCE_PERIOD) == 0)
+        {
+            DoScaledSocialAggroSearch(creature, victim, scale, maxAgroZDistance);
+            return;
+        }
+        EverQuestCreatureSocialAggroState* state = creature->CustomData.GetDefault<EverQuestCreatureSocialAggroState>(EQ_CREATURE_CUSTOMDATA_SOCIALAGGRO);
+        state->IsHarmonyTakeover = true;
+        state->RecallTimerMS = sWorld->getIntConfig(CONFIG_CREATURE_FAMILY_ASSISTANCE_DELAY);
         return;
+    }
 
     creature->SetNoCallAssistance(true);
     DoScaledSocialAggroSearch(creature, victim, scale, maxAgroZDistance);
@@ -10650,6 +10829,152 @@ void EverQuestMod::ApplyScaledCreatureSocialAggroOnEngage(Creature* creature, Un
 void EverQuestMod::RemoveCreatureSocialAggroState(Creature* creature)
 {
     creature->CustomData.Erase(EQ_CREATURE_CUSTOMDATA_SOCIALAGGRO);
+}
+
+bool EverQuestMod::IsCreatureAssistBlockedByHarmony(Creature* assistant, Creature* caller)
+{
+    if (HarmonyAuraCreatureCount.load() == 0 || assistant == nullptr || caller == nullptr)
+        return false;
+    int32 smallestAssistRangeInHundredths = -1;
+    Unit::AuraEffectList const& dummyAuraEffects = assistant->GetAuraEffectsByType(SPELL_AURA_DUMMY);
+    for (AuraEffect const* dummyAuraEffect : dummyAuraEffects)
+    {
+        if (dummyAuraEffect == nullptr || dummyAuraEffect->GetMiscValue() != EQ_SPELLDUMMYTYPE_HARMONY)
+            continue;
+        if (dummyAuraEffect->GetId() < ConfigSystemSpellDBCIDMin || dummyAuraEffect->GetId() > ConfigSystemSpellDBCIDMax)
+            continue;
+        int32 assistRangeInHundredths = std::max<int32>(0, dummyAuraEffect->GetAmount());
+        if (smallestAssistRangeInHundredths < 0 || assistRangeInHundredths < smallestAssistRangeInHundredths)
+            smallestAssistRangeInHundredths = assistRangeInHundredths;
+    }
+    if (smallestAssistRangeInHundredths < 0)
+        return false;
+
+    // TAKP answers a call from as far as the larger of the aggro and assist radius, and a lull shrinks both (SE_ChangeFrenzyRad and SE_Harmony)
+    int32 answerRangeInHundredths = smallestAssistRangeInHundredths;
+    int32 smallestAggroRangeInHundredths = GetSmallestLullAggroRangeInHundredths(assistant, nullptr, nullptr);
+    if (smallestAggroRangeInHundredths > answerRangeInHundredths)
+        answerRangeInHundredths = smallestAggroRangeInHundredths;
+    return caller->GetExactDist(assistant) * 100.0f > float(answerRangeInHundredths);
+}
+
+int32 EverQuestMod::GetSmallestLullAggroRangeInHundredths(Unit* unit, Aura const* excludedAura, AuraEffect const** smallestEffectOut)
+{
+    if (smallestEffectOut != nullptr)
+        *smallestEffectOut = nullptr;
+    if (unit == nullptr)
+        return -1;
+    int32 smallestAggroRangeInHundredths = -1;
+    Unit::AuraEffectList const& detectRangeEffects = unit->GetAuraEffectsByType(SPELL_AURA_MOD_DETECT_RANGE);
+    for (AuraEffect const* detectRangeEffect : detectRangeEffects)
+    {
+        if (detectRangeEffect == nullptr || detectRangeEffect->GetBase() == excludedAura || detectRangeEffect->GetBase()->IsRemoved() == true)
+            continue;
+        uint32 spellID = detectRangeEffect->GetId();
+        if (spellID < ConfigSystemSpellDBCIDMin || spellID > ConfigSystemSpellDBCIDMax || IsSpellAnEQSpell(spellID) == false)
+            continue;
+        int32 aggroRangeInHundredths = std::max<int32>(0, detectRangeEffect->GetMiscValue());
+        if (smallestAggroRangeInHundredths < 0 || aggroRangeInHundredths < smallestAggroRangeInHundredths)
+        {
+            smallestAggroRangeInHundredths = aggroRangeInHundredths;
+            if (smallestEffectOut != nullptr)
+                *smallestEffectOut = detectRangeEffect;
+        }
+    }
+    return smallestAggroRangeInHundredths;
+}
+
+int32 EverQuestMod::GetLullAggroRangeAuraAmount(Unit* unit, int32 lullAggroRangeInHundredths)
+{
+    Creature* creature = (unit != nullptr) ? unit->ToCreature() : nullptr;
+    if (creature == nullptr || lullAggroRangeInHundredths < 0)
+        return 0;
+    float differenceInYards = float(lullAggroRangeInHundredths) / 100.0f - creature->GetDetectionRange() - EQ_LULL_CORE_AGGRO_LEVEL_TERM_MAX_IN_YARDS;
+    if (differenceInYards >= 0.0f)
+        return 0;
+    return int32(std::floor(differenceInYards));
+}
+
+int32 EverQuestMod::GetLullAggroRangeAmountForNewEffect(Unit* unit, AuraEffect const* newLullEffect)
+{
+    if (unit == nullptr || newLullEffect == nullptr)
+        return 0;
+    uint32 spellID = newLullEffect->GetId();
+    if (spellID < ConfigSystemSpellDBCIDMin || spellID > ConfigSystemSpellDBCIDMax)
+        return 0;
+    int32 newAggroRangeInHundredths = std::max<int32>(0, newLullEffect->GetMiscValue());
+    AuraEffect const* otherSmallestEffect = nullptr;
+    int32 otherSmallestInHundredths = GetSmallestLullAggroRangeInHundredths(unit, newLullEffect->GetBase(), &otherSmallestEffect);
+    if (otherSmallestInHundredths >= 0 && otherSmallestInHundredths < newAggroRangeInHundredths)
+        return 0;
+
+    // A tie goes to whichever already holds the amount.  This also runs when a lull is refreshed (a recast or a bard song pulse), which doesn't
+    // run the apply hook that would otherwise put the amounts right, so giving up the amount to a tied lull holding 0 would leave neither counting
+    if (otherSmallestInHundredths == newAggroRangeInHundredths && otherSmallestEffect != nullptr && otherSmallestEffect->GetAmount() != 0)
+        return 0;
+    return GetLullAggroRangeAuraAmount(unit, newAggroRangeInHundredths);
+}
+
+void EverQuestMod::RefreshLullAggroRanges(Unit* unit, Aura const* excludedAura)
+{
+    if (unit == nullptr)
+        return;
+    AuraEffect const* smallestEffect = nullptr;
+    int32 smallestAggroRangeInHundredths = GetSmallestLullAggroRangeInHundredths(unit, excludedAura, &smallestEffect);
+    if (smallestAggroRangeInHundredths < 0)
+        return;
+
+    // Among tied smallest lulls, keep the amount on the one already holding it, so a refresh never has to move it (see GetLullAggroRangeAmountForNewEffect)
+    Unit::AuraEffectList const& tiedCandidateEffects = unit->GetAuraEffectsByType(SPELL_AURA_MOD_DETECT_RANGE);
+    for (AuraEffect const* tiedCandidateEffect : tiedCandidateEffects)
+    {
+        if (tiedCandidateEffect == nullptr || tiedCandidateEffect->GetBase() == excludedAura || tiedCandidateEffect->GetBase()->IsRemoved() == true)
+            continue;
+        uint32 spellID = tiedCandidateEffect->GetId();
+        if (spellID < ConfigSystemSpellDBCIDMin || spellID > ConfigSystemSpellDBCIDMax || IsSpellAnEQSpell(spellID) == false)
+            continue;
+        if (std::max<int32>(0, tiedCandidateEffect->GetMiscValue()) == smallestAggroRangeInHundredths && tiedCandidateEffect->GetAmount() != 0)
+        {
+            smallestEffect = tiedCandidateEffect;
+            break;
+        }
+    }
+
+    // Collect first, so no amount changes while the unit's aura list is being walked
+    vector<AuraEffect*> lullEffects;
+    Unit::AuraEffectList const& detectRangeEffects = unit->GetAuraEffectsByType(SPELL_AURA_MOD_DETECT_RANGE);
+    for (AuraEffect* detectRangeEffect : detectRangeEffects)
+    {
+        if (detectRangeEffect == nullptr || detectRangeEffect->GetBase() == excludedAura || detectRangeEffect->GetBase()->IsRemoved() == true)
+            continue;
+        uint32 spellID = detectRangeEffect->GetId();
+        if (spellID < ConfigSystemSpellDBCIDMin || spellID > ConfigSystemSpellDBCIDMax || IsSpellAnEQSpell(spellID) == false)
+            continue;
+        lullEffects.push_back(detectRangeEffect);
+    }
+    for (AuraEffect* lullEffect : lullEffects)
+    {
+        int32 wantedAmount = (lullEffect == smallestEffect) ? GetLullAggroRangeAuraAmount(unit, smallestAggroRangeInHundredths) : 0;
+        if (lullEffect->GetAmount() != wantedAmount)
+            lullEffect->ChangeAmount(wantedAmount);
+    }
+}
+
+bool EverQuestMod::IsHarmonySocialAggroTakeoverNeeded(Creature* creature)
+{
+    if (HarmonyAuraCreatureCount.load() == 0 || creature == nullptr)
+        return false;
+    if (creature->GetEntry() < ConfigSystemCreatureTemplateIDMin || creature->GetEntry() > ConfigSystemCreatureTemplateIDMax)
+        return false;
+    if (creature->IsPet() == true || creature->IsControlledByPlayer() == true || creature->IsCharmed() == true)
+        return false;
+    if (creature->HasFlagsExtra(CREATURE_FLAG_EXTRA_DONT_CALL_ASSISTANCE) == true)
+        return false;
+
+    // The same creatures the core leaves out of periodic calls (Creature::CanPeriodicallyCallForAssistance)
+    if (creature->HasUnitState(UNIT_STATE_POSSESSED) == true || (creature->IsSummon() == true && creature->GetMap()->Instanceable() == true))
+        return false;
+    return true;
 }
 
 void EverQuestMod::MarkCreatureAgroZBlockOnEngage(Creature* creature, Unit* victim)
@@ -10860,13 +11185,30 @@ void EverQuestMod::UpdateCreatureScaledSocialAggro(Creature* creature, uint32 di
 
     float scale = 1.0f;
     float maxAgroZDistance = -1.0f;
-    bool eligible = IsSocialAggroOverrideNeededForCreature(creature, scale, maxAgroZDistance) == true && creature->IsAlive() == true && creature->IsInCombat() == true && creature->IsPet() == false && creature->IsControlledByPlayer() == false;
+    bool isOverrideCreature = IsSocialAggroOverrideNeededForCreature(creature, scale, maxAgroZDistance);
+    bool isFightingFreely = creature->IsAlive() == true && creature->IsInCombat() == true && creature->IsPet() == false && creature->IsControlledByPlayer() == false;
+    EverQuestCreatureSocialAggroState* existingState = creature->CustomData.Get<EverQuestCreatureSocialAggroState>(EQ_CREATURE_CUSTOMDATA_SOCIALAGGRO);
+    bool isHarmonyTakeover = existingState != nullptr && existingState->IsHarmonyTakeover == true;
+
+    // A creature that was already fighting when something got lulled has its calls taken over from here on
+    if (isOverrideCreature == false && isHarmonyTakeover == false && isFightingFreely == true && IsHarmonySocialAggroTakeoverNeeded(creature) == true)
+    {
+        existingState = creature->CustomData.GetDefault<EverQuestCreatureSocialAggroState>(EQ_CREATURE_CUSTOMDATA_SOCIALAGGRO);
+        existingState->IsHarmonyTakeover = true;
+        existingState->RecallTimerMS = sWorld->getIntConfig(CONFIG_CREATURE_FAMILY_ASSISTANCE_PERIOD);
+        isHarmonyTakeover = true;
+    }
+
+    bool eligible = (isOverrideCreature == true || isHarmonyTakeover == true) && isFightingFreely == true;
     Unit* victim = creature->GetVictim();
     if (victim == nullptr || victim->IsAlive() == false)
         eligible = false;
 
     if (eligible == false)
     {
+        // A takeover lasts the rest of the fight, since the core's own periodic call stays switched off for it
+        if (isHarmonyTakeover == true && isFightingFreely == true)
+            return;
         RemoveCreatureSocialAggroState(creature);
         return;
     }

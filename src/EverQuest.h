@@ -54,7 +54,7 @@ class ByteBuffer;
 struct AreaTrigger;
 struct BuildValuesCachePosPointers;
 
-#define EQ_MOD_VERSION                              120
+#define EQ_MOD_VERSION                              121
 
 #define EQ_MOVEMENT_CAST_SNARE_DURATION_BUFFER_IN_MS 2000 // How much longer than the remaining cast time the casting slow is given, so a pushed-back cast keeps it
 
@@ -208,6 +208,13 @@ struct BuildValuesCachePosPointers;
 #define EQ_SPELLDUMMYTYPE_REMOVEDAMAGESHIELD        21
 #define EQ_SPELLDUMMYTYPE_HEALMELEEATTACKERS        22
 #define EQ_SPELLDUMMYTYPE_HEARTHSTONETETHER         23
+#define EQ_SPELLDUMMYTYPE_WIPEHATELIST              24  // Amount is the percent chance, MiscValueB of 1 on an aura rolls again each tick
+#define EQ_SPELLDUMMYTYPE_HARMONY                   25  // Amount is the assist radius in hundredths of a yard
+#define EQ_SPELLDUMMYTYPE_TRUENORTH                 26
+#define EQ_SPELLDUMMYTYPE_EYEOFZOMM                 27  // The channeled aura that controls a possessed eye of zomm
+#define EQ_SPELLDUMMYTYPE_TELESCOPE                 28  // The channeled caster aura that carries a telescope far sight
+#define EQ_EYE_OF_ZOMM_LIFETIME_SLACK_IN_MS         2000
+#define EQ_LULL_CORE_AGGRO_LEVEL_TERM_MAX_IN_YARDS   25.0f   // How far Creature::GetAggroRange can widen a radius for a lower level target
 
 // Each tether type is remembered separately, so a character can hold a gate tether and a hearthstone tether at the same time
 #define EQ_TETHER_TYPE_NONE                         0
@@ -379,6 +386,10 @@ struct BuildValuesCachePosPointers;
 #define EQ_CREATURE_CUSTOMDATA_COMBATABILITY        "EQCombatAbility"
 #define EQ_PLAYER_CUSTOMDATA_LOSSOFCONTROLIMMUNITY  "EQLossOfControlImmunity"
 #define EQ_FEAR_BREAK_CHECK_INTERVAL_IN_MS          6000
+#define EQ_BLIND_BREAK_CHECK_INTERVAL_IN_MS         6000
+#define EQ_WIPE_HATE_LIST_TICK_INTERVAL_IN_MS       6000
+#define EQ_WIPE_HATE_LIST_FULL_CHANCE_BELOW_LEVEL   17  // TAKP: a target under this level always forgets
+#define EQ_WIPE_HATE_LIST_LEVEL_BONUS_MAX_LEVEL     53  // TAKP: the level bonus slides from here down to the level above
 
 // Kinds of control a creature ability can take away from a player
 enum EverQuestLossOfControlCategory
@@ -764,10 +775,21 @@ public:
     uint32 TeleportAttemptsUsed = 0;
 };
 
+class EverQuestWipeHateListEvent : public BasicEvent
+{
+public:
+    EverQuestWipeHateListEvent(Creature* owner) : Owner(owner) {}
+    bool Execute(uint64 eventTime, uint32 diff) override;
+
+private:
+    Creature* Owner;
+};
+
 class EverQuestCreatureSocialAggroState : public DataMap::Base
 {
 public:
     uint32 RecallTimerMS = 0;
+    bool IsHarmonyTakeover = false; // The mod took this fight's assist calls away from the core so a lulled creature is not pulled in
 };
 
 class EverQuestCreatureAggroPositionState : public DataMap::Base
@@ -1653,6 +1675,7 @@ public:
     uint32 ConfigSystemInvisVsUndeadDetectSpellID;
     uint32 ConfigSystemRangedAttackSpellID;
     uint32 ConfigSystemResistAdjustmentSpellID;
+    uint32 ConfigSystemBlindWanderSpellID;
     uint32 ConfigSystemRoguePoisonMarkerSpellID;
     uint32 ConfigSystemLegacyAchievementID;
     string ConfigSystemLegacyAchievementAccountCreatedBefore;
@@ -1765,6 +1788,7 @@ public:
     bool ConfigSpellPvPChainedCrowdControlDiminishingReturnsEnabled;
     uint32 ConfigSpellPvPCrowdControlMaxDurationInMS;
     uint32 ConfigSpellFearBreakCheckChance;
+    uint32 ConfigSpellBlindBreakCheckChance;
     float ConfigSpellCreatureLossOfControlPlayerImmunityMultiplier;
     bool ConfigSpellPvPSnareDiminishingReturnsEnabled;
     bool ConfigSpellPvPSilenceCancelsBardSongsEnabled;
@@ -1933,6 +1957,7 @@ public:
     unordered_map<ObjectGuid, EverQuestMentorshipState> MentorshipStatesByPlayerGUID;
     unordered_map<ObjectGuid, EverQuestMentorshipRequest> MentorshipRequestsByTargetGUID;
     std::atomic<uint32> MentorshipStateCount{ 0 };
+    std::atomic<uint32> HarmonyAuraCreatureCount{ 0 }; // Lull auras on creatures anywhere, so the assist checks cost nothing while there are none
     unordered_map<uint64, unordered_map<ObjectGuid, vector<EverQuestUnitHasteAuraEffect>>> EQHasteAuraEffectsByMapInstanceKeyThenUnitGUID; // Map-instance keyed since creature GUIDs repeat across instance copies of a map
     unordered_map<uint64, unordered_map<ObjectGuid, vector<EverQuestUnitAttackPowerAuraEffect>>> EQAttackPowerAuraEffectsByMapInstanceKeyThenUnitGUID; // Map-instance keyed since creature GUIDs repeat across instance copies of a map
     unordered_map<ObjectGuid, uint32> BearFormArmorShiftAmountByPlayerGUID; // Shield, mail and plate armor moved out of the form-multiplied base value
@@ -2167,6 +2192,14 @@ public:
     bool HandleCreatureLossOfControlOnPlayerAuraApply(Unit* target, Aura* aura);
     void ProcessEQFearBreakChecksForPlayer(Player* player, uint32 diff);
     SpellMissInfo RollEQSpellHitResultWithResistDiff(Unit* caster, Unit* target, SpellInfo const* spellInfo);
+    bool RollEQBlindBreakCheck(Unit* caster, Unit* target, SpellInfo const* spellInfo);
+    bool IsBlindWanderAllowedForUnit(Unit* target);
+    void ApplyBlindWander(Unit* target, Aura* blindAura);
+    void RemoveBlindWanderIfNoBlindRemains(Unit* target, Aura* removedBlindAura);
+    int32 GetWipeHateListChanceOnLanding(Unit* target, int32 baseChance);
+    void RollWipeHateListOnUnit(Unit* caster, Unit* target, int32 chance);
+    void TurnPlayerToFaceNorth(Player* player);
+    SpellCastResult GetCallPetCastResult(Unit* caster);
     bool IsPvPEQCharmAuraApplication(Unit* target, Aura* aura);
     bool WouldAssistFlagUnflaggedPlayerForPvP(Player* caster, Unit* target);
     bool IsFriendlySpellTargetSkippedToAvoidPvPFlag(Spell* spell, Unit* target);
@@ -2401,6 +2434,12 @@ public:
     void RemoveCreatureCrowdControlAurasFromPlayersOnDeath(Creature* deadCreature);
     void UpdateCreatureScaledSocialAggro(Creature* creature, uint32 diff);
     void RemoveCreatureSocialAggroState(Creature* creature);
+    bool IsCreatureAssistBlockedByHarmony(Creature* assistant, Creature* caller);
+    bool IsHarmonySocialAggroTakeoverNeeded(Creature* creature);
+    int32 GetSmallestLullAggroRangeInHundredths(Unit* unit, Aura const* excludedAura, AuraEffect const** smallestEffectOut);
+    int32 GetLullAggroRangeAuraAmount(Unit* unit, int32 lullAggroRangeInHundredths);
+    int32 GetLullAggroRangeAmountForNewEffect(Unit* unit, AuraEffect const* newLullEffect);
+    void RefreshLullAggroRanges(Unit* unit, Aura const* excludedAura);
     float GetMaxAgroZDistanceForMap(uint32 mapID);
     bool IsBlockedByAgroZDistance(WorldObject const* source, WorldObject const* target, float maxAgroZDistance);
     bool IsSocialAggroOverrideNeededForCreature(Creature* creature, float& scaleOut, float& maxAgroZDistanceOut);
