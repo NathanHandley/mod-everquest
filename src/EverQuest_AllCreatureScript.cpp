@@ -38,6 +38,15 @@ public:
         EverQuest->ApplyWorldBossHealthMultiplier(creature);
     }
 
+    // Runs before the gossip menu is built, so an achievement granted here already counts for that menu's conditions
+    bool CanCreatureGossipHello(Player* player, Creature* creature) override
+    {
+        if (EverQuest->IsEnabled == false || player == nullptr || creature == nullptr)
+            return false;
+        EverQuest->GrantCreatureGossipHelloAchievement(player, creature);
+        return false;
+    }
+
     void OnCreatureAddWorld(Creature* creature) override
     {
         if (EverQuest->IsEnabled == false)

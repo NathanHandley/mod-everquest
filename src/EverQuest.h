@@ -539,6 +539,7 @@ public:
     uint32 DifficultyType = EQ_CREATURE_DIFFICULTY_NORMAL;
     bool GossipIsOnlyFromHailText = false;
     float SpellDamageMultiplier = 1.0f;
+    uint32 GossipHelloAchievementID = 0;
 };
 
 class EverQuestCreatureSpawnPoint
@@ -1178,6 +1179,7 @@ public:
     float PositionZ = 0;
     float Orientation = 0;
     uint32 IllusionItemID = 0;
+    uint32 StartAchievementID = 0;
 };
 
 class EverQuestQuestCompletionReputation
@@ -2348,6 +2350,8 @@ public:
     void ApplyIllusionCharacterLookToNewCorpse(Corpse* corpse);
     void RestoreNativeDisplayAfterCorpseIllusion(Player* player);
     void GrantLegacyAchievementIfEligible(Player* player);
+    void GrantStartAchievementIfMissing(Player* player);
+    void GrantCreatureGossipHelloAchievement(Player* player, Creature* creature);
     void ApplyAdventurerAuraStateOnLogin(Player* player);
     bool IsMapIDAnEverQuestMap(uint32 mapID);
     bool IsZoneWideGroupRewardEnabledForMap(uint32 mapID);

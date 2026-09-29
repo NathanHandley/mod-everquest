@@ -637,7 +637,7 @@ void EverQuestMod::LoadConfigurationFile()
 void EverQuestMod::LoadCreatureData()
 {
     CreaturesByTemplateID.clear();
-    QueryResult queryResult = WorldDatabase.Query("SELECT CreatureTemplateID, CanShowHeldLootItems, CanShowHeldLootShields, SpawnLimit, RangedAttackEnabled, RangedAttackMinRange, RangedAttackMaxRange, RangedAttackDamageModPct, AgroSocialDistanceMod, EnrageEnabled, EnrageHPPct, EnrageDurationInMS, EnrageCooldownInMS, FlurryEnabled, FlurryChancePct, RampageEnabled, RampageChancePct, RampageRange, RampageDamagePct, WildRampageEnabled, WildRampageChancePct, WildRampageMaxTargets, WildRampageDamagePct, AttackRoundTimeInMS, DifficultyType, GossipIsOnlyFromHailText, SpellDamageMultiplier FROM mod_everquest_creature ORDER BY CreatureTemplateID;");
+    QueryResult queryResult = WorldDatabase.Query("SELECT CreatureTemplateID, CanShowHeldLootItems, CanShowHeldLootShields, SpawnLimit, RangedAttackEnabled, RangedAttackMinRange, RangedAttackMaxRange, RangedAttackDamageModPct, AgroSocialDistanceMod, EnrageEnabled, EnrageHPPct, EnrageDurationInMS, EnrageCooldownInMS, FlurryEnabled, FlurryChancePct, RampageEnabled, RampageChancePct, RampageRange, RampageDamagePct, WildRampageEnabled, WildRampageChancePct, WildRampageMaxTargets, WildRampageDamagePct, AttackRoundTimeInMS, DifficultyType, GossipIsOnlyFromHailText, SpellDamageMultiplier, GossipHelloAchievementID FROM mod_everquest_creature ORDER BY CreatureTemplateID;");
     if (queryResult)
     {
         do
@@ -672,6 +672,7 @@ void EverQuestMod::LoadCreatureData()
             everQuestCreature.DifficultyType = fields[24].Get<uint32>();
             everQuestCreature.GossipIsOnlyFromHailText = fields[25].Get<bool>();
             everQuestCreature.SpellDamageMultiplier = fields[26].Get<float>();
+            everQuestCreature.GossipHelloAchievementID = fields[27].Get<uint32>();
             CreaturesByTemplateID[everQuestCreature.CreatureTemplateID] = everQuestCreature;
         } while (queryResult->NextRow());
     }
@@ -8009,7 +8010,7 @@ void EverQuestMod::TryResummonTemporaryUnsummonedEQPet(Player* player)
 void EverQuestMod::LoadCreatePlayerData()
 {
     PlayerCreateInfoByRaceIDThenClassID.clear();
-    QueryResult queryResult = WorldDatabase.Query("SELECT race, class, map, zone, position_x, position_y, position_z, orientation, illusionitem FROM mod_everquest_playercreateinfo;");
+    QueryResult queryResult = WorldDatabase.Query("SELECT race, class, map, zone, position_x, position_y, position_z, orientation, illusionitem, startachievement FROM mod_everquest_playercreateinfo;");
     if (queryResult)
     {
         do
@@ -8026,6 +8027,7 @@ void EverQuestMod::LoadCreatePlayerData()
             everQuestPlayerCreateInfo.PositionZ = fields[6].Get<float>();
             everQuestPlayerCreateInfo.Orientation = fields[7].Get<float>();
             everQuestPlayerCreateInfo.IllusionItemID = fields[8].Get<uint32>();
+            everQuestPlayerCreateInfo.StartAchievementID = fields[9].Get<uint32>();
             PlayerCreateInfoByRaceIDThenClassID[everQuestPlayerCreateInfo.RaceID][everQuestPlayerCreateInfo.ClassID] = everQuestPlayerCreateInfo;
         } while (queryResult->NextRow());
     }
@@ -8490,6 +8492,51 @@ void EverQuestMod::GrantLegacyAchievementIfEligible(Player* player)
     QueryResult accountEligibleQueryResult = LoginDatabase.Query("SELECT 1 FROM account WHERE id = {} AND joindate < '{}'", accountID, ConfigSystemLegacyAchievementAccountCreatedBefore);
     if (!accountEligibleQueryResult)
         return;
+    player->CompletedAchievement(achievementEntry);
+}
+
+void EverQuestMod::GrantStartAchievementIfMissing(Player* player)
+{
+    uint8 raceID = player->getRace(true);
+    uint8 classID = player->getClass();
+    if (HasCreatePlayerData(raceID, classID) == false)
+        return;
+    uint32 startAchievementID = GetPlayerCreateInfo(raceID, classID).StartAchievementID;
+    if (startAchievementID == 0 || player->HasAchieved(startAchievementID) == true)
+        return;
+
+    // The core refuses achievements in GM mode (with a chat message), so leave it for a later non-GM login
+    if (player->IsGameMaster() == true)
+        return;
+
+    AchievementEntry const* achievementEntry = sAchievementStore.LookupEntry(startAchievementID);
+    if (achievementEntry == nullptr)
+    {
+        LOG_ERROR("module.EverQuest", "EverQuestMod::GrantStartAchievementIfMissing error, no achievement with ID {} exists for race {} class {}", startAchievementID, raceID, classID);
+        return;
+    }
+    player->CompletedAchievement(achievementEntry);
+}
+
+void EverQuestMod::GrantCreatureGossipHelloAchievement(Player* player, Creature* creature)
+{
+    unordered_map<uint32, EverQuestCreature>::const_iterator creatureIterator = CreaturesByTemplateID.find(creature->GetEntry());
+    if (creatureIterator == CreaturesByTemplateID.end())
+        return;
+    uint32 achievementID = creatureIterator->second.GossipHelloAchievementID;
+    if (achievementID == 0 || player->HasAchieved(achievementID) == true)
+        return;
+
+    // The core refuses achievements in GM mode (with a chat message), so leave it for a later non-GM visit
+    if (player->IsGameMaster() == true)
+        return;
+
+    AchievementEntry const* achievementEntry = sAchievementStore.LookupEntry(achievementID);
+    if (achievementEntry == nullptr)
+    {
+        LOG_ERROR("module.EverQuest", "EverQuestMod::GrantCreatureGossipHelloAchievement error, no achievement with ID {} exists for creature template {}", achievementID, creature->GetEntry());
+        return;
+    }
     player->CompletedAchievement(achievementEntry);
 }
 
