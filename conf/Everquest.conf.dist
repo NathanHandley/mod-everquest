@@ -458,6 +458,15 @@ EverQuest.Spells.BardFearDiminishingReturnsResetTimeInMS = 15000
 #		unresistable blind never breaks this way.  0 turns it off
 #	Default: 75
 #
+# 	EverQuest.Spells.EQResistRollEnabled
+#		When True, resistable EverQuest spells also roll against the target's resist of the spell's EQ
+#		resist type (Magic = Arcane, Fire, Cold = Frost, Poison = Nature, Disease = Shadow), like TAKP
+#		Mob::CheckResistSpell.  That makes roots, stuns, mez, fear, charm and debuffs resistable by
+#		resist gear and buffs.  Spells that TAKP lets partially resist (damage first) are only fully
+#		resisted on a deep roll.  Only between players and EverQuest creatures; WoW creatures are never
+#		part of it, as the caster or the target.  Also applies to the fear and blind break rolls
+#	Default: True
+#
 # 	EverQuest.Spells.CreatureLossOfControlPlayerImmunityMultiplier
 #		When an EverQuest creature ability that does more than take control away (a breath that damages
 #		and stuns, for example) lands its stun, fear, charm or mesmerize on a player, the player becomes
@@ -478,6 +487,7 @@ EverQuest.Spells.PvPEQCharmImmunityEnabled = True
 EverQuest.Spells.UnflaggedCasterSkipsPvPAlliesEnabled = True
 EverQuest.Spells.FearBreakCheckChance = 75
 EverQuest.Spells.BlindBreakCheckChance = 75
+EverQuest.Spells.EQResistRollEnabled = True
 EverQuest.Spells.CreatureLossOfControlPlayerImmunityMultiplier = 4
 
 ###################################################################################################

@@ -135,6 +135,7 @@ EverQuestMod::EverQuestMod() :
     ConfigSpellPvPCrowdControlMaxDurationInMS(10000),
     ConfigSpellFearBreakCheckChance(75),
     ConfigSpellBlindBreakCheckChance(75),
+    ConfigSpellEQResistRollEnabled(true),
     ConfigSpellCreatureLossOfControlPlayerImmunityMultiplier(4.0f),
     ConfigSpellPvPSnareDiminishingReturnsEnabled(true),
     ConfigSpellPvPSilenceCancelsBardSongsEnabled(true),
@@ -496,6 +497,7 @@ void EverQuestMod::LoadConfigurationFile()
     ConfigSpellPvPCrowdControlMaxDurationInMS = sConfigMgr->GetOption<uint32>("EverQuest.Spells.PvPCrowdControlMaxDurationInMS", 10000);
     ConfigSpellFearBreakCheckChance = std::min<uint32>(100, sConfigMgr->GetOption<uint32>("EverQuest.Spells.FearBreakCheckChance", 75));
     ConfigSpellBlindBreakCheckChance = std::min<uint32>(100, sConfigMgr->GetOption<uint32>("EverQuest.Spells.BlindBreakCheckChance", 75));
+    ConfigSpellEQResistRollEnabled = sConfigMgr->GetOption<bool>("EverQuest.Spells.EQResistRollEnabled", true);
     ConfigSpellCreatureLossOfControlPlayerImmunityMultiplier = std::max(0.0f, sConfigMgr->GetOption<float>("EverQuest.Spells.CreatureLossOfControlPlayerImmunityMultiplier", 4.0f));
     ConfigSpellPvPSnareDiminishingReturnsEnabled = sConfigMgr->GetOption<bool>("EverQuest.Spells.PvPSnareDiminishingReturnsEnabled", true);
     ConfigSpellPvPSilenceCancelsBardSongsEnabled = sConfigMgr->GetOption<bool>("EverQuest.Spells.PvPSilenceCancelsBardSongsEnabled", true);
@@ -4412,7 +4414,7 @@ void EverQuestMod::LoadSpellData()
     SpellDataBySpellID.clear();
     BardSongTickSpellIDs.clear();
     HiddenAuraIconSpellIDs.clear();
-    QueryResult queryResult = WorldDatabase.Query("SELECT SpellID, AuraDurationBaseInMS, AuraDurationAddPerLevelInMS, AuraDurationMaxInMS, AuraDurationCalcMinLevel, AuraDurationCalcMaxLevel, RecourseSpellID, SpellIDCastOnMeleeAttacker, FocusBoostType, PeriodicAuraSpellID, PeriodicAuraSpellRadius, MaleFormSpellID, FemaleFormSpellID, EffectFailChancePercent, EffectFailableType, StunUsesBashKickChance, SpellIDCastOnTargetWhenStunLands, AuraStaysOnSecondaryClassSwitch, MinTargetLevel, MaxCreatureTargetLevel, ResistDiff, HasteType, ModFactionRepValue, IllusionFormAlignment, IllusionFormEQRaceID, PersistOnClassChange, IllusionObjectClass, ManaGainSpellPowerCoefficient, DamageIsFixed, IntensifyingRampStartMultiplier1, IntensifyingRampStartMultiplier2, IntensifyingRampStartMultiplier3, CasterVisualKitID, CreatureLossOfControlGrantsImmunity, HideAuraIcon FROM mod_everquest_spell ORDER BY SpellID;");
+    QueryResult queryResult = WorldDatabase.Query("SELECT SpellID, AuraDurationBaseInMS, AuraDurationAddPerLevelInMS, AuraDurationMaxInMS, AuraDurationCalcMinLevel, AuraDurationCalcMaxLevel, RecourseSpellID, SpellIDCastOnMeleeAttacker, FocusBoostType, PeriodicAuraSpellID, PeriodicAuraSpellRadius, MaleFormSpellID, FemaleFormSpellID, EffectFailChancePercent, EffectFailableType, StunUsesBashKickChance, SpellIDCastOnTargetWhenStunLands, AuraStaysOnSecondaryClassSwitch, MinTargetLevel, MaxCreatureTargetLevel, ResistDiff, HasteType, ModFactionRepValue, IllusionFormAlignment, IllusionFormEQRaceID, PersistOnClassChange, IllusionObjectClass, ManaGainSpellPowerCoefficient, DamageIsFixed, IntensifyingRampStartMultiplier1, IntensifyingRampStartMultiplier2, IntensifyingRampStartMultiplier3, CasterVisualKitID, CreatureLossOfControlGrantsImmunity, HideAuraIcon, EQResistType, IsEQPartialResistCapable FROM mod_everquest_spell ORDER BY SpellID;");
     if (queryResult)
     {
         do
@@ -4455,6 +4457,8 @@ void EverQuestMod::LoadSpellData()
             everQuestSpell.CasterVisualKitID = fields[32].Get<uint32>();
             everQuestSpell.CreatureLossOfControlGrantsImmunity = fields[33].Get<uint8>() != 0;
             everQuestSpell.HideAuraIcon = fields[34].Get<uint8>() != 0;
+            everQuestSpell.EQResistType = fields[35].Get<uint8>();
+            everQuestSpell.IsEQPartialResistCapable = fields[36].Get<uint8>() != 0;
             SpellDataBySpellID[everQuestSpell.SpellID] = everQuestSpell;
             if (everQuestSpell.PeriodicAuraSpellID != 0)
                 BardSongTickSpellIDs.insert(everQuestSpell.PeriodicAuraSpellID);
@@ -5982,7 +5986,79 @@ SpellMissInfo EverQuestMod::RollEQSpellHitResultWithResistDiff(Unit* caster, Uni
     SpellMissInfo hitResult = caster->SpellHitResult(target, spellInfo, false);
     if (addedResistAdjustment == true)
         caster->RemoveAurasDueToSpell(ConfigSystemResistAdjustmentSpellID);
+    if (hitResult == SPELL_MISS_NONE && RollEQResist(caster, target, spellInfo) == true)
+        hitResult = SPELL_MISS_RESIST;
     return hitResult;
+}
+
+// EQ resist rolls only happen between EQ participants, which are players and EQ creatures (EQ pets included).  WoW creatures keep stock WoW behavior on either end
+bool EverQuestMod::IsUnitInEQResistContext(Unit* unit)
+{
+    if (unit == nullptr)
+        return false;
+    if (unit->IsPlayer() == true)
+        return true;
+    Creature* creature = unit->ToCreature();
+    if (creature == nullptr)
+        return false;
+    return HasCreatureDataForCreatureTemplateID(creature->GetEntry());
+}
+
+// The resist part of TAKP Mob::CheckResistSpell: a 0-200 roll against the target's resist of the spell's EQ resist type.  The level difference and
+// ResistDiff parts are left out on purpose, since the core's own spell hit roll already carries those (see EverQuest_ResistDiffSpellScript).
+// Returns true when the spell is fully resisted
+bool EverQuestMod::RollEQResist(Unit* caster, Unit* target, SpellInfo const* spellInfo)
+{
+    if (ConfigSpellEQResistRollEnabled == false || caster == nullptr || target == nullptr || spellInfo == nullptr || caster == target)
+        return false;
+    if (spellInfo->Id < ConfigSystemSpellDBCIDMin || spellInfo->Id > ConfigSystemSpellDBCIDMax || IsSpellAnEQSpell(spellInfo->Id) == false)
+        return false;
+    if (IsUnitInEQResistContext(caster) == false || IsUnitInEQResistContext(target) == false)
+        return false;
+    EverQuestSpell const& spellData = GetSpellDataForSpellID(spellInfo->Id);
+
+    // The EQ resist type decides the resist, not the spell's school (a school override doesn't change what resists it)
+    SpellSchools resistSchool;
+    switch (spellData.EQResistType)
+    {
+        case 1: resistSchool = SPELL_SCHOOL_ARCANE; break; // Magic
+        case 2: resistSchool = SPELL_SCHOOL_FIRE; break; // Fire
+        case 3: resistSchool = SPELL_SCHOOL_FROST; break; // Cold
+        case 4: resistSchool = SPELL_SCHOOL_NATURE; break; // Poison
+        case 5: resistSchool = SPELL_SCHOOL_SHADOW; break; // Disease
+        default: return false;
+    }
+
+    // Read signed, since resist debuffs can push it below zero.  TAKP still resists 1 roll in 201 at no resist, but that floor is already in the core's hit roll
+    int32 resistChance = target->GetInt32Value(static_cast<uint16>(UNIT_FIELD_RESISTANCES) + resistSchool);
+    if (resistChance <= 0)
+        return false;
+
+    // TAKP's PvP curve bows the linear roll, and always leaves at least a 2% chance to land
+    if (caster->IsPlayer() == true && target->IsPlayer() == true)
+    {
+        if (resistChance > 1 && resistChance < 200)
+            resistChance = resistChance * 400 / (200 + resistChance);
+        if (resistChance > 196)
+            resistChance = 196;
+    }
+
+    int32 roll = irand(0, 200);
+    if (roll > resistChance)
+        return false;
+    if (spellData.IsEQPartialResistCapable == false)
+        return true;
+
+    // A spell that can partially resist is only fully resisted on a deep enough roll (TAKP partial_modifier of 100 or more).  On anything less it lands,
+    // and the core's own partial resist trims its damage
+    int32 partialModifier = (150 * (resistChance - roll)) / resistChance;
+    if (caster->IsPlayer() == false)
+    {
+        int32 levelDiff = int32(target->GetLevel()) - int32(caster->GetLevel());
+        if (levelDiff >= 20)
+            partialModifier += int32(float(levelDiff) * 1.5f);
+    }
+    return partialModifier >= 100;
 }
 
 // TAKP Spells:FearBreakCheckChance.  Each 6 second tick of an EverQuest fear on a player has this chance of a fresh resist roll, and a resist breaks

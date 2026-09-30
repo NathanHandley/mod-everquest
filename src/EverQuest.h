@@ -54,7 +54,7 @@ class ByteBuffer;
 struct AreaTrigger;
 struct BuildValuesCachePosPointers;
 
-#define EQ_MOD_VERSION                              123
+#define EQ_MOD_VERSION                              124
 
 #define EQ_MOVEMENT_CAST_SNARE_DURATION_BUFFER_IN_MS 2000 // How much longer than the remaining cast time the casting slow is given, so a pushed-back cast keeps it
 
@@ -498,6 +498,8 @@ public:
     uint32 CasterVisualKitID = 0; // SpellVisualKit played on a creature caster when the spell goes off (instant dragon breaths, whose own visual leaves it out)
     bool CreatureLossOfControlGrantsImmunity = false; // When a creature lands this spell's stun, fear, charm or mesmerize on a player, the player gets a short immunity to it
     bool HideAuraIcon = false; // A split block left visible only so its damage or healing shows in the combat log, whose icon would duplicate the base spell's
+    uint8 EQResistType = 0; // EQ resist type (1 Magic, 2 Fire, 3 Cold, 4 Poison, 5 Disease) whose resist the target rolls against, 0 = no EQ resist roll
+    bool IsEQPartialResistCapable = false; // TAKP IsPartialCapableSpell, so only a deep resist roll fully resists it
 };
 
 class EverQuestIllusionObject
@@ -1794,6 +1796,7 @@ public:
     uint32 ConfigSpellPvPCrowdControlMaxDurationInMS;
     uint32 ConfigSpellFearBreakCheckChance;
     uint32 ConfigSpellBlindBreakCheckChance;
+    bool ConfigSpellEQResistRollEnabled;
     float ConfigSpellCreatureLossOfControlPlayerImmunityMultiplier;
     bool ConfigSpellPvPSnareDiminishingReturnsEnabled;
     bool ConfigSpellPvPSilenceCancelsBardSongsEnabled;
@@ -2201,6 +2204,8 @@ public:
     void ProcessEQFearBreakChecksForPlayer(Player* player, uint32 diff);
     SpellMissInfo RollEQSpellHitResultWithResistDiff(Unit* caster, Unit* target, SpellInfo const* spellInfo);
     bool RollEQBlindBreakCheck(Unit* caster, Unit* target, SpellInfo const* spellInfo);
+    bool IsUnitInEQResistContext(Unit* unit);
+    bool RollEQResist(Unit* caster, Unit* target, SpellInfo const* spellInfo);
     bool IsBlindWanderAllowedForUnit(Unit* target);
     void ApplyBlindWander(Unit* target, Aura* blindAura);
     void RemoveBlindWanderIfNoBlindRemains(Unit* target, Aura* removedBlindAura);

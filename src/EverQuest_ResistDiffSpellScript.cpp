@@ -14,7 +14,9 @@
 //  You should have received a copy of the GNU General Public License
 //  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+#include "ObjectAccessor.h"
 #include "ScriptMgr.h"
+#include "Spell.h"
 #include "SpellAuras.h"
 #include "SpellScript.h"
 #include "Unit.h"
@@ -26,6 +28,7 @@ using namespace std;
 // EQ spells can be modified by "ResistDiff" which modifies the resist roll (see TAKP Mob::CheckResistSpell)
 // Since Wow has no per-spell hit modifier, there is a hidden hit chance aura on the caster sized from resistdiff then removes it after
 // the cast completes. The aura is really short in case the cast was aborted
+// It also rolls each target's EQ resist (the target's resist of the spell's EQ resist type), which WoW has no per-target hook for
 class EverQuest_ResistDiffSpellScript : public SpellScript
 {
     PrepareSpellScript(EverQuest_ResistDiffSpellScript);
@@ -70,9 +73,42 @@ class EverQuest_ResistDiffSpellScript : public SpellScript
         caster->RemoveAurasDueToSpell(EverQuest->ConfigSystemResistAdjustmentSpellID);
     }
 
+    // Runs after the targets and the core's hit rolls are settled, but before the client is told the outcome, so a resist shows as one
+    void HandleOnCast()
+    {
+        if (EverQuest->IsEnabled == false)
+            return;
+        SpellInfo const* spellInfo = GetSpellInfo();
+        if (EverQuest->GetSpellDataForSpellID(spellInfo->Id).EQResistType == 0)
+            return;
+
+        // Spells carrying effects for a parent spell already had their resist rolled with the parent
+        if (spellInfo->HasAttribute(SPELL_ATTR7_NO_ATTACK_MISS) || spellInfo->HasAttribute(SPELL_ATTR3_ALWAYS_HIT))
+            return;
+
+        Spell* spell = GetSpell();
+        Unit* caster = spell->GetOriginalCaster();
+        if (caster == nullptr)
+            caster = GetCaster();
+        if (caster == nullptr)
+            return;
+
+        for (TargetInfo& targetInfo : *spell->GetUniqueTargetInfo())
+        {
+            if (targetInfo.missCondition != SPELL_MISS_NONE)
+                continue;
+            Unit* target = ObjectAccessor::GetUnit(*caster, targetInfo.targetGUID);
+            if (target == nullptr || caster->IsFriendlyTo(target) == true)
+                continue;
+            if (EverQuest->RollEQResist(caster, target, spellInfo) == true)
+                targetInfo.missCondition = SPELL_MISS_RESIST;
+        }
+    }
+
     void Register() override
     {
         BeforeCast += SpellCastFn(EverQuest_ResistDiffSpellScript::HandleBeforeCast);
+        OnCast += SpellCastFn(EverQuest_ResistDiffSpellScript::HandleOnCast);
         AfterCast += SpellCastFn(EverQuest_ResistDiffSpellScript::HandleAfterCast);
     }
 };
