@@ -15,6 +15,7 @@
 //  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #include "Creature.h"
+#include "ObjectAccessor.h"
 #include "Player.h"
 #include "Random.h"
 #include "ScriptMgr.h"
@@ -22,6 +23,7 @@
 #include "SpellAuras.h"
 #include "SpellInfo.h"
 #include "SpellMgr.h"
+#include "Spell.h"
 #include "SpellScript.h"
 
 #include "EverQuest.h"
@@ -571,6 +573,176 @@ class EverQuest_DemonicEmpowermentSpellScript : public SpellScript
         OnEffectHitTarget += SpellEffectFn(EverQuest_DemonicEmpowermentSpellScript::HandleScriptEffect, EFFECT_0, SPELL_EFFECT_SCRIPT_EFFECT);
     }
 };
+
+// Whether an EverQuest spell deals damage, directly, over time or as a lifetap, on its own or through a spell it triggers or links (a split block)
+static bool DoesEQSpellDealDamageForTalents(SpellInfo const* spellInfo, uint8 depth)
+{
+    if (spellInfo == nullptr)
+        return false;
+    if (EverQuestSpellTalentAlignment::DoesSpellInfoDealDirectDamage(spellInfo) == true || EverQuestSpellTalentAlignment::DoesSpellInfoDealPeriodicDamage(spellInfo) == true)
+        return true;
+    if (depth >= 3)
+        return false;
+    for (uint8 i = 0; i < MAX_SPELL_EFFECTS; ++i)
+    {
+        uint32 effectType = spellInfo->Effects[i].Effect;
+        if (effectType != SPELL_EFFECT_TRIGGER_SPELL && effectType != SPELL_EFFECT_TRIGGER_SPELL_WITH_VALUE && effectType != SPELL_EFFECT_TRIGGER_MISSILE)
+            continue;
+        uint32 triggerSpellID = spellInfo->Effects[i].TriggerSpell;
+        if (triggerSpellID != 0 && triggerSpellID != spellInfo->Id && DoesEQSpellDealDamageForTalents(sSpellMgr->GetSpellInfo(triggerSpellID), depth + 1) == true)
+            return true;
+    }
+    // Aura links too: a split whose first block and second block both carry an aura (a debuff first, the damage over time in the split) is chained that way
+    int32 linkKeys[3] = { (int32)spellInfo->Id + SPELL_LINK_CAST, (int32)spellInfo->Id + SPELL_LINK_HIT, (int32)spellInfo->Id + SPELL_LINK_AURA };
+    for (uint8 k = 0; k < 3; ++k)
+    {
+        std::vector<int32> const* linkedSpellIDs = sSpellMgr->GetSpellLinked(linkKeys[k]);
+        if (linkedSpellIDs == nullptr)
+            continue;
+        for (int32 linkedSpellID : *linkedSpellIDs)
+        {
+            // A negative entry removes an aura rather than casting anything
+            if (linkedSpellID <= 0 || (uint32)linkedSpellID == spellInfo->Id)
+                continue;
+            if (DoesEQSpellDealDamageForTalents(sSpellMgr->GetSpellInfo((uint32)linkedSpellID), depth + 1) == true)
+                return true;
+        }
+    }
+    return false;
+}
+
+// Improved Icy Touch and Virulence give each rank a share of the chance, with a full three ranks always landing
+static int32 GetEQDeathKnightDiseaseChance(Player* player, uint32 talentRank1SpellID)
+{
+    Aura const* talentAura = player->GetAuraOfRankedSpell(talentRank1SpellID);
+    if (talentAura == nullptr)
+        return 0;
+    uint8 rank = sSpellMgr->GetSpellRank(talentAura->GetId());
+    if (rank >= 3)
+        return 100;
+    return int32(rank) * EQ_DK_DISEASE_CHANCE_PER_TALENT_RANK;
+}
+
+// Death Knight talents that also reach EverQuest spells.  Runs once for each cast the player makes, after its targets have all been struck (Spell::cast
+// runs handle_immediate ahead of this hook, and converter spells never travel), so whether each target was hit is already settled:
+//   Fire: Scent of Blood (spend a charge for its runic power), Death Rune Mastery (casts of 2 seconds or more turn recharging Frost and Unholy runes
+//         into Death Runes) and Bloodworms (a roll for each target struck, sharing the talent's own internal cooldown)
+//   Frost or Arcane: Improved Icy Touch (Frost Fever on each target struck) and Chill of the Grave (runic power)
+//   Shadow: Virulence (Blood Plague on each target struck) and Dirge (runic power)
+// A cast counts once it lands on at least one enemy, the way the stock talents need a hit.  Only a damaging spell counts, as the WoW spells these
+// talents key on all deal damage
+void EverQuestMod::HandleEQDeathKnightTalentsOnSpellCast(Player* player, Spell* spell)
+{
+    // Only a Death Knight can hold these talents, which keeps every other caster out before any aura lookup
+    if (IsEQTalentInteractionEnabled() == false || player == nullptr || spell == nullptr || spell->IsTriggered() == true || player->getClass() != CLASS_DEATH_KNIGHT)
+        return;
+    SpellInfo const* spellInfo = spell->GetSpellInfo();
+    if (spellInfo == nullptr || IsSpellAnEQSpell(spellInfo->Id) == false || spellInfo->IsPositive() == true)
+        return;
+    bool isFire = (spellInfo->SchoolMask & SPELL_SCHOOL_MASK_FIRE) != 0;
+    bool isFrostOrArcane = (spellInfo->SchoolMask & (SPELL_SCHOOL_MASK_FROST | SPELL_SCHOOL_MASK_ARCANE)) != 0;
+    bool isShadow = (spellInfo->SchoolMask & SPELL_SCHOOL_MASK_SHADOW) != 0;
+    if (isFire == false && isFrostOrArcane == false && isShadow == false)
+        return;
+
+    // Nothing to do for anyone without one of the talents (or a Scent of Blood charge), which is nearly every cast
+    Aura* scentOfBloodAura = isFire == true ? player->GetAura(EQ_SPELL_ID_DK_SCENT_OF_BLOOD_BUFF) : nullptr;
+    AuraEffect* deathRuneMasteryEffect = isFire == true ? player->GetAuraEffectOfRankedSpell(EQ_SPELL_ID_DK_DEATH_RUNE_MASTERY_RANK1, EFFECT_0) : nullptr;
+    Aura* bloodwormsAura = isFire == true ? player->GetAuraOfRankedSpell(EQ_SPELL_ID_DK_BLOODWORMS_RANK1) : nullptr;
+    int32 frostFeverChance = isFrostOrArcane == true ? GetEQDeathKnightDiseaseChance(player, EQ_SPELL_ID_DK_IMPROVED_ICY_TOUCH_RANK1) : 0;
+    AuraEffect* chillOfTheGraveEffect = isFrostOrArcane == true ? player->GetAuraEffectOfRankedSpell(EQ_SPELL_ID_DK_CHILL_OF_THE_GRAVE_RANK1, EFFECT_0) : nullptr;
+    int32 bloodPlagueChance = isShadow == true ? GetEQDeathKnightDiseaseChance(player, EQ_SPELL_ID_DK_VIRULENCE_RANK1) : 0;
+    AuraEffect* dirgeEffect = isShadow == true ? player->GetAuraEffectOfRankedSpell(EQ_SPELL_ID_DK_DIRGE_RANK1, EFFECT_0) : nullptr;
+    if (scentOfBloodAura == nullptr && deathRuneMasteryEffect == nullptr && bloodwormsAura == nullptr && frostFeverChance == 0 && chillOfTheGraveEffect == nullptr
+        && bloodPlagueChance == 0 && dirgeEffect == nullptr)
+        return;
+    if (DoesEQSpellDealDamageForTalents(spellInfo, 0) == false)
+        return;
+
+    // The enemies the cast actually landed on (a miss, dodge, resist or immunity is not a strike)
+    std::vector<Unit*> struckTargets;
+    std::list<TargetInfo>* targetInfos = spell->GetUniqueTargetInfo();
+    for (TargetInfo const& targetInfo : *targetInfos)
+    {
+        if (targetInfo.missCondition != SPELL_MISS_NONE)
+            continue;
+        Unit* target = ObjectAccessor::GetUnit(*player, targetInfo.targetGUID);
+        if (target == nullptr || target == player || target->IsInWorld() == false || player->IsFriendlyTo(target) == true)
+            continue;
+        struckTargets.push_back(target);
+    }
+    if (struckTargets.empty() == true)
+        return;
+
+    // Per target: the diseases and the Bloodworms
+    SpellInfo const* bloodwormsSummonInfo = bloodwormsAura != nullptr ? sSpellMgr->GetSpellInfo(EQ_SPELL_ID_DK_BLOODWORMS_SUMMON) : nullptr;
+    SpellProcEntry const* bloodwormsProcEntry = bloodwormsAura != nullptr ? sSpellMgr->GetSpellProcEntry(bloodwormsAura->GetId()) : nullptr;
+    for (Unit* target : struckTargets)
+    {
+        if (target->IsAlive() == true)
+        {
+            if (frostFeverChance > 0 && roll_chance_i(frostFeverChance) == true)
+                player->CastSpell(target, EQ_SPELL_ID_DK_FROST_FEVER, true);
+            if (bloodPlagueChance > 0 && roll_chance_i(bloodPlagueChance) == true)
+                player->CastSpell(target, EQ_SPELL_ID_DK_BLOOD_PLAGUE, true);
+        }
+
+        // Same chance and the same internal cooldown as the talent's weapon hits (a spell striking further away than the Bloodworms reach does not roll or start it)
+        if (bloodwormsAura != nullptr && bloodwormsSummonInfo != nullptr && bloodwormsAura->IsRemoved() == false)
+        {
+            TimePoint now = std::chrono::steady_clock::now();
+            if (bloodwormsAura->IsProcOnCooldown(now) == true)
+                continue;
+            if (player->IsWithinDistInMap(target, bloodwormsSummonInfo->GetMaxRange(false, player)) == false)
+                continue;
+            if (roll_chance_i(int32(bloodwormsAura->GetSpellInfo()->ProcChance)) == false)
+                continue;
+            if (bloodwormsProcEntry != nullptr)
+                bloodwormsAura->AddProcCooldown(bloodwormsProcEntry, now);
+            AuraEffect* bloodwormsEffect = bloodwormsAura->GetEffect(EFFECT_0);
+            int32 bloodwormsBasePoints = bloodwormsEffect != nullptr ? bloodwormsEffect->GetAmount() : 0;
+            player->CastCustomSpell(target, EQ_SPELL_ID_DK_BLOODWORMS_SUMMON, &bloodwormsBasePoints, nullptr, nullptr, true, nullptr, bloodwormsEffect);
+        }
+    }
+
+    // Once per cast
+    if (scentOfBloodAura != nullptr)
+    {
+        player->CastSpell(player, EQ_SPELL_ID_DK_SCENT_OF_BLOOD_ENERGIZE, true);
+        player->RemoveAuraFromStack(EQ_SPELL_ID_DK_SCENT_OF_BLOOD_BUFF);
+    }
+    if (chillOfTheGraveEffect != nullptr)
+    {
+        int32 runicPower = chillOfTheGraveEffect->GetAmount();
+        player->CastCustomSpell(player, EQ_SPELL_ID_DK_CHILL_OF_THE_GRAVE_ENERGIZE, &runicPower, nullptr, nullptr, true, nullptr, chillOfTheGraveEffect);
+    }
+    if (dirgeEffect != nullptr)
+    {
+        int32 runicPower = dirgeEffect->GetAmount();
+        player->CastCustomSpell(player, EQ_SPELL_ID_DK_DIRGE_ENERGIZE, &runicPower, nullptr, nullptr, true, nullptr, dirgeEffect);
+    }
+
+    // Death Rune Mastery, like the core's spell_dk_death_rune: the conversion is tied to the talent's effect, whose timer turns the runes back, so the timer restarts.
+    // Where the core converts the runes the strike just spent, an EverQuest spell spends none, so it takes up to two Frost or Unholy runes that are recharging
+    if (deathRuneMasteryEffect != nullptr && spellInfo->CalcCastTime() >= EQ_DK_DEATH_RUNE_MASTERY_MIN_BASE_CAST_TIME_IN_MS
+        && roll_chance_i(int32(deathRuneMasteryEffect->GetSpellInfo()->ProcChance)) == true)
+    {
+        uint8 runesLeft = 2;
+        bool timerRestarted = false;
+        for (uint8 i = 0; i < MAX_RUNES && runesLeft > 0; ++i)
+        {
+            if (player->GetBaseRune(i) == RUNE_BLOOD || player->GetCurrentRune(i) == RUNE_DEATH || player->GetRuneCooldown(i) == 0)
+                continue;
+            if (timerRestarted == false)
+            {
+                deathRuneMasteryEffect->ResetPeriodic(true);
+                timerRestarted = true;
+            }
+            --runesLeft;
+            player->AddRuneByAuraEffect(i, RUNE_DEATH, deathRuneMasteryEffect);
+        }
+    }
+}
 
 void AddEverQuestTalentInteractionScripts()
 {

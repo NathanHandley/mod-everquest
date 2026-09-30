@@ -184,6 +184,22 @@ struct BuildValuesCachePosPointers;
 #define EQ_SPELL_ID_PRIEST_MIND_MELT_RANK1          14910
 #define EQ_SPELL_ID_PRIEST_IMPROVED_VAMPIRIC_EMBRACE_RANK1  27839
 #define EQ_SPELL_ID_PRIEST_IMPROVED_FLASH_HEAL_RANK1        63504
+#define EQ_SPELL_ID_DK_SCENT_OF_BLOOD_BUFF          50421 // The charges the Scent of Blood talent grants
+#define EQ_SPELL_ID_DK_SCENT_OF_BLOOD_ENERGIZE      50422 // 10 runic power
+#define EQ_SPELL_ID_DK_DEATH_RUNE_MASTERY_RANK1     49467
+#define EQ_SPELL_ID_DK_BLOODWORMS_RANK1             49027
+#define EQ_SPELL_ID_DK_BLOODWORMS_SUMMON            50452
+#define EQ_SPELL_ID_DK_IMPROVED_ICY_TOUCH_RANK1     49175
+#define EQ_SPELL_ID_DK_FROST_FEVER                  55095
+#define EQ_SPELL_ID_DK_CHILL_OF_THE_GRAVE_RANK1     49149
+#define EQ_SPELL_ID_DK_CHILL_OF_THE_GRAVE_ENERGIZE  50480
+#define EQ_SPELL_ID_DK_VIRULENCE_RANK1              48962
+#define EQ_SPELL_ID_DK_BLOOD_PLAGUE                 55078
+#define EQ_SPELL_ID_DK_MORBIDITY_RANK1              48963
+#define EQ_SPELL_ID_DK_DIRGE_RANK1                  49223
+#define EQ_SPELL_ID_DK_DIRGE_ENERGIZE               51206
+#define EQ_DK_DEATH_RUNE_MASTERY_MIN_BASE_CAST_TIME_IN_MS   2000    // EverQuest Fire spells need at least this base cast time to roll Death Rune Mastery
+#define EQ_DK_DISEASE_CHANCE_PER_TALENT_RANK        33      // Improved Icy Touch and Virulence, per rank (a full three ranks is always 100)
 
 #define EQ_SPELLDUMMYTYPE_BINDSELF                  1
 #define EQ_SPELLDUMMYTYPE_BINDANY                   2
@@ -1936,6 +1952,7 @@ public:
     unordered_map<uint32, EverQuestSpell> SpellDataBySpellID;
     unordered_set<uint32> BardSongTickSpellIDs;
     unordered_set<uint32> BardSongEffectSpellIDs;
+    vector<uint32> GateSpellIDs; // Every converted spell that gates to the EQ bind point, built once at startup, read-only after
     unordered_set<uint32> MovementCastSnareSpellIDs;
     unordered_map<uint64, EverQuestIllusionCharacter> IllusionCharactersByRaceAndGenderKey;
     unordered_map<uint64, uint32> IllusionNativeItemDisplayIDsByLookupKey; // (item display, ChrRaceID, gender) - that race's native armor display, loaded once at startup, read-only after
@@ -2311,6 +2328,7 @@ public:
     bool HandleClassAuraToggleOnCheckCast(Player* player, Spell* spell, SpellCastResult& result);
     void HandleClassAuraShamanWarspiritRemove(Unit* unit, Aura* aura);
     void HandleClassAuraShamanWarspiritApply(Player* player, Aura* aura);
+    void HandleEQDeathKnightTalentsOnSpellCast(Player* player, Spell* spell);
     bool IsClassAuraShadowKnightFocusSpell(SpellInfo const* spellInfo);
     bool IsClassAuraShadowKnightFocusActiveForPlayer(Player* player);
     bool IsClassAuraShadowKnightFocusStockSpell(Spell* spell, SpellInfo const* spellInfo);

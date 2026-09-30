@@ -420,6 +420,10 @@ public:
         if (caster != nullptr && caster->IsPlayer() == true)
             EverQuest->HandleClassAuraSpellCast(caster->ToPlayer(), spell);
 
+        // Death Knight talents that also reach EverQuest spells (runic power, runes, diseases and Bloodworms)
+        if (caster != nullptr && caster->IsPlayer() == true)
+            EverQuest->HandleEQDeathKnightTalentsOnSpellCast(caster->ToPlayer(), spell);
+
         // Verify it's an EQ spell that is mapped
         if (spellInfo == nullptr)
             return;

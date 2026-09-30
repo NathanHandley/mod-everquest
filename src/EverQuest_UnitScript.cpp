@@ -490,6 +490,11 @@ public:
             if (soulSiphonPercent > 0)
                 damage += (damage * uint32(soulSiphonPercent)) / 100;
 
+            // Death Knight "Morbidity" boosts the periodic ticks of EverQuest lifetap spells too (the heal follows the damage)
+            int32 morbidityPercent = GetMorbidityDamagePercent(target, attacker, spellInfo);
+            if (morbidityPercent > 0)
+                damage += (damage * uint32(morbidityPercent)) / 100;
+
             // Priest "Mind Melt" lets EverQuest Holy and Shadow damage over time spells critically tick (priest talents align to Holy, the Cleric school, and Shadow).  A family 0 spell can never satisfy the aura that normally enables
             // periodic crits, so the roll happens here (the spell school's crit + the talent bonus).  Spells that can not crit (damage a caster deals to itself) never roll
             if ((spellInfo->SchoolMask & (SPELL_SCHOOL_MASK_HOLY | SPELL_SCHOOL_MASK_SHADOW)) != 0 && spellInfo->HasAttribute(SPELL_ATTR2_CANT_CRIT) == false)
@@ -601,6 +606,18 @@ public:
         return modPercent;
     }
 
+    // Death Knight "Morbidity" raises Death Coil's damage and healing.  An EverQuest lifetap is the closest match, and its heal is taken from the damage, so raising
+    // the damage raises both
+    int32 GetMorbidityDamagePercent(Unit* target, Unit* attacker, SpellInfo const* spellInfo)
+    {
+        if (target == attacker || EverQuestSpellTalentAlignment::DoesSpellInfoLeech(spellInfo) == false)
+            return 0;
+        AuraEffect const* morbidityEffect = attacker->GetAuraEffectOfRankedSpell(EQ_SPELL_ID_DK_MORBIDITY_RANK1, EFFECT_0);
+        if (morbidityEffect == nullptr)
+            return 0;
+        return morbidityEffect->GetAmount();
+    }
+
     int32 GetDeathsEmbraceDamagePercent(Unit* target, Unit* attacker, SpellInfo const* spellInfo)
     {
         if ((spellInfo->SchoolMask & SPELL_SCHOOL_MASK_SHADOW) == 0)
@@ -678,6 +695,11 @@ public:
         int32 soulSiphonPercent = GetSoulSiphonDamagePercent(target, attacker, spellInfo);
         if (soulSiphonPercent > 0)
             damage += (damage * soulSiphonPercent) / 100;
+
+        // Death Knight "Morbidity"
+        int32 morbidityPercent = GetMorbidityDamagePercent(target, attacker, spellInfo);
+        if (morbidityPercent > 0)
+            damage += (damage * morbidityPercent) / 100;
     }
 
     void ModifyMeleeDamage(Unit* target, Unit* attacker, uint32& damage) override
