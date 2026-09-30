@@ -88,6 +88,20 @@ public:
         return true;
     }
 
+    void OnPlayerAfterUpdateMaxHealth(Player* /*player*/, float& value) override
+    {
+        // EQ items can carry negative HP, and the core casts this straight to uint32, so a total below zero would wrap to ~4 billion max health
+        if (value < 1.0f)
+            value = 1.0f;
+    }
+
+    void OnPlayerAfterUpdateMaxPower(Player* /*player*/, Powers& /*power*/, float& value) override
+    {
+        // Same wrap as health, reachable by classes with no base mana wearing negative mana items (all powers are active for all classes)
+        if (value < 0.0f)
+            value = 0.0f;
+    }
+
     void OnPlayerKilledByCreature(Creature* killer, Player* killed) override
     {
         if (EverQuest->IsEnabled == false)
