@@ -61,12 +61,15 @@ class EverQuest_ResistDiffSpellScript : public SpellScript
         else if (hitChanceMod < -100)
             hitChanceMod = -100;
         caster->CastCustomSpell(EverQuest->ConfigSystemResistAdjustmentSpellID, SPELLVALUE_BASE_POINT0, hitChanceMod, caster, true);
+        _addedResistAdjustment = true;
     }
 
     void HandleAfterCast()
     {
-        if (EverQuest->ConfigSystemResistAdjustmentSpellID == 0)
+        // Only take off the adjustment this cast put on, since another cast still in progress may own the one that's there
+        if (_addedResistAdjustment == false || EverQuest->ConfigSystemResistAdjustmentSpellID == 0)
             return;
+        _addedResistAdjustment = false;
         Unit* caster = GetCaster();
         if (caster == nullptr)
             return;
@@ -95,7 +98,8 @@ class EverQuest_ResistDiffSpellScript : public SpellScript
 
         for (TargetInfo& targetInfo : *spell->GetUniqueTargetInfo())
         {
-            if (targetInfo.missCondition != SPELL_MISS_NONE)
+            // Skip targets that already missed, and ones the mod already dropped from the spell
+            if (targetInfo.missCondition != SPELL_MISS_NONE || targetInfo.processed == true || targetInfo.effectMask == 0)
                 continue;
             Unit* target = ObjectAccessor::GetUnit(*caster, targetInfo.targetGUID);
             if (target == nullptr || caster->IsFriendlyTo(target) == true)
@@ -104,6 +108,8 @@ class EverQuest_ResistDiffSpellScript : public SpellScript
                 targetInfo.missCondition = SPELL_MISS_RESIST;
         }
     }
+
+    bool _addedResistAdjustment = false;
 
     void Register() override
     {

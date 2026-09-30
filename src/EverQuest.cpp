@@ -6004,9 +6004,8 @@ bool EverQuestMod::IsUnitInEQResistContext(Unit* unit)
     return HasCreatureDataForCreatureTemplateID(creature->GetEntry());
 }
 
-// The resist part of TAKP Mob::CheckResistSpell: a 0-200 roll against the target's resist of the spell's EQ resist type.  The level difference and
-// ResistDiff parts are left out on purpose, since the core's own spell hit roll already carries those (see EverQuest_ResistDiffSpellScript).
-// Returns true when the spell is fully resisted
+// The resist part of TAKP Mob::CheckResistSpell: a 0-200 roll against the target's resist of the spell's EQ resist type plus the spell's ResistDiff.
+// The level difference part is left out, since the core's own spell hit roll already carries it.  Returns true when the spell is fully resisted
 bool EverQuestMod::RollEQResist(Unit* caster, Unit* target, SpellInfo const* spellInfo)
 {
     if (ConfigSpellEQResistRollEnabled == false || caster == nullptr || target == nullptr || spellInfo == nullptr || caster == target)
@@ -6015,6 +6014,12 @@ bool EverQuestMod::RollEQResist(Unit* caster, Unit* target, SpellInfo const* spe
         return false;
     if (IsUnitInEQResistContext(caster) == false || IsUnitInEQResistContext(target) == false)
         return false;
+
+    // The core already rolled the target's resistance for this spell (see WorldObject::MagicSpellHitResult), so a second resist roll is never made
+    if (spellInfo->IsPositive() == false && spellInfo->HasAttribute(SPELL_ATTR4_NO_CAST_LOG) == false && spellInfo->HasAttribute(SPELL_ATTR0_CU_BINARY_SPELL) == true
+        && (spellInfo->GetSchoolMask() & (SPELL_SCHOOL_MASK_NORMAL | SPELL_SCHOOL_MASK_HOLY)) == 0)
+        return false;
+
     EverQuestSpell const& spellData = GetSpellDataForSpellID(spellInfo->Id);
 
     // The EQ resist type decides the resist, not the spell's school (a school override doesn't change what resists it)
@@ -6029,8 +6034,9 @@ bool EverQuestMod::RollEQResist(Unit* caster, Unit* target, SpellInfo const* spe
         default: return false;
     }
 
-    // Read signed, since resist debuffs can push it below zero.  TAKP still resists 1 roll in 201 at no resist, but that floor is already in the core's hit roll
-    int32 resistChance = target->GetInt32Value(static_cast<uint16>(UNIT_FIELD_RESISTANCES) + resistSchool);
+    // Read signed, since resist debuffs can push it below zero.  A negative ResistDiff makes the spell harder to resist (dragon breaths, lifetaps, the -1000
+    // "near unresistable" line).  TAKP still resists 1 roll in 201 at no resist, but that floor is already in the core's hit roll
+    int32 resistChance = std::max<int32>(0, target->GetInt32Value(static_cast<uint16>(UNIT_FIELD_RESISTANCES) + resistSchool)) + spellData.ResistDiff;
     if (resistChance <= 0)
         return false;
 

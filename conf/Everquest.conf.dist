@@ -461,9 +461,10 @@ EverQuest.Spells.BardFearDiminishingReturnsResetTimeInMS = 15000
 # 	EverQuest.Spells.EQResistRollEnabled
 #		When True, resistable EverQuest spells also roll against the target's resist of the spell's EQ
 #		resist type (Magic = Arcane, Fire, Cold = Frost, Poison = Nature, Disease = Shadow), like TAKP
-#		Mob::CheckResistSpell.  That makes roots, stuns, mez, fear, charm and debuffs resistable by
-#		resist gear and buffs.  Spells that TAKP lets partially resist (damage first) are only fully
-#		resisted on a deep roll.  Only between players and EverQuest creatures; WoW creatures are never
+#		Mob::CheckResistSpell, shifted by the spell's resist adjustment.  That makes roots, stuns, mez,
+#		fear, charm and debuffs resistable by resist gear and buffs.  Spells that TAKP lets partially
+#		resist (damage first) are only fully resisted on a deep roll.  Spells the core already rolls
+#		resistance for (most snares, slows and stat debuffs) keep that roll and don't get a second one.  Only between players and EverQuest creatures; WoW creatures are never
 #		part of it, as the caster or the target.  Also applies to the fear and blind break rolls
 #	Default: True
 #
