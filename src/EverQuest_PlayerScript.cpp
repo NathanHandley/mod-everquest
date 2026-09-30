@@ -209,7 +209,8 @@ public:
         const list<EverQuestQuestCompletionReputation>& questCompletionReputations = EverQuest->GetQuestCompletionReputationsForQuestTemplate(quest->GetQuestId());
         for (auto& completionReputation : questCompletionReputations)
         {
-            float repChange = player->CalculateReputationGain(REPUTATION_SOURCE_QUEST, quest->GetQuestLevel(), static_cast<float>(completionReputation.CompletionRewardValue), completionReputation.FactionID);
+            // Pass the player's own level instead of the quest's so a grey quest still pays full reputation (Rate.Reputation.LowLevel.Quest never applies)
+            float repChange = player->CalculateReputationGain(REPUTATION_SOURCE_QUEST, player->GetLevel(), static_cast<float>(completionReputation.CompletionRewardValue), completionReputation.FactionID);
 
             FactionEntry const* factionEntry = sFactionStore.LookupEntry(completionReputation.FactionID);
             if (factionEntry && repChange != 0)
