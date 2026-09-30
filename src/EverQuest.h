@@ -2122,6 +2122,7 @@ public:
     bool IsSpellAnEQWeaponPoisonProc(uint32 spellID);
     void LoadSpellData();
     void LoadBardSongEffectSpellIDs();
+    void LoadGateSpellIDs();
     const EverQuestSpell& GetSpellDataForSpellID(uint32 spellID);
     void LoadSpellMovementCastSnareData();
     bool IsMovementCastSpell(uint32 spellID);
@@ -2571,6 +2572,8 @@ public:
     std::string GetTetherAreaName(Player* player, uint32 areaID);
     void SendTetherAreaNameToPlayer(Player* player, uint8 tetherType, uint32 areaID, uint32 tetherAuraSpellID);
     void SendTetherLocationsToPlayer(Player* player, bool showChatMessage);
+    void SendBindAreaNameToPlayer(Player* player, bool hasBind, uint32 areaID);
+    void SendGateSpellIDsToPlayer(Player* player);
     void QueuePendingGateReturn(Player* player, uint8 tetherType, uint32 mapID, uint32 instanceID, float x, float y, float z, float orientation);
     void ClearPendingGateReturnForPlayer(ObjectGuid playerGUID);
     void ProcessPendingGateReturns();

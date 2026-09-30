@@ -4492,6 +4492,23 @@ void EverQuestMod::LoadBardSongEffectSpellIDs()
     }
 }
 
+void EverQuestMod::LoadGateSpellIDs()
+{
+    // Anything carrying the gate dummy in its first slot sends the caster to the EQ bind point, which covers the class spells and the item clickies alike
+    GateSpellIDs.clear();
+    for (uint32 spellID = ConfigSystemSpellDBCIDMin; spellID <= ConfigSystemSpellDBCIDMax && spellID < sSpellMgr->GetSpellInfoStoreSize(); ++spellID)
+    {
+        SpellInfo const* spellInfo = sSpellMgr->GetSpellInfo(spellID);
+        if (spellInfo == nullptr)
+            continue;
+        if (spellInfo->Effects[EFFECT_0].Effect != SPELL_EFFECT_DUMMY
+            && (spellInfo->Effects[EFFECT_0].Effect != SPELL_EFFECT_APPLY_AURA || spellInfo->Effects[EFFECT_0].ApplyAuraName != SPELL_AURA_DUMMY))
+            continue;
+        if (spellInfo->Effects[EFFECT_0].MiscValue == EQ_SPELLDUMMYTYPE_GATE)
+            GateSpellIDs.push_back(spellID);
+    }
+}
+
 const EverQuestSpell& EverQuestMod::GetSpellDataForSpellID(uint32 spellID)
 {
     if (SpellDataBySpellID.find(spellID) != SpellDataBySpellID.end())
@@ -13682,6 +13699,43 @@ void EverQuestMod::SendTetherAreaNameToPlayer(Player* player, uint8 tetherType, 
     }
 }
 
+void EverQuestMod::SendBindAreaNameToPlayer(Player* player, bool hasBind, uint32 areaID)
+{
+    if (player == nullptr || player->GetSession() == nullptr)
+        return;
+
+    // Labels the gate spell tooltips.  A bare "BIND" means there is no bind point in Norrath to gate to
+    std::string addonMessage = "EQTETHER\tBIND";
+    if (hasBind == true)
+        addonMessage = fmt::format("EQTETHER\tBIND\t{}", GetTetherAreaName(player, areaID));
+    WorldPacket data;
+    ChatHandler::BuildChatPacket(data, CHAT_MSG_SYSTEM, LANG_ADDON, nullptr, nullptr, addonMessage);
+    player->GetSession()->SendPacket(&data);
+}
+
+void EverQuestMod::SendGateSpellIDsToPlayer(Player* player)
+{
+    if (player == nullptr || player->GetSession() == nullptr)
+        return;
+
+    // Spell.dbc can't tell the addon which spells gate, so the list goes over in comma separated pieces that stay well under the client's addon message length
+    std::string spellIDList;
+    for (size_t i = 0; i < GateSpellIDs.size(); ++i)
+    {
+        if (spellIDList.empty() == false)
+            spellIDList += ",";
+        spellIDList += std::to_string(GateSpellIDs[i]);
+        if (spellIDList.length() >= 200 || i + 1 == GateSpellIDs.size())
+        {
+            std::string addonMessage = fmt::format("EQTETHER\tGATESPELLS\t{}", spellIDList);
+            WorldPacket data;
+            ChatHandler::BuildChatPacket(data, CHAT_MSG_SYSTEM, LANG_ADDON, nullptr, nullptr, addonMessage);
+            player->GetSession()->SendPacket(&data);
+            spellIDList.clear();
+        }
+    }
+}
+
 void EverQuestMod::SendTetherLocationsToPlayer(Player* player, bool showChatMessage)
 {
     if (player == nullptr || player->GetSession() == nullptr)
@@ -13705,29 +13759,32 @@ void EverQuestMod::SendTetherLocationsToPlayer(Player* player, bool showChatMess
             hasHearthstoneTether = true;
     }
 
-    // The addon asks on every loading screen, so the database is only asked when there is a tether to look up
+    // The bind point labels the gate spell tooltips, so the row is always read, not just when a tether is up
     uint32 gateAreaID = 0;
     uint32 hearthstoneAreaID = 0;
-    if (hasGateTether == true || hasHearthstoneTether == true)
+    uint32 bindAreaID = 0;
+    bool hasGateLocation = false;
+    bool hasHearthstoneLocation = false;
+    bool hasBind = false;
+    QueryResult queryResult = CharacterDatabase.Query("SELECT lastgateMapId, lastgateZoneId, lasthearthMapId, lasthearthZoneId, homebindMapId, homebindZoneId FROM mod_everquest_character_settings WHERE guid = {}", player->GetGUID().GetCounter());
+    if (queryResult)
     {
-        bool hasGateLocation = false;
-        bool hasHearthstoneLocation = false;
-        QueryResult queryResult = CharacterDatabase.Query("SELECT lastgateMapId, lastgateZoneId, lasthearthMapId, lasthearthZoneId FROM mod_everquest_character_settings WHERE guid = {}", player->GetGUID().GetCounter());
-        if (queryResult)
-        {
-            Field* fields = queryResult->Fetch();
-            hasGateLocation = fields[0].IsNull() == false;
-            gateAreaID = fields[1].IsNull() == true ? 0 : fields[1].Get<uint32>();
-            hasHearthstoneLocation = fields[2].IsNull() == false;
-            hearthstoneAreaID = fields[3].IsNull() == true ? 0 : fields[3].Get<uint32>();
-        }
-        hasGateTether = hasGateTether && hasGateLocation;
-        hasHearthstoneTether = hasHearthstoneTether && hasHearthstoneLocation;
+        Field* fields = queryResult->Fetch();
+        hasGateLocation = fields[0].IsNull() == false;
+        gateAreaID = fields[1].IsNull() == true ? 0 : fields[1].Get<uint32>();
+        hasHearthstoneLocation = fields[2].IsNull() == false;
+        hearthstoneAreaID = fields[3].IsNull() == true ? 0 : fields[3].Get<uint32>();
+        hasBind = fields[4].IsNull() == false;
+        bindAreaID = fields[5].IsNull() == true ? 0 : fields[5].Get<uint32>();
     }
+    hasGateTether = hasGateTether && hasGateLocation;
+    hasHearthstoneTether = hasHearthstoneTether && hasHearthstoneLocation;
     if (hasGateTether == true)
         SendTetherAreaNameToPlayer(player, EQ_TETHER_TYPE_GATE, gateAreaID, 0);
     if (hasHearthstoneTether == true)
         SendTetherAreaNameToPlayer(player, EQ_TETHER_TYPE_HEARTHSTONE, hearthstoneAreaID, 0);
+    SendGateSpellIDsToPlayer(player);
+    SendBindAreaNameToPlayer(player, hasBind, bindAreaID);
 
     if (showChatMessage == false)
         return;
@@ -13740,6 +13797,10 @@ void EverQuestMod::SendTetherLocationsToPlayer(Player* player, bool showChatMess
         chatHandler.PSendSysMessage("Your hearthstone tether returns you to |cff4CFF00{}|r.", GetTetherAreaName(player, hearthstoneAreaID));
     else
         chatHandler.PSendSysMessage("You have no hearthstone tether.");
+    if (hasBind == true)
+        chatHandler.PSendSysMessage("Gate spells send you to your bind point at |cff4CFF00{}|r.", GetTetherAreaName(player, bindAreaID));
+    else
+        chatHandler.PSendSysMessage("You have no bind point in Norrath.");
 }
 
 void EverQuestMod::QueuePendingGateReturn(Player* player, uint8 tetherType, uint32 mapID, uint32 instanceID, float x, float y, float z, float orientation)
@@ -13919,6 +13980,11 @@ void EverQuestMod::SetNewBindHome(Player* player, uint32 playerGUIDCounter, int 
 
     // Send a message to the player
     ChatHandler(player->GetSession()).PSendSysMessage("You feel yourself bind to the area.");
+
+    // The write above is queued, so the area goes to the client addon from here rather than being read back.  A character still being created
+    // has no addon listening yet, and picks the bind up from the sync on entering the world
+    if (player->IsInWorld() == true)
+        SendBindAreaNameToPlayer(player, true, zoneID);
 }
 
 void EverQuestMod::DeletePlayerBindHome(ObjectGuid guid)
