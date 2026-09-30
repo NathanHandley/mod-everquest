@@ -27,17 +27,19 @@ public:
     EverQuest_GameEventScript() : GameEventScript("EverQuest_GameEventScript") {}
 
     // Runs on start event
-    void OnStart(uint16 /*EventID*/) override
+    void OnStart(uint16 EventID) override
     {
         if (EverQuest->IsEnabled == false)
             return;
+        EverQuest->SpawnGameEventCreaturesIntoLiveInstances(int16(EventID));
     }
 
     // Runs on stop event
-    void OnStop(uint16 /*EventID*/) override
+    void OnStop(uint16 EventID) override
     {
         if (EverQuest->IsEnabled == false)
             return;
+        EverQuest->SpawnGameEventCreaturesIntoLiveInstances(-int16(EventID));
     }
 };
 

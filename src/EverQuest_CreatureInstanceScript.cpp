@@ -446,7 +446,7 @@ public:
             events.Update(diff);
 
             // A gossip or quest reaction walk owns this creature's movement until it arrives, so the waypoint and roaming logic has to stay out of the way or the two generators fight over the spline
-            if (EverQuest->IsCreatureInReactionWalk(me->GetGUID()) == true)
+            if (EverQuest->IsCreatureInReactionWalk(me) == true)
             {
                 events.CancelEvent(EVENT_PAUSE_DONE);
                 SmartAI::UpdateAI(diff);

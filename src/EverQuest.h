@@ -54,7 +54,7 @@ class ByteBuffer;
 struct AreaTrigger;
 struct BuildValuesCachePosPointers;
 
-#define EQ_MOD_VERSION                              121
+#define EQ_MOD_VERSION                              122
 
 #define EQ_MOVEMENT_CAST_SNARE_DURATION_BUFFER_IN_MS 2000 // How much longer than the remaining cast time the casting slow is given, so a pushed-back cast keeps it
 
@@ -598,6 +598,7 @@ public:
     uint32 TriggerMinLevel = 0;
     uint32 TriggerMaxLevel = 0;
     uint32 RespawnTimeSec = 0;
+    bool RespawnUsesRaidLockout = false; // The row asked for the raid boss respawn window, which inside a raid instance means the instance lockout
     unordered_map<uint32, vector<ObjectGuid::LowType>> TargetSpawnIDsByMapID; // Spawn rows differ between the open world zone and its raid instance copy, so respawn targets resolve per map
 };
 
@@ -635,6 +636,7 @@ public:
     bool DespawnNearestToPositionOnly = false;
     bool AddToHateList = false;
     uint32 RespawnTimeSec = 0;
+    bool RespawnUsesRaidLockout = false;
     vector<ObjectGuid::LowType> RespawnTargetSpawnIDs;
     ObjectGuid KillerGUID;
     ObjectGuid MoverGUID;
@@ -1900,7 +1902,7 @@ public:
     unordered_map<uint64, vector<EverQuestPendingKillSpawnAction>> PendingKillSpawnActionsByMapInstanceKey;
     std::mutex PendingArrivalActionsMutex;
     unordered_map<uint64, vector<EverQuestPendingArrivalAction>> PendingArrivalActionsByMapInstanceKey;
-    std::set<ObjectGuid> ReactionWalkCreatureGUIDs;
+    std::set<std::pair<uint64, ObjectGuid>> ReactionWalkCreatureKeys; // Map instance key + creature GUID, since creature GUID counters are per map and repeat between a zone and its instanced copies
     std::atomic<uint32> ReactionWalkCreatureCount{ 0 };
     std::mutex ReactionSpawnedCreaturesMutex;
     unordered_map<uint64, vector<ObjectGuid::LowType>> ReactionSpawnedCreatureSpawnIDsByMapInstanceKey;
@@ -2010,6 +2012,7 @@ public:
     bool ShouldDespawnCreatureDueToSpawnRestrictions(Creature* creature);
     ObjectGuid::LowType RollCycleSpawnCreatureGUID(const EverQuestCycleSpawnGroup& cycleSpawnGroup, uint32 excludedSpawnPointID, Map* map);
     void ProcessCycleSpawnForCreatureDeath(Creature* deadCreature);
+    uint32 GetRespawnTimeSecForSpawnOnMap(Map* map, ObjectGuid::LowType spawnID, uint32 respawnTimeSec, bool usesRaidLockout);
     void ApplyRaidBossRespawnVariance(Creature* deadCreature);
     void BindRaidInstanceOnCreatureKill(Creature* deadCreature, Unit* killer);
     void UpdateCycleSpawns(Map* map, uint32 diff);
@@ -2054,7 +2057,7 @@ public:
     void SpawnReactionGameObject(Creature* summoner, uint32 gameObjectEntryID, float x, float y, float z, uint32 lifetimeSec);
     bool DoesPlayerMeetGossipRequirements(Player* player, Creature* creature, const EverQuestGossipReaction& gossipReaction);
     void UpdatePendingArrivalActions(Map* map, uint32 diff);
-    bool IsCreatureInReactionWalk(ObjectGuid creatureGUID);
+    bool IsCreatureInReactionWalk(Creature* creature);
     void SpeakReactionText(Creature* creature, uint8 actionType, const string& text, Player* listener);
     bool HasAliveCreatureWithEntryInMap(Map* map, uint32 creatureTemplateID, Creature* ignoreCreature);
     void ExecuteKillSpawnAction(Map* map, EverQuestPendingKillSpawnAction& action);
@@ -2494,6 +2497,8 @@ public:
     uint32 GetLastInstanceDungeonIDForPlayer(ObjectGuid playerGUID, uint32 dungeonMapID);
     void TryRestoreInstanceDungeonBindForPlayer(Player* player, uint32 dungeonMapID);
     bool IsCreatureBlockedFromInstanceMap(uint32 creatureTemplateID, Map* map);
+    void SpawnGameEventCreaturesIntoLiveInstances(int16 eventID);
+    void SpawnGameEventCreatureIntoInstanceMap(Map* map, ObjectGuid::LowType spawnID, CreatureData const* creatureData);
     bool TryZoneLineIntoInstanceDungeon(Player* player, AreaTrigger const* trigger);
     void SendInstanceDungeonEntryMessageToPlayer(Player* player);
     void RestoreInstanceValidityOutsideInstances(Player* player);

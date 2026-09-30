@@ -813,9 +813,25 @@ void EverQuestMod::ProcessCycleSpawnForCreatureDeath(Creature* deadCreature)
     EverQuestPendingKillSpawnAction action;
     action.ActionType = EQ_KILLSPAWN_ACTION_RESPAWNTARGET;
     action.RespawnTimeSec = cycleSpawnGroup.CycleRespawnTimeSec;
+    action.RespawnUsesRaidLockout = true;
     action.RespawnTargetSpawnIDs.push_back(nextCreatureGUID);
     action.RemainingMS = 1;
     EnqueuePendingKillSpawnAction(deadCreature->GetMap(), action);
+}
+
+uint32 EverQuestMod::GetRespawnTimeSecForSpawnOnMap(Map* map, ObjectGuid::LowType spawnID, uint32 respawnTimeSec, bool usesRaidLockout)
+{
+    // Inside a raid instance a named raid creature is generated with the lockout as its respawn time, and a normal respawn (a cycle, or a kill row asking for the raid boss window) must
+    // not bring it back sooner.  An immediate respawn (0) is an encounter reset rather than a respawn, so it is left alone
+    if (usesRaidLockout == false || respawnTimeSec == 0 || map == nullptr || IsMapInstanceRaidLow(map->GetId()) == false)
+        return respawnTimeSec;
+    CreatureData const* creatureData = sObjectMgr->GetCreatureData(spawnID);
+    if (creatureData == nullptr || HasCreatureDataForCreatureTemplateID(creatureData->id) == false)
+        return respawnTimeSec;
+    uint32 difficultyType = GetCreatureDataForCreatureTemplateID(creatureData->id).DifficultyType;
+    if (difficultyType != EQ_CREATURE_DIFFICULTY_RAIDBOSS && difficultyType != EQ_CREATURE_DIFFICULTY_RAIDMINIBOSS)
+        return respawnTimeSec;
+    return creatureData->spawntimesecs > 0 ? creatureData->spawntimesecs : respawnTimeSec;
 }
 
 void EverQuestMod::ApplyRaidBossRespawnVariance(Creature* deadCreature)
@@ -951,7 +967,7 @@ void EverQuestMod::UpdateCycleSpawns(Map* map, uint32 diff)
         ObjectGuid::LowType nextCreatureGUID = RollCycleSpawnCreatureGUID(cycleSpawnGroup, 0, map);
         if (nextCreatureGUID == 0)
             continue;
-        time_t respawnTime = nowTime + (time_t)cycleSpawnGroup.CycleRespawnTimeSec;
+        time_t respawnTime = nowTime + (time_t)GetRespawnTimeSecForSpawnOnMap(map, nextCreatureGUID, cycleSpawnGroup.CycleRespawnTimeSec, true);
         map->SaveCreatureRespawnTime(nextCreatureGUID, respawnTime);
     }
 }
@@ -1038,7 +1054,7 @@ void EverQuestMod::LoadCreatureKillSpawnData()
     OocTimerKillSpawnDurationMSByCreatureTemplateID.clear();
     SelfDespawnOocTimerKeys.clear();
 
-    QueryResult queryResult = WorldDatabase.Query("SELECT ID, TriggerCreatureTemplateID, TriggerTypeID, MapID, ActionType, TargetCreatureTemplateID, Chance, AltGroup, AltID, AltWeight, SpawnAtCorpse, PositionX, PositionY, PositionZ, Orientation, DelayMinMS, DelayMaxMS, OnlyIfNotAliveCreatureTemplateID, RequireDeadCreatureTemplateIDs, RequireAliveCreatureTemplateIDs, AddToHateList, TriggerMinLevel, TriggerMaxLevel, RespawnTimeSec FROM mod_everquest_creature_kill_spawn;");
+    QueryResult queryResult = WorldDatabase.Query("SELECT ID, TriggerCreatureTemplateID, TriggerTypeID, MapID, ActionType, TargetCreatureTemplateID, Chance, AltGroup, AltID, AltWeight, SpawnAtCorpse, PositionX, PositionY, PositionZ, Orientation, DelayMinMS, DelayMaxMS, OnlyIfNotAliveCreatureTemplateID, RequireDeadCreatureTemplateIDs, RequireAliveCreatureTemplateIDs, AddToHateList, TriggerMinLevel, TriggerMaxLevel, RespawnTimeSec, RespawnUsesRaidLockout FROM mod_everquest_creature_kill_spawn;");
     if (queryResult)
     {
         do
@@ -1073,6 +1089,7 @@ void EverQuestMod::LoadCreatureKillSpawnData()
             killSpawn.TriggerMinLevel = fields[21].Get<uint32>();
             killSpawn.TriggerMaxLevel = fields[22].Get<uint32>();
             killSpawn.RespawnTimeSec = fields[23].Get<uint32>();
+            killSpawn.RespawnUsesRaidLockout = fields[24].Get<uint8>() != 0;
             if (killSpawn.TriggerTypeID == EQ_KILLSPAWN_TRIGGER_EVADE)
                 EvadeKillSpawnTriggerCreatureTemplateIDs.insert(killSpawn.TriggerCreatureTemplateID);
             else if (killSpawn.TriggerTypeID == EQ_KILLSPAWN_TRIGGER_OOCTIMER)
@@ -1947,6 +1964,7 @@ void EverQuestMod::ProcessKillSpawnsForCreatureEvent(Creature* eventCreature, Un
         action.OnlyIfNotAliveCreatureTemplateID = killSpawn.OnlyIfNotAliveCreatureTemplateID;
         action.AddToHateList = killSpawn.AddToHateList;
         action.RespawnTimeSec = killSpawn.RespawnTimeSec;
+        action.RespawnUsesRaidLockout = killSpawn.RespawnUsesRaidLockout;
         if (otherUnit != nullptr)
             action.KillerGUID = otherUnit->GetGUID();
         if (killSpawn.ActionType == EQ_KILLSPAWN_ACTION_RESPAWNSELF)
@@ -2106,6 +2124,8 @@ void EverQuestMod::ExecuteKillSpawnAction(Map* map, EverQuestPendingKillSpawnAct
         {
             for (ObjectGuid::LowType targetSpawnID : action.RespawnTargetSpawnIDs)
             {
+                uint32 respawnTimeSec = GetRespawnTimeSecForSpawnOnMap(map, targetSpawnID, action.RespawnTimeSec, action.RespawnUsesRaidLockout);
+
                 // Spawns stay in the world as dead placeholders while despawned, so work with the object directly if one is loaded
                 bool spawnHandledInWorld = false;
                 vector<Creature*> respawnCandidates;
@@ -2122,11 +2142,11 @@ void EverQuestMod::ExecuteKillSpawnAction(Map* map, EverQuestPendingKillSpawnAct
                     spawnHandledInWorld = true;
 
                     // No respawn time means to bring it back now, otherwise reschedule the spawn point (persists to the DB)
-                    if (action.RespawnTimeSec == 0)
+                    if (respawnTimeSec == 0)
                         respawnCandidate->Respawn(true);
                     else
                     {
-                        respawnCandidate->SetRespawnTime(action.RespawnTimeSec);
+                        respawnCandidate->SetRespawnTime(respawnTimeSec);
                         respawnCandidate->SaveRespawnTime();
                     }
                 }
@@ -2134,7 +2154,7 @@ void EverQuestMod::ExecuteKillSpawnAction(Map* map, EverQuestPendingKillSpawnAct
                 // Dynamic (non-compat) spawns are destroyed while despawned, so reschedule through the map's respawn queue instead.  ProcessRespawns will recreate the creature when appropriate (I hope...)
                 if (spawnHandledInWorld == false)
                 {
-                    time_t respawnTime = GameTime::GetGameTime().count() + (time_t)action.RespawnTimeSec;
+                    time_t respawnTime = GameTime::GetGameTime().count() + (time_t)respawnTimeSec;
                     map->SaveCreatureRespawnTime(targetSpawnID, respawnTime);
                 }
             }
@@ -2315,13 +2335,14 @@ void EverQuestMod::SpeakReactionText(Creature* creature, uint8 actionType, const
         creature->Say(formattedText, LANG_UNIVERSAL, listener);
 }
 
-bool EverQuestMod::IsCreatureInReactionWalk(ObjectGuid creatureGUID)
+bool EverQuestMod::IsCreatureInReactionWalk(Creature* creature)
 {
     // This runs from the per-creature AI tick, so the common case of nothing walking must not take the lock at all
-    if (ReactionWalkCreatureCount.load() == 0)
+    if (creature == nullptr || ReactionWalkCreatureCount.load() == 0)
         return false;
+    uint64 mapInstanceKey = GetMapInstanceKey(creature->GetMap());
     std::lock_guard<std::mutex> lock(PendingArrivalActionsMutex);
-    return ReactionWalkCreatureGUIDs.find(creatureGUID) != ReactionWalkCreatureGUIDs.end();
+    return ReactionWalkCreatureKeys.find(std::make_pair(mapInstanceKey, creature->GetGUID())) != ReactionWalkCreatureKeys.end();
 }
 
 float EverQuestMod::GetTerrainSnappedZ(Creature* creature, float priorX, float priorY, float priorZ, float initialTargetX, float initialTargetY, float initialTargetZ,
@@ -2587,7 +2608,7 @@ bool EverQuestMod::StartReactionWalk(Creature* creature, float x, float y, float
                     savedNpcFlags = watchers[i - 1].SavedNpcFlags;
                 watchers.erase(watchers.begin() + (i - 1));
             }
-        ReactionWalkCreatureGUIDs.erase(creature->GetGUID());
+        ReactionWalkCreatureKeys.erase(std::make_pair(GetMapInstanceKey(creature->GetMap()), creature->GetGUID()));
 
         EverQuestPendingArrivalAction watcher;
         watcher.MoverGUID = creature->GetGUID();
@@ -2603,8 +2624,8 @@ bool EverQuestMod::StartReactionWalk(Creature* creature, float x, float y, float
         watcher.StallCheckRemainingMS = EQ_REACTION_WALK_STALL_CHECK_MS;
         watcher.ActionsOnArrival = actionsOnArrival;
         watchers.push_back(watcher);
-        ReactionWalkCreatureGUIDs.insert(creature->GetGUID());
-        ReactionWalkCreatureCount.store((uint32)ReactionWalkCreatureGUIDs.size());
+        ReactionWalkCreatureKeys.insert(std::make_pair(GetMapInstanceKey(creature->GetMap()), creature->GetGUID()));
+        ReactionWalkCreatureCount.store((uint32)ReactionWalkCreatureKeys.size());
     }
     creature->ReplaceAllNpcFlags(UNIT_NPC_FLAG_NONE);
 
@@ -2708,7 +2729,7 @@ bool EverQuestMod::StartReactionGridWalk(Creature* creature, uint32 pathListID, 
                     savedNpcFlags = watchers[i - 1].SavedNpcFlags;
                 watchers.erase(watchers.begin() + (i - 1));
             }
-        ReactionWalkCreatureGUIDs.erase(creature->GetGUID());
+        ReactionWalkCreatureKeys.erase(std::make_pair(GetMapInstanceKey(creature->GetMap()), creature->GetGUID()));
 
         EverQuestPendingArrivalAction watcher;
         watcher.MoverGUID = creature->GetGUID();
@@ -2720,8 +2741,8 @@ bool EverQuestMod::StartReactionGridWalk(Creature* creature, uint32 pathListID, 
         watcher.HasSavedNpcFlags = true;
         watcher.ActionsOnArrival = actionsOnArrival;
         watchers.push_back(watcher);
-        ReactionWalkCreatureGUIDs.insert(creature->GetGUID());
-        ReactionWalkCreatureCount.store((uint32)ReactionWalkCreatureGUIDs.size());
+        ReactionWalkCreatureKeys.insert(std::make_pair(GetMapInstanceKey(creature->GetMap()), creature->GetGUID()));
+        ReactionWalkCreatureCount.store((uint32)ReactionWalkCreatureKeys.size());
     }
     creature->ReplaceAllNpcFlags(UNIT_NPC_FLAG_NONE);
 
@@ -2779,8 +2800,8 @@ void EverQuestMod::UpdatePendingArrivalActions(Map* map, uint32 diff)
             if (hasArrived == false)
                 LOG_DEBUG("module.EverQuest", "EverQuestMod::UpdatePendingArrivalActions dropping {} queued action(s) for creature {}, which {} after {} ms", (uint32)watcher.ActionsOnArrival.size(), mover != nullptr ? mover->GetEntry() : 0, moverIsGone == true ? "left the world" : "never reached its destination", watcher.ElapsedMS);
 
-            ReactionWalkCreatureGUIDs.erase(watcher.MoverGUID);
-            ReactionWalkCreatureCount.store((uint32)ReactionWalkCreatureGUIDs.size());
+            ReactionWalkCreatureKeys.erase(std::make_pair(watcherIter->first, watcher.MoverGUID));
+            ReactionWalkCreatureCount.store((uint32)ReactionWalkCreatureKeys.size());
             if (watcher.HasSavedNpcFlags == true)
                 npcFlagRestores.push_back(std::make_pair(watcher.MoverGUID, watcher.SavedNpcFlags));
             if (hasArrived == true)
@@ -12312,18 +12333,51 @@ bool EverQuestMod::IsCreatureBlockedFromInstanceMap(uint32 creatureTemplateID, M
 {
     if (map == nullptr)
         return false;
-    bool isDungeonInstanceMap = IsMapInstanceDungeon(map->GetId());
-    bool isRaidInstanceMap = IsMapInstanceRaidLow(map->GetId());
-    if (isDungeonInstanceMap == false && isRaidInstanceMap == false)
+    // Only a dungeon instance restricts its creatures (no raid creatures of any tier), while a raid instance holds every creature the open world zone does
+    if (IsMapInstanceDungeon(map->GetId()) == false)
         return false;
     if (HasCreatureDataForCreatureTemplateID(creatureTemplateID) == false)
         return false;
 
     uint32 difficultyType = GetCreatureDataForCreatureTemplateID(creatureTemplateID).DifficultyType;
-    bool isRaidCreature = (difficultyType == EQ_CREATURE_DIFFICULTY_RAIDTRASH || difficultyType == EQ_CREATURE_DIFFICULTY_RAIDBOSS || difficultyType == EQ_CREATURE_DIFFICULTY_RAIDMINIBOSS);
-    if (isRaidInstanceMap == true)
-        return isRaidCreature == false;
-    return isRaidCreature;
+    return (difficultyType == EQ_CREATURE_DIFFICULTY_RAIDTRASH || difficultyType == EQ_CREATURE_DIFFICULTY_RAIDBOSS || difficultyType == EQ_CREATURE_DIFFICULTY_RAIDMINIBOSS);
+}
+
+void EverQuestMod::SpawnGameEventCreaturesIntoLiveInstances(int16 eventID)
+{
+    // The core puts a game event's creatures into the grid data and spawns them live on the open world only, so an EQ instance that is already running would not see them until it was
+    // created again.  A negative ID is the list the event spawns when it stops.  This runs on the world thread with the map threads parked (game event update and GM commands)
+    auto const& creatureGUIDsByEvent = sGameEventMgr->GameEventCreatureGuids;
+    int32 eventListIndex = int32(sGameEventMgr->GetEventMap().size()) + eventID - 1;
+    if (eventListIndex < 0 || eventListIndex >= int32(creatureGUIDsByEvent.size()))
+        return;
+
+    for (ObjectGuid::LowType spawnID : creatureGUIDsByEvent[eventListIndex])
+    {
+        CreatureData const* creatureData = sObjectMgr->GetCreatureData(spawnID);
+        if (creatureData == nullptr)
+            continue;
+        if (IsMapInstanceRaidLow(creatureData->mapid) == false && IsMapInstanceDungeon(creatureData->mapid) == false)
+            continue;
+        Map* baseMap = sMapMgr->FindBaseMap(creatureData->mapid);
+        if (baseMap == nullptr || baseMap->ToMapInstanced() == nullptr)
+            continue;
+        for (auto& instanceMapByInstanceID : baseMap->ToMapInstanced()->GetInstancedMaps())
+            SpawnGameEventCreatureIntoInstanceMap(instanceMapByInstanceID.second, spawnID, creatureData);
+    }
+}
+
+void EverQuestMod::SpawnGameEventCreatureIntoInstanceMap(Map* map, ObjectGuid::LowType spawnID, CreatureData const* creatureData)
+{
+    if (map == nullptr || (creatureData->spawnMask & (1 << map->GetSpawnMode())) == 0 || map->IsGridLoaded(creatureData->posX, creatureData->posY) == false)
+        return;
+
+    // Any copy already there, even a corpse waiting on its respawn, is left alone
+    if (map->GetCreatureBySpawnIdStore().count(spawnID) > 0)
+        return;
+    Creature* creature = new Creature();
+    if (creature->LoadCreatureFromDB(spawnID, map) == false)
+        delete creature;
 }
 
 void EverQuestMod::UpdateRaidLowInstanceStateForPlayer(Player* player)
@@ -14107,9 +14161,9 @@ void EverQuestMod::ClearPerMapRuntimeStateForMap(Map* map)
         {
             // The walkers themselves are gone with the map, so their entries in the shared walk set have to go too
             for (const EverQuestPendingArrivalAction& watcher : watcherIter->second)
-                ReactionWalkCreatureGUIDs.erase(watcher.MoverGUID);
+                ReactionWalkCreatureKeys.erase(std::make_pair(mapInstanceKey, watcher.MoverGUID));
             PendingArrivalActionsByMapInstanceKey.erase(watcherIter);
-            ReactionWalkCreatureCount.store((uint32)ReactionWalkCreatureGUIDs.size());
+            ReactionWalkCreatureCount.store((uint32)ReactionWalkCreatureKeys.size());
         }
     }
 
@@ -14211,7 +14265,10 @@ void EverQuestMod::ExecutePendingReactionSpawn(const EverQuestPendingReactionSpa
         delete creature;
         return;
     }
-    sObjectMgr->AddCreatureToGrid(spawnId, sObjectMgr->GetCreatureData(spawnId));
+    // The grid registration is shared by every copy of a map, so on an instanced map it would put this creature into any other copy that loads while it lives.  An instance loads all of its
+    // grids when it is created and never unloads one on its own, so the creature needs no registration there to survive
+    if (map->Instanceable() == false)
+        sObjectMgr->AddCreatureToGrid(spawnId, sObjectMgr->GetCreatureData(spawnId));
 
     // Remove only the database rows so the spawn doesn't persist across restarts.
     WorldDatabase.Execute("DELETE FROM `creature_addon` WHERE `guid` = {}", spawnId);

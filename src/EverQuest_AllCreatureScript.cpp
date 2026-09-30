@@ -55,7 +55,7 @@ public:
         uint32 mapID = creature->GetMap()->GetId();
         if (mapID >= EverQuest->ConfigSystemMapDBCIDMin && mapID <= EverQuest->ConfigSystemMapDBCIDMax)
         {
-            // An instanced copy of a zone only holds part of that zone's creature list (a dungeon instance no raid creatures, a raid instance nothing but them).  The spawn rows are
+            // A dungeon instance copy of a zone holds no raid creatures of any tier.  The spawn rows are
             // generated that way already, so this only catches spawns that reached the map some other way, like rows left behind by an older generation of the world database
             // A player's own summon (an eye of zomm, which is 'normal' difficulty) is never one of those
             bool isPlayerSummon = creature->IsSummon() == true && (creature->GetOwnerGUID().IsPlayer() == true || creature->GetCreatorGUID().IsPlayer() == true);
