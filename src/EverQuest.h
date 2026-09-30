@@ -54,7 +54,7 @@ class ByteBuffer;
 struct AreaTrigger;
 struct BuildValuesCachePosPointers;
 
-#define EQ_MOD_VERSION                              122
+#define EQ_MOD_VERSION                              123
 
 #define EQ_MOVEMENT_CAST_SNARE_DURATION_BUFFER_IN_MS 2000 // How much longer than the remaining cast time the casting slow is given, so a pushed-back cast keeps it
 
@@ -497,6 +497,7 @@ public:
     float IntensifyingRampStartMultipliers[3] = { 0.0f, 0.0f, 0.0f }; // Per spell effect index.  First tick as a fraction of the average tick for an EQ intensifying ("Splurt") formula, 0 = no ramp
     uint32 CasterVisualKitID = 0; // SpellVisualKit played on a creature caster when the spell goes off (instant dragon breaths, whose own visual leaves it out)
     bool CreatureLossOfControlGrantsImmunity = false; // When a creature lands this spell's stun, fear, charm or mesmerize on a player, the player gets a short immunity to it
+    bool HideAuraIcon = false; // A split block left visible only so its damage or healing shows in the combat log, whose icon would duplicate the base spell's
 };
 
 class EverQuestIllusionObject
@@ -1920,6 +1921,7 @@ public:
     unordered_map<uint32, EverQuestItemTemplate> ItemTemplatesByEntryID;
     unordered_map<uint64, vector<EverQuestGearSwapCandidate>> GearSwapCandidatesByLookupKey;
     unordered_set<uint32> WornEffectSpellIDs;
+    unordered_set<uint32> HiddenAuraIconSpellIDs;
     unordered_set<uint32> EQWeaponPoisonProcSpellIDs;
     unordered_map<uint32, EverQuestSpell> SpellDataBySpellID;
     unordered_set<uint32> BardSongTickSpellIDs;
@@ -2091,6 +2093,7 @@ public:
     void BuildAuctionScanResultPacket(EverQuestAuctionSearchScan& scan, WorldPacket& resultPacket);
     void SendAuctionScanResultPacket(WorldSession* session, WorldPacket& resultPacket);
     bool IsWornEffectSpell(uint32 spellID);
+    bool IsHiddenAuraIconSpell(uint32 spellID);
     bool IsNeverLootStackItem(uint32 itemTemplateEntryID);
     bool IsItemEquipAuraSpell(SpellInfo const* spellInfo);
     void RemoveOrphanedItemEquipAurasForPlayer(Player* player);

@@ -118,26 +118,34 @@ static size_t GetAuraUpdateEntryEndPosition(WorldPacket const& packet, size_t po
 }
 
 // Creatures carry the worn effect auras of the loot they rolled (ApplyLootWornEffectAuras), and EverQuest.CreatureWornEffects.HideAuraIcons keeps those icons off the client while
-// the effect stays.  The visible aura slot belongs to the core, so the entries are taken out of the aura packets on the way out instead.  Players' own worn auras are untouched
+// the effect stays.  Split blocks that are only left visible so their damage or healing reaches the combat log (mod_everquest_spell.HideAuraIcon) are kept off every unit, since
+// the base spell already shows the icon.  The visible aura slot belongs to the core, so the entries are taken out of the aura packets on the way out instead.  Players' own worn auras are untouched
+static bool IsAuraIconHiddenFromClient(bool isCreatureTarget, uint32 spellID)
+{
+    if (EverQuest->IsHiddenAuraIconSpell(spellID) == true)
+        return true;
+    return isCreatureTarget == true && EverQuest->ConfigCreatureWornEffectsHideAuraIcons == true && EverQuest->IsWornEffectSpell(spellID) == true;
+}
+
 static bool HandleAuraUpdatePacketSend(WorldSession* session, WorldPacket const& packet)
 {
-    if (EverQuest->IsEnabled == false || EverQuest->ConfigCreatureWornEffectsHideAuraIcons == false)
+    if (EverQuest->IsEnabled == false)
+        return true;
+    if (EverQuest->ConfigCreatureWornEffectsHideAuraIcons == false && EverQuest->HiddenAuraIconSpellIDs.empty() == true)
         return true;
 
     try
     {
         uint64 rawTargetGUID = 0;
         size_t entriesStartPosition = ReadPackedGUIDAtPosition(packet, 0, rawTargetGUID);
-        if (ObjectGuid(rawTargetGUID).IsAnyTypeCreature() == false)
-            return true;
+        bool isCreatureTarget = ObjectGuid(rawTargetGUID).IsAnyTypeCreature();
 
         // A single slot update is either the icon or its removal, and a removal carries no spell so it always goes through
         if (packet.GetOpcode() == SMSG_AURA_UPDATE)
-            return EverQuest->IsWornEffectSpell(packet.read<uint32>(entriesStartPosition + 1)) == false;
+            return IsAuraIconHiddenFromClient(isCreatureTarget, packet.read<uint32>(entriesStartPosition + 1)) == false;
 
-        // The full list is resent without the hidden entries, and only when there was one to hide.  The resent packet comes back through here with nothing left to strip
-        WorldPacket filteredPacket(SMSG_AURA_UPDATE_ALL, packet.size());
-        filteredPacket.append(packet.contents(), entriesStartPosition);
+        // The full list is resent without the hidden entries, and only when there was one to hide (checked first, so the common case copies nothing).  The resent packet
+        // comes back through here with nothing left to strip
         bool hasHiddenEntry = false;
         size_t position = entriesStartPosition;
         while (position < packet.size())
@@ -146,14 +154,29 @@ static bool HandleAuraUpdatePacketSend(WorldSession* session, WorldPacket const&
             size_t entryEndPosition = GetAuraUpdateEntryEndPosition(packet, position, spellID);
             if (entryEndPosition > packet.size())
                 return true;
-            if (EverQuest->IsWornEffectSpell(spellID) == true)
+            if (IsAuraIconHiddenFromClient(isCreatureTarget, spellID) == true)
+            {
                 hasHiddenEntry = true;
-            else
-                filteredPacket.append(packet.contents() + position, entryEndPosition - position);
+                break;
+            }
             position = entryEndPosition;
         }
         if (hasHiddenEntry == false)
             return true;
+
+        WorldPacket filteredPacket(SMSG_AURA_UPDATE_ALL, packet.size());
+        filteredPacket.append(packet.contents(), entriesStartPosition);
+        position = entriesStartPosition;
+        while (position < packet.size())
+        {
+            uint32 spellID = 0;
+            size_t entryEndPosition = GetAuraUpdateEntryEndPosition(packet, position, spellID);
+            if (entryEndPosition > packet.size())
+                return true;
+            if (IsAuraIconHiddenFromClient(isCreatureTarget, spellID) == false)
+                filteredPacket.append(packet.contents() + position, entryEndPosition - position);
+            position = entryEndPosition;
+        }
         session->SendPacket(&filteredPacket);
         return false;
     }

@@ -2972,6 +2972,11 @@ bool EverQuestMod::IsWornEffectSpell(uint32 spellID)
     return WornEffectSpellIDs.find(spellID) != WornEffectSpellIDs.end();
 }
 
+bool EverQuestMod::IsHiddenAuraIconSpell(uint32 spellID)
+{
+    return HiddenAuraIconSpellIDs.find(spellID) != HiddenAuraIconSpellIDs.end();
+}
+
 bool EverQuestMod::IsNeverLootStackItem(uint32 itemTemplateEntryID)
 {
     unordered_map<uint32, EverQuestItemTemplate>::const_iterator itemTemplateItr = ItemTemplatesByEntryID.find(itemTemplateEntryID);
@@ -4406,7 +4411,8 @@ void EverQuestMod::LoadSpellData()
 {
     SpellDataBySpellID.clear();
     BardSongTickSpellIDs.clear();
-    QueryResult queryResult = WorldDatabase.Query("SELECT SpellID, AuraDurationBaseInMS, AuraDurationAddPerLevelInMS, AuraDurationMaxInMS, AuraDurationCalcMinLevel, AuraDurationCalcMaxLevel, RecourseSpellID, SpellIDCastOnMeleeAttacker, FocusBoostType, PeriodicAuraSpellID, PeriodicAuraSpellRadius, MaleFormSpellID, FemaleFormSpellID, EffectFailChancePercent, EffectFailableType, StunUsesBashKickChance, SpellIDCastOnTargetWhenStunLands, AuraStaysOnSecondaryClassSwitch, MinTargetLevel, MaxCreatureTargetLevel, ResistDiff, HasteType, ModFactionRepValue, IllusionFormAlignment, IllusionFormEQRaceID, PersistOnClassChange, IllusionObjectClass, ManaGainSpellPowerCoefficient, DamageIsFixed, IntensifyingRampStartMultiplier1, IntensifyingRampStartMultiplier2, IntensifyingRampStartMultiplier3, CasterVisualKitID, CreatureLossOfControlGrantsImmunity FROM mod_everquest_spell ORDER BY SpellID;");
+    HiddenAuraIconSpellIDs.clear();
+    QueryResult queryResult = WorldDatabase.Query("SELECT SpellID, AuraDurationBaseInMS, AuraDurationAddPerLevelInMS, AuraDurationMaxInMS, AuraDurationCalcMinLevel, AuraDurationCalcMaxLevel, RecourseSpellID, SpellIDCastOnMeleeAttacker, FocusBoostType, PeriodicAuraSpellID, PeriodicAuraSpellRadius, MaleFormSpellID, FemaleFormSpellID, EffectFailChancePercent, EffectFailableType, StunUsesBashKickChance, SpellIDCastOnTargetWhenStunLands, AuraStaysOnSecondaryClassSwitch, MinTargetLevel, MaxCreatureTargetLevel, ResistDiff, HasteType, ModFactionRepValue, IllusionFormAlignment, IllusionFormEQRaceID, PersistOnClassChange, IllusionObjectClass, ManaGainSpellPowerCoefficient, DamageIsFixed, IntensifyingRampStartMultiplier1, IntensifyingRampStartMultiplier2, IntensifyingRampStartMultiplier3, CasterVisualKitID, CreatureLossOfControlGrantsImmunity, HideAuraIcon FROM mod_everquest_spell ORDER BY SpellID;");
     if (queryResult)
     {
         do
@@ -4448,9 +4454,12 @@ void EverQuestMod::LoadSpellData()
             everQuestSpell.IntensifyingRampStartMultipliers[2] = fields[31].Get<float>();
             everQuestSpell.CasterVisualKitID = fields[32].Get<uint32>();
             everQuestSpell.CreatureLossOfControlGrantsImmunity = fields[33].Get<uint8>() != 0;
+            everQuestSpell.HideAuraIcon = fields[34].Get<uint8>() != 0;
             SpellDataBySpellID[everQuestSpell.SpellID] = everQuestSpell;
             if (everQuestSpell.PeriodicAuraSpellID != 0)
                 BardSongTickSpellIDs.insert(everQuestSpell.PeriodicAuraSpellID);
+            if (everQuestSpell.HideAuraIcon == true)
+                HiddenAuraIconSpellIDs.insert(everQuestSpell.SpellID);
         } while (queryResult->NextRow());
     }
 }
@@ -15939,8 +15948,8 @@ void EverQuestMod::NotifyPlayerOfDispelledAura(Player* player, AuraApplication* 
     if (spellInfo == nullptr)
         return;
 
-    // Don't give messages for the hidden chain "split" auras
-    if (spellInfo->HasAttribute(SPELL_ATTR0_DO_NOT_DISPLAY) == true)
+    // Don't give messages for the chain "split" auras, whether hidden or only left visible for the combat log
+    if (spellInfo->HasAttribute(SPELL_ATTR0_DO_NOT_DISPLAY) == true || IsHiddenAuraIconSpell(spellInfo->Id) == true)
         return;
 
     // An absorb shield that soaked its last point is removed with the same reason code as a dispel, so skip a spent shield
