@@ -317,6 +317,9 @@ public:
         // A Shaman turning Warspirit on gives up the vigor they gave themself by healing
         EverQuest->HandleClassAuraShamanWarspiritApply(player, aura);
 
+        // A Shadow Knight turning Spellsword's Focus on gives up a readied edge
+        EverQuest->HandleClassAuraShadowKnightFocusApply(player, aura);
+
         // A silence landed by another player, or their pet, stops the songs this player already has running
         EverQuest->CancelBardSongsOnPvPSilenceAuraApply(player, aura);
 

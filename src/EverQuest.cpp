@@ -351,6 +351,10 @@ bool EverQuestMod::LoadConfigurationSystemDataFromDB()
                 ConfigSystemClassAuraShadowKnightBloodDebtStoreDurationInMS = (uint32)atoi(value.c_str());
             else if (key == "ClassAuraShadowKnightBloodDebtFullSpellVisualKitID")
                 ConfigSystemClassAuraShadowKnightBloodDebtFullSpellVisualKitID = (uint32)atoi(value.c_str());
+            else if (key == "ClassAuraShadowKnightFocusSpellFamilyFlag")
+                ConfigSystemClassAuraShadowKnightFocusSpellFamilyFlag = (uint32)strtoul(value.c_str(), nullptr, 10);
+            else if (key == "ClassAuraShadowKnightFocusCooldownFromBaseCastTimePercent")
+                ConfigSystemClassAuraShadowKnightFocusCooldownFromBaseCastTimePercent = (uint32)atoi(value.c_str());
             else if (key == "RainTargetHitCap")
                 ConfigRainTargetHitCap = (int32)atoi(value.c_str());
             else if (key == "RainTargetHitCapNoDirectDamage")

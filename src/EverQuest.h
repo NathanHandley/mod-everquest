@@ -54,7 +54,7 @@ class ByteBuffer;
 struct AreaTrigger;
 struct BuildValuesCachePosPointers;
 
-#define EQ_MOD_VERSION                              124
+#define EQ_MOD_VERSION                              126
 
 #define EQ_MOVEMENT_CAST_SNARE_DURATION_BUFFER_IN_MS 2000 // How much longer than the remaining cast time the casting slow is given, so a pushed-back cast keeps it
 
@@ -1072,7 +1072,8 @@ enum EverQuestClassAuraSpellType : uint32
     EQ_CLASSAURA_SPELL_SHADOWKNIGHT_BLOOD_DEBT_VITALITY = 70,
     EQ_CLASSAURA_SPELL_DRUID_NATURES_BALANCE_SHADOW = 71,
     EQ_CLASSAURA_SPELL_DRUID_NATURES_BALANCE_ARCANE = 72,
-    EQ_CLASSAURA_SPELL_TYPE_COUNT = 73
+    EQ_CLASSAURA_SPELL_SHADOWKNIGHT_FOCUS = 73,
+    EQ_CLASSAURA_SPELL_TYPE_COUNT = 74
 };
 
 class EverQuestPlayerClientMoveState : public DataMap::Base
@@ -1127,6 +1128,10 @@ public:
     bool PendingCadenceConsume = false;
     bool PendingEdgeConsume = false;
     bool PendingChiSurgeConsume = false;
+    uint32 PendingEdgeNoGlobalCooldownSpellID = 0; // An instant cast readied by Spellsword's Edge, whose global cooldown is lifted once the cast is prepared
+    uint32 PendingToggleOffSpellID = 0;            // A toggle that turns off through its own cast (Spellsword's Focus), taken off once that cast goes through
+    uint32 PendingFocusSpellID = 0;                // A cast Spellsword's Focus applies to, which picks up the added cooldown once it goes off
+    bool PendingFocusIsStockSpell = false;         // That cast is a stock WoW spell, which the mod makes instant itself (EQ spells get that from a spell mod)
     uint64 ChiSurgeReadyAtMS = 0;
     uint64 LuckyStrikeReadyAtMS = 0;
     uint64 NextUnrelentingAssaultStackAtMS = 0;
@@ -1738,6 +1743,8 @@ public:
     uint32 ConfigSystemClassAuraShadowKnightBloodDebtMaxHealthPercent = 50;
     uint32 ConfigSystemClassAuraShadowKnightBloodDebtStoreDurationInMS = 20000;
     uint32 ConfigSystemClassAuraShadowKnightBloodDebtFullSpellVisualKitID = 0;
+    uint32 ConfigSystemClassAuraShadowKnightFocusSpellFamilyFlag = 0;
+    uint32 ConfigSystemClassAuraShadowKnightFocusCooldownFromBaseCastTimePercent = 150;
     float ConfigSystemSlowBossEffectivenessMod = 0.5f;
     uint32 ConfigSystemRaidBossRespawnVarianceInSec;
     uint32 ConfigSystemRaidMiniBossRespawnVarianceInSec = 0;
@@ -2303,6 +2310,12 @@ public:
     bool HandleClassAuraToggleOnCheckCast(Player* player, Spell* spell, SpellCastResult& result);
     void HandleClassAuraShamanWarspiritRemove(Unit* unit, Aura* aura);
     void HandleClassAuraShamanWarspiritApply(Player* player, Aura* aura);
+    bool IsClassAuraShadowKnightFocusSpell(SpellInfo const* spellInfo);
+    bool IsClassAuraShadowKnightFocusActiveForPlayer(Player* player);
+    bool IsClassAuraShadowKnightFocusStockSpell(Spell* spell, SpellInfo const* spellInfo);
+    bool HandleClassAuraShadowKnightFocusRangeOnCheckCast(Player* player, Spell* spell, bool strict, SpellCastResult& result);
+    void HandleClassAuraShadowKnightFocusApply(Player* player, Aura* aura);
+    void ApplyClassAuraShadowKnightFocusCooldown(Player* player, Spell* spell, SpellInfo const* spellInfo);
     void RegisterClassAuraRangerChannelAmmoSpell(SpellInfo* spellInfo);
     void HandleClassAuraRangerAmmoOnSpellCast(Player* player, Spell* spell);
 

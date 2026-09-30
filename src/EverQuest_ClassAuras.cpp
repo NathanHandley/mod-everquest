@@ -64,19 +64,22 @@ static const char* EQ_CLASSAURA_SPELL_TYPE_NAMES[EQ_CLASSAURA_SPELL_TYPE_COUNT] 
     "ClericRadiance", "ClericRadianceFreeMana",
     "WizardIntensifiedSkyfall",
     "ShadowKnightBloodDebtVitality",
-    "DruidNaturesBalanceShadow", "DruidNaturesBalanceArcane"
+    "DruidNaturesBalanceShadow", "DruidNaturesBalanceArcane",
+    "ShadowKnightFocus"
 };
 
 struct EverQuestClassAuraToggle
 {
     EverQuestClassAuraSpellType ToggleType;
     EverQuestClassAuraSpellType PassiveType;
+    bool TurnsOffThroughCast;   // Turning it off is a real cast (so it starts the global cooldown) rather than a refused one
 };
 static const EverQuestClassAuraToggle EQ_CLASSAURA_TOGGLES[] =
 {
-    { EQ_CLASSAURA_SPELL_RANGER_ENDLESS_QUIVER, EQ_CLASSAURA_SPELL_RANGER_PASSIVE },
-    { EQ_CLASSAURA_SPELL_SHAMAN_WARSPIRIT, EQ_CLASSAURA_SPELL_SHAMAN_PASSIVE },
-    { EQ_CLASSAURA_SPELL_WIZARD_INTENSIFIED_SKYFALL, EQ_CLASSAURA_SPELL_WIZARD_PASSIVE }
+    { EQ_CLASSAURA_SPELL_RANGER_ENDLESS_QUIVER, EQ_CLASSAURA_SPELL_RANGER_PASSIVE, false },
+    { EQ_CLASSAURA_SPELL_SHAMAN_WARSPIRIT, EQ_CLASSAURA_SPELL_SHAMAN_PASSIVE, false },
+    { EQ_CLASSAURA_SPELL_WIZARD_INTENSIFIED_SKYFALL, EQ_CLASSAURA_SPELL_WIZARD_PASSIVE, false },
+    { EQ_CLASSAURA_SPELL_SHADOWKNIGHT_FOCUS, EQ_CLASSAURA_SPELL_SHADOWKNIGHT_PASSIVE, true }
 };
 static const size_t EQ_CLASSAURA_TOGGLE_COUNT = sizeof(EQ_CLASSAURA_TOGGLES) / sizeof(EQ_CLASSAURA_TOGGLES[0]);
 
@@ -1793,6 +1796,9 @@ void EverQuestMod::ApplyClassAuraCastAdjustmentsOnCheckCast(Player* player, Spel
     state->PendingCadenceConsume = false;
     state->PendingEdgeConsume = false;
     state->PendingChiSurgeConsume = false;
+    state->PendingEdgeNoGlobalCooldownSpellID = 0;
+    state->PendingFocusSpellID = 0;
+    state->PendingFocusIsStockSpell = false;
     if (IsClassAuraSpell(spellInfo->Id) == true)
         return;
 
@@ -1816,15 +1822,32 @@ void EverQuestMod::ApplyClassAuraCastAdjustmentsOnCheckCast(Player* player, Spel
             castTimeMultiplier = (float)baseCastTimeInMS / (float)currentCastTimeInMS;
     }
 
-    // Shadow Knight
+    // Shadow Knight, Spellsword's Focus.  EQ spells get the instant cast from the toggle's own spell mod, since the converter marks them for it.  A stock WoW spell has no mark
+    // to aim a spell mod at (and one aimed at every spell would also reach whatever the cast triggers), so it is made instant here.  Either way the cast is remembered, so
+    // HandleClassAuraShadowKnightFocusRangeOnCheckCast holds it to melee range and it picks up the added cooldown when it goes off
+    if (isBardSong == false && IsClassAuraShadowKnightFocusActiveForPlayer(player) == true)
+    {
+        if (IsClassAuraShadowKnightFocusSpell(spellInfo) == true)
+            state->PendingFocusSpellID = spellInfo->Id;
+        // A cast something else already made instant (Nightfall, Presence of Mind) is left to that, so it neither wastes the proc nor picks up the added cooldown
+        else if (IsClassAuraShadowKnightFocusStockSpell(spell, spellInfo) == true && spellInfo->CalcCastTime(player, spell) > 0)
+        {
+            player->SetInstantCast(true);
+            state->PendingFocusSpellID = spellInfo->Id;
+            state->PendingFocusIsStockSpell = true;
+        }
+    }
+
+    // Shadow Knight, the edge makes the cast instant and lifts its global cooldown.  Spellsword's Focus switches the edge off (its own spell mods already make these casts instant)
     // Note: This needs to go before Chi Surge because otherwise the instant from SK will get consumed by it (but at time of writing this, no class can be SK and Monk)
     uint32 edgeSpellID = GetClassAuraSpellID(EQ_CLASSAURA_SPELL_SHADOWKNIGHT_EDGE);
     if (isBardSong == false && edgeSpellID != 0 && baseCastTimeInMS > 0 && spellInfo->IsPositive() == false && spellInfo->DmgClass == SPELL_DAMAGE_CLASS_MAGIC
-        && player->HasAura(edgeSpellID) == true && PlayerHasClassAura(player, EQ_CLASSAURA_SPELL_SHADOWKNIGHT_AURA) == true)
+        && player->HasAura(edgeSpellID) == true && PlayerHasClassAura(player, EQ_CLASSAURA_SPELL_SHADOWKNIGHT_AURA) == true && IsClassAuraShadowKnightFocusActiveForPlayer(player) == false)
     {
         player->SetInstantCast(true);
         state->PendingEdgeConsume = true;
         state->PendingCastAdjustSpellID = spellInfo->Id;
+        state->PendingEdgeNoGlobalCooldownSpellID = spellInfo->Id;
     }
 
     // Monk
@@ -1841,7 +1864,8 @@ void EverQuestMod::ApplyClassAuraCastAdjustmentsOnCheckCast(Player* player, Spel
 
     // Cleric
     uint32 cadenceSpellID = GetClassAuraSpellID(EQ_CLASSAURA_SPELL_CLERIC_CADENCE);
-    bool isCompleteHeal = ConfigSystemClassAuraPrivateSpellFamilyID != 0 && spellInfo->SpellFamilyName == ConfigSystemClassAuraPrivateSpellFamilyID;
+    bool isCompleteHeal = ConfigSystemClassAuraPrivateSpellFamilyID != 0 && spellInfo->SpellFamilyName == ConfigSystemClassAuraPrivateSpellFamilyID
+        && IsClassAuraShadowKnightFocusSpell(spellInfo) == false; // Offensive spells marked for Spellsword's Focus share the private family
     if (isBardSong == false && cadenceSpellID != 0 && isDirectHeal == true && isSingleTarget == true && target != nullptr && isCompleteHeal == false
         && ConfigSystemClassAuraClericCadenceReductionPercent > 0 && ConfigSystemClassAuraClericCadenceReductionPercent < 100
         && player->HasAura(cadenceSpellID) == true && PlayerHasClassAura(player, EQ_CLASSAURA_SPELL_CLERIC_AURA) == true)
@@ -1893,6 +1917,28 @@ void EverQuestMod::FinishClassAuraCastAdjustmentsOnPrepare(Player* player, Spell
     if (spell->IsTriggered() == true)
         return;
     player->SetInstantCast(false);
+
+    // Shadow Knight, a cast the edge made instant carries no global cooldown.  An instant cast has already gone off inside Spell::prepare by now, and the core starts the global
+    // cooldown right after it, so it is lifted here: on the server, and on the client by clearing the spell's cooldown (and handing back its own cooldown, if it has one)
+    EverQuestPlayerClassAuraState* edgeState = player->CustomData.Get<EverQuestPlayerClassAuraState>(EQ_PLAYER_CUSTOMDATA_CLASSAURA);
+    if (edgeState != nullptr && edgeState->PendingEdgeNoGlobalCooldownSpellID != 0)
+    {
+        bool isEdgeCast = edgeState->PendingEdgeNoGlobalCooldownSpellID == spell->GetSpellInfo()->Id;
+        edgeState->PendingEdgeNoGlobalCooldownSpellID = 0;
+        if (isEdgeCast == true && spell->GetCastTime() == 0 && spell->GetSpellInfo()->StartRecoveryTime > 0)
+        {
+            player->GetGlobalCooldownMgr().CancelGlobalCooldown(spell->GetSpellInfo());
+            player->SendClearCooldown(spell->GetSpellInfo()->Id, player);
+            SpellCooldowns::const_iterator cooldownItr = player->GetSpellCooldownMap().find(spell->GetSpellInfo()->Id);
+            uint32 nowMS = (uint32)GameTime::GetGameTimeMS().count();
+            if (cooldownItr != player->GetSpellCooldownMap().end() && cooldownItr->second.end > nowMS)
+            {
+                WorldPacket cooldownPacket;
+                player->BuildCooldownPacket(cooldownPacket, SPELL_COOLDOWN_FLAG_NONE, spell->GetSpellInfo()->Id, cooldownItr->second.end - nowMS);
+                player->SendDirectMessage(&cooldownPacket);
+            }
+        }
+    }
     uint32 helperSpellID = GetClassAuraSpellID(EQ_CLASSAURA_SPELL_CAST_SPEED_HELPER);
     if (helperSpellID == 0)
         return;
@@ -1942,6 +1988,9 @@ void EverQuestMod::ClearClassAuraCastAdjustmentsForPlayer(Player* player)
         state->PendingCadenceConsume = false;
         state->PendingEdgeConsume = false;
         state->PendingChiSurgeConsume = false;
+        state->PendingEdgeNoGlobalCooldownSpellID = 0;
+        state->PendingFocusSpellID = 0;
+        state->PendingFocusIsStockSpell = false;
     }
 }
 
@@ -1956,10 +2005,20 @@ void EverQuestMod::HandleClassAuraSpellCast(Player* player, Spell* spell)
     SpellInfo const* spellInfo = spell->GetSpellInfo();
     if (spellInfo == nullptr || IsClassAuraSystemEnabled() == false)
         return;
+
+    // A toggle that turns off through its own cast (so that it starts the global cooldown) comes off once that cast has gone through
+    EverQuestPlayerClassAuraState* state = GetClassAuraStateForPlayer(player);
+    if (state->PendingToggleOffSpellID != 0 && state->PendingToggleOffSpellID == spellInfo->Id)
+    {
+        state->PendingToggleOffSpellID = 0;
+        player->RemoveAurasDueToSpell(spellInfo->Id);
+        return;
+    }
     if (IsClassAuraSpell(spellInfo->Id) == true)
         return;
 
-    EverQuestPlayerClassAuraState* state = GetClassAuraStateForPlayer(player);
+    // Shadow Knight, a spell cast through Spellsword's Focus picks up its extra cooldown
+    ApplyClassAuraShadowKnightFocusCooldown(player, spell, spellInfo);
 
     // What a focus charge has already handed back on this cast.  A second giveback below subtracts it, so no combination can ever return more mana than the cast was charged
     int32 manaAlreadyRefunded = 0;
@@ -2084,13 +2143,21 @@ bool EverQuestMod::HandleClassAuraToggleOnCheckCast(Player* player, Spell* spell
         if (toggleSpellID == 0 || spell->GetSpellInfo()->Id != toggleSpellID)
             continue;
 
-        // Casting it while it is up turns it off
+        // Casting it while it is up turns it off.  Most are taken off right here and the cast is refused, while one that should start the global cooldown either way is let through
+        // and taken off once the cast has gone off
         if (player->HasAura(toggleSpellID) == true)
         {
+            if (EQ_CLASSAURA_TOGGLES[i].TurnsOffThroughCast == true)
+            {
+                GetClassAuraStateForPlayer(player)->PendingToggleOffSpellID = toggleSpellID;
+                return false;
+            }
             player->RemoveAurasDueToSpell(toggleSpellID);
             result = SPELL_FAILED_DONT_REPORT;
             return true;
         }
+        if (EQ_CLASSAURA_TOGGLES[i].TurnsOffThroughCast == true)
+            GetClassAuraStateForPlayer(player)->PendingToggleOffSpellID = 0;
 
         // Only the toggle's class (primary or secondary) can turn it on
         uint32 passiveSpellID = GetClassAuraSpellID(EQ_CLASSAURA_TOGGLES[i].PassiveType);
@@ -2129,6 +2196,117 @@ void EverQuestMod::HandleClassAuraShamanWarspiritApply(Player* player, Aura* aur
     uint32 vigorSpellID = GetClassAuraSpellID(EQ_CLASSAURA_SPELL_SHAMAN_VIGOR);
     if (vigorSpellID != 0 && player->HasAura(vigorSpellID, player->GetGUID()) == true)
         player->RemoveAurasDueToSpell(vigorSpellID, player->GetGUID());
+}
+
+bool EverQuestMod::IsClassAuraShadowKnightFocusSpell(SpellInfo const* spellInfo)
+{
+    // The converter marks every player-learned offensive spell with a cast time with the focus flag, in the private family.  The spell mods on the toggle reach exactly these
+    if (spellInfo == nullptr || ConfigSystemClassAuraShadowKnightFocusSpellFamilyFlag == 0 || ConfigSystemClassAuraPrivateSpellFamilyID == 0)
+        return false;
+    return spellInfo->SpellFamilyName == ConfigSystemClassAuraPrivateSpellFamilyID && (spellInfo->SpellFamilyFlags[2] & ConfigSystemClassAuraShadowKnightFocusSpellFamilyFlag) != 0;
+}
+
+bool EverQuestMod::IsClassAuraShadowKnightFocusActiveForPlayer(Player* player)
+{
+    if (player == nullptr)
+        return false;
+    uint32 focusSpellID = GetClassAuraSpellID(EQ_CLASSAURA_SPELL_SHADOWKNIGHT_FOCUS);
+    return focusSpellID != 0 && player->HasAura(focusSpellID) == true;
+}
+
+bool EverQuestMod::IsClassAuraShadowKnightFocusStockSpell(Spell* spell, SpellInfo const* spellInfo)
+{
+    // A stock WoW spell (every converter spell sits at or above the spell DBC range start) that is harmful magic with a real cast.  Channels are left out since their time is
+    // not a cast to skip, and so is anything with a minimum range, which a melee range limit would leave with no range to be cast from
+    if (spell == nullptr || spellInfo == nullptr || ConfigSystemSpellDBCIDMin == 0 || spellInfo->Id >= ConfigSystemSpellDBCIDMin)
+        return false;
+    if (spell->IsTriggered() == true || spell->m_CastItem != nullptr)
+        return false;
+    if (spellInfo->DmgClass != SPELL_DAMAGE_CLASS_MAGIC || spellInfo->IsPositive() == true || spellInfo->IsChanneled() == true || spellInfo->IsPassive() == true
+        || spellInfo->HasAttribute(SPELL_ATTR2_AUTO_REPEAT) == true)
+        return false;
+    if (spellInfo->CalcCastTime() == 0 || spellInfo->GetMinRange(false) > 0.0f)
+        return false;
+    return true;
+}
+
+bool EverQuestMod::HandleClassAuraShadowKnightFocusRangeOnCheckCast(Player* player, Spell* spell, bool strict, SpellCastResult& result)
+{
+    // Spellsword's Focus holds its casts to melee range, measured exactly the way Spell::CheckRange measures a melee range spell like Bash (5 yards less twice the minimum melee
+    // reach, or less it once while leeway applies, on top of the melee range between the two), so the action bar's range display (the addon reads a 5 yard melee range item)
+    // and this agree.  Only the strict check matters, since these casts are instant
+    if (strict == false || player == nullptr || spell == nullptr || spell->IsTriggered() == true || spell->GetSpellInfo() == nullptr)
+        return false;
+    EverQuestPlayerClassAuraState* state = player->CustomData.Get<EverQuestPlayerClassAuraState>(EQ_PLAYER_CUSTOMDATA_CLASSAURA);
+    if (state == nullptr || state->PendingFocusSpellID == 0 || state->PendingFocusSpellID != spell->GetSpellInfo()->Id)
+        return false;
+    bool isInRange = true;
+    Unit* target = spell->m_targets.GetUnitTarget();
+    if (target != nullptr && target != player)
+    {
+        float meleeReach = NOMINAL_MELEE_RANGE - (player->GetLeewayBonusRange(target) > 0.0f ? MIN_MELEE_REACH : 2.0f * MIN_MELEE_REACH);
+        isInRange = player->IsWithinMeleeRange(target, std::max(meleeReach, 0.0f));
+    }
+    else if (spell->m_targets.HasDst() == true && spell->m_targets.HasTraj() == false)
+        isInRange = player->IsWithinDist3d(spell->m_targets.GetDstPos(), NOMINAL_MELEE_RANGE + player->GetLeewayBonusRadius());
+    if (isInRange == true)
+        return false;
+    ClearClassAuraCastAdjustmentsForPlayer(player);
+    result = SPELL_FAILED_OUT_OF_RANGE;
+    return true;
+}
+
+void EverQuestMod::HandleClassAuraShadowKnightFocusApply(Player* player, Aura* aura)
+{
+    // Turning Spellsword's Focus on ends a readied edge, since the two never work together
+    if (player == nullptr || aura == nullptr)
+        return;
+    uint32 focusSpellID = GetClassAuraSpellID(EQ_CLASSAURA_SPELL_SHADOWKNIGHT_FOCUS);
+    if (focusSpellID == 0 || aura->GetId() != focusSpellID)
+        return;
+    uint32 edgeSpellID = GetClassAuraSpellID(EQ_CLASSAURA_SPELL_SHADOWKNIGHT_EDGE);
+    if (edgeSpellID != 0 && player->HasAura(edgeSpellID) == true)
+        player->RemoveAurasDueToSpell(edgeSpellID);
+}
+
+void EverQuestMod::ApplyClassAuraShadowKnightFocusCooldown(Player* player, Spell* spell, SpellInfo const* spellInfo)
+{
+    // The spell's own cooldown plus a share of its base cast time.  The base cast time is the spell's unhasted one, so haste never shortens it.  The core has already started
+    // the spell's own cooldown by now (Spell::SendSpellCooldown runs ahead of this hook), and this replaces it with the longer one
+    if (player == nullptr || spell == nullptr || spellInfo == nullptr)
+        return;
+    EverQuestPlayerClassAuraState* state = GetClassAuraStateForPlayer(player);
+    if (state->PendingFocusSpellID == 0 || state->PendingFocusSpellID != spellInfo->Id)
+        return;
+    state->PendingFocusSpellID = 0;
+    state->PendingFocusIsStockSpell = false;
+    if (spell->m_CastItem != nullptr || spell->GetCastTime() != 0 || IsClassAuraShadowKnightFocusActiveForPlayer(player) == false)
+        return;
+    uint32 baseCastTimeInMS = spellInfo->CalcCastTime();
+    if (baseCastTimeInMS == 0)
+        return;
+    uint32 cooldownInMS = (uint32)(((uint64)baseCastTimeInMS * ConfigSystemClassAuraShadowKnightFocusCooldownFromBaseCastTimePercent) / 100);
+
+    // The original cooldown is whatever the core just started for this cast, so cooldown modifiers it applied still count
+    SpellCooldowns::iterator cooldownItr = player->GetSpellCooldownMap().find(spellInfo->Id);
+    uint32 nowMS = (uint32)GameTime::GetGameTimeMS().count();
+    bool hasCooldownEntry = cooldownItr != player->GetSpellCooldownMap().end();
+    if (hasCooldownEntry == true && cooldownItr->second.end > nowMS)
+        cooldownInMS += cooldownItr->second.end - nowMS;
+    if (cooldownInMS == 0)
+        return;
+
+    // An entry the core just made is lengthened in place, so its category and item stay as they were
+    if (hasCooldownEntry == true)
+    {
+        cooldownItr->second.end = nowMS + cooldownInMS;
+        cooldownItr->second.maxduration = cooldownInMS;
+    }
+    else
+        player->AddSpellCooldown(spellInfo->Id, 0, cooldownInMS);
+    WorldPacket cooldownPacket;
+    player->BuildCooldownPacket(cooldownPacket, SPELL_COOLDOWN_FLAG_NONE, spellInfo->Id, cooldownInMS);
+    player->SendDirectMessage(&cooldownPacket);
 }
 
 static bool IsClassAuraRangerAmmoAttackSpell(SpellInfo const* spellInfo)

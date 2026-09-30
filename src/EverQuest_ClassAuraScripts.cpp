@@ -208,7 +208,7 @@ class EverQuest_ClassAuraWarriorAuraScript : public AuraScript
     }
 };
 
-// Shadow Knight "Spellsword": a melee critical strike readies the edge (the proc row's cooldown spaces the triggers)
+// Shadow Knight "Spellsword": a melee critical strike readies the edge (the proc row's cooldown spaces the triggers), unless Spellsword's Focus is on
 class EverQuest_ClassAuraShadowKnightAuraScript : public AuraScript
 {
     PrepareAuraScript(EverQuest_ClassAuraShadowKnightAuraScript);
@@ -222,7 +222,7 @@ class EverQuest_ClassAuraShadowKnightAuraScript : public AuraScript
         if (shadowKnight == nullptr || shadowKnight->IsPlayer() == false || shadowKnight->IsAlive() == false)
             return;
         uint32 edgeSpellID = EverQuest->GetClassAuraSpellID(EQ_CLASSAURA_SPELL_SHADOWKNIGHT_EDGE);
-        if (edgeSpellID == 0)
+        if (edgeSpellID == 0 || EverQuest->IsClassAuraShadowKnightFocusActiveForPlayer(shadowKnight->ToPlayer()) == true)
             return;
         shadowKnight->CastSpell(shadowKnight, edgeSpellID, true);
     }

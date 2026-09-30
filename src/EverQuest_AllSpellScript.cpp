@@ -78,6 +78,10 @@ public:
         if (spell->GetCaster()->IsPlayer() == true && EverQuest->HandleClassAuraToggleOnCheckCast(spell->GetCaster()->ToPlayer(), spell, res) == true)
             return;
 
+        // Class auras: a spell cast through the Shadow Knight's Spellsword's Focus only reaches melee range
+        if (spell->GetCaster()->IsPlayer() == true && EverQuest->HandleClassAuraShadowKnightFocusRangeOnCheckCast(spell->GetCaster()->ToPlayer(), spell, strict, res) == true)
+            return;
+
         // A character that turned casting on the move off cannot start one of those casts while moving
         if (strict == true && spell->GetCaster()->IsPlayer() == true && EverQuest->IsMovementCastStartBlockedForPlayer(spell->GetCaster()->ToPlayer(), spell) == true)
         {
