@@ -110,18 +110,8 @@ public:
             if (spell->Effects[i].ApplyAuraName != 0)
                 hasAuraEffect = true;
 
-            switch (spell->Effects[i].ApplyAuraName)
-            {
-                case SPELL_AURA_PERIODIC_DAMAGE:
-                case SPELL_AURA_PERIODIC_DAMAGE_PERCENT:
-                case SPELL_AURA_PERIODIC_LEECH:
-                case SPELL_AURA_PERIODIC_MANA_LEECH:
-                case SPELL_AURA_POWER_BURN:
-                    hasHarmfulPeriodic = true;
-                    break;
-                default:
-                    break;
-            }
+            if (EverQuest->IsHarmfulPeriodicAuraType(spell->Effects[i].ApplyAuraName) == true)
+                hasHarmfulPeriodic = true;
 
             uint32 targetA = spell->Effects[i].TargetA.GetTarget();
             if (targetA != TARGET_UNIT_CASTER && targetA != 0)
@@ -143,6 +133,11 @@ public:
         // for the rogue that applied it, so a second rogue can have their own copy instead of refreshing
         if (hasAuraEffect == true && EverQuest->IsWornEffectSpell(spell->Id) == false && (EverQuest->ConfigSystemRoguePoisonMarkerSpellID == 0 || spell->Id != EverQuest->ConfigSystemRoguePoisonMarkerSpellID))
             spell->AttributesCu |= SPELL_ATTR0_CU_SINGLE_AURA_STACK;
+
+        // Damage over time is the exception to the shared copy, but which spells that covers can't be settled until every block of a split spell has its attributes, so
+        // it's finished at startup (BuildPerCasterDoTSpells)
+        if (hasAuraEffect == true)
+            EverQuest->RememberLoadedEQSpellInfo(spell);
 
         // EQ class aura effects can keep one shared copy per target no matter who applied it
         if (EverQuest->IsClassAuraSpell(spell->Id) == true)

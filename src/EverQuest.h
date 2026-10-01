@@ -1949,6 +1949,8 @@ public:
     unordered_set<uint32> WornEffectSpellIDs;
     unordered_set<uint32> HiddenAuraIconSpellIDs;
     unordered_set<uint32> EQWeaponPoisonProcSpellIDs;
+    unordered_map<uint32, SpellInfo*> LoadedEQSpellInfosBySpellID;
+    unordered_set<uint32> PerCasterDoTSpellIDs; // Every converted spell that keeps one copy per caster so each caster's damage over time lands, built once at startup, read-only after
     unordered_map<uint32, EverQuestSpell> SpellDataBySpellID;
     unordered_set<uint32> BardSongTickSpellIDs;
     unordered_set<uint32> BardSongEffectSpellIDs;
@@ -2138,6 +2140,11 @@ public:
     void RegisterEQWeaponPoisonProcSpells(SpellInfo* spellInfo);
     bool IsSpellAnEQWeaponPoisonProc(uint32 spellID);
     void LoadSpellData();
+    bool IsHarmfulPeriodicAuraType(uint32 auraType);
+    void RememberLoadedEQSpellInfo(SpellInfo* spellInfo);
+    void BuildPerCasterDoTSpells();
+    bool DoesSpellHaveEffectUnsafeToDuplicate(SpellInfo const* spellInfo);
+    bool IsPerCasterDoTSpell(uint32 spellID);
     void LoadBardSongEffectSpellIDs();
     void LoadGateSpellIDs();
     const EverQuestSpell& GetSpellDataForSpellID(uint32 spellID);
@@ -2253,6 +2260,12 @@ public:
     void UntrackAttackPowerAurasAndEnforceHighestOnlyOnAuraRemove(Unit* unit, Aura* aura);
     void EnforceHighestOnlyAttackPowerOnUnit(Unit* unit, vector<EverQuestUnitAttackPowerAuraEffect>& trackedAttackPowerAuraEffects);
     void ApplyEQSlowBossReductionOnAuraApply(Unit* unit, Aura* aura);
+    bool TryGetEQSlowBossReducedAmount(Unit* unit, uint32 spellID, uint32 auraType, int32 naturalAmount, int32& reducedAmount);
+    bool IsPerCasterDoTSharedAuraType(uint32 auraType);
+    void EnforcePerCasterDoTCopyRulesOnAuraApply(Unit* unit, Aura* aura);
+    void EnforcePerCasterDoTCopyRulesOnAuraRemove(Unit* unit, Aura* aura);
+    void EnforceSharedEffectsAcrossPerCasterDoTCopies(Unit* unit, uint32 spellID, Aura* appliedAura, Aura* removedAura);
+    void EnforceSharedEffectsOnAuraLinkedPerCasterDoTSpells(Unit* unit, uint32 spellID, ObjectGuid casterGUID, uint8 depth);
     void PreserveEQAuraAmountsThroughSaveAndLoadOnAuraApply(Aura* aura);
     bool IsItemArmorExcludedFromBearFormMultiplier(ItemTemplate const* itemTemplate);
     uint32 GetEquippedItemBaseArmorExcludedFromBearFormMultiplier(Item* item);

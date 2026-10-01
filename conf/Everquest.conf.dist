@@ -231,6 +231,12 @@ EverQuest.Mentorship.RequestTimeoutInSeconds = 30
 #
 # 	EverQuest.Spells.DisableStackingOfSameDOT
 #		If true, spells that apply the same dot will not stack, which is EQ-like
+#		If false, every player (or player pet) that casts the same dot on a target gets their own copy of it, so each
+#		caster's damage lands. Anything else the spell does (stat, resist or attack speed reductions and so on) still
+#		only counts once, and creatures (including charmed creatures, totems and guardians) casting the same dot
+#		still share one copy. A dot that also lowers maximum health or mana, feigns death, or changes how
+#		the target moves (hover, feather fall, water walk) keeps one shared copy
+#		Read at server startup only
 #	Default: False (use WoW behavior)
 #
 ###################################################################################################

@@ -4472,6 +4472,241 @@ void EverQuestMod::LoadSpellData()
     }
 }
 
+bool EverQuestMod::IsHarmfulPeriodicAuraType(uint32 auraType)
+{
+    switch (auraType)
+    {
+        case SPELL_AURA_PERIODIC_DAMAGE:
+        case SPELL_AURA_PERIODIC_DAMAGE_PERCENT:
+        case SPELL_AURA_PERIODIC_LEECH:
+        case SPELL_AURA_PERIODIC_MANA_LEECH:
+        case SPELL_AURA_POWER_BURN:
+            return true;
+        default:
+            return false;
+    }
+}
+
+void EverQuestMod::RememberLoadedEQSpellInfo(SpellInfo* spellInfo)
+{
+    if (spellInfo == nullptr)
+        return;
+    LoadedEQSpellInfosBySpellID[spellInfo->Id] = spellInfo;
+}
+
+void EverQuestMod::BuildPerCasterDoTSpells()
+{
+    // In EQ a recast of a spell refreshes the one copy on the target no matter who cast it, which is what the shared copy attribute does for every converted aura spell.
+    // Damage over time is the exception, since every caster's damage should land.  A detrimental spell that ticks damage keeps a copy per caster instead, and so does
+    // every block its aura chains to or from, because the core adds, refreshes and removes a chained block by its caster.  A shared block in a per caster chain would be
+    // taken away when the first caster's copy ends.  What those spells do besides damage still only counts once (EnforceSharedEffectsAcrossPerCasterDoTCopies)
+    PerCasterDoTSpellIDs.clear();
+    if (ConfigSpellDisableStackingOfSameDOT == false)
+    {
+        // Anything reached through a link is a split block, and the rest are the spells that get cast
+        int32 linkTypes[2] = { SPELL_LINK_AURA, SPELL_LINK_HIT };
+        unordered_set<uint32> splitBlockSpellIDs;
+        for (unordered_map<uint32, EverQuestSpell>::const_iterator spellItr = SpellDataBySpellID.begin(); spellItr != SpellDataBySpellID.end(); ++spellItr)
+        {
+            for (int32 linkType : linkTypes)
+            {
+                std::vector<int32> const* linkedSpellIDs = sSpellMgr->GetSpellLinked((int32)spellItr->first + linkType);
+                if (linkedSpellIDs == nullptr)
+                    continue;
+                for (int32 linkedSpellID : *linkedSpellIDs)
+                    if (linkedSpellID > 0)
+                        splitBlockSpellIDs.insert((uint32)linkedSpellID);
+            }
+        }
+
+        for (unordered_map<uint32, EverQuestSpell>::const_iterator spellItr = SpellDataBySpellID.begin(); spellItr != SpellDataBySpellID.end(); ++spellItr)
+        {
+            uint32 castSpellID = spellItr->first;
+            if (splitBlockSpellIDs.find(castSpellID) != splitBlockSpellIDs.end())
+                continue;
+            if (IsWornEffectSpell(castSpellID) == true || IsClassAuraSpell(castSpellID) == true)
+                continue;
+            SpellInfo const* castSpellInfo = sSpellMgr->GetSpellInfo(castSpellID);
+            if (castSpellInfo == nullptr || castSpellInfo->IsPassive() == true)
+                continue;
+
+            // Only the cast spell can say whether the whole thing is detrimental.  Its split blocks are aimed at whoever the cast spell hit, as that unit casting on
+            // itself, which the core reads as a helpful effect
+            bool hasEffect = false;
+            bool hasPositiveEffect = false;
+            for (uint8 i = 0; i < MAX_SPELL_EFFECTS; ++i)
+            {
+                if (castSpellInfo->Effects[i].IsEffect() == false)
+                    continue;
+                hasEffect = true;
+                if (castSpellInfo->IsPositiveEffect(i) == true)
+                    hasPositiveEffect = true;
+            }
+            if (hasEffect == false || hasPositiveEffect == true)
+                continue;
+
+            // Gather the cast spell and every split block under it
+            vector<uint32> blockSpellIDs;
+            vector<pair<uint32, uint32>> auraLinks;
+            blockSpellIDs.push_back(castSpellID);
+            for (size_t blockIndex = 0; blockIndex < blockSpellIDs.size() && blockSpellIDs.size() < 32; ++blockIndex)
+            {
+                uint32 blockSpellID = blockSpellIDs[blockIndex];
+                for (int32 linkType : linkTypes)
+                {
+                    std::vector<int32> const* linkedSpellIDs = sSpellMgr->GetSpellLinked((int32)blockSpellID + linkType);
+                    if (linkedSpellIDs == nullptr)
+                        continue;
+                    for (int32 linkedSpellID : *linkedSpellIDs)
+                    {
+                        if (linkedSpellID <= 0)
+                            continue;
+                        if (linkType == SPELL_LINK_AURA)
+                            auraLinks.push_back(make_pair(blockSpellID, (uint32)linkedSpellID));
+                        if (std::find(blockSpellIDs.begin(), blockSpellIDs.end(), (uint32)linkedSpellID) == blockSpellIDs.end())
+                            blockSpellIDs.push_back((uint32)linkedSpellID);
+                    }
+                }
+            }
+
+            // The blocks that tick damage, then everything joined to one of them by an aura link
+            unordered_set<uint32> perCasterBlockSpellIDs;
+            for (uint32 blockSpellID : blockSpellIDs)
+            {
+                SpellInfo const* blockSpellInfo = sSpellMgr->GetSpellInfo(blockSpellID);
+                if (blockSpellInfo == nullptr)
+                    continue;
+                for (uint8 i = 0; i < MAX_SPELL_EFFECTS; ++i)
+                {
+                    if (blockSpellInfo->Effects[i].IsEffect() == false)
+                        continue;
+                    if (IsHarmfulPeriodicAuraType(blockSpellInfo->Effects[i].ApplyAuraName) == true)
+                    {
+                        perCasterBlockSpellIDs.insert(blockSpellID);
+                        break;
+                    }
+                }
+            }
+            if (perCasterBlockSpellIDs.empty() == true)
+                continue;
+            bool addedAny = true;
+            while (addedAny == true)
+            {
+                addedAny = false;
+                for (pair<uint32, uint32> const& auraLink : auraLinks)
+                {
+                    bool hasTrigger = perCasterBlockSpellIDs.find(auraLink.first) != perCasterBlockSpellIDs.end();
+                    bool hasLinked = perCasterBlockSpellIDs.find(auraLink.second) != perCasterBlockSpellIDs.end();
+                    if (hasTrigger == hasLinked)
+                        continue;
+                    perCasterBlockSpellIDs.insert(auraLink.first);
+                    perCasterBlockSpellIDs.insert(auraLink.second);
+                    addedAny = true;
+                }
+            }
+
+            // A second copy's effects are live for a moment before they can be zeroed, which is harmless for anything that simply comes back off again.  Lowering
+            // maximum health or mana is not, since the unit's current health or mana is cut down to the doubled reduction and stays there, and neither is an effect
+            // that acts each time a copy lands or leaves, so those spells keep the one shared copy
+            bool hasEffectUnsafeToDuplicate = false;
+            for (uint32 blockSpellID : perCasterBlockSpellIDs)
+            {
+                if (DoesSpellHaveEffectUnsafeToDuplicate(sSpellMgr->GetSpellInfo(blockSpellID)) == true)
+                {
+                    hasEffectUnsafeToDuplicate = true;
+                    break;
+                }
+            }
+            if (hasEffectUnsafeToDuplicate == true)
+                continue;
+
+            for (uint32 blockSpellID : perCasterBlockSpellIDs)
+            {
+                if (IsWornEffectSpell(blockSpellID) == true || IsClassAuraSpell(blockSpellID) == true)
+                    continue;
+
+                // Only converted spells that apply an aura were remembered
+                unordered_map<uint32, SpellInfo*>::const_iterator loadedSpellInfoItr = LoadedEQSpellInfosBySpellID.find(blockSpellID);
+                if (loadedSpellInfoItr == LoadedEQSpellInfosBySpellID.end())
+                    continue;
+                SpellInfo* blockSpellInfo = loadedSpellInfoItr->second;
+                if (blockSpellInfo->IsPassive() == true)
+                    continue;
+
+                // The stacking rule attribute lets copies from different casters sit side by side even when the spell hits an area
+                blockSpellInfo->AttributesCu &= ~SPELL_ATTR0_CU_SINGLE_AURA_STACK;
+                blockSpellInfo->AttributesEx3 |= SPELL_ATTR3_DOT_STACKING_RULE;
+                PerCasterDoTSpellIDs.insert(blockSpellID);
+            }
+        }
+
+        // The core handles a chained block by the caster of the aura that chains it, so a chain with a per caster copy on only one end loses or keeps the wrong block
+        for (unordered_map<uint32, EverQuestSpell>::const_iterator spellItr = SpellDataBySpellID.begin(); spellItr != SpellDataBySpellID.end(); ++spellItr)
+        {
+            std::vector<int32> const* linkedSpellIDs = sSpellMgr->GetSpellLinked((int32)spellItr->first + SPELL_LINK_AURA);
+            if (linkedSpellIDs == nullptr)
+                continue;
+            for (int32 linkedSpellID : *linkedSpellIDs)
+            {
+                if (linkedSpellID <= 0)
+                    continue;
+                if (IsPerCasterDoTSpell(spellItr->first) != IsPerCasterDoTSpell((uint32)linkedSpellID))
+                    LOG_ERROR("module.EverQuest", "EverQuestMod::BuildPerCasterDoTSpells found spell {} chaining spell {} with only one of them keeping a damage over time copy per caster", spellItr->first, linkedSpellID);
+            }
+        }
+        LOG_INFO("module.EverQuest", "EverQuestMod marked {} spells to keep a damage over time copy per caster", PerCasterDoTSpellIDs.size());
+    }
+    LoadedEQSpellInfosBySpellID.clear();
+}
+
+bool EverQuestMod::DoesSpellHaveEffectUnsafeToDuplicate(SpellInfo const* spellInfo)
+{
+    if (spellInfo == nullptr)
+        return false;
+    for (uint8 i = 0; i < MAX_SPELL_EFFECTS; ++i)
+    {
+        if (spellInfo->Effects[i].IsEffect() == false)
+            continue;
+        switch (spellInfo->Effects[i].ApplyAuraName)
+        {
+            case SPELL_AURA_MOD_INCREASE_HEALTH:
+            case SPELL_AURA_MOD_INCREASE_HEALTH_2:
+            case SPELL_AURA_230:
+            case SPELL_AURA_MOD_INCREASE_HEALTH_PERCENT:
+            case SPELL_AURA_MOD_INCREASE_ENERGY:
+            case SPELL_AURA_MOD_INCREASE_ENERGY_PERCENT:
+            case SPELL_AURA_MOD_BASE_HEALTH_PCT:
+                return true;
+            case SPELL_AURA_MOD_STAT:
+            case SPELL_AURA_MOD_PERCENT_STAT:
+            case SPELL_AURA_MOD_TOTAL_STAT_PERCENTAGE:
+            {
+                // Stamina and intellect are what maximum health and mana are built from (a negative value is every stat)
+                int32 stat = spellInfo->Effects[i].MiscValue;
+                if (stat < 0 || stat == STAT_STAMINA || stat == STAT_INTELLECT)
+                    return true;
+                break;
+            }
+            // Feigning death wipes the player's threat every time a copy lands, and a copy leaving stands them back up even with another copy still on them
+            case SPELL_AURA_FEIGN_DEATH:
+                return true;
+            // These tell the client to change how the unit moves each time a copy lands, and hovering can lift it a second time
+            case SPELL_AURA_HOVER:
+            case SPELL_AURA_FEATHER_FALL:
+            case SPELL_AURA_WATER_WALK:
+                return true;
+            default:
+                break;
+        }
+    }
+    return false;
+}
+
+bool EverQuestMod::IsPerCasterDoTSpell(uint32 spellID)
+{
+    return PerCasterDoTSpellIDs.find(spellID) != PerCasterDoTSpellIDs.end();
+}
+
 void EverQuestMod::LoadBardSongEffectSpellIDs()
 {
     // A song's effects can be spread across its tick spell and the split blocks that tick chains into, and only spell_linked_spell knows about those blocks
@@ -7060,8 +7295,6 @@ void EverQuestMod::ApplyEQSlowBossReductionOnAuraApply(Unit* unit, Aura* aura)
         return;
 
     float effectivenessMod = ConfigSystemSlowBossEffectivenessMod;
-    if (effectivenessMod < 0.0f)
-        effectivenessMod = 0.0f;
     if (effectivenessMod >= 1.0f)
         return;
 
@@ -7075,16 +7308,269 @@ void EverQuestMod::ApplyEQSlowBossReductionOnAuraApply(Unit* unit, Aura* aura)
         AuraType auraType = auraEffect->GetAuraType();
         if (auraType != SPELL_AURA_MOD_MELEE_HASTE && auraType != SPELL_AURA_MOD_RANGED_HASTE && auraType != SPELL_AURA_MOD_MELEE_RANGED_HASTE && auraType != SPELL_AURA_MELEE_SLOW)
             continue;
-        int32 naturalAmount = auraEffect->CalculateAmount(caster);
-        if (naturalAmount >= 0)
+        int32 reducedAmount = 0;
+        if (TryGetEQSlowBossReducedAmount(unit, spellID, auraType, auraEffect->CalculateAmount(caster), reducedAmount) == false)
             continue;
-        int32 reducedAmount = (int32)std::lround((float)naturalAmount * effectivenessMod);
-
-        // Never let the reduction erase a slow completely, since the spell still reads as a slow on the tooltip
-        if (reducedAmount == 0)
-            reducedAmount = -1;
         if (auraEffect->GetAmount() != reducedAmount)
             auraEffect->ChangeAmount(reducedAmount);
+    }
+}
+
+bool EverQuestMod::TryGetEQSlowBossReducedAmount(Unit* unit, uint32 spellID, uint32 auraType, int32 naturalAmount, int32& reducedAmount)
+{
+    if (ConfigSpellSlowsWeakerOnBossesEnabled == false || unit == nullptr)
+        return false;
+    if (auraType != SPELL_AURA_MOD_MELEE_HASTE && auraType != SPELL_AURA_MOD_RANGED_HASTE && auraType != SPELL_AURA_MOD_MELEE_RANGED_HASTE && auraType != SPELL_AURA_MELEE_SLOW)
+        return false;
+    if (naturalAmount >= 0)
+        return false;
+    if (spellID < ConfigSystemSpellDBCIDMin || spellID > ConfigSystemSpellDBCIDMax)
+        return false;
+    if (IsSpellAnEQSpell(spellID) == false)
+        return false;
+    Creature* creature = unit->ToCreature();
+    if (creature == nullptr || creature->isWorldBoss() == false)
+        return false;
+
+    float effectivenessMod = ConfigSystemSlowBossEffectivenessMod;
+    if (effectivenessMod < 0.0f)
+        effectivenessMod = 0.0f;
+    if (effectivenessMod >= 1.0f)
+        return false;
+    reducedAmount = (int32)std::lround((float)naturalAmount * effectivenessMod);
+
+    // Never let the reduction erase a slow completely, since the spell still reads as a slow on the tooltip
+    if (reducedAmount == 0)
+        reducedAmount = -1;
+    return true;
+}
+
+bool EverQuestMod::IsPerCasterDoTSharedAuraType(uint32 auraType)
+{
+    // The effects that add up when two copies of one spell sit on a unit.  Anything not listed either doesn't add up in the core (snares and
+    // speed take the strongest) or is on/off (roots, stuns, fears), so a second copy of those changes nothing.  Maximum health and mana effects
+    // aren't here because a spell with one never gets a copy per caster (DoesSpellHaveEffectUnsafeToDuplicate)
+    switch (auraType)
+    {
+        case SPELL_AURA_MOD_STAT:
+        case SPELL_AURA_MOD_PERCENT_STAT:
+        case SPELL_AURA_MOD_TOTAL_STAT_PERCENTAGE:
+        case SPELL_AURA_MOD_RESISTANCE:
+        case SPELL_AURA_MOD_BASE_RESISTANCE:
+        case SPELL_AURA_MOD_RESISTANCE_PCT:
+        case SPELL_AURA_MOD_BASE_RESISTANCE_PCT:
+        case SPELL_AURA_MOD_HIT_CHANCE:
+        case SPELL_AURA_MOD_SPELL_HIT_CHANCE:
+        case SPELL_AURA_MOD_MELEE_HASTE:
+        case SPELL_AURA_MOD_RANGED_HASTE:
+        case SPELL_AURA_MOD_MELEE_RANGED_HASTE:
+        case SPELL_AURA_MELEE_SLOW:
+        case SPELL_AURA_MOD_ATTACK_POWER:
+        case SPELL_AURA_MOD_RANGED_ATTACK_POWER:
+        case SPELL_AURA_MOD_DAMAGE_DONE:
+        case SPELL_AURA_MOD_DAMAGE_TAKEN:
+        case SPELL_AURA_MOD_DAMAGE_PERCENT_DONE:
+        case SPELL_AURA_MOD_DAMAGE_PERCENT_TAKEN:
+        case SPELL_AURA_MOD_HEALING:
+        case SPELL_AURA_MOD_HEALING_PCT:
+        case SPELL_AURA_MOD_SKILL:
+        case SPELL_AURA_MOD_SCALE:
+        case SPELL_AURA_MOD_DODGE_PERCENT:
+        case SPELL_AURA_MOD_PARRY_PERCENT:
+        case SPELL_AURA_MOD_BLOCK_PERCENT:
+        case SPELL_AURA_MOD_WEAPON_CRIT_PERCENT:
+        case SPELL_AURA_MOD_SPELL_CRIT_CHANCE:
+        case SPELL_AURA_MOD_REGEN:
+        case SPELL_AURA_MOD_POWER_REGEN:
+            return true;
+        default:
+            return false;
+    }
+}
+
+void EverQuestMod::EnforcePerCasterDoTCopyRulesOnAuraApply(Unit* unit, Aura* aura)
+{
+    if (unit == nullptr || aura == nullptr || aura->IsRemoved() == true || aura->GetType() != UNIT_AURA_TYPE)
+        return;
+    uint32 spellID = aura->GetId();
+    if (IsPerCasterDoTSpell(spellID) == false)
+        return;
+
+    // Each player (or player's pet) keeps their own copy, but creatures still share the one, so a creature's cast takes the place of any other creature's copy
+    // the same as its refresh did before the copies were per caster
+    ObjectGuid casterGUID = aura->GetCasterGUID();
+    if (casterGUID.IsPlayer() == false && casterGUID.IsPet() == false)
+    {
+        vector<Aura*> otherCreatureCopies;
+        Unit::AuraMapBounds ownedAuraBounds = unit->GetOwnedAuras().equal_range(spellID);
+        for (Unit::AuraMap::const_iterator ownedAuraItr = ownedAuraBounds.first; ownedAuraItr != ownedAuraBounds.second; ++ownedAuraItr)
+        {
+            Aura* otherAura = ownedAuraItr->second;
+            if (otherAura == nullptr || otherAura == aura || otherAura->IsRemoved() == true)
+                continue;
+            ObjectGuid otherCasterGUID = otherAura->GetCasterGUID();
+            if (otherCasterGUID.IsPlayer() == true || otherCasterGUID.IsPet() == true)
+                continue;
+            otherCreatureCopies.push_back(otherAura);
+        }
+        for (Aura* otherCreatureCopy : otherCreatureCopies)
+            if (otherCreatureCopy->IsRemoved() == false)
+                unit->RemoveOwnedAura(otherCreatureCopy);
+    }
+
+    EnforceSharedEffectsAcrossPerCasterDoTCopies(unit, spellID, aura, nullptr);
+
+    // A refresh also refreshes the split blocks chained off of this aura, which puts their amounts back without this hook running for them
+    EnforceSharedEffectsOnAuraLinkedPerCasterDoTSpells(unit, spellID, casterGUID, 0);
+}
+
+void EverQuestMod::EnforcePerCasterDoTCopyRulesOnAuraRemove(Unit* unit, Aura* aura)
+{
+    if (unit == nullptr || aura == nullptr || aura->GetType() != UNIT_AURA_TYPE)
+        return;
+    uint32 spellID = aura->GetId();
+    if (IsPerCasterDoTSpell(spellID) == false)
+        return;
+
+    // A unit that died or is leaving the world is losing every copy anyway
+    if (unit->IsInWorld() == false || unit->IsAlive() == false)
+        return;
+
+    EnforceSharedEffectsAcrossPerCasterDoTCopies(unit, spellID, nullptr, aura);
+}
+
+void EverQuestMod::EnforceSharedEffectsOnAuraLinkedPerCasterDoTSpells(Unit* unit, uint32 spellID, ObjectGuid casterGUID, uint8 depth)
+{
+    // A split block can chain a further split block, but never deeply
+    if (depth > 3)
+        return;
+    std::vector<int32> const* linkedSpellIDs = sSpellMgr->GetSpellLinked((int32)spellID + SPELL_LINK_AURA);
+    if (linkedSpellIDs == nullptr)
+        return;
+    for (int32 linkedSpellID : *linkedSpellIDs)
+    {
+        if (linkedSpellID <= 0)
+            continue;
+        if (IsPerCasterDoTSpell((uint32)linkedSpellID) == true)
+        {
+            // The caster's own copy of the block is the one that was refreshed.  It came back at its natural amounts, so a slow on a boss is weakened again
+            // before the copies are sorted out
+            Aura* refreshedCopy = unit->GetOwnedAura((uint32)linkedSpellID, casterGUID);
+            if (refreshedCopy != nullptr)
+            {
+                ApplyEQSlowBossReductionOnAuraApply(unit, refreshedCopy);
+
+                // Attack power is left to its own tracking, which also only hears about a copy through the aura apply hook
+                TrackAttackPowerAurasAndEnforceHighestOnlyOnAuraApply(unit, refreshedCopy);
+            }
+            EnforceSharedEffectsAcrossPerCasterDoTCopies(unit, (uint32)linkedSpellID, refreshedCopy, nullptr);
+        }
+        EnforceSharedEffectsOnAuraLinkedPerCasterDoTSpells(unit, (uint32)linkedSpellID, casterGUID, depth + 1);
+    }
+}
+
+void EverQuestMod::EnforceSharedEffectsAcrossPerCasterDoTCopies(Unit* unit, uint32 spellID, Aura* appliedAura, Aura* removedAura)
+{
+    // Only the damage is meant to add up across the copies each caster holds.  Everything else the spell does (stat, resist, attack speed reductions and so on)
+    // counts once, so each of those effects stays live on one copy and is zeroed on the rest.  The zeroed copies keep ticking their damage.  The copy holding
+    // an effect keeps it until that copy is gone, and then it passes to the copy with the most time left
+    SpellInfo const* spellInfo = sSpellMgr->GetSpellInfo(spellID);
+    if (spellInfo == nullptr)
+        return;
+
+    vector<Aura*> copies;
+    Unit::AuraMapBounds ownedAuraBounds = unit->GetOwnedAuras().equal_range(spellID);
+    for (Unit::AuraMap::const_iterator ownedAuraItr = ownedAuraBounds.first; ownedAuraItr != ownedAuraBounds.second; ++ownedAuraItr)
+    {
+        Aura* copy = ownedAuraItr->second;
+        if (copy == nullptr || copy == removedAura || copy->IsRemoved() == true)
+            continue;
+        copies.push_back(copy);
+    }
+    if (copies.empty() == true)
+        return;
+
+    for (uint8 i = 0; i < MAX_SPELL_EFFECTS; ++i)
+    {
+        if (spellInfo->Effects[i].IsEffect() == false)
+            continue;
+        uint32 auraType = spellInfo->Effects[i].ApplyAuraName;
+        if (IsPerCasterDoTSharedAuraType(auraType) == false)
+            continue;
+
+        // Attack power and positive haste already keep to a single winner through their own tracking, which rewrites these same amounts
+        if (ConfigSpellAttackPowerHighestOnlyEnabled == true && (auraType == SPELL_AURA_MOD_ATTACK_POWER || auraType == SPELL_AURA_MOD_RANGED_ATTACK_POWER))
+            continue;
+        bool isTrackedHasteType = ConfigSpellHasteCapEnabled == true && (auraType == SPELL_AURA_MOD_MELEE_HASTE || auraType == SPELL_AURA_MOD_RANGED_HASTE);
+
+        // The effect only counts on copies the unit actually took it from (it could have been immune when one landed).  The copy that just landed or refreshed
+        // came in with its natural amount, so it only reads as the holder when nothing else is
+        vector<AuraEffect*> copyEffects(copies.size(), nullptr);
+        size_t copyCount = copies.size();
+        int holderIndex = -1;
+        bool isHolderLive = false;
+        int32 holderDuration = 0;
+        for (size_t copyIndex = 0; copyIndex < copyCount; ++copyIndex)
+        {
+            Aura* copy = copies[copyIndex];
+            copyEffects[copyIndex] = nullptr;
+            AuraApplication const* auraApplication = copy->GetApplicationOfTarget(unit->GetGUID());
+            if (auraApplication == nullptr || (auraApplication->GetEffectsToApply() & (1 << i)) == 0)
+                continue;
+            AuraEffect* auraEffect = copy->GetEffect(i);
+            if (auraEffect == nullptr)
+                continue;
+            copyEffects[copyIndex] = auraEffect;
+
+            // A copy with no duration never runs out
+            bool isLive = auraEffect->GetAmount() != 0 && copy != appliedAura;
+            int32 copyDuration = copy->GetDuration() < 0 ? INT32_MAX : copy->GetDuration();
+            if (holderIndex == -1 || (isLive == true && isHolderLive == false) || (isLive == isHolderLive && copyDuration > holderDuration))
+            {
+                holderIndex = (int)copyIndex;
+                isHolderLive = isLive;
+                holderDuration = copyDuration;
+            }
+        }
+        if (holderIndex == -1)
+            continue;
+
+        for (size_t copyIndex = 0; copyIndex < copyCount; ++copyIndex)
+        {
+            AuraEffect* auraEffect = copyEffects[copyIndex];
+            if (auraEffect == nullptr)
+                continue;
+            int32 currentAmount = auraEffect->GetAmount();
+            if ((int)copyIndex != holderIndex)
+            {
+                if (currentAmount == 0)
+                    continue;
+                if (isTrackedHasteType == true && currentAmount > 0)
+                    continue;
+                auraEffect->ChangeAmount(0);
+                continue;
+            }
+
+            // The holder takes over at the strength of the copy that just left when that one was holding the effect, and otherwise gets its own natural amount back
+            // (weakened again if it's a slow on a boss, which the amount taken from the copy that left already is)
+            if (currentAmount != 0)
+                continue;
+            int32 restoredAmount = 0;
+            if (removedAura != nullptr && removedAura->GetEffect(i) != nullptr)
+                restoredAmount = removedAura->GetEffect(i)->GetAmount();
+            if (restoredAmount == 0)
+            {
+                restoredAmount = auraEffect->CalculateAmount(copies[copyIndex]->GetCaster());
+                int32 reducedAmount = 0;
+                if (TryGetEQSlowBossReducedAmount(unit, spellID, auraType, restoredAmount, reducedAmount) == true)
+                    restoredAmount = reducedAmount;
+            }
+            if (restoredAmount == 0)
+                continue;
+            if (isTrackedHasteType == true && restoredAmount > 0)
+                continue;
+            auraEffect->ChangeAmount(restoredAmount);
+        }
     }
 }
 

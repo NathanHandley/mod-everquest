@@ -286,6 +286,9 @@ public:
             return;
         }
 
+        // Damage over time stacks per caster, but the rest of what those spells do only counts once
+        EverQuest->EnforcePerCasterDoTCopyRulesOnAuraApply(unit, aura);
+
         // ModFaction (Alliance line) auras landing on creatures grant the caster a temporary reputation bonus with the creature's faction
         if (unit->IsCreature() == true)
             EverQuest->HandleModFactionAuraApplyOnCreature(unit->ToCreature(), aura);
@@ -359,6 +362,9 @@ public:
         {
             EverQuest->UntrackEQHasteAurasAndEnforceCapOnAuraRemove(unit, aurApp->GetBase());
             EverQuest->UntrackAttackPowerAurasAndEnforceHighestOnlyOnAuraRemove(unit, aurApp->GetBase());
+
+            // Losing a copy of a per caster damage over time spell hands its one-time effects to a copy that's left
+            EverQuest->EnforcePerCasterDoTCopyRulesOnAuraRemove(unit, aurApp->GetBase());
 
             // A Shaman turning Warspirit off loses the vigor it built
             EverQuest->HandleClassAuraShamanWarspiritRemove(unit, aurApp->GetBase());

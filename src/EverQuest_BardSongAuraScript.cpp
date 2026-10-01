@@ -231,10 +231,10 @@ class EverQuest_BardSongAuraScript: public AuraScript
             if (targetType == EQ_BARDSONGAURATARGET_FRIENDLYPARTY && EverQuest->WouldAssistFlagUnflaggedPlayerForPvP(caster->ToPlayer(), target) == true)
                 continue;
 
-            // Allow proper refresh behavior, even across two bards
+            // Allow proper refresh behavior, even across two bards.  Only the copy left by a bard who is gone comes off, since damage songs keep a copy per bard
             Aura* existingAura = target->GetOwnedAura(effectSpellID);
             if (existingAura != nullptr && existingAura->GetCasterGUID() != caster->GetGUID() && existingAura->GetCaster() == nullptr)
-                target->RemoveAurasDueToSpell(effectSpellID);
+                target->RemoveOwnedAura(existingAura);
             caster->CastSpell(target, effectSpellID, true);
         }
     }
