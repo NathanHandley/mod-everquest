@@ -64,8 +64,8 @@ public:
         if (EverQuest->IsEnabled == false)
             return;
 
-        // Keep the pet's own talent points during its owner's mentorship
-        EverQuest->AdjustPetTalentPointsForMentorship(pet, level, points);
+        // Keep the pet's own talent points during its owner's mentorship, and the ones held before its owner lost any levels to death
+        EverQuest->AdjustPetTalentPointsForHeldLevel(pet, level, points);
     }
 
     void OnPetAddToWorld(Pet* pet) override

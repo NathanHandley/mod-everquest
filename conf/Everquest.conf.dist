@@ -163,6 +163,14 @@ EverQuest.Login.ReturnCharactersToNorrath = True
 #       NOTE: Walking back to your corpse or using a spirit healer does not count as a resurrection
 #	Default: 90 (90% of the experience lost to the last death is restored)
 #
+# 	EverQuest.ExpLossOnDeath.KeepTalentPoints
+#		If true, levels lost to death never take talent points with them.  The character (and any
+#        hunter pet pulled down with it) keeps the talent points of the highest level it held, and
+#        earns no new ones until it levels past that point again.
+#       If false, a character left with more talent points spent than its lowered level allows has
+#        its talents reset, which is the stock behavior
+#	Default: True (enabled, talent points are kept through levels lost to death)
+#
 ###################################################################################################
 
 EverQuest.ExpLossOnDeath.Enabled = True
@@ -170,6 +178,7 @@ EverQuest.ExpLossOnDeath.MinLevel = 5
 EverQuest.ExpLossOnDeath.LossPercent = 10
 EverQuest.ExpLossOnDeath.AddLostExpToRestExp = True
 EverQuest.ExpLossOnDeath.ResurrectRestorePercent = 90
+EverQuest.ExpLossOnDeath.KeepTalentPoints = True
 
 ###################################################################################################
 #

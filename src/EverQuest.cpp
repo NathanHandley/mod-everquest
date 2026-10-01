@@ -117,6 +117,7 @@ EverQuestMod::EverQuestMod() :
     ConfigExpLossOnDeathLossPercent(10),
     ConfigExpLossOnDeathAddLostExpToRestExp(true),
     ConfigExpLossOnDeathResurrectRestorePercent(90.0f),
+    ConfigExpLossOnDeathKeepTalentPoints(true),
     ConfigAlternateGroupExperienceFormulaEnabled(false),
     ConfigAlternateGroupExperienceAddPercentPerAddedMember(20.0f),
     ConfigSpellDisableStackingOfSameDOT(false),
@@ -476,6 +477,7 @@ void EverQuestMod::LoadConfigurationFile()
     ConfigExpLossOnDeathLossPercent = sConfigMgr->GetOption<float>("EverQuest.ExpLossOnDeath.LossPercent", 10);
     ConfigExpLossOnDeathAddLostExpToRestExp = sConfigMgr->GetOption<bool>("EverQuest.ExpLossOnDeath.AddLostExpToRestExp", true);
     ConfigExpLossOnDeathResurrectRestorePercent = sConfigMgr->GetOption<float>("EverQuest.ExpLossOnDeath.ResurrectRestorePercent", 90.0f);
+    ConfigExpLossOnDeathKeepTalentPoints = sConfigMgr->GetOption<bool>("EverQuest.ExpLossOnDeath.KeepTalentPoints", true);
 
     // Group EXP rates
     ConfigAlternateGroupExperienceFormulaEnabled = sConfigMgr->GetOption<bool>("EverQuest.AlternateGroupExperienceFormula.Enabled", false);
@@ -15771,6 +15773,7 @@ EverQuestPlayerControllerData* EverQuestMod::GetOrLoadActivePlayerClassControlle
 
     // Load outside the lock, since this queries the database
     EverQuestPlayerControllerData loadedControllerData = GetPlayerControllerData(player);
+    LoadDeathPetTalentLevelsForPlayerGUID(player->GetGUID().GetCounter());
 
     std::lock_guard<std::mutex> lock(RuntimeStateMutex);
     return &ActivePlayerClassControllerDataByGUID.emplace(player->GetGUID(), loadedControllerData).first->second;
@@ -15900,6 +15903,9 @@ EverQuestPlayerControllerData EverQuestMod::GetPlayerControllerData(Player* play
         controllerData.MoveWhileCasting = fields[27].Get<bool>();
         controllerData.ShowMezBreakMessage = fields[28].Get<bool>();
     }
+
+    // Kept in a table of its own rather than with the settings, since every secondary class profile has its own level and talent build
+    controllerData.DeathTalentLevel = LoadDeathTalentLevelForPlayerGUIDAndEQClass(controllerData.GUID, controllerData.CurrentSecondClass);
     return controllerData;
 }
 
@@ -17256,6 +17262,9 @@ void EverQuestMod::LowerPlayerLevelWithFullRefreshForPlayer(Player* player, uint
     if (newLevel == 0 || newLevel >= oldLevel)
         return;
 
+    // Has to be on record before the level moves, since both the talent rebuild below and the pet being pulled down read it
+    RecordDeathTalentLevelsForPlayer(player, newLevel);
+
     PlayerLevelInfo levelInfo;
     sObjectMgr->GetPlayerLevelInfo(player->getRace(true), player->getClass(), newLevel, &levelInfo);
 
@@ -17274,7 +17283,8 @@ void EverQuestMod::LowerPlayerLevelWithFullRefreshForPlayer(Player* player, uint
     player->SetCreateHealth(classLevelInfo.basehealth);
     player->SetCreateMana(classLevelInfo.basemana);
 
-    // A character carrying more talent points than the lower level allows is reset by this, which the core would do at the next login anyway, so it happens now while the message explaining the lost level is still on screen
+    // Talent points are still counted from the level just recorded, so this resets nothing and only refreshes the client.  With EverQuest.ExpLossOnDeath.KeepTalentPoints off, a character carrying
+    // more talent points than the lower level allows is reset by this instead, which the core would do at the next login anyway, so it happens now while the message explaining the lost level is still on screen
     player->InitTalentForLevel();
     player->InitTaxiNodesForLevel();
     player->InitGlyphsForLevel();
@@ -17528,6 +17538,138 @@ void EverQuestMod::SaveDeathExpLossForPlayer(Player* player)
         controllerData.DeathExpLost,
         controllerData.DeathExpRestGranted,
         controllerData.DeathExpLostSecondaryClass);
+}
+
+uint8 EverQuestMod::LoadDeathTalentLevelForPlayerGUIDAndEQClass(uint32 playerGUIDCounter, uint8 eqClassID)
+{
+    QueryResult queryResult = CharacterDatabase.Query("SELECT `talentLevel` FROM `mod_everquest_character_death_talent_level` WHERE `guid` = {} AND `eqclass` = {}", playerGUIDCounter, uint32(eqClassID));
+    if (!queryResult || queryResult->GetRowCount() == 0)
+        return 0;
+    return queryResult->Fetch()[0].Get<uint8>();
+}
+
+void EverQuestMod::LoadDeathPetTalentLevelsForPlayerGUID(uint32 playerGUIDCounter)
+{
+    // Every pet the character owns across all of its secondary class profiles (a parked profile's pets are held under eq_owner), since a parked profile's pets come back with it.
+    // Only a pet that still exists is read.  The core hands out pet numbers from the highest one in character_pet at startup, so the number of an abandoned pet can be given to a
+    // new one after a restart, and what the old pet was owed must never land on it.  Nothing is recorded for a pet before this has run for its owner, so the rows that are left over can go
+    QueryResult queryResult = CharacterDatabase.Query("SELECT `talentLevels`.`petNumber`, `talentLevels`.`talentLevel` FROM `mod_everquest_pet_death_talent_level` `talentLevels` "
+        "INNER JOIN `character_pet` `pets` ON `pets`.`id` = `talentLevels`.`petNumber` AND (`pets`.`owner` = {} OR `pets`.`eq_owner` = {}) WHERE `talentLevels`.`owner` = {}",
+        playerGUIDCounter, playerGUIDCounter, playerGUIDCounter);
+    CharacterDatabase.Execute("DELETE `talentLevels` FROM `mod_everquest_pet_death_talent_level` `talentLevels` "
+        "LEFT JOIN `character_pet` `pets` ON `pets`.`id` = `talentLevels`.`petNumber` AND (`pets`.`owner` = {} OR `pets`.`eq_owner` = {}) WHERE `talentLevels`.`owner` = {} AND `pets`.`id` IS NULL",
+        playerGUIDCounter, playerGUIDCounter, playerGUIDCounter);
+    if (!queryResult || queryResult->GetRowCount() == 0)
+        return;
+
+    std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+    do
+    {
+        Field* fields = queryResult->Fetch();
+        DeathPetTalentLevelsByPetNumber[fields[0].Get<uint32>()] = fields[1].Get<uint8>();
+    } while (queryResult->NextRow());
+}
+
+uint8 EverQuestMod::GetDeathPetTalentLevelForPetNumber(uint32 petNumber)
+{
+    std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+    unordered_map<uint32, uint8>::const_iterator talentLevelIterator = DeathPetTalentLevelsByPetNumber.find(petNumber);
+    if (talentLevelIterator == DeathPetTalentLevelsByPetNumber.end())
+        return 0;
+    return talentLevelIterator->second;
+}
+
+void EverQuestMod::RecordDeathTalentLevelsForPlayer(Player* player, uint8 newLevel)
+{
+    if (ConfigExpLossOnDeathKeepTalentPoints == false)
+        return;
+
+    uint8 oldLevel = player->GetLevel();
+    if (newLevel >= oldLevel)
+        return;
+
+    // Only ever raised here, so a second death before the first one was earned back keeps counting from the highest level that was held
+    EverQuestPlayerControllerData* controllerData = GetOrLoadActivePlayerClassControllerData(player);
+    if (controllerData != nullptr && oldLevel > controllerData->DeathTalentLevel)
+    {
+        controllerData->DeathTalentLevel = oldLevel;
+        CharacterDatabase.Execute("REPLACE INTO `mod_everquest_character_death_talent_level` (`guid`, `eqclass`, `talentLevel`) VALUES ({}, {}, {})",
+            player->GetGUID().GetCounter(),
+            uint32(controllerData->CurrentSecondClass),
+            uint32(oldLevel));
+    }
+
+    // Pet::SynchronizeLevelWithOwner pulls a hunter pet down to its owner's level, either right away or whenever it is next called, and Pet::InitTalentForLevel then wipes its talents the same way.
+    // The pet is normally not out at a spirit release, so the stable is where its level is found
+    Pet* pet = player->GetPet();
+    if (pet != nullptr && pet->getPetType() == HUNTER_PET && pet->GetCharmInfo() != nullptr)
+        RecordDeathPetTalentLevelForPlayer(player, pet->GetCharmInfo()->GetPetNumber(), pet->GetLevel(), newLevel);
+
+    PetStable* petStable = player->GetPetStable();
+    if (petStable == nullptr)
+        return;
+    if (petStable->CurrentPet.has_value() == true && petStable->CurrentPet->Type == HUNTER_PET)
+        RecordDeathPetTalentLevelForPlayer(player, petStable->CurrentPet->PetNumber, petStable->CurrentPet->Level, newLevel);
+    for (uint8 stableSlotIndex = 0; stableSlotIndex < MAX_PET_STABLES; ++stableSlotIndex)
+    {
+        if (petStable->StabledPets[stableSlotIndex].has_value() == true && petStable->StabledPets[stableSlotIndex]->Type == HUNTER_PET)
+            RecordDeathPetTalentLevelForPlayer(player, petStable->StabledPets[stableSlotIndex]->PetNumber, petStable->StabledPets[stableSlotIndex]->Level, newLevel);
+    }
+    for (PetStable::PetInfo const& unslottedPetInfo : petStable->UnslottedPets)
+    {
+        if (unslottedPetInfo.Type == HUNTER_PET)
+            RecordDeathPetTalentLevelForPlayer(player, unslottedPetInfo.PetNumber, unslottedPetInfo.Level, newLevel);
+    }
+}
+
+void EverQuestMod::RecordDeathPetTalentLevelForPlayer(Player* player, uint32 petNumber, uint8 petLevel, uint8 newOwnerLevel)
+{
+    // A pet at or below the owner's new level is not pulled down by it, so it has nothing to hold on to
+    if (petNumber == 0 || petLevel <= newOwnerLevel)
+        return;
+
+    {
+        std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+        uint8& heldTalentLevel = DeathPetTalentLevelsByPetNumber[petNumber];
+        if (heldTalentLevel >= petLevel)
+            return;
+        heldTalentLevel = petLevel;
+    }
+
+    CharacterDatabase.Execute("REPLACE INTO `mod_everquest_pet_death_talent_level` (`petNumber`, `owner`, `talentLevel`) VALUES ({}, {}, {})",
+        petNumber,
+        player->GetGUID().GetCounter(),
+        uint32(petLevel));
+}
+
+void EverQuestMod::ClearRegainedDeathTalentLevelForPlayer(Player* player)
+{
+    if (player == nullptr)
+        return;
+
+    EverQuestPlayerControllerData* controllerData = GetOrLoadActivePlayerClassControllerData(player);
+    if (controllerData == nullptr || controllerData->DeathTalentLevel == 0)
+        return;
+
+    // Measured against the level the character really owns, so a level borrowed through a mentorship never counts as having earned anything back
+    if (GetEarnedLevelForPlayer(player) < controllerData->DeathTalentLevel)
+        return;
+
+    controllerData->DeathTalentLevel = 0;
+    CharacterDatabase.Execute("DELETE FROM `mod_everquest_character_death_talent_level` WHERE `guid` = {} AND `eqclass` = {}",
+        player->GetGUID().GetCounter(),
+        uint32(controllerData->CurrentSecondClass));
+}
+
+void EverQuestMod::ClearDeathPetTalentLevelForPetNumber(uint32 petNumber)
+{
+    {
+        std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+        if (DeathPetTalentLevelsByPetNumber.erase(petNumber) == 0)
+            return;
+    }
+
+    CharacterDatabase.Execute("DELETE FROM `mod_everquest_pet_death_talent_level` WHERE `petNumber` = {}", petNumber);
 }
 
 bool EverQuestMod::IsPlayerReportingLevelCap(Player const* player)
@@ -18857,36 +18999,55 @@ bool EverQuestMod::HasPendingMentorshipLevelRestoreForPlayer(Player* player)
     return controllerData->MentorshipRole != EQ_MENTORSHIP_ROLE_NONE && controllerData->MentorshipRealLevel != 0;
 }
 
-void EverQuestMod::AdjustTalentPointsForMentorship(Player const* player, uint32& talentPointsForLevel)
+void EverQuestMod::AdjustTalentPointsForHeldLevel(Player const* player, uint32& talentPointsForLevel)
 {
-    // Talent points should never be borrowed from a mentorship
     if (player == nullptr)
         return;
 
-    uint8 realLevel = 0;
-    if (TryGetMentorshipRealLevelForPlayer(player, realLevel) == false)
+    uint8 standingLevel = player->GetLevel();
+    uint8 talentLevel = standingLevel;
+
+    // Only a character being loaded is read from the database for this.  Anywhere else the data is already held for any character that has logged in, and one that
+    // has not (a character still being created) has nothing on record to find
+    bool isPlayerLoading = player->GetSession() != nullptr && player->GetSession()->PlayerLoading() == true;
+    EverQuestPlayerControllerData* controllerData = nullptr;
+    if (isPlayerLoading == true)
+        controllerData = GetOrLoadActivePlayerClassControllerData(const_cast<Player*>(player));
+    else
     {
-        // No live tether, so the only remaining case is a character still being loaded at a level a crash left it saved at
-        if (player->GetSession() == nullptr || player->GetSession()->PlayerLoading() == false)
-            return;
-        EverQuestPlayerControllerData* controllerData = GetOrLoadActivePlayerClassControllerData(const_cast<Player*>(player));
-        if (controllerData == nullptr || controllerData->MentorshipRole == EQ_MENTORSHIP_ROLE_NONE || controllerData->MentorshipRealLevel == 0)
-            return;
-        realLevel = controllerData->MentorshipRealLevel;
+        std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+        auto controllerDataIt = ActivePlayerClassControllerDataByGUID.find(player->GetGUID());
+        if (controllerDataIt != ActivePlayerClassControllerDataByGUID.end())
+            controllerData = &controllerDataIt->second;
     }
 
-    uint8 standingLevel = player->GetLevel();
-    if (standingLevel == realLevel)
+    // Talent points should never be borrowed from a mentorship
+    uint8 realLevel = 0;
+    if (TryGetMentorshipRealLevelForPlayer(player, realLevel) == true)
+        talentLevel = realLevel;
+    else if (isPlayerLoading == true)
+    {
+        // No live tether, so the only remaining case is a character still being loaded at a level a crash left it saved at
+        if (controllerData != nullptr && controllerData->MentorshipRole != EQ_MENTORSHIP_ROLE_NONE && controllerData->MentorshipRealLevel != 0)
+            talentLevel = controllerData->MentorshipRealLevel;
+    }
+
+    // Levels lost to death do not take talent points with them, so they keep being counted from the highest level held until it is earned back.
+    // This is laid over the real level rather than the standing one, so it reads the same inside a mentorship as outside of one
+    if (ConfigExpLossOnDeathKeepTalentPoints == true && controllerData != nullptr && controllerData->DeathTalentLevel > talentLevel)
+        talentLevel = controllerData->DeathTalentLevel;
+
+    if (talentLevel == standingLevel)
         return;
 
     // Mirrors the base talent formula in Player::CalculateTalentsPoints, applied as a difference so any bonus points the core added on top are kept
-    int32 realBasePoints = realLevel < 10 ? 0 : (int32)realLevel - 9;
+    int32 heldBasePoints = talentLevel < 10 ? 0 : (int32)talentLevel - 9;
     int32 standingBasePoints = standingLevel < 10 ? 0 : (int32)standingLevel - 9;
-    int32 adjustedPoints = (int32)talentPointsForLevel + (realBasePoints - standingBasePoints);
+    int32 adjustedPoints = (int32)talentPointsForLevel + (heldBasePoints - standingBasePoints);
     talentPointsForLevel = adjustedPoints < 0 ? 0 : (uint32)adjustedPoints;
 }
 
-void EverQuestMod::AdjustPetTalentPointsForMentorship(Pet* pet, uint8 level, uint8& talentPointsForLevel)
+void EverQuestMod::AdjustPetTalentPointsForHeldLevel(Pet* pet, uint8 level, uint8& talentPointsForLevel)
 {
     // Pet::InitTalentForLevel wipes every pet talent the moment more are spent than the standing level allows, so a hunter pet dragged down with a mentor
     // (or only brought back to owner-5 by Pet::SynchronizeLevelWithOwner before RestorePetLevelAfterMentorshipForPlayer finishes the job) would lose its whole build.
@@ -18902,17 +19063,31 @@ void EverQuestMod::AdjustPetTalentPointsForMentorship(Pet* pet, uint8 level, uin
 
     // The controller data is written before the level moves and cleared only after the pet has been put back, so it covers the whole window, including a pet loaded after a crash left it saved at the borrowed level
     EverQuestPlayerControllerData* controllerData = GetOrLoadActivePlayerClassControllerData(owner);
-    if (controllerData == nullptr || controllerData->MentorshipRole == EQ_MENTORSHIP_ROLE_NONE)
+    if (controllerData == nullptr)
         return;
-    uint32 mentorshipPetNumber = controllerData->MentorshipPetNumber;
-    uint8 petRealLevel = controllerData->MentorshipPetRealLevel;
-    if (mentorshipPetNumber != petNumber || petRealLevel == 0 || petRealLevel == level)
+    uint8 talentLevel = level;
+    bool isOwnerInMentorship = controllerData->MentorshipRole != EQ_MENTORSHIP_ROLE_NONE;
+    if (isOwnerInMentorship == true && controllerData->MentorshipPetNumber == petNumber && controllerData->MentorshipPetRealLevel != 0)
+        talentLevel = controllerData->MentorshipPetRealLevel;
+
+    // A pet pulled down by its owner losing levels to death keeps counting from the level it stood at, the same as the owner does.  It only levels back on its own experience,
+    // well after the owner has, so it is held for as long as the pet is short of that level and let go the first time it is seen standing at it again
+    if (ConfigExpLossOnDeathKeepTalentPoints == true)
+    {
+        uint8 deathTalentLevel = GetDeathPetTalentLevelForPetNumber(petNumber);
+        if (deathTalentLevel > talentLevel)
+            talentLevel = deathTalentLevel;
+        else if (deathTalentLevel != 0 && isOwnerInMentorship == false)
+            ClearDeathPetTalentLevelForPetNumber(petNumber);
+    }
+
+    if (talentLevel == level)
         return;
 
     // Mirrors the base pet talent formula in Pet::GetMaxTalentPointsForLevel, applied as a difference so points from owner auras (Beast Mastery) are kept
-    int32 realBasePoints = petRealLevel >= 20 ? ((int32)petRealLevel - 16) / 4 : 0;
+    int32 heldBasePoints = talentLevel >= 20 ? ((int32)talentLevel - 16) / 4 : 0;
     int32 standingBasePoints = level >= 20 ? ((int32)level - 16) / 4 : 0;
-    int32 adjustedPoints = (int32)talentPointsForLevel + (realBasePoints - standingBasePoints);
+    int32 adjustedPoints = (int32)talentPointsForLevel + (heldBasePoints - standingBasePoints);
     talentPointsForLevel = adjustedPoints < 0 ? 0 : (adjustedPoints > 255 ? 255 : (uint8)adjustedPoints);
 }
 
@@ -19747,9 +19922,16 @@ bool EverQuestMod::PerformClassSwitch(Player* player)
         transaction->Append("DELETE FROM `mod_everquest_character_class_inventory` WHERE guid = {} AND eqclass = {}", player->GetGUID().GetCounter(), nextSecondaryEQClass);
     }
 
+    // A class taken on for the first time has no levels to have lost, so anything left under its name by a profile that no longer exists must not hand it talent points
+    if (isNew == true)
+        transaction->Append("DELETE FROM `mod_everquest_character_death_talent_level` WHERE `guid` = {} AND `eqclass` = {}", player->GetGUID().GetCounter(), nextSecondaryEQClass);
+
     // Update current class
     UpdatePlayerControllerForClassChange(player, nextSecondaryEQClass, transaction);
     GetOrLoadActivePlayerClassControllerData(player)->CurrentSecondClass = nextSecondaryEQClass;
+
+    // The controller data outlives the logout, so the talent level held through deaths has to follow the profile that is now the live one
+    GetOrLoadActivePlayerClassControllerData(player)->DeathTalentLevel = isNew == true ? 0 : LoadDeathTalentLevelForPlayerGUIDAndEQClass(player->GetGUID().GetCounter(), nextSecondaryEQClass);
 
     // A class taken on for the first time is owed its start items, but this runs at logout where nothing can reach the character's bags
     if (isNew == true && PlayerClassStartItemWOWIDsByEQClassID.find(nextSecondaryEQClass) != PlayerClassStartItemWOWIDsByEQClassID.end())
@@ -19783,6 +19965,8 @@ bool EverQuestMod::PerformPlayerDelete(ObjectGuid guid)
     transaction->Append("DELETE FROM mod_everquest_character_class_queststatus WHERE guid = {}", playerGUID);
     transaction->Append("DELETE FROM mod_everquest_character_class_queststatus_rewarded WHERE guid = {}", playerGUID);
     transaction->Append("DELETE FROM character_pet WHERE owner = 0 AND eq_owner = {}", playerGUID);
+    transaction->Append("DELETE FROM mod_everquest_character_death_talent_level WHERE guid = {}", playerGUID);
+    transaction->Append("DELETE FROM mod_everquest_pet_death_talent_level WHERE owner = {}", playerGUID);
     CharacterDatabase.CommitTransaction(transaction);
     {
         std::lock_guard<std::mutex> lock(RuntimeStateMutex);

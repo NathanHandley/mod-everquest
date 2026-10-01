@@ -444,8 +444,8 @@ public:
         if (EverQuest->IsEnabled == false)
             return;
 
-        // Keep own talent level during a mentorship
-        EverQuest->AdjustTalentPointsForMentorship(player, talentPointsForLevel);
+        // Keep own talent level during a mentorship, and the one held before any levels were lost to death
+        EverQuest->AdjustTalentPointsForHeldLevel(player, talentPointsForLevel);
     }
 
     void OnPlayerEquip(Player* player, Item* /*it*/, uint8 /*bag*/, uint8 /*slot*/, bool /*update*/) override
@@ -1025,6 +1025,9 @@ public:
 
         // Autolearn may have just granted a class aura passive
         EverQuest->RefreshClassAurasForPlayer(player);
+
+        // Levels lost to death that have now been earned back no longer need their talent points held
+        EverQuest->ClearRegainedDeathTalentLevelForPlayer(player);
     }
 
     void OnPlayerResurrect(Player* player, float restore_percent, bool& applySickness) override

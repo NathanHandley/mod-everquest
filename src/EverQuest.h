@@ -1555,6 +1555,7 @@ struct EverQuestPlayerControllerData
     uint32 DeathExpLost = 0;
     uint32 DeathExpRestGranted = 0;
     uint8 DeathExpLostSecondaryClass = 0;
+    uint8 DeathTalentLevel = 0;
     uint8 PendingStartItemEQClass = 0;
     uint8 DruidFormBear = EQ_DRUID_FORM_BEAR_FACTION_DEFAULT;
     uint8 DruidFormCat = EQ_DRUID_FORM_CAT_FACTION_DEFAULT;
@@ -1798,6 +1799,7 @@ public:
     float ConfigExpLossOnDeathLossPercent;
     bool ConfigExpLossOnDeathAddLostExpToRestExp;
     float ConfigExpLossOnDeathResurrectRestorePercent;
+    bool ConfigExpLossOnDeathKeepTalentPoints;
     bool ConfigAlternateGroupExperienceFormulaEnabled;
     float ConfigAlternateGroupExperienceAddPercentPerAddedMember;
     bool ConfigMentorshipEnabled;
@@ -1988,6 +1990,7 @@ public:
     std::mutex AuctionScanMutex;
     unordered_set<ObjectGuid> PlayersGainingExperience;
     unordered_set<ObjectGuid> PlayersLastDeathWasNotPlayerKill;
+    unordered_map<uint32, uint8> DeathPetTalentLevelsByPetNumber;
     unordered_set<ObjectGuid> PlayersPendingLevelCapExperiencePark;
     unordered_map<ObjectGuid, EverQuestMentorshipState> MentorshipStatesByPlayerGUID;
     unordered_map<ObjectGuid, EverQuestMentorshipRequest> MentorshipRequestsByTargetGUID;
@@ -2753,6 +2756,13 @@ public:
     void RestoreDeathExpLossOnResurrectForPlayer(Player* player);
     void ClearDeathExpLossForPlayer(Player* player);
     void SaveDeathExpLossForPlayer(Player* player);
+    uint8 LoadDeathTalentLevelForPlayerGUIDAndEQClass(uint32 playerGUIDCounter, uint8 eqClassID);
+    void LoadDeathPetTalentLevelsForPlayerGUID(uint32 playerGUIDCounter);
+    uint8 GetDeathPetTalentLevelForPetNumber(uint32 petNumber);
+    void RecordDeathTalentLevelsForPlayer(Player* player, uint8 newLevel);
+    void RecordDeathPetTalentLevelForPlayer(Player* player, uint32 petNumber, uint8 petLevel, uint8 newOwnerLevel);
+    void ClearRegainedDeathTalentLevelForPlayer(Player* player);
+    void ClearDeathPetTalentLevelForPetNumber(uint32 petNumber);
     bool IsPlayerReportingLevelCap(Player const* player);
     static uint8 GetGroupExperienceLevelForPlayer(Player const* player);
     void HandleLevelCapOnBeforeExperienceGain(Player const* player, uint8& levelForExpGain);
@@ -2769,8 +2779,8 @@ public:
     uint8 GetMentorshipRoleForPlayerGUID(ObjectGuid playerGUID);
     bool IsPlayerMentorshipLevelAdjusted(Player* player);
     bool TryGetMentorshipRealLevelForPlayer(Player const* player, uint8& outRealLevel);
-    void AdjustTalentPointsForMentorship(Player const* player, uint32& talentPointsForLevel);
-    void AdjustPetTalentPointsForMentorship(Pet* pet, uint8 level, uint8& talentPointsForLevel);
+    void AdjustTalentPointsForHeldLevel(Player const* player, uint32& talentPointsForLevel);
+    void AdjustPetTalentPointsForHeldLevel(Pet* pet, uint8 level, uint8& talentPointsForLevel);
     bool IsQuestBlockedByMentorshipForPlayer(Player* player, Quest const* quest);
     bool IsTrainerInteractionBlockedByMentorshipForPlayer(Player* player);
     bool HandleMentorshipTrainerPacketReceive(WorldSession* session, WorldPacket const& packet);
