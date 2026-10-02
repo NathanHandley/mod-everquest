@@ -93,6 +93,21 @@ class EverQuest_BardSongAuraScript: public AuraScript
         return false;
     }
 
+    bool IsUnitAPetOfPlayerOrGroupMember(Player* player, Group* group, Unit* target)
+    {
+        // Only summoned and tamed pets share in a group song, so a charmed creature (or a pet someone other than its owner has taken control of) is left out
+        if (target->IsPet() == false)
+            return false;
+        ObjectGuid ownerGUID = target->GetOwnerGUID();
+        if (ownerGUID.IsPlayer() == false)
+            return false;
+        if (target->IsCharmed() == true && target->GetCharmerGUID() != ownerGUID)
+            return false;
+        if (ownerGUID == player->GetGUID())
+            return true;
+        return group != nullptr && group->IsMember(ownerGUID) == true;
+    }
+
     list<Unit*> GetTargets(Unit* caster, int bardTargetType, uint32 radius)
     {
         Player* player = caster->ToPlayer();
@@ -147,17 +162,27 @@ class EverQuest_BardSongAuraScript: public AuraScript
             if (caster->IsAlive())
                 validTargets.push_back(caster);
 
+            // The bard's own pet is sung to even without a group, and the pets of party members are sung to along with them
             Group* group = player->GetGroup();
-            if (!group)
-                return validTargets;
             for (Unit* target : targetCandidates)
             {
-                if (!target->IsPlayer() || !target->IsAlive() || target == caster || !caster->IsWithinLOSInMap(target))
+                if (!target->IsAlive() || target == caster)
                     continue;
 
-                Player* targetPlayer = target->ToPlayer();
-                if (group->SameSubGroup(player->GetGUID(), targetPlayer->GetGUID()) || group->IsMember(targetPlayer->GetGUID()))
-                    validTargets.push_back(targetPlayer);
+                if (target->IsPlayer())
+                {
+                    if (!group)
+                        continue;
+                    Player* targetPlayer = target->ToPlayer();
+                    if (!group->SameSubGroup(player->GetGUID(), targetPlayer->GetGUID()) && !group->IsMember(targetPlayer->GetGUID()))
+                        continue;
+                }
+                else if (IsUnitAPetOfPlayerOrGroupMember(player, group, target) == false)
+                    continue;
+
+                if (!caster->IsWithinLOSInMap(target))
+                    continue;
+                validTargets.push_back(target);
             }
         }
         else if (bardTargetType == EQ_BARDSONGAURATARGET_ENEMYAREA)
