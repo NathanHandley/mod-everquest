@@ -54,7 +54,7 @@ class ByteBuffer;
 struct AreaTrigger;
 struct BuildValuesCachePosPointers;
 
-#define EQ_MOD_VERSION                              126
+#define EQ_MOD_VERSION                              127
 
 #define EQ_MOVEMENT_CAST_SNARE_DURATION_BUFFER_IN_MS 2000 // How much longer than the remaining cast time the casting slow is given, so a pushed-back cast keeps it
 
@@ -1066,7 +1066,7 @@ enum EverQuestClassAuraSpellType : uint32
     EQ_CLASSAURA_SPELL_DRUID_NATURES_BALANCE_FIRE = 48,
     EQ_CLASSAURA_SPELL_WARRIOR_UNRELENTING_ASSAULT = 49,
     EQ_CLASSAURA_SPELL_WARRIOR_RIPOSTE = 50,
-    EQ_CLASSAURA_SPELL_BARD_VIGOR = 51,
+    EQ_CLASSAURA_SPELL_UNUSED_51 = 51, // Was the Bard's Virtuoso Vigor.  Kept so every later spell keeps its ID, and free for the next new spell
     EQ_CLASSAURA_SPELL_MONK_CHI_SURGE = 52,
     EQ_CLASSAURA_SPELL_PALADIN_DEFLECTION = 53,
     EQ_CLASSAURA_SPELL_ROGUE_LUCKY_STRIKE = 54,
@@ -1706,6 +1706,11 @@ public:
     uint32 ConfigSystemResistAdjustmentSpellID;
     uint32 ConfigSystemBlindWanderSpellID;
     uint32 ConfigSystemRoguePoisonMarkerSpellID;
+    uint32 ConfigSystemInstrumentTotemCategoryIDWind = 0;
+    uint32 ConfigSystemInstrumentTotemCategoryIDString = 0;
+    uint32 ConfigSystemInstrumentTotemCategoryIDBrass = 0;
+    uint32 ConfigSystemInstrumentTotemCategoryIDPercussion = 0;
+    uint32 ConfigSystemInstrumentTotemCategoryIDAll = 0;
     uint32 ConfigSystemLegacyAchievementID;
     string ConfigSystemLegacyAchievementAccountCreatedBefore;
     uint32 ConfigSystemItemTemplateIDMin;
@@ -2229,6 +2234,11 @@ public:
     bool HandlePvPSnareDiminishingReturnsOnAuraApply(Unit* target, Aura* aura);
     void ClearPvPSnareDiminishingReturnState(Unit* unit);
     void CancelBardSongsOnPvPSilenceAuraApply(Unit* target, Aura* aura);
+    void SetInstrumentTotemCategoryIDFromConfigKey(const string& instrumentTypeName, uint32 totemCategoryID);
+    uint32 GetRangedSlotInstrumentTotemCategoryForPlayer(Player* player);
+    bool IsBardSongPlayableWithInstrumentTotemCategory(uint32 spellID, uint32 instrumentTotemCategoryID);
+    bool HandleBardSongRangedSlotInstrumentOnCheckCast(Player* player, Spell* spell, SpellCastResult& result);
+    void CancelBardSongsBlockedByRangedSlotInstrumentForPlayer(Player* player);
     uint8 GetEQCharmEffectMask(SpellInfo const* spellInfo);
     bool IsEQCharmBlockedInPvP(SpellInfo const* spellInfo, Unit* target, Unit* caster);
     uint8 GetPvPEQCharmImmuneEffectMaskForTarget(Spell* spell, Unit* target);

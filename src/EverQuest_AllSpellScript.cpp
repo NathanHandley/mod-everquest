@@ -74,6 +74,10 @@ public:
         if (spell->GetCaster()->IsPlayer() == true)
             EverQuest->ApplyClassAuraCastAdjustmentsOnCheckCast(spell->GetCaster()->ToPlayer(), spell, strict);
 
+        // An instrument in the ranged slot holds a bard to songs of its type and sung ones
+        if (spell->GetCaster()->IsPlayer() == true && EverQuest->HandleBardSongRangedSlotInstrumentOnCheckCast(spell->GetCaster()->ToPlayer(), spell, res) == true)
+            return;
+
         // Class auras: the Ranger's Endless Quiver and the Shaman's Warspirit are toggles, so casting one while it is up turns it off
         if (spell->GetCaster()->IsPlayer() == true && EverQuest->HandleClassAuraToggleOnCheckCast(spell->GetCaster()->ToPlayer(), spell, res) == true)
             return;

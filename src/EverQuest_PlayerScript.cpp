@@ -448,10 +448,14 @@ public:
         EverQuest->AdjustTalentPointsForHeldLevel(player, talentPointsForLevel);
     }
 
-    void OnPlayerEquip(Player* player, Item* /*it*/, uint8 /*bag*/, uint8 /*slot*/, bool /*update*/) override
+    void OnPlayerEquip(Player* player, Item* /*it*/, uint8 bag, uint8 slot, bool /*update*/) override
     {
         if (EverQuest->IsEnabled == false)
             return;
+
+        // An instrument going into the ranged slot ends the songs it does not allow (a character still loading is handled at login)
+        if (bag == INVENTORY_SLOT_BAG_0 && slot == EQUIPMENT_SLOT_RANGED && player->IsInWorld() == true)
+            EverQuest->CancelBardSongsBlockedByRangedSlotInstrumentForPlayer(player);
 
         // Equipping gear while illusioned can change change gear under some situations
         EverQuest->RefreshIllusionGearDisplayForPlayer(player);
@@ -941,6 +945,9 @@ public:
 
         // Put the adventurer aura back if the character never did anything to lose it (it is granted here for new characters too)
         EverQuest->ApplyAdventurerAuraStateOnLogin(player);
+
+        // Songs carried through the logout end here if the instrument now in the ranged slot does not allow them
+        EverQuest->CancelBardSongsBlockedByRangedSlotInstrumentForPlayer(player);
 
         // Grab any cast bard songs for the player
         if (EverQuest->ConfigBardMaxConcurrentSongs != 0)

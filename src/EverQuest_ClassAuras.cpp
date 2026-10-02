@@ -56,7 +56,7 @@ static const char* EQ_CLASSAURA_SPELL_TYPE_NAMES[EQ_CLASSAURA_SPELL_TYPE_COUNT] 
     "DruidPassive", "DruidAura", "DruidRegrowth",
     "ShamanPassive", "ShamanAura", "ShamanWarspirit", "ShamanVigor",
     "CastSpeedHelper",
-    "DruidNaturesBalanceFire", "WarriorUnrelentingAssault", "WarriorRiposte", "BardVigor", "MonkChiSurge", "PaladinDeflection", "RogueLuckyStrike", "RogueLuckyStrikeHelper",
+    "DruidNaturesBalanceFire", "WarriorUnrelentingAssault", "WarriorRiposte", "Unused51", "MonkChiSurge", "PaladinDeflection", "RogueLuckyStrike", "RogueLuckyStrikeHelper",
     "DruidNaturesBalanceCold", "DruidNaturesBalanceNature", "DruidEntangleStrike", "ShamanWarspiritVigor",
     "ShadowKnightBloodDebt", "ShadowKnightBloodDebtCharge", "ShadowKnightBloodDebtHeal",
     "NecromancerShadowExchange", "RangerCompoundInjuryMoving",
@@ -2080,11 +2080,6 @@ void EverQuestMod::HandleClassAuraSpellCast(Player* player, Spell* spell)
         if (radianceRefund > 0)
             player->ModifyPower(POWER_MANA, radianceRefund);
     }
-
-    // Bard, every song that finishes casting (a restarted one included) grants the vigor
-    uint32 bardVigorSpellID = GetClassAuraSpellID(EQ_CLASSAURA_SPELL_BARD_VIGOR);
-    if (bardVigorSpellID != 0 && IsSpellAnEQBardSong(spellInfo->Id) == true && PlayerHasClassAura(player, EQ_CLASSAURA_SPELL_BARD_AURA) == true)
-        player->CastSpell(player, bardVigorSpellID, true);
 
     // Druid, a slow enough fire, cold, or nature nuke builds the balance for its element
     HandleClassAuraDruidNaturesBalanceOnSpellCast(player, spellInfo);
