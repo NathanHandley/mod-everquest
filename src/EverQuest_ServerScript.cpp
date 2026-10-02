@@ -281,7 +281,10 @@ static bool HandleGetMirrorImageDataPacketReceive(WorldSession* session, WorldPa
 // reaches the target.  With no displacement that loop normally bails out, except while hovering (0x6EAD73), and then the local player's collide step (0x762E00) returns zero consumed time as soon
 // as it sees ROOT (0x762F25), so the loop never finishes.  EQ levitation is hover, and spells like Whirlbolt root and levitate together, so the client is never allowed to have both: hover is
 // taken off the client for as long as it is rooted and put back after the unroot.  The core only tracks the player's own flags from what the client reports back, and never checks hover there,
-// so only the client's side changes.  Everything that roots, stuns or hovers the player reaches the client through these few packets, which is why this sits on the way out rather than on auras
+// so only the client's side changes.  Everything that roots, stuns or hovers the player reaches the client through these few packets, which is why this sits on the way out rather than on auras.
+// While the player is not the one moving their character (feared, confused or charmed) the core sends the spline form of the same packets to everyone in view, the player included,
+// and those are followed for the player's own client too, or a root that ends during a fear would leave the hover held back for good.
+// Not covered: a unit another player has possessed.  Its root and hover go to the possessing player's session under the unit's GUID and pass through untouched
 static thread_local bool IsSendingOwnClientMovePacket = false;
 
 class EverQuestOwnClientMovePacketGuard
@@ -297,9 +300,16 @@ static void SendOwnClientMovePacket(WorldSession* session, WorldPacket const& pa
     session->SendPacket(&packet);
 }
 
-// Field layout must match Unit::SetHover
-static void SendPlayerClientHoverPacket(WorldSession* session, Player* player, bool enable)
+// Field layout must match Unit::SetHover.  The spline form is the one the core uses while the player is not the one moving their character, and it carries no counter
+static void SendPlayerClientHoverPacket(WorldSession* session, Player* player, bool enable, bool useSplineForm)
 {
+    if (useSplineForm == true)
+    {
+        WorldPacket splineData(enable == true ? SMSG_SPLINE_MOVE_SET_HOVER : SMSG_SPLINE_MOVE_UNSET_HOVER, player->GetPackGUID().size());
+        splineData << player->GetPackGUID();
+        SendOwnClientMovePacket(session, splineData);
+        return;
+    }
     WorldPacket data(enable == true ? SMSG_MOVE_SET_HOVER : SMSG_MOVE_UNSET_HOVER, player->GetPackGUID().size() + 4);
     data << player->GetPackGUID();
     data << uint32(session->GetOrderCounter());
@@ -340,16 +350,26 @@ static bool HandleMultipleMovesPacketSend(WorldSession* session, Player* player,
         position += entryLength;
     }
 
+    // The core has already sent the hover on its own by now (the aura effects SendInitialPacketsAfterAddToMap sends again just ahead of this packet), and the player's own
+    // create block can carry it too (ResetPlayerClientMoveState), so a client about to be rooted is taken off hover first no matter what this packet holds
+    bool isHoverWanted = hasHover == true || state->ClientHovering == true;
     state->ClientRooted = hasRoot;
-    state->ClientHovering = hasHover && hasRoot == false;
-    state->HoverHeldBack = hasHover && hasRoot;
-    if (state->HoverHeldBack == false)
+    state->ClientHovering = isHoverWanted == true && hasRoot == false;
+    state->HoverHeldBack = isHoverWanted == true && hasRoot == true;
+    if (state->HoverHeldBack == true)
+        SendPlayerClientHoverPacket(session, player, false, false);
+    if (hasRoot == false || hasHover == false)
         return true;
 
+    // The core asserts on an empty append, and the hover entry is the last one it writes, so there is normally nothing behind it to copy
+    size_t lengthBeforeHoverEntry = hoverEntryPosition - 4;
+    size_t lengthAfterHoverEntry = packet.size() - hoverEntryPosition - hoverEntryLength;
     WorldPacket filteredPacket(SMSG_MULTIPLE_MOVES, packet.size());
     filteredPacket << uint32(0);
-    filteredPacket.append(packet.contents() + 4, hoverEntryPosition - 4);
-    filteredPacket.append(packet.contents() + hoverEntryPosition + hoverEntryLength, packet.size() - hoverEntryPosition - hoverEntryLength);
+    if (lengthBeforeHoverEntry > 0)
+        filteredPacket.append(packet.contents() + 4, lengthBeforeHoverEntry);
+    if (lengthAfterHoverEntry > 0)
+        filteredPacket.append(packet.contents() + hoverEntryPosition + hoverEntryLength, lengthAfterHoverEntry);
     filteredPacket.put<uint32>(0, uint32(filteredPacket.size() - 4));
     SendOwnClientMovePacket(session, filteredPacket);
     return false;
@@ -378,22 +398,26 @@ static bool HandleRootOrHoverPacketSend(WorldSession* session, WorldPacket const
         return true;
     }
 
+    // What the mod sends of its own goes out in the same form as the packet it is answering
+    bool isSplineForm = (opcode == SMSG_SPLINE_MOVE_ROOT || opcode == SMSG_SPLINE_MOVE_UNROOT || opcode == SMSG_SPLINE_MOVE_SET_HOVER || opcode == SMSG_SPLINE_MOVE_UNSET_HOVER);
     EverQuestPlayerClientMoveState* state = player->CustomData.GetDefault<EverQuestPlayerClientMoveState>(EQ_PLAYER_CUSTOMDATA_CLIENTMOVESTATE);
     switch (opcode)
     {
         case SMSG_FORCE_MOVE_ROOT:
+        case SMSG_SPLINE_MOVE_ROOT:
         {
             state->ClientRooted = true;
             if (state->ClientHovering == false)
                 return true;
             // The hover has to be gone before the root lands, so the root is resent behind it
-            SendPlayerClientHoverPacket(session, player, false);
+            SendPlayerClientHoverPacket(session, player, false, isSplineForm);
             state->ClientHovering = false;
             state->HoverHeldBack = true;
             SendOwnClientMovePacket(session, packet);
             return false;
         }
         case SMSG_FORCE_MOVE_UNROOT:
+        case SMSG_SPLINE_MOVE_UNROOT:
         {
             state->ClientRooted = false;
             if (state->HoverHeldBack == false)
@@ -403,12 +427,13 @@ static bool HandleRootOrHoverPacketSend(WorldSession* session, WorldPacket const
             SendOwnClientMovePacket(session, packet);
             if (player->HasAuraType(SPELL_AURA_HOVER) == true)
             {
-                SendPlayerClientHoverPacket(session, player, true);
+                SendPlayerClientHoverPacket(session, player, true, isSplineForm);
                 state->ClientHovering = true;
             }
             return false;
         }
         case SMSG_MOVE_SET_HOVER:
+        case SMSG_SPLINE_MOVE_SET_HOVER:
         {
             if (state->ClientRooted == true)
             {
@@ -419,6 +444,7 @@ static bool HandleRootOrHoverPacketSend(WorldSession* session, WorldPacket const
             return true;
         }
         case SMSG_MOVE_UNSET_HOVER:
+        case SMSG_SPLINE_MOVE_UNSET_HOVER:
         {
             state->ClientHovering = false;
             state->HoverHeldBack = false;
@@ -431,15 +457,22 @@ static bool HandleRootOrHoverPacketSend(WorldSession* session, WorldPacket const
 
 static void ResetPlayerClientMoveState(WorldSession* session)
 {
-    // A new world rebuilds the client's own mover from scratch, and the initial move packets that follow re-establish root and hover
+    // A new world rebuilds the client's own mover from scratch, and the initial move packets that follow re-establish root and hover.  The mover is rebuilt from the player's
+    // own create block though, which carries whatever hover the server still has on record (it can outlast the aura when the client was not there to answer its removal), so
+    // that counts as hovering from the start.  Being wrong about it only costs a hover removal the client did not need ahead of its next root
     Player* player = session->GetPlayer();
     if (player == nullptr)
         return;
+    bool hasHoverOnRecord = player->HasUnitMovementFlag(MOVEMENTFLAG_HOVER);
     EverQuestPlayerClientMoveState* state = player->CustomData.Get<EverQuestPlayerClientMoveState>(EQ_PLAYER_CUSTOMDATA_CLIENTMOVESTATE);
     if (state == nullptr)
-        return;
+    {
+        if (hasHoverOnRecord == false)
+            return;
+        state = player->CustomData.GetDefault<EverQuestPlayerClientMoveState>(EQ_PLAYER_CUSTOMDATA_CLIENTMOVESTATE);
+    }
     state->ClientRooted = false;
-    state->ClientHovering = false;
+    state->ClientHovering = hasHoverOnRecord;
     state->HoverHeldBack = false;
 }
 
@@ -501,7 +534,8 @@ public:
     bool CanPacketSend(WorldSession* session, WorldPacket const& packet) override
     {
         uint16 opcode = packet.GetOpcode();
-        if (opcode == SMSG_FORCE_MOVE_ROOT || opcode == SMSG_FORCE_MOVE_UNROOT || opcode == SMSG_MOVE_SET_HOVER || opcode == SMSG_MOVE_UNSET_HOVER || opcode == SMSG_MULTIPLE_MOVES)
+        if (opcode == SMSG_FORCE_MOVE_ROOT || opcode == SMSG_FORCE_MOVE_UNROOT || opcode == SMSG_MOVE_SET_HOVER || opcode == SMSG_MOVE_UNSET_HOVER || opcode == SMSG_MULTIPLE_MOVES
+            || opcode == SMSG_SPLINE_MOVE_ROOT || opcode == SMSG_SPLINE_MOVE_UNROOT || opcode == SMSG_SPLINE_MOVE_SET_HOVER || opcode == SMSG_SPLINE_MOVE_UNSET_HOVER)
             return HandleRootOrHoverPacketSend(session, packet);
         if (opcode == SMSG_NEW_WORLD || opcode == SMSG_LOGIN_VERIFY_WORLD)
         {

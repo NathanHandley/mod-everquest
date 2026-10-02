@@ -6465,7 +6465,7 @@ void EverQuestMod::RollWipeHateListOnUnit(Unit* caster, Unit* target, int32 chan
         return;
 
     // Evading resets a boss fight here, which a memory blur never did in EQ
-    if (creature->isWorldBoss() == true || creature->IsDungeonBoss() == true)
+    if (creature->isWorldBoss() == true || creature->IsDungeonBoss() == true || IsEQBossTierCreature(creature) == true)
         return;
 
     // Evading also drops the tap and heals, so only whoever tapped the creature (or a creature caster) can make it forget.  A caster that has left
