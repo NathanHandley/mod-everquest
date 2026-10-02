@@ -340,8 +340,6 @@ bool EverQuestMod::LoadConfigurationSystemDataFromDB()
                 ConfigSystemClassAuraDruidEntangleStrikeDamageTakenPercentPerStack = (uint32)atoi(value.c_str());
             else if (key == "ClassAuraDruidEntangleStrikeBehindDamagePercentPerStack")
                 ConfigSystemClassAuraDruidEntangleStrikeBehindDamagePercentPerStack = (uint32)atoi(value.c_str());
-            else if (key == "ClassAuraShamanDotExtendChancePercent")
-                ConfigSystemClassAuraShamanDotExtendChancePercent = (uint32)atoi(value.c_str());
             else if (key == "ClassAuraShamanDotExtendInMS")
                 ConfigSystemClassAuraShamanDotExtendInMS = (uint32)atoi(value.c_str());
             else if (key == "ClassAuraShadowKnightBloodDebtDamageTakenStoredPercent")

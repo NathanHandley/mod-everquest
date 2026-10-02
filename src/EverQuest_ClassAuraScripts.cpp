@@ -233,6 +233,35 @@ class EverQuest_ClassAuraShadowKnightAuraScript : public AuraScript
     }
 };
 
+// Shadow Knight "Spellsword's Focus": while the toggle is up, every melee autoattack that lands restores a share of maximum mana (the mana spell carries the amount and the visual)
+class EverQuest_ClassAuraShadowKnightFocusAuraScript : public AuraScript
+{
+    PrepareAuraScript(EverQuest_ClassAuraShadowKnightFocusAuraScript);
+
+    void HandleProc(ProcEventInfo& eventInfo)
+    {
+        PreventDefaultAction();
+        if (EverQuest->IsClassAuraSystemEnabled() == false || IsClassAuraPeriodicTickProc(eventInfo) == true)
+            return;
+        Unit* shadowKnight = GetTarget();
+        if (shadowKnight == nullptr || shadowKnight->IsPlayer() == false || shadowKnight->IsAlive() == false)
+            return;
+
+        // Nothing to hand back to a full pool (or to a character with no mana at all), so the visual only plays for a real gain
+        if (shadowKnight->GetMaxPower(POWER_MANA) == 0 || shadowKnight->GetPower(POWER_MANA) >= shadowKnight->GetMaxPower(POWER_MANA))
+            return;
+        uint32 focusManaSpellID = EverQuest->GetClassAuraSpellID(EQ_CLASSAURA_SPELL_SHADOWKNIGHT_FOCUS_MANA);
+        if (focusManaSpellID == 0)
+            return;
+        shadowKnight->CastSpell(shadowKnight, focusManaSpellID, true);
+    }
+
+    void Register() override
+    {
+        OnProc += AuraProcFn(EverQuest_ClassAuraShadowKnightFocusAuraScript::HandleProc);
+    }
+};
+
 // Shadow Knight "Blood Debt": drains the stored damage from the target as shadow damage and heals the knight for the full amount stored.  The charge is only spent
 // on a hit that can take the damage, so a miss or an immune target costs nothing
 class EverQuest_ClassAuraShadowKnightBloodDebtSpellScript : public SpellScript
@@ -698,6 +727,7 @@ void AddEverQuestClassAuraScripts()
     RegisterSpellScript(EverQuest_ClassAuraPaladinAuraScript);
     RegisterSpellScript(EverQuest_ClassAuraWarriorAuraScript);
     RegisterSpellScript(EverQuest_ClassAuraShadowKnightAuraScript);
+    RegisterSpellScript(EverQuest_ClassAuraShadowKnightFocusAuraScript);
     RegisterSpellScript(EverQuest_ClassAuraShadowKnightBloodDebtSpellScript);
     RegisterSpellScript(EverQuest_ClassAuraShadowKnightBloodDebtVitalityAuraScript);
     RegisterSpellScript(EverQuest_ClassAuraNecromancerShadowExchangeSpellScript);

@@ -54,7 +54,7 @@ class ByteBuffer;
 struct AreaTrigger;
 struct BuildValuesCachePosPointers;
 
-#define EQ_MOD_VERSION                              127
+#define EQ_MOD_VERSION                              128
 
 #define EQ_MOVEMENT_CAST_SNARE_DURATION_BUFFER_IN_MS 2000 // How much longer than the remaining cast time the casting slow is given, so a pushed-back cast keeps it
 
@@ -1089,7 +1089,8 @@ enum EverQuestClassAuraSpellType : uint32
     EQ_CLASSAURA_SPELL_DRUID_NATURES_BALANCE_SHADOW = 71,
     EQ_CLASSAURA_SPELL_DRUID_NATURES_BALANCE_ARCANE = 72,
     EQ_CLASSAURA_SPELL_SHADOWKNIGHT_FOCUS = 73,
-    EQ_CLASSAURA_SPELL_TYPE_COUNT = 74
+    EQ_CLASSAURA_SPELL_SHADOWKNIGHT_FOCUS_MANA = 74,
+    EQ_CLASSAURA_SPELL_TYPE_COUNT = 75
 };
 
 class EverQuestPlayerClientMoveState : public DataMap::Base
@@ -1759,7 +1760,6 @@ public:
     uint32 ConfigSystemClassAuraDruidNaturesBalanceMinBaseCastTimeInMS = 500;
     uint32 ConfigSystemClassAuraDruidEntangleStrikeDamageTakenPercentPerStack = 1;
     uint32 ConfigSystemClassAuraDruidEntangleStrikeBehindDamagePercentPerStack = 2;
-    uint32 ConfigSystemClassAuraShamanDotExtendChancePercent = 33;
     uint32 ConfigSystemClassAuraShamanDotExtendInMS = 3000;
     uint32 ConfigSystemClassAuraShadowKnightBloodDebtDamageTakenStoredPercent = 5;
     uint32 ConfigSystemClassAuraShadowKnightBloodDebtMaxHealthPercent = 50;
