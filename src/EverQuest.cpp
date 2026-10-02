@@ -120,6 +120,9 @@ EverQuestMod::EverQuestMod() :
     ConfigExpLossOnDeathKeepTalentPoints(true),
     ConfigAlternateGroupExperienceFormulaEnabled(false),
     ConfigAlternateGroupExperienceAddPercentPerAddedMember(20.0f),
+    ConfigMentorshipEnabled(true),
+    ConfigMentorshipMinLevelGap(3),
+    ConfigMentorshipRequestTimeoutInSec(30),
     ConfigSpellDisableStackingOfSameDOT(false),
     ConfigSpellCrowdControlLevelRestrictionsEnabled(true),
     ConfigSpellHasteCapEnabled(true),
@@ -170,9 +173,6 @@ EverQuestMod::EverQuestMod() :
     ConfigSecondaryExpPoolGainPercent(25.0f),
     ConfigSecondaryExpPoolMaxPooled(1000000),
     ConfigPlayerLevelCap(0),
-    ConfigMentorshipEnabled(true),
-    ConfigMentorshipMinLevelGap(3),
-    ConfigMentorshipRequestTimeoutInSec(30),
     ConfigPlayerAddHearthstoneToNewCharacters(true),
     ConfigPlayerAddMasterTotemToShamans(true),
     ConfigPlayerAddRacialGuiseItemOnLogin(true),
@@ -5678,7 +5678,7 @@ uint8 EverQuestMod::GetCharmProtectedDispelEffectMaskForTarget(SpellInfo const* 
         if (spellInfo->Effects[i].Effect == SPELL_EFFECT_DISPEL_MECHANIC)
         {
             // Matches how the core picks auras for a mechanic dispel, off the full mechanic mask of the aura's spell
-            if (effectMiscValue < 0 || effectMiscValue >= MAX_MECHANIC)
+            if (effectMiscValue < 0 || effectMiscValue >= (int32)MAX_MECHANIC)
                 continue;
             if ((charmMechanicMask & (1ULL << effectMiscValue)) != 0)
                 blockedEffectMask |= (uint8)(1 << i);
@@ -9177,7 +9177,7 @@ void EverQuestMod::ApplyIllusionCharacterLookToNewCorpse(Corpse* corpse)
         Item const* equippedItem = owner->GetItemByPos(INVENTORY_SLOT_BAG_0, mirrorImageItemSlots[slotIndex]);
         if (equippedItem == nullptr || equippedItem->GetTemplate() == nullptr)
             continue;
-        corpse->SetUInt32Value(CORPSE_FIELD_ITEM + mirrorImageItemSlots[slotIndex], itemDisplayIDs[slotIndex] | ((uint32)equippedItem->GetTemplate()->InventoryType << 24));
+        corpse->SetUInt32Value(CORPSE_FIELD_ITEM + (uint8)mirrorImageItemSlots[slotIndex], itemDisplayIDs[slotIndex] | ((uint32)equippedItem->GetTemplate()->InventoryType << 24));
     }
 }
 

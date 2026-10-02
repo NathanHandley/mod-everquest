@@ -291,7 +291,7 @@ void EverQuestMod::UpdateRogueLuckyStrikeForPlayer(Player* player)
     if (luckyStrikeSpellID == 0)
         return;
     EverQuestPlayerClassAuraState* state = GetClassAuraStateForPlayer(player);
-    bool shouldHave = PlayerHasClassAura(player, EQ_CLASSAURA_SPELL_ROGUE_AURA) == true && GameTime::GetGameTimeMS().count() >= state->LuckyStrikeReadyAtMS;
+    bool shouldHave = PlayerHasClassAura(player, EQ_CLASSAURA_SPELL_ROGUE_AURA) == true && (uint64)GameTime::GetGameTimeMS().count() >= state->LuckyStrikeReadyAtMS;
     bool hasAura = player->HasAura(luckyStrikeSpellID);
     if (shouldHave == true && hasAura == false)
         player->AddAura(luckyStrikeSpellID, player);
@@ -318,7 +318,7 @@ void EverQuestMod::RemoveClassAuraRogueLuckyStrikeHelper(Player* player)
         player->RemoveAurasDueToSpell(helperSpellID);
 }
 
-void EverQuestMod::HandleClassAuraRogueLuckyStrikeOnCheckCast(Player* player, Spell* spell, bool strict)
+void EverQuestMod::HandleClassAuraRogueLuckyStrikeOnCheckCast(Player* player, Spell* spell, bool /*strict*/)
 {
     if (player == nullptr || spell == nullptr)
         return;
@@ -341,7 +341,7 @@ void EverQuestMod::UpdateMonkChiSurgeForPlayer(Player* player)
     if (chiSurgeSpellID == 0)
         return;
     EverQuestPlayerClassAuraState* state = GetClassAuraStateForPlayer(player);
-    bool shouldHave = PlayerHasClassAura(player, EQ_CLASSAURA_SPELL_MONK_AURA) == true && GameTime::GetGameTimeMS().count() >= state->ChiSurgeReadyAtMS;
+    bool shouldHave = PlayerHasClassAura(player, EQ_CLASSAURA_SPELL_MONK_AURA) == true && (uint64)GameTime::GetGameTimeMS().count() >= state->ChiSurgeReadyAtMS;
     bool hasAura = player->HasAura(chiSurgeSpellID);
     if (shouldHave == true && hasAura == false)
         player->AddAura(chiSurgeSpellID, player);
