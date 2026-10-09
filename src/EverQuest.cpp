@@ -1058,11 +1058,15 @@ const EverQuestCreature& EverQuestMod::GetCreatureDataForCreatureTemplateID(uint
 void EverQuestMod::LoadCreatureKillSpawnData()
 {
     CreatureKillSpawnsByTriggerCreatureTemplateID.clear();
-    EvadeKillSpawnTriggerCreatureTemplateIDs.clear();
+    KillSpawnWatchFlagsByCreatureTemplateID.clear();
+    ProximityKillSpawnRadiusByCreatureTemplateID.clear();
+    OneTimeProximityKillSpawnCreatureTemplateIDs.clear();
     OocTimerKillSpawnDurationMSByCreatureTemplateID.clear();
     SelfDespawnOocTimerKeys.clear();
+    PersistentEventSpawnKeys.clear();
 
-    QueryResult queryResult = WorldDatabase.Query("SELECT ID, TriggerCreatureTemplateID, TriggerTypeID, MapID, ActionType, TargetCreatureTemplateID, Chance, AltGroup, AltID, AltWeight, SpawnAtCorpse, PositionX, PositionY, PositionZ, Orientation, DelayMinMS, DelayMaxMS, OnlyIfNotAliveCreatureTemplateID, RequireDeadCreatureTemplateIDs, RequireAliveCreatureTemplateIDs, AddToHateList, TriggerMinLevel, TriggerMaxLevel, RespawnTimeSec, RespawnUsesRaidLockout FROM mod_everquest_creature_kill_spawn;");
+    // Rows load in ID order, since alt groups that play in sequence step through their alternatives in the order they are first seen
+    QueryResult queryResult = WorldDatabase.Query("SELECT ID, TriggerCreatureTemplateID, TriggerTypeID, MapID, ActionType, TargetCreatureTemplateID, Chance, AltGroup, AltID, AltWeight, SpawnAtCorpse, PositionX, PositionY, PositionZ, Orientation, DelayMinMS, DelayMaxMS, OnlyIfNotAliveCreatureTemplateID, RequireDeadCreatureTemplateIDs, RequireAliveCreatureTemplateIDs, AddToHateList, TriggerMinLevel, TriggerMaxLevel, RespawnTimeSec, RespawnUsesRaidLockout, TriggerRadius, SpellID, PathListID, ArrivalBehavior, IsPersistent, SayText FROM mod_everquest_creature_kill_spawn ORDER BY ID;");
     if (queryResult)
     {
         do
@@ -1098,8 +1102,43 @@ void EverQuestMod::LoadCreatureKillSpawnData()
             killSpawn.TriggerMaxLevel = fields[22].Get<uint32>();
             killSpawn.RespawnTimeSec = fields[23].Get<uint32>();
             killSpawn.RespawnUsesRaidLockout = fields[24].Get<uint8>() != 0;
+            killSpawn.TriggerRadius = fields[25].Get<float>();
+            killSpawn.SpellID = fields[26].Get<uint32>();
+            killSpawn.PathListID = fields[27].Get<uint32>();
+            killSpawn.ArrivalBehavior = fields[28].Get<uint8>();
+            killSpawn.IsPersistent = fields[29].Get<uint8>() != 0;
+            killSpawn.SayText = fields[30].Get<string>();
+            if (killSpawn.ActionType == EQ_KILLSPAWN_ACTION_SPAWN && killSpawn.IsPersistent == true)
+                PersistentEventSpawnKeys.insert((static_cast<uint64>(killSpawn.MapID) << 32) | killSpawn.TargetCreatureTemplateID);
+            if (killSpawn.ActionType == EQ_KILLSPAWN_ACTION_ROOT)
+                KillSpawnWatchFlagsByCreatureTemplateID[killSpawn.TriggerCreatureTemplateID] |= EQ_KILLSPAWN_WATCH_FLAG_ROOT;
+            if (killSpawn.ActionType == EQ_KILLSPAWN_ACTION_ATTACKPLAYER)
+            {
+                // A row that names no one sends the trigger creature itself
+                uint32 attackerCreatureTemplateID = (killSpawn.TargetCreatureTemplateID != 0 ? killSpawn.TargetCreatureTemplateID : killSpawn.TriggerCreatureTemplateID);
+                KillSpawnWatchFlagsByCreatureTemplateID[attackerCreatureTemplateID] |= EQ_KILLSPAWN_WATCH_FLAG_ATTACKER;
+            }
             if (killSpawn.TriggerTypeID == EQ_KILLSPAWN_TRIGGER_EVADE)
-                EvadeKillSpawnTriggerCreatureTemplateIDs.insert(killSpawn.TriggerCreatureTemplateID);
+                KillSpawnWatchFlagsByCreatureTemplateID[killSpawn.TriggerCreatureTemplateID] |= EQ_KILLSPAWN_WATCH_FLAG_EVADE;
+            else if (killSpawn.TriggerTypeID == EQ_KILLSPAWN_TRIGGER_SPAWN)
+                KillSpawnWatchFlagsByCreatureTemplateID[killSpawn.TriggerCreatureTemplateID] |= EQ_KILLSPAWN_WATCH_FLAG_SPAWN;
+            else if (killSpawn.TriggerTypeID == EQ_KILLSPAWN_TRIGGER_PROXIMITY)
+            {
+                if (killSpawn.TriggerRadius <= 0)
+                    LOG_ERROR("module.EverQuest", "EverQuestMod::LoadCreatureKillSpawnData kill spawn ID {} has a proximity trigger with no radius, so it will never fire", killSpawn.ID);
+                else
+                {
+                    // Who is inside is tracked once per creature, so every proximity row of a template shares one radius
+                    float& templateRadius = ProximityKillSpawnRadiusByCreatureTemplateID[killSpawn.TriggerCreatureTemplateID];
+                    if (templateRadius != 0 && templateRadius != killSpawn.TriggerRadius)
+                        LOG_ERROR("module.EverQuest", "EverQuestMod::LoadCreatureKillSpawnData kill spawn ID {} has a different proximity radius than the other proximity rows of creature template {}, and the largest one is used for all of them", killSpawn.ID, killSpawn.TriggerCreatureTemplateID);
+                    KillSpawnWatchFlagsByCreatureTemplateID[killSpawn.TriggerCreatureTemplateID] |= EQ_KILLSPAWN_WATCH_FLAG_PROXIMITY;
+                    if (killSpawn.TriggerRadius > templateRadius)
+                        templateRadius = killSpawn.TriggerRadius;
+                    if (killSpawn.ActionType == EQ_KILLSPAWN_ACTION_DESPAWN && killSpawn.SpawnAtCorpse == true && killSpawn.TargetCreatureTemplateID == killSpawn.TriggerCreatureTemplateID)
+                        OneTimeProximityKillSpawnCreatureTemplateIDs.insert(killSpawn.TriggerCreatureTemplateID);
+                }
+            }
             else if (killSpawn.TriggerTypeID == EQ_KILLSPAWN_TRIGGER_OOCTIMER)
             {
                 // This delay is the out-of-combat (ooc) countdouwn duration and the creature's countdown uses the longest duration
@@ -1107,6 +1146,7 @@ void EverQuestMod::LoadCreatureKillSpawnData()
                     LOG_ERROR("module.EverQuest", "EverQuestMod::LoadCreatureKillSpawnData kill spawn ID {} has an ooctimer trigger with no delay duration, so it will never fire", killSpawn.ID);
                 else
                 {
+                    KillSpawnWatchFlagsByCreatureTemplateID[killSpawn.TriggerCreatureTemplateID] |= EQ_KILLSPAWN_WATCH_FLAG_OOCTIMER;
                     if (killSpawn.DelayMinMS > OocTimerKillSpawnDurationMSByCreatureTemplateID[killSpawn.TriggerCreatureTemplateID])
                         OocTimerKillSpawnDurationMSByCreatureTemplateID[killSpawn.TriggerCreatureTemplateID] = killSpawn.DelayMinMS;
 
@@ -1900,12 +1940,49 @@ bool EverQuestMod::HasAliveCreatureWithEntryInMap(Map* map, uint32 creatureTempl
     return false;
 }
 
-void EverQuestMod::ProcessKillSpawnsForCreatureEvent(Creature* eventCreature, Unit* otherUnit, uint8 triggerTypeID)
+// Talking to a creature is the closest analog to saying 'Hail' in EQ.  The gossip opcode is handled in place, so this can run on the creature's map thread or on the world thread, and either way
+// everything it sets off goes through the pending queue and executes from the map's own update
+void EverQuestMod::ProcessHailKillSpawnsForCreature(Creature* creature, Player* player)
+{
+    if (creature == nullptr || player == nullptr)
+        return;
+    uint32 mapID = creature->GetMapId();
+    if (mapID < ConfigSystemMapDBCIDMin || mapID > ConfigSystemMapDBCIDMax)
+        return;
+    if (creature->IsAlive() == false || creature->IsPet() == true || creature->IsControlledByPlayer() == true)
+        return;
+    ProcessKillSpawnsForCreatureEvent(creature, player, EQ_KILLSPAWN_TRIGGER_HAIL);
+}
+
+void EverQuestMod::ProcessKillSpawnsForCreatureEvent(Creature* eventCreature, Unit* otherUnit, uint8 triggerTypeID, uint32 sequenceIndex)
 {
     auto killSpawnIter = CreatureKillSpawnsByTriggerCreatureTemplateID.find(eventCreature->GetEntry());
     if (killSpawnIter == CreatureKillSpawnsByTriggerCreatureTemplateID.end())
         return;
     Map* map = eventCreature->GetMap();
+
+    // A spawn trigger that fires again for the same creature (a respawn, or a game event bringing it back) starts its sequence over, so anything its last run still has waiting is called off first.
+    // A placed creature is recognized by its spawn point, since it comes back as a new object with a new GUID
+    if (triggerTypeID == EQ_KILLSPAWN_TRIGGER_SPAWN)
+    {
+        ObjectGuid::LowType eventCreatureSpawnID = eventCreature->GetSpawnId();
+        std::lock_guard<std::mutex> lock(PendingKillSpawnActionsMutex);
+        auto pendingIter = PendingKillSpawnActionsByMapInstanceKey.find(GetMapInstanceKey(map));
+        if (pendingIter != PendingKillSpawnActionsByMapInstanceKey.end())
+        {
+            vector<EverQuestPendingKillSpawnAction>& pendingActions = pendingIter->second;
+            for (size_t i = pendingActions.size(); i > 0; --i)
+            {
+                const EverQuestPendingKillSpawnAction& pendingAction = pendingActions[i - 1];
+                if (pendingAction.SourceTriggerTypeID != EQ_KILLSPAWN_TRIGGER_SPAWN)
+                    continue;
+                if (pendingAction.SourceCreatureGUID == eventCreature->GetGUID() || (eventCreatureSpawnID != 0 && pendingAction.SourceSpawnID == eventCreatureSpawnID))
+                    pendingActions.erase(pendingActions.begin() + (i - 1));
+            }
+            if (pendingActions.empty() == true)
+                PendingKillSpawnActionsByMapInstanceKey.erase(pendingIter);
+        }
+    }
 
     // Kill spawn rows only exist for the open world copy of a zone, so events inside a raid instance copy match against its open world map
     uint32 mapID = GetOpenWorldMapIDForMapID(map->GetId());
@@ -1930,6 +2007,13 @@ void EverQuestMod::ProcessKillSpawnsForCreatureEvent(Creature* eventCreature, Un
         float totalWeight = 0;
         for (pair<uint32, float>& altWeight : altGroup.second)
             totalWeight += altWeight.second;
+
+        // A group with no weight at all plays its alternatives in order, one per firing, instead of rolling between them
+        if (totalWeight <= 0)
+        {
+            chosenAltIDByGroup[altGroup.first] = altGroup.second[sequenceIndex % altGroup.second.size()].first;
+            continue;
+        }
         float weightRoll = frand(0, totalWeight);
         for (pair<uint32, float>& altWeight : altGroup.second)
         {
@@ -1956,25 +2040,58 @@ void EverQuestMod::ProcessKillSpawnsForCreatureEvent(Creature* eventCreature, Un
             continue;
         if (killSpawn.Chance < 100 && roll_chance_f(killSpawn.Chance) == false)
             continue;
+        // A spawn trigger starts a sequence that can run for minutes, so what its rows require is judged when each action runs instead of here
         bool requirementFailed = false;
-        for (uint32 creatureTemplateID : killSpawn.RequireDeadCreatureTemplateIDs)
-            if (HasAliveCreatureWithEntryInMap(map, creatureTemplateID, eventCreature) == true)
-                requirementFailed = true;
-        for (uint32 creatureTemplateID : killSpawn.RequireAliveCreatureTemplateIDs)
-            if (HasAliveCreatureWithEntryInMap(map, creatureTemplateID, eventCreature) == false)
-                requirementFailed = true;
+        if (triggerTypeID != EQ_KILLSPAWN_TRIGGER_SPAWN)
+        {
+            for (uint32 creatureTemplateID : killSpawn.RequireDeadCreatureTemplateIDs)
+                if (HasAliveCreatureWithEntryInMap(map, creatureTemplateID, eventCreature) == true)
+                    requirementFailed = true;
+            for (uint32 creatureTemplateID : killSpawn.RequireAliveCreatureTemplateIDs)
+                if (HasAliveCreatureWithEntryInMap(map, creatureTemplateID, eventCreature) == false)
+                    requirementFailed = true;
+        }
         if (requirementFailed == true)
             continue;
 
         EverQuestPendingKillSpawnAction action;
+        if (triggerTypeID == EQ_KILLSPAWN_TRIGGER_SPAWN)
+        {
+            action.RequireDeadCreatureTemplateIDs = killSpawn.RequireDeadCreatureTemplateIDs;
+            action.RequireAliveCreatureTemplateIDs = killSpawn.RequireAliveCreatureTemplateIDs;
+        }
+        else if (killSpawn.IsPersistent == true)
+        {
+            // A spawn standing in for a spawn point can be waiting out a long respawn delay, and by the time it runs something else may already have put its creature back
+            action.RequireDeadCreatureTemplateIDs = killSpawn.RequireDeadCreatureTemplateIDs;
+        }
         action.ActionType = killSpawn.ActionType;
         action.TargetCreatureTemplateID = killSpawn.TargetCreatureTemplateID;
         action.OnlyIfNotAliveCreatureTemplateID = killSpawn.OnlyIfNotAliveCreatureTemplateID;
         action.AddToHateList = killSpawn.AddToHateList;
         action.RespawnTimeSec = killSpawn.RespawnTimeSec;
         action.RespawnUsesRaidLockout = killSpawn.RespawnUsesRaidLockout;
+        action.SpellID = killSpawn.SpellID;
+        action.PathListID = killSpawn.PathListID;
+        action.ArrivalBehavior = killSpawn.ArrivalBehavior;
+        action.SayText = killSpawn.SayText;
+        action.MoverGUID = eventCreature->GetGUID();
+        action.SourceCreatureGUID = eventCreature->GetGUID();
+        action.SourceSpawnID = eventCreature->GetSpawnId();
+        action.SourceTriggerTypeID = triggerTypeID;
         if (otherUnit != nullptr)
+        {
             action.KillerGUID = otherUnit->GetGUID();
+            if (otherUnit->IsPlayer() == true)
+                action.ListenerGUID = otherUnit->GetGUID();
+        }
+        if (killSpawn.ActionType == EQ_KILLSPAWN_ACTION_SAY || killSpawn.ActionType == EQ_KILLSPAWN_ACTION_EMOTE || killSpawn.ActionType == EQ_KILLSPAWN_ACTION_YELL)
+        {
+            // A row with no target (or its own trigger as the target) is the trigger creature talking
+            if (killSpawn.TargetCreatureTemplateID == 0 || killSpawn.TargetCreatureTemplateID == killSpawn.TriggerCreatureTemplateID)
+                action.SpeakerGUID = eventCreature->GetGUID();
+            action.SpeakToWholeMap = (killSpawn.ActionType == EQ_KILLSPAWN_ACTION_YELL);
+        }
         if (killSpawn.ActionType == EQ_KILLSPAWN_ACTION_RESPAWNSELF)
         {
             action.RespawnSpawnID = eventCreature->GetSpawnId();
@@ -1995,6 +2112,10 @@ void EverQuestMod::ProcessKillSpawnsForCreatureEvent(Creature* eventCreature, Un
             action.PositionY = eventCreature->GetPositionY() + killSpawn.PositionY;
             action.PositionZ = eventCreature->GetPositionZ() + killSpawn.PositionZ;
             action.Orientation = eventCreature->GetOrientation();
+
+            // A despawn 'at the corpse' takes only the creature that set the trigger off, which is how one of many creatures sharing a template depops on its own
+            if (killSpawn.ActionType == EQ_KILLSPAWN_ACTION_DESPAWN)
+                action.DespawnMoverOnly = true;
         }
         else
         {
@@ -2030,6 +2151,14 @@ void EverQuestMod::ProcessKillSpawnsForCreatureEvent(Creature* eventCreature, Un
 
 void EverQuestMod::ExecuteKillSpawnAction(Map* map, EverQuestPendingKillSpawnAction& action)
 {
+    // Requirements held over from when the trigger fired, which only some rows carry
+    for (uint32 creatureTemplateID : action.RequireDeadCreatureTemplateIDs)
+        if (HasAliveCreatureWithEntryInMap(map, creatureTemplateID, nullptr) == true)
+            return;
+    for (uint32 creatureTemplateID : action.RequireAliveCreatureTemplateIDs)
+        if (HasAliveCreatureWithEntryInMap(map, creatureTemplateID, nullptr) == false)
+            return;
+
     switch (action.ActionType)
     {
         case EQ_KILLSPAWN_ACTION_SPAWN:
@@ -2058,6 +2187,20 @@ void EverQuestMod::ExecuteKillSpawnAction(Map* map, EverQuestPendingKillSpawnAct
         } break;
         case EQ_KILLSPAWN_ACTION_DESPAWN:
         {
+            if (action.DespawnMoverOnly == true)
+            {
+                Creature* triggerCreature = map->GetCreature(action.MoverGUID);
+                if (triggerCreature == nullptr || triggerCreature->IsInWorld() == false || triggerCreature->IsAlive() == false)
+                    return;
+
+                // An out-of-combat timer never pulls a creature out from under a fight, and it comes around again.  Any other trigger only fires the once, so its despawn always goes through
+                if (action.SourceTriggerTypeID == EQ_KILLSPAWN_TRIGGER_OOCTIMER && triggerCreature->IsInCombat() == true)
+                    return;
+                DoCreatureEmoteEvent(triggerCreature, EQ_CREATURE_EMOTE_EVENT_ONDESPAWN, nullptr);
+                triggerCreature->DespawnOrUnsummon();
+                return;
+            }
+
             // Copy out under the lock, since DespawnOrUnsummon re-enters hooks that also take RuntimeStateMutex
             vector<Creature*> despawnCandidates;
             {
@@ -2112,10 +2255,221 @@ void EverQuestMod::ExecuteKillSpawnAction(Map* map, EverQuestPendingKillSpawnAct
             const vector<EverQuestCreatureWaypoint>& pathNodes = GetWaypoints(0, action.PathListID);
             if (pathNodes.empty() == true)
                 return;
-            if (walker->GetExactDist2d(pathNodes[0].X, pathNodes[0].Y) > EQ_REACTION_WALK_PATH_JOIN_DISTANCE)
+
+            // A walk chained onto the end of another has to start where the last one stopped.  A walk given by a kill spawn row starts from wherever the creature was put
+            if (action.SourceCreatureGUID.IsEmpty() == true && walker->GetExactDist2d(pathNodes[0].X, pathNodes[0].Y) > EQ_REACTION_WALK_PATH_JOIN_DISTANCE)
                 return;
-            vector<EverQuestPendingKillSpawnAction> noArrivalActions;
-            StartReactionGridWalk(walker, action.PathListID, noArrivalActions);
+
+            // A kill spawn row's walk never drags its creature out of a fight, it waits for the fight to be over
+            if (action.SourceCreatureGUID.IsEmpty() == false)
+            {
+                if (walker->IsAlive() == false)
+                    return;
+
+                // Already on this walk, or already standing where it ends, which is what a second copy of the row finds
+                const EverQuestCreatureWaypoint& lastPathNode = pathNodes[pathNodes.size() - 1];
+                if (IsCreatureInReactionWalk(walker) == true || walker->GetExactDist2d(lastPathNode.X, lastPathNode.Y) <= EQ_REACTION_WALK_PRECISE_ARRIVE_DISTANCE)
+                    return;
+                if (walker->IsInCombat() == true || walker->IsCharmed() == true || walker->IsInEvadeMode() == true)
+                {
+                    EverQuestPendingKillSpawnAction retryAction = action;
+                    retryAction.RemainingMS = EQ_KILLSPAWN_WALK_RETRY_MS;
+                    EnqueuePendingKillSpawnAction(map, retryAction);
+                    return;
+                }
+            }
+            vector<EverQuestPendingKillSpawnAction> arrivalActions;
+            if (action.ArrivalBehavior == EQ_KILLSPAWN_ARRIVAL_SIT)
+            {
+                EverQuestPendingKillSpawnAction sitAction;
+                sitAction.ActionType = EQ_KILLSPAWN_ACTION_SETSTANDSTATE;
+                sitAction.StandState = UNIT_STAND_STATE_SIT;
+                arrivalActions.push_back(sitAction);
+            }
+            else if (action.ArrivalBehavior == EQ_KILLSPAWN_ARRIVAL_DESPAWN)
+            {
+                EverQuestPendingKillSpawnAction despawnAction;
+                despawnAction.ActionType = EQ_KILLSPAWN_ACTION_DESPAWN;
+                despawnAction.TargetCreatureTemplateID = walker->GetEntry();
+                arrivalActions.push_back(despawnAction);
+            }
+
+            // Where a kill spawn row's walk ends is where the creature now belongs, so a fight at the far end doesn't send it back to where it appeared
+            if (StartReactionGridWalk(walker, action.PathListID, arrivalActions) == true && action.SourceCreatureGUID.IsEmpty() == false)
+            {
+                const EverQuestCreatureWaypoint& finalPathNode = pathNodes[pathNodes.size() - 1];
+                walker->SetHomePosition(finalPathNode.X, finalPathNode.Y, finalPathNode.Z, walker->GetOrientation());
+                SetReactionWalkPreciseArrival(walker);
+            }
+        } break;
+        case EQ_KILLSPAWN_ACTION_SETSTANDSTATE:
+        {
+            Creature* stander = map->GetCreature(action.MoverGUID);
+            if (stander == nullptr || stander->IsAlive() == false || stander->IsInCombat() == true)
+                return;
+            stander->SetStandState(action.StandState);
+        } break;
+        case EQ_KILLSPAWN_ACTION_SAY:
+        case EQ_KILLSPAWN_ACTION_EMOTE:
+        case EQ_KILLSPAWN_ACTION_YELL:
+        {
+            if (action.SayText.empty() == true)
+                return;
+            vector<Creature*> speakers;
+            if (action.SpeakerGUID.IsEmpty() == false)
+            {
+                // The trigger creature can speak from its corpse, which is how a death line gets said
+                Creature* speaker = map->GetCreature(action.SpeakerGUID);
+                if (speaker != nullptr && speaker->IsInWorld() == true && (speaker->IsAlive() == true || action.SourceTriggerTypeID == EQ_KILLSPAWN_TRIGGER_DEATH))
+                    speakers.push_back(speaker);
+            }
+            else
+                speakers = GetLivingCreaturesForKillSpawnAction(map, action.TargetCreatureTemplateID);
+            if (speakers.empty() == true)
+                return;
+            Player* listener = (action.ListenerGUID ? ObjectAccessor::GetPlayer(map, action.ListenerGUID) : nullptr);
+            EverQuestCreatureEmote spokenLine;
+            spokenLine.EmoteText = action.SayText;
+            if (action.ActionType == EQ_KILLSPAWN_ACTION_EMOTE)
+                spokenLine.EmoteType = EQ_CREATURE_EMOTE_TYPE_EMOTE;
+            else if (action.ActionType == EQ_KILLSPAWN_ACTION_YELL && action.SpeakToWholeMap == true)
+                spokenLine.EmoteType = EQ_CREATURE_EMOTE_TYPE_SHOUT;
+            else if (action.ActionType == EQ_KILLSPAWN_ACTION_YELL)
+            {
+                for (Creature* speaker : speakers)
+                    speaker->Yell(FormatCreatureEmoteText(speaker, listener, action.SayText), LANG_UNIVERSAL, listener);
+                return;
+            }
+            else
+                spokenLine.EmoteType = EQ_CREATURE_EMOTE_TYPE_SAY;
+            for (Creature* speaker : speakers)
+                EmitCreatureEmote(speaker, spokenLine, listener);
+        } break;
+        case EQ_KILLSPAWN_ACTION_ATTACKPLAYER:
+        {
+            // Unit::Attack writes into the victim's attacker list, so the player has to belong to this map
+            Player* victim = (action.ListenerGUID ? ObjectAccessor::GetPlayer(map, action.ListenerGUID) : nullptr);
+            if (victim == nullptr || victim->IsAlive() == false || victim->FindMap() != map)
+                return;
+
+            // A row that names its own trigger (or nothing) sends the creature that was triggered, anything else sends the nearest living creature of that template
+            Creature* attacker = nullptr;
+            Creature* triggerCreature = map->GetCreature(action.MoverGUID);
+            if (triggerCreature != nullptr && (action.TargetCreatureTemplateID == 0 || action.TargetCreatureTemplateID == triggerCreature->GetEntry()))
+                attacker = triggerCreature;
+            else
+                attacker = GetNearestLoadedCreatureWithEntryID(map, action.TargetCreatureTemplateID, victim);
+            if (attacker == nullptr || attacker->IsInWorld() == false || attacker->IsAlive() == false)
+                return;
+            attacker->SetFaction(2300); // Make Kill-on-sight
+            attacker->SetReactState(REACT_AGGRESSIVE);
+            attacker->SetTarget(victim->GetGUID());
+
+            // Going through the AI is what starts the chase, a bare attack only swings at whoever is already in reach
+            attacker->SetInCombatWith(victim);
+            attacker->AddThreat(victim, 1.0f);
+            if (attacker->IsAIEnabled == true && attacker->AI() != nullptr)
+                attacker->AI()->AttackStart(victim);
+            else
+                attacker->Attack(victim, true);
+
+            // These rows can be set off again and again, so the creature is noted as needing its own faction back once this fight is done (see UpdateCreatureKillSpawnCombatWatch)
+            EverQuestCreatureKillSpawnWatchState* attackerState = attacker->CustomData.GetDefault<EverQuestCreatureKillSpawnWatchState>(EQ_CREATURE_CUSTOMDATA_KILLSPAWNWATCH);
+            attackerState->IsOnAttackPlayerFaction = true;
+            attackerState->HasFoughtOnAttackPlayerFaction = false;
+            attackerState->AttackPlayerFactionGraceRemainingMS = EQ_KILLSPAWN_ATTACKER_FACTION_GRACE_MS;
+        } break;
+        case EQ_KILLSPAWN_ACTION_CASTSPELL:
+        {
+            Creature* caster = map->GetCreature(action.MoverGUID);
+            if (caster == nullptr || caster->IsInWorld() == false || caster->IsAlive() == false || action.SpellID == 0)
+                return;
+            Unit* spellTarget = (action.KillerGUID ? ObjectAccessor::GetUnit(*caster, action.KillerGUID) : nullptr);
+            if (spellTarget == nullptr || spellTarget->IsInWorld() == false || spellTarget->IsAlive() == false || spellTarget->FindMap() != map)
+                return;
+            CastScriptedSpellAtUnit(caster, spellTarget, action.SpellID);
+        } break;
+        case EQ_KILLSPAWN_ACTION_MOVETO:
+        {
+            vector<Creature*> movers = GetLivingCreaturesForKillSpawnAction(map, action.TargetCreatureTemplateID);
+            for (Creature* mover : movers)
+            {
+                // A creature that is fighting, charmed, or already on a reaction walk sits this one out
+                if (mover->IsInCombat() == true || mover->IsCharmed() == true || mover->IsInEvadeMode() == true || IsCreatureInReactionWalk(mover) == true)
+                    continue;
+                if (mover->GetExactDist2d(action.PositionX, action.PositionY) <= EQ_REACTION_WALK_PRECISE_ARRIVE_DISTANCE)
+                    continue;
+
+                // The new spot becomes home, so a fight that ends there doesn't send the creature back to where it first spawned
+                vector<EverQuestPendingKillSpawnAction> noArrivalActions;
+                if (StartReactionWalk(mover, action.PositionX, action.PositionY, action.PositionZ, action.Orientation, true, false, noArrivalActions) == true)
+                {
+                    mover->SetHomePosition(action.PositionX, action.PositionY, action.PositionZ, action.Orientation);
+                    SetReactionWalkPreciseArrival(mover);
+                }
+            }
+        } break;
+        case EQ_KILLSPAWN_ACTION_ROOT:
+        {
+            Creature* rootedCreature = map->GetCreature(action.MoverGUID);
+            if (rootedCreature == nullptr || rootedCreature->IsInWorld() == false || rootedCreature->IsAlive() == false)
+                return;
+            rootedCreature->StopMoving();
+            rootedCreature->SetControlled(true, UNIT_STATE_ROOT);
+            rootedCreature->CustomData.GetDefault<EverQuestCreatureKillSpawnWatchState>(EQ_CREATURE_CUSTOMDATA_KILLSPAWNWATCH)->IsScriptRooted = true;
+        } break;
+        case EQ_KILLSPAWN_ACTION_ENDCASTCOMBAT:
+        {
+            Creature* caster = map->GetCreature(action.MoverGUID);
+            if (caster == nullptr || caster->IsInWorld() == false || caster->IsAlive() == false)
+                return;
+            Unit* spellTarget = (action.KillerGUID ? ObjectAccessor::GetUnit(*caster, action.KillerGUID) : nullptr);
+            if (spellTarget == nullptr || spellTarget->IsInWorld() == false || spellTarget->FindMap() != map)
+                return;
+
+            // A real fight between the two is left alone for good
+            if (caster->IsThreatenedBy(spellTarget) == true || caster->GetVictim() == spellTarget || spellTarget->GetVictim() == caster)
+                return;
+            auto const& combatReferences = caster->GetCombatManager().GetPvECombatRefs();
+            auto combatReferenceIter = combatReferences.find(spellTarget->GetGUID());
+            if (combatReferenceIter != combatReferences.end())
+                combatReferenceIter->second->EndCombat();
+
+            // Each tick of a spell that lingers puts the two back in combat, so the passes go on for as long as anything cast by this creature is still on the target
+            bool hasLingeringSpell = false;
+            Unit::AuraApplicationMap const& appliedAuras = spellTarget->GetAppliedAuras();
+            for (Unit::AuraApplicationMap::const_iterator auraIter = appliedAuras.begin(); auraIter != appliedAuras.end(); ++auraIter)
+                if (auraIter->second->GetBase()->GetCasterGUID() == caster->GetGUID())
+                {
+                    hasLingeringSpell = true;
+                    break;
+                }
+            uint32 passesMade = EQ_SCRIPTED_CAST_COMBAT_END_PASSES - action.PassesRemaining + 1;
+            if (hasLingeringSpell == false && passesMade >= EQ_SCRIPTED_CAST_COMBAT_END_MIN_PASSES)
+                return;
+            if (action.PassesRemaining > 1)
+            {
+                EverQuestPendingKillSpawnAction nextPassAction = action;
+                nextPassAction.PassesRemaining = action.PassesRemaining - 1;
+                nextPassAction.RemainingMS = EQ_SCRIPTED_CAST_COMBAT_END_INTERVAL_MS;
+                EnqueuePendingKillSpawnAction(map, nextPassAction);
+            }
+        } break;
+        case EQ_KILLSPAWN_ACTION_FOLLOW:
+        {
+            Creature* follower = map->GetCreature(action.MoverGUID);
+            if (follower == nullptr || follower->IsInWorld() == false || follower->IsAlive() == false)
+                return;
+            if (follower->IsInCombat() == true || follower->IsCharmed() == true || follower->IsInEvadeMode() == true)
+                return;
+            if (follower->GetMotionMaster()->GetCurrentMovementGeneratorType() == FOLLOW_MOTION_TYPE)
+                return;
+
+            // Only a leader that is close by is picked up, so the follower never sets off across the zone in a straight line to reach one
+            Creature* leader = GetNearestLoadedCreatureWithEntryID(map, action.TargetCreatureTemplateID, follower);
+            if (leader == nullptr || leader == follower || leader->GetExactDist(follower) > EQ_REACTION_WALK_PATH_JOIN_DISTANCE)
+                return;
+            follower->GetMotionMaster()->MoveFollow(leader, EQ_KILLSPAWN_FOLLOW_DISTANCE, static_cast<float>(M_PI));
         } break;
         case EQ_KILLSPAWN_ACTION_RESPAWNSELF:
         {
@@ -2176,13 +2530,142 @@ void EverQuestMod::RemoveCreatureKillSpawnCombatWatchState(Creature* creature)
     creature->CustomData.Erase(EQ_CREATURE_CUSTOMDATA_KILLSPAWNWATCH);
 }
 
+// A creature that is talked to sits on a faction the core will not let attack a player who is not at war with it, which makes its harmful spells fail outright.  The creature is
+// made hostile for just the cast, the same way an attackplayer row makes it hostile for a fight
+void EverQuestMod::CastScriptedSpellAtUnit(Creature* caster, Unit* spellTarget, uint32 spellID)
+{
+    if (caster == nullptr || spellTarget == nullptr || spellID == 0)
+        return;
+    SpellInfo const* spellInfo = sSpellMgr->GetSpellInfo(spellID);
+    if (spellInfo == nullptr)
+    {
+        LOG_ERROR("module.EverQuest", "EverQuestMod::CastScriptedSpellAtUnit creature {} was told to cast spell {}, which does not exist", caster->GetEntry(), spellID);
+        return;
+    }
+    uint32 originalFactionTemplateID = caster->GetFaction();
+    bool madeHostileForCast = false;
+    if (spellInfo->IsPositive() == false && caster != spellTarget && caster->IsValidAttackTarget(spellTarget) == false)
+    {
+        caster->SetFaction(2300); // Make Kill-on-sight
+        madeHostileForCast = true;
+    }
+    bool wasInCombatWithTarget = caster->IsInCombatWith(spellTarget);
+    caster->CastSpell(spellTarget, spellID, true);
+    if (madeHostileForCast == true)
+        caster->SetFaction(originalFactionTemplateID);
+
+    // The spell puts the two in combat with each other, but the creature holds no threat and so never evades to end it.  It is let go of from the map's own update, and
+    // again for a while after, since every tick of a spell that lingers brings it back
+    if (spellInfo->IsPositive() == false && wasInCombatWithTarget == false && caster != spellTarget)
+    {
+        EverQuestPendingKillSpawnAction endCombatAction;
+        endCombatAction.ActionType = EQ_KILLSPAWN_ACTION_ENDCASTCOMBAT;
+        endCombatAction.MoverGUID = caster->GetGUID();
+        endCombatAction.KillerGUID = spellTarget->GetGUID();
+        endCombatAction.PassesRemaining = EQ_SCRIPTED_CAST_COMBAT_END_PASSES;
+        endCombatAction.RemainingMS = EQ_SCRIPTED_CAST_COMBAT_END_INTERVAL_MS;
+        EnqueuePendingKillSpawnAction(caster->GetMap(), endCombatAction);
+    }
+}
+
+// The watcher of a walk that was just started is told the walk has to finish on its spot, instead of anywhere near it
+void EverQuestMod::SetReactionWalkPreciseArrival(Creature* creature)
+{
+    if (creature == nullptr)
+        return;
+    std::lock_guard<std::mutex> lock(PendingArrivalActionsMutex);
+    auto watcherIter = PendingArrivalActionsByMapInstanceKey.find(GetMapInstanceKey(creature->GetMap()));
+    if (watcherIter == PendingArrivalActionsByMapInstanceKey.end())
+        return;
+    for (EverQuestPendingArrivalAction& watcher : watcherIter->second)
+    {
+        if (watcher.MoverGUID != creature->GetGUID())
+            continue;
+        watcher.IsPreciseArrival = true;
+
+        // A fight on the way leaves the walker standing wherever it ended, so the walk is picked up again from there.  The first look waits long enough for the walk itself to have started
+        watcher.ReissueMoveWhenStalled = true;
+        watcher.StallCheckRemainingMS = 3 * EQ_REACTION_WALK_STALL_CHECK_MS;
+    }
+}
+
+vector<Creature*> EverQuestMod::GetLivingCreaturesForKillSpawnAction(Map* map, uint32 creatureTemplateID)
+{
+    // Copied out under the lock, since anything done to these creatures can re-enter hooks that also take RuntimeStateMutex
+    vector<Creature*> livingCreatures;
+    std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+    auto mapIter = AllLoadedCreaturesByMapInstanceKeyThenCreatureEntryID.find(GetMapInstanceKey(map));
+    if (mapIter == AllLoadedCreaturesByMapInstanceKeyThenCreatureEntryID.end())
+        return livingCreatures;
+    auto entryIter = mapIter->second.find(creatureTemplateID);
+    if (entryIter == mapIter->second.end())
+        return livingCreatures;
+    for (Creature* creature : entryIter->second)
+        if (creature->IsAlive() == true)
+            livingCreatures.push_back(creature);
+    return livingCreatures;
+}
+
+// EQ's proximity events fire for a player crossing into the area, so who is already inside is remembered and only new arrivals set the trigger off
+void EverQuestMod::UpdateCreatureKillSpawnProximity(Creature* creature, EverQuestCreatureKillSpawnWatchState* state, uint32 diff)
+{
+    if (state->ProximityCheckRemainingMS > diff)
+    {
+        state->ProximityCheckRemainingMS -= diff;
+        return;
+    }
+    state->ProximityCheckRemainingMS = EQ_KILLSPAWN_PROXIMITY_CHECK_MS;
+    if (state->HasFiredOneTimeProximity == true)
+        return;
+    auto radiusIter = ProximityKillSpawnRadiusByCreatureTemplateID.find(creature->GetEntry());
+    if (radiusIter == ProximityKillSpawnRadiusByCreatureTemplateID.end())
+        return;
+    float radius = radiusIter->second;
+    float height = radius / EQ_KILLSPAWN_PROXIMITY_HEIGHT_DIVISOR;
+
+    set<ObjectGuid> playerGUIDsNowInside;
+    vector<Player*> enteredPlayers;
+    Map::PlayerList const& mapPlayers = creature->GetMap()->GetPlayers();
+    for (Map::PlayerList::const_iterator playerIter = mapPlayers.begin(); playerIter != mapPlayers.end(); ++playerIter)
+    {
+        Player* mapPlayer = playerIter->GetSource();
+        if (mapPlayer == nullptr || mapPlayer->IsInWorld() == false || mapPlayer->IsAlive() == false || mapPlayer->IsGameMaster() == true)
+            continue;
+        if (std::fabs(mapPlayer->GetPositionZ() - creature->GetPositionZ()) > height)
+            continue;
+        if (creature->GetExactDist2d(mapPlayer) > radius)
+            continue;
+        playerGUIDsNowInside.insert(mapPlayer->GetGUID());
+        if (state->PlayerGUIDsInProximity.find(mapPlayer->GetGUID()) == state->PlayerGUIDsInProximity.end())
+            enteredPlayers.push_back(mapPlayer);
+    }
+    state->PlayerGUIDsInProximity.swap(playerGUIDsNowInside);
+    if (state->HasSeededProximity == false)
+    {
+        state->HasSeededProximity = true;
+        return;
+    }
+    if (enteredPlayers.empty() == true)
+        return;
+
+    // A creature that depops itself as part of what it does here only does it for the first player to walk up, however many arrive together
+    if (OneTimeProximityKillSpawnCreatureTemplateIDs.find(creature->GetEntry()) != OneTimeProximityKillSpawnCreatureTemplateIDs.end())
+    {
+        state->HasFiredOneTimeProximity = true;
+        ProcessKillSpawnsForCreatureEvent(creature, enteredPlayers[0], EQ_KILLSPAWN_TRIGGER_PROXIMITY);
+        return;
+    }
+    for (Player* enteredPlayer : enteredPlayers)
+        ProcessKillSpawnsForCreatureEvent(creature, enteredPlayer, EQ_KILLSPAWN_TRIGGER_PROXIMITY);
+}
+
 void EverQuestMod::UpdateCreatureKillSpawnCombatWatch(Creature* creature, uint32 diff)
 {
-    bool hasEvadeRows = EvadeKillSpawnTriggerCreatureTemplateIDs.find(creature->GetEntry()) != EvadeKillSpawnTriggerCreatureTemplateIDs.end();
-    auto oocTimerIter = OocTimerKillSpawnDurationMSByCreatureTemplateID.find(creature->GetEntry());
-    bool hasOocTimerRows = oocTimerIter != OocTimerKillSpawnDurationMSByCreatureTemplateID.end();
-    if (hasEvadeRows == false && hasOocTimerRows == false)
+    // This runs on every creature tick, so one lookup has to settle the common case of a creature with nothing to watch
+    auto watchFlagsIter = KillSpawnWatchFlagsByCreatureTemplateID.find(creature->GetEntry());
+    if (watchFlagsIter == KillSpawnWatchFlagsByCreatureTemplateID.end())
         return;
+    uint8 watchFlags = watchFlagsIter->second;
     if (creature->IsPet() == true || creature->IsControlledByPlayer() == true)
         return;
     if (creature->IsAlive() == false)
@@ -2193,9 +2676,43 @@ void EverQuestMod::UpdateCreatureKillSpawnCombatWatch(Creature* creature, uint32
     EverQuestCreatureKillSpawnWatchState* state = creature->CustomData.GetDefault<EverQuestCreatureKillSpawnWatchState>(EQ_CREATURE_CUSTOMDATA_KILLSPAWNWATCH);
     bool isInCombat = creature->IsInCombat();
 
-    if (hasOocTimerRows == true)
+    // The watch state is dropped on death and when the creature leaves the world, so a state that has not fired yet means the creature has just appeared alive
+    if ((watchFlags & EQ_KILLSPAWN_WATCH_FLAG_SPAWN) != 0 && state->HasFiredSpawnTrigger == false)
     {
-        uint32 oocTimerDurationMS = oocTimerIter->second;
+        state->HasFiredSpawnTrigger = true;
+        ProcessKillSpawnsForCreatureEvent(creature, nullptr, EQ_KILLSPAWN_TRIGGER_SPAWN);
+    }
+
+    if ((watchFlags & EQ_KILLSPAWN_WATCH_FLAG_PROXIMITY) != 0)
+        UpdateCreatureKillSpawnProximity(creature, state, diff);
+
+    // The core lets go of a root whenever a root spell on the creature ends, so one that is meant to never move is put back in place
+    if ((watchFlags & EQ_KILLSPAWN_WATCH_FLAG_ROOT) != 0 && state->IsScriptRooted == true && creature->HasUnitState(UNIT_STATE_ROOT) == false)
+        creature->SetControlled(true, UNIT_STATE_ROOT);
+
+    // A creature that an attackplayer row turned on someone goes back to its own faction when that fight is over, or shortly after if the fight never started
+    if ((watchFlags & EQ_KILLSPAWN_WATCH_FLAG_ATTACKER) != 0 && state->IsOnAttackPlayerFaction == true)
+    {
+        bool restoreFaction = false;
+        if (isInCombat == true)
+            state->HasFoughtOnAttackPlayerFaction = true;
+        else if (state->HasFoughtOnAttackPlayerFaction == true)
+            restoreFaction = true;
+        else if (state->AttackPlayerFactionGraceRemainingMS > diff)
+            state->AttackPlayerFactionGraceRemainingMS -= diff;
+        else
+            restoreFaction = true;
+        if (restoreFaction == true)
+        {
+            state->IsOnAttackPlayerFaction = false;
+            creature->SetFaction(creature->GetCreatureTemplate()->faction);
+        }
+    }
+
+    if ((watchFlags & EQ_KILLSPAWN_WATCH_FLAG_OOCTIMER) != 0)
+    {
+        // The flag is only ever set alongside a duration
+        uint32 oocTimerDurationMS = OocTimerKillSpawnDurationMSByCreatureTemplateID.find(creature->GetEntry())->second;
         if (isInCombat == true || state->OocTimerRemainingMS == 0)
             state->OocTimerRemainingMS = oocTimerDurationMS;
         else if (state->OocTimerRemainingMS > diff)
@@ -2203,11 +2720,13 @@ void EverQuestMod::UpdateCreatureKillSpawnCombatWatch(Creature* creature, uint32
         else
         {
             state->OocTimerRemainingMS = oocTimerDurationMS;
-            ProcessKillSpawnsForCreatureEvent(creature, nullptr, EQ_KILLSPAWN_TRIGGER_OOCTIMER);
+            uint32 sequenceIndex = state->OocTimerFireCount;
+            state->OocTimerFireCount++;
+            ProcessKillSpawnsForCreatureEvent(creature, nullptr, EQ_KILLSPAWN_TRIGGER_OOCTIMER, sequenceIndex);
         }
     }
 
-    if (hasEvadeRows == true)
+    if ((watchFlags & EQ_KILLSPAWN_WATCH_FLAG_EVADE) != 0)
     {
         if (isInCombat == true)
             state->WasInCombat = true;
@@ -2775,20 +3294,33 @@ void EverQuestMod::UpdatePendingArrivalActions(Map* map, uint32 diff)
         for (size_t i = watchers.size(); i > 0; --i)
         {
             EverQuestPendingArrivalAction& watcher = watchers[i - 1];
-            watcher.ElapsedMS += diff;
-
             Creature* mover = map->GetCreature(watcher.MoverGUID);
             bool moverIsGone = (mover == nullptr || mover->IsInWorld() == false || mover->IsAlive() == false);
+
+            // A walk that has to finish on its spot is put on hold by a fight rather than run out by it, and picks up again once the walker is free
+            bool isHeldByFight = (watcher.IsPreciseArrival == true && moverIsGone == false && (mover->IsInCombat() == true || mover->IsInEvadeMode() == true || mover->IsCharmed() == true));
+            if (isHeldByFight == false)
+                watcher.ElapsedMS += diff;
 
             // Arriving finishes the walk.  A creature that died, despawned, or got stuck long enough drops its queued actions on the floor rather than firing them somewhere it never reached
             bool hasArrived = false;
             if (moverIsGone == false)
-                hasArrived = mover->GetExactDist2d(watcher.DestinationX, watcher.DestinationY) <= EQ_REACTION_WALK_ARRIVE_DISTANCE;
+            {
+                float distanceToDestination = mover->GetExactDist2d(watcher.DestinationX, watcher.DestinationY);
+                if (watcher.IsPreciseArrival == false)
+                    hasArrived = distanceToDestination <= EQ_REACTION_WALK_ARRIVE_DISTANCE;
+                else if (isHeldByFight == false)
+                {
+                    // Either standing on the spot, or still stopped short of it after being sent on once more, which is as close as the path can get
+                    hasArrived = distanceToDestination <= EQ_REACTION_WALK_PRECISE_ARRIVE_DISTANCE || (distanceToDestination <= EQ_REACTION_WALK_ARRIVE_DISTANCE &&
+                        watcher.HasReissuedMove == true && watcher.ElapsedMS >= EQ_REACTION_WALK_PRECISE_SETTLE_MS && mover->movespline->Finalized() == true);
+                }
+            }
             bool hasTimedOut = watcher.ElapsedMS >= watcher.TimeoutMS;
 
             if (moverIsGone == false && hasArrived == false && hasTimedOut == false)
             {
-                if (watcher.ReissueMoveWhenStalled == true && mover->IsInCombat() == false)
+                if (watcher.ReissueMoveWhenStalled == true && mover->IsInCombat() == false && isHeldByFight == false)
                 {
                     if (watcher.StallCheckRemainingMS > diff)
                         watcher.StallCheckRemainingMS -= diff;
@@ -2799,7 +3331,10 @@ void EverQuestMod::UpdatePendingArrivalActions(Map* map, uint32 diff)
                         // The next leg is built after the lock is released below.  Path building and the motion master are engine calls, and holding this mutex across them stalls every
                         // creature tick on every map that asks IsCreatureInReactionWalk while a walk is up
                         if (mover->movespline->Finalized() == true)
+                        {
                             stalledWatchers.push_back(watcher);
+                            watcher.HasReissuedMove = true;
+                        }
                     }
                 }
                 continue;
@@ -2826,8 +3361,20 @@ void EverQuestMod::UpdatePendingArrivalActions(Map* map, uint32 diff)
         Creature* stalledMover = map->GetCreature(stalledWatcher.MoverGUID);
         if (stalledMover == nullptr || stalledMover->IsInWorld() == false || stalledMover->IsAlive() == false)
             continue;
-        StartTerrainSnappedMoveToPoint(stalledMover, stalledWatcher.DestinationX, stalledWatcher.DestinationY, stalledWatcher.DestinationZ, true);
+        StartTerrainSnappedMoveToPoint(stalledMover, stalledWatcher.DestinationX, stalledWatcher.DestinationY, stalledWatcher.DestinationZ, stalledWatcher.IsPreciseArrival == false);
         LOG_DEBUG("module.EverQuest", "EverQuestMod::UpdatePendingArrivalActions creature {} stalled {} yards short of its reaction walk, so the next leg was built", stalledMover->GetEntry(), stalledMover->GetExactDist2d(stalledWatcher.DestinationX, stalledWatcher.DestinationY));
+    }
+
+    // Where a precise walk ends is where its walker now belongs.  The core moves a walker's home to wherever it was attacked along the way, so it is put right on arrival
+    for (EverQuestPendingArrivalAction& arrivedWatcher : arrivedWatchers)
+    {
+        if (arrivedWatcher.IsPreciseArrival == false)
+            continue;
+        Creature* arrivedMover = map->GetCreature(arrivedWatcher.MoverGUID);
+        if (arrivedMover == nullptr)
+            continue;
+        arrivedMover->SetHomePosition(arrivedWatcher.DestinationX, arrivedWatcher.DestinationY, arrivedWatcher.DestinationZ,
+            arrivedWatcher.HasDestinationOrientation == true ? arrivedWatcher.DestinationOrientation : arrivedMover->GetOrientation());
     }
 
     // The walk is over either way, so the creature can be talked to again before anything it has to say fires
@@ -8066,7 +8613,7 @@ bool EverQuestMod::AreNonFactionQuestObjectivesMetForPlayer(Player* player, Ques
 void EverQuestMod::LoadGossipReactions()
 {
     GossipReactionsByGossipCreatureTemplateID.clear();
-    QueryResult queryResult = WorldDatabase.Query("SELECT GossipCreatureTemplateID, NpcTextID, OptionID, OptionText, ReactionType, SayText, TargetCreatureTemplateID, UsePlayerX, UsePlayerY, UsePlayerZ, AddedPlayerX, AddedPlayerY, UsePlayerOrientation, UseNpcX, UseNpcY, UseNpcZ, UseNpcOrientation, PositionX, PositionY, PositionZ, Orientation, DelayInMS, MovementIsRun, FiresOnArrival, PathListID, GameObjectEntryID, GameObjectLifetimeSec, RequiredQuestID, RequiredNearX, RequiredNearY, RequiredNearZ, RequiredNearDistance FROM mod_everquest_gossip_reaction ORDER BY GossipCreatureTemplateID, ID;");
+    QueryResult queryResult = WorldDatabase.Query("SELECT GossipCreatureTemplateID, NpcTextID, OptionID, OptionText, ReactionType, SayText, TargetCreatureTemplateID, UsePlayerX, UsePlayerY, UsePlayerZ, AddedPlayerX, AddedPlayerY, UsePlayerOrientation, UseNpcX, UseNpcY, UseNpcZ, UseNpcOrientation, PositionX, PositionY, PositionZ, Orientation, DelayInMS, MovementIsRun, FiresOnArrival, PathListID, GameObjectEntryID, GameObjectLifetimeSec, RequiredQuestID, RequiredNearX, RequiredNearY, RequiredNearZ, RequiredNearDistance, SpellID FROM mod_everquest_gossip_reaction ORDER BY GossipCreatureTemplateID, ID;");
     if (queryResult)
     {
         do
@@ -8106,6 +8653,7 @@ void EverQuestMod::LoadGossipReactions()
             gossipReaction.RequiredNearY = fields[29].Get<float>();
             gossipReaction.RequiredNearZ = fields[30].Get<float>();
             gossipReaction.RequiredNearDistance = fields[31].Get<float>();
+            gossipReaction.SpellID = fields[32].Get<uint32>();
             GossipReactionsByGossipCreatureTemplateID[gossipReaction.GossipCreatureTemplateID].push_back(gossipReaction);
         } while (queryResult->NextRow());
     }
@@ -8182,14 +8730,26 @@ bool EverQuestMod::HandleGossipHello(Player* player, Creature* creature)
         addedOptionIDs.insert(gossipReaction.OptionID);
         AddGossipItemFor(player, GOSSIP_ICON_CHAT, gossipReaction.OptionText, GOSSIP_SENDER_MAIN, gossipReaction.OptionID);
     }
+
+    // This menu replaces the one the core would have built, which is where a merchant's shop line normally comes from
+    if (creature->IsVendor() == true)
+        AddGossipItemFor(player, GOSSIP_ICON_VENDOR, "I want to browse your goods.", EQ_GOSSIP_SENDER_VENDOR, 0);
     SendGossipMenuFor(player, npcTextID, creature->GetGUID());
     return true;
 }
 
-bool EverQuestMod::HandleGossipSelect(Player* player, Creature* creature, uint32 /*sender*/, uint32 action)
+bool EverQuestMod::HandleGossipSelect(Player* player, Creature* creature, uint32 sender, uint32 action)
 {
     if (IsEnabled == false)
         return false;
+    if (sender == EQ_GOSSIP_SENDER_VENDOR)
+    {
+        if (creature->IsVendor() == true)
+            player->GetSession()->SendListInventory(creature->GetGUID());
+        else
+            CloseGossipMenuFor(player);
+        return true;
+    }
     unordered_map<uint32, vector<EverQuestGossipReaction>>::const_iterator gossipReactionsIterator = GossipReactionsByGossipCreatureTemplateID.find(creature->GetEntry());
     if (gossipReactionsIterator == GossipReactionsByGossipCreatureTemplateID.end())
         return false;
@@ -8305,6 +8865,18 @@ bool EverQuestMod::HandleGossipSelect(Player* player, Creature* creature, uint32
         {
             creature->Yell(FormatGossipTextForPlayer(player, gossipReaction.SayText), LANG_UNIVERSAL, player);
         } break;
+        case EQ_QUEST_REACTION_NPCSAY:
+        {
+            // Another creature answers, like the rest of a group chiming in when one of them is spoken to
+            Creature* otherSpeaker = GetNearestLoadedCreatureWithEntryID(map, gossipReaction.TargetCreatureTemplateID, creature);
+            if (otherSpeaker != nullptr && otherSpeaker != creature)
+                otherSpeaker->Say(FormatGossipTextForPlayer(player, gossipReaction.SayText), LANG_UNIVERSAL, player);
+        } break;
+        case EQ_QUEST_REACTION_CASTSPELL:
+        {
+            if (gossipReaction.SpellID != 0 && player->IsAlive() == true)
+                CastScriptedSpellAtUnit(creature, player, gossipReaction.SpellID);
+        } break;
         case EQ_QUEST_REACTION_ATTACKPLAYER:
         {
             MakeCreatureAttackPlayer(gossipReaction.TargetCreatureTemplateID, map, player);
@@ -8390,6 +8962,7 @@ string EverQuestMod::FormatGossipTextForPlayer(Player* player, const string& tex
         formattedText.replace(tokenPosition, 2, player->GetName());
         tokenPosition = formattedText.find("$N", tokenPosition + player->GetName().length());
     }
+    ReplaceAllInString(formattedText, "$R", GetRaceNameForPlayerRaceID(player->getRace()));
     return formattedText;
 }
 
@@ -15180,6 +15753,10 @@ void EverQuestMod::TrackEventSpawnLifetime(Creature* creature)
         return;
     uint64 selfDespawnOocTimerKey = (static_cast<uint64>(GetOpenWorldMapIDForMapID(creature->GetMap()->GetId())) << 32) | creature->GetEntry();
     if (SelfDespawnOocTimerKeys.find(selfDespawnOocTimerKey) != SelfDespawnOocTimerKeys.end())
+        return;
+
+    // A spawn that stands in for a real spawn point (its row is marked persistent) is brought back by its own rows when it dies, so timing it out would leave the spot empty for good
+    if (PersistentEventSpawnKeys.find(selfDespawnOocTimerKey) != PersistentEventSpawnKeys.end())
         return;
 
     EverQuestEventSpawnLifetime lifetime;

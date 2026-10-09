@@ -291,6 +291,24 @@ public:
                 arrivalActions.push_back(arrivalAction);
             }
 
+            // Where the questgiver stands is read before any reaction runs, since one of them may be what despawns it
+            bool hasQuestgiverPosition = false;
+            Position questgiverPosition;
+            for (const EverQuestQuestReaction& questReaction : questReactions)
+            {
+                if (questReaction.FiresOnArrival == true)
+                    continue;
+                if (questReaction.UseNpcX == false && questReaction.UseNpcY == false && questReaction.UseNpcZ == false && questReaction.UseNpcOrientation == false)
+                    continue;
+                Creature* questgiver = EverQuest->GetNearestLoadedCreatureWithEntryID(map, questReaction.QuestgiverCreatureTemplateID, player);
+                if (questgiver != nullptr)
+                {
+                    questgiverPosition = questgiver->GetPosition();
+                    hasQuestgiverPosition = true;
+                }
+                break;
+            }
+
             for (const EverQuestQuestReaction& questReaction : questReactions)
             {
                 if (questReaction.FiresOnArrival == true)
@@ -307,6 +325,16 @@ public:
                 float orientation = questReaction.Orientation;
                 if (questReaction.UsePlayerOrientation == true)
                     orientation = player->GetOrientation();
+
+                // A reaction placed at the questgiver falls back to the player's spot when the questgiver can't be found, rather than landing at the map origin
+                if (questReaction.UseNpcX == true)
+                    x = (hasQuestgiverPosition == true ? questgiverPosition.GetPositionX() : player->GetPositionX());
+                if (questReaction.UseNpcY == true)
+                    y = (hasQuestgiverPosition == true ? questgiverPosition.GetPositionY() : player->GetPositionY());
+                if (questReaction.UseNpcZ == true)
+                    z = (hasQuestgiverPosition == true ? questgiverPosition.GetPositionZ() : player->GetPositionZ());
+                if (questReaction.UseNpcOrientation == true)
+                    orientation = (hasQuestgiverPosition == true ? questgiverPosition.GetOrientation() : player->GetOrientation());
 
                 switch (questReaction.ReactionType)
                 {
@@ -362,7 +390,7 @@ public:
                     // The questgiver copy the player just handed in to is the one that walks
                     Creature* walker = EverQuest->GetNearestLoadedCreatureWithEntryID(map, questReaction.QuestgiverCreatureTemplateID, player);
                     if (walker != nullptr)
-                        EverQuest->StartReactionWalk(walker, x, y, z, orientation, questReaction.Orientation != 0 || questReaction.UsePlayerOrientation == true, questReaction.MovementIsRun, arrivalActions);
+                        EverQuest->StartReactionWalk(walker, x, y, z, orientation, questReaction.Orientation != 0 || questReaction.UsePlayerOrientation == true || questReaction.UseNpcOrientation == true, questReaction.MovementIsRun, arrivalActions);
                 } break;
                 case EQ_QUEST_REACTION_SPAWNOBJECT:
                 {

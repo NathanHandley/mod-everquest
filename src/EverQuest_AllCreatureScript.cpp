@@ -44,6 +44,7 @@ public:
         if (EverQuest->IsEnabled == false || player == nullptr || creature == nullptr)
             return false;
         EverQuest->GrantCreatureGossipHelloAchievement(player, creature);
+        EverQuest->ProcessHailKillSpawnsForCreature(creature, player);
         return false;
     }
 

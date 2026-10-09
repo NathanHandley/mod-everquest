@@ -54,7 +54,7 @@ class ByteBuffer;
 struct AreaTrigger;
 struct BuildValuesCachePosPointers;
 
-#define EQ_MOD_VERSION                              128
+#define EQ_MOD_VERSION                              129
 
 #define EQ_MOVEMENT_CAST_SNARE_DURATION_BUFFER_IN_MS 2000 // How much longer than the remaining cast time the casting slow is given, so a pushed-back cast keeps it
 
@@ -290,9 +290,13 @@ struct BuildValuesCachePosPointers;
 #define EQ_QUEST_REACTION_YELL                      7
 #define EQ_QUEST_REACTION_KILLSPAWN                 8
 #define EQ_QUEST_REACTION_WALKTO                    9
+#define EQ_QUEST_REACTION_CASTSPELL                 10  // Quest reactions cast through SmartAI, so only gossip reactions reach the mod with this
 #define EQ_QUEST_REACTION_WALKGRID                  11
 #define EQ_QUEST_REACTION_SPAWNOBJECT               12
 #define EQ_QUEST_REACTION_ATTACKNPC                 13
+#define EQ_QUEST_REACTION_NPCSAY                    14  // Another creature (by template) says the line instead of the one being talked to
+
+#define EQ_GOSSIP_SENDER_VENDOR                     1001 // Marks the 'browse goods' line on a reaction menu, which shares its action numbers with the option IDs
 
 #define EQ_KILLSPAWN_ACTION_SPAWN                   0
 #define EQ_KILLSPAWN_ACTION_DESPAWN                 1
@@ -306,6 +310,21 @@ struct BuildValuesCachePosPointers;
 #define EQ_KILLSPAWN_ACTION_SPAWNOBJECT             9
 #define EQ_KILLSPAWN_ACTION_ATTACKNPC               10
 #define EQ_KILLSPAWN_ACTION_ASSAULTARRIVE           11
+#define EQ_KILLSPAWN_ACTION_CASTSPELL               12  // The trigger creature casts a spell at whoever set the trigger off
+#define EQ_KILLSPAWN_ACTION_MOVETO                  13  // Every living creature of the target template walks to the position and makes it home
+#define EQ_KILLSPAWN_ACTION_SETSTANDSTATE           14  // Only ever queued as an arrival action, to sit a walker down where it stops
+#define EQ_KILLSPAWN_ACTION_FOLLOW                  15  // The trigger creature follows the nearest living creature of the target template
+#define EQ_KILLSPAWN_ACTION_ROOT                    16  // The trigger creature is held in place, for one EQ gives a speed of zero
+#define EQ_KILLSPAWN_ACTION_ENDCASTCOMBAT           17  // Only ever queued by a scripted cast, to let go of the combat a creature's one-off spell left between it and a player
+
+#define EQ_SCRIPTED_CAST_COMBAT_END_INTERVAL_MS     2000    // How often the combat left by a scripted cast is let go of, since each tick of a lingering spell brings it back
+#define EQ_SCRIPTED_CAST_COMBAT_END_PASSES          300     // The most passes ever made (ten minutes), for a spell that lingers that long
+#define EQ_SCRIPTED_CAST_COMBAT_END_MIN_PASSES      3       // Passes always made, so a hit that lands late is still covered
+#define EQ_KILLSPAWN_WALK_RETRY_MS                  5000    // How long a walk row waits before trying again when its creature is busy fighting
+
+#define EQ_KILLSPAWN_ARRIVAL_NONE                   0
+#define EQ_KILLSPAWN_ARRIVAL_SIT                    1
+#define EQ_KILLSPAWN_ARRIVAL_DESPAWN                2
 
 #define EQ_REACTION_WALK_TIMEOUT_MS                 120000
 #define EQ_REACTION_WALK_MAX_TIMEOUT_MS             900000
@@ -313,6 +332,8 @@ struct BuildValuesCachePosPointers;
 #define EQ_REACTION_WALK_HOME_DISTANCE              10.0f
 #define EQ_REACTION_OBJECT_DEFAULT_LIFETIME_SEC     1800
 #define EQ_REACTION_WALK_ARRIVE_DISTANCE            5.0f
+#define EQ_REACTION_WALK_PRECISE_ARRIVE_DISTANCE    1.0f    // For walks that have to end on their spot, like one to a seat or between places a few yards apart
+#define EQ_REACTION_WALK_PRECISE_SETTLE_MS          1000    // How long a precise walk has to have been going before a stopped walker that is merely close counts as arrived
 #define EQ_REACTION_WALK_POINT_ID                   9910001
 #define EQ_REACTION_WALK_STALL_CHECK_MS             1000
 #define EQ_ASSAULT_ENGAGE_DISTANCE                  30.0f
@@ -323,6 +344,20 @@ struct BuildValuesCachePosPointers;
 #define EQ_KILLSPAWN_TRIGGER_COMBAT                 1
 #define EQ_KILLSPAWN_TRIGGER_EVADE                  2
 #define EQ_KILLSPAWN_TRIGGER_OOCTIMER               3   // Fires after DelayMinMS of continuous out-of-combat time
+#define EQ_KILLSPAWN_TRIGGER_SPAWN                  4   // Fires when the creature appears alive (first spawn, respawn, or its grid loading back in)
+#define EQ_KILLSPAWN_TRIGGER_PROXIMITY              5   // Fires for each player who walks within TriggerRadius
+#define EQ_KILLSPAWN_TRIGGER_HAIL                   6   // Fires when a player talks to the creature
+
+#define EQ_KILLSPAWN_WATCH_FLAG_EVADE               0x01
+#define EQ_KILLSPAWN_WATCH_FLAG_OOCTIMER            0x02
+#define EQ_KILLSPAWN_WATCH_FLAG_SPAWN               0x04
+#define EQ_KILLSPAWN_WATCH_FLAG_PROXIMITY           0x08
+#define EQ_KILLSPAWN_WATCH_FLAG_ROOT                0x10    // Held in place by a root row, which has to be put back whenever a root spell wearing off clears it
+#define EQ_KILLSPAWN_WATCH_FLAG_ATTACKER            0x20    // Can be turned on a player by an attackplayer row, and goes back to its own faction once that fight is over
+#define EQ_KILLSPAWN_ATTACKER_FACTION_GRACE_MS      5000    // How long a creature turned on a player keeps the hostile faction when the fight never actually starts
+#define EQ_KILLSPAWN_PROXIMITY_CHECK_MS             1000    // How often a proximity trigger creature looks for players who walked in
+#define EQ_KILLSPAWN_PROXIMITY_HEIGHT_DIVISOR       3.0f    // The vertical reach of a proximity trigger is its radius divided by this, so it stays on its own floor
+#define EQ_KILLSPAWN_FOLLOW_DISTANCE                2.0f
 
 #define EQ_PRESENCE_GROUP_MAX_OTHER_CREATURES       4       
 #define EQ_PRESENCE_GROUP_SUPPRESSED_RESPAWN_IN_SEC 604800  // A week, so a presence group primary held down by a stand-in only comes back when the group asks for it
@@ -618,6 +653,12 @@ public:
     uint32 TriggerMaxLevel = 0;
     uint32 RespawnTimeSec = 0;
     bool RespawnUsesRaidLockout = false; // The row asked for the raid boss respawn window, which inside a raid instance means the instance lockout
+    float TriggerRadius = 0;
+    uint32 SpellID = 0;
+    uint32 PathListID = 0;
+    uint8 ArrivalBehavior = EQ_KILLSPAWN_ARRIVAL_NONE;
+    bool IsPersistent = false; // A spawn that stands in for a real spawn point, so the event spawn lifetime backstop leaves it alone
+    string SayText;
     unordered_map<uint32, vector<ObjectGuid::LowType>> TargetSpawnIDsByMapID; // Spawn rows differ between the open world zone and its raid instance copy, so respawn targets resolve per map
 };
 
@@ -670,6 +711,17 @@ public:
     bool UseMoverPositionZ = false;
     bool UseMoverOrientation = false;
     ObjectGuid AssaultTargetGUID;
+    uint32 SpellID = 0;
+    uint8 ArrivalBehavior = EQ_KILLSPAWN_ARRIVAL_NONE;
+    uint8 StandState = 0;
+    bool SpeakToWholeMap = false; // EQ shouts reach the whole zone
+    bool DespawnMoverOnly = false; // Only the creature that set the trigger off goes away, not every creature of its template
+    vector<uint32> RequireDeadCreatureTemplateIDs;  // Checked when the action runs, for rows whose requirements can't be judged when the trigger fires
+    vector<uint32> RequireAliveCreatureTemplateIDs;
+    ObjectGuid SourceCreatureGUID; // The creature whose trigger queued this, so a spawn trigger that fires again can call off what its last run left waiting
+    uint32 PassesRemaining = 0;
+    ObjectGuid::LowType SourceSpawnID = 0; // A placed creature gets a new GUID each time it is created again, so its spawn point is what identifies it across those
+    uint8 SourceTriggerTypeID = EQ_KILLSPAWN_TRIGGER_DEATH;
 };
 
 class EverQuestPendingArrivalAction
@@ -686,6 +738,8 @@ public:
     uint32 SavedNpcFlags = 0;
     bool HasSavedNpcFlags = false;
     bool ReissueMoveWhenStalled = false;
+    bool IsPreciseArrival = false;
+    bool HasReissuedMove = false;
     uint32 StallCheckRemainingMS = 0;
     vector<EverQuestPendingKillSpawnAction> ActionsOnArrival;
 };
@@ -899,6 +953,16 @@ class EverQuestCreatureKillSpawnWatchState : public DataMap::Base
 public:
     bool WasInCombat = false;
     uint32 OocTimerRemainingMS = 0; // 0 = not yet armed
+    uint32 OocTimerFireCount = 0;   // Steps the alt groups that play in order instead of rolling
+    bool HasFiredSpawnTrigger = false;
+    uint32 ProximityCheckRemainingMS = 0;
+    bool HasFiredOneTimeProximity = false;
+    bool HasSeededProximity = false;    // Players already standing inside when the creature appears did not walk in, so the first look only notes who is there
+    bool IsScriptRooted = false;        // Held in place by a root row
+    set<ObjectGuid> PlayerGUIDsInProximity;
+    bool IsOnAttackPlayerFaction = false;   // Put on the kill-on-sight faction by an attackplayer row
+    bool HasFoughtOnAttackPlayerFaction = false;
+    uint32 AttackPlayerFactionGraceRemainingMS = 0;
 };
 
 class EverQuestVulakLockState : public DataMap::Base
@@ -1297,6 +1361,7 @@ public:
     float RequiredNearDistance = 0;
     bool MovementIsRun = false;
     bool FiresOnArrival = false;
+    uint32 SpellID = 0;
 };
 
 class EverQuestTriggeredQuestKillSpawn
@@ -1923,7 +1988,10 @@ public:
     std::mutex CreaturePresenceGroupStateMutex;
     unordered_map<uint64, unordered_map<uint32, int32>> PresenceGroupCheckTimerInMSByMapInstanceKeyThenGroupID;
     unordered_map<uint64, unordered_set<uint32>> SuppressedPresenceGroupIDsByMapInstanceKey;
-    unordered_set<uint32> EvadeKillSpawnTriggerCreatureTemplateIDs;
+    unordered_map<uint32, uint8> KillSpawnWatchFlagsByCreatureTemplateID; // Which per-tick kill spawn watches (EQ_KILLSPAWN_WATCH_FLAG_*) a creature template needs, so one lookup settles a creature tick
+    unordered_map<uint32, float> ProximityKillSpawnRadiusByCreatureTemplateID; // The largest radius among the template's proximity rows
+    unordered_set<uint32> OneTimeProximityKillSpawnCreatureTemplateIDs; // Templates whose proximity rows end with the creature depopping itself, so the first player to walk up is the only one who sets it off
+    unordered_set<uint64> PersistentEventSpawnKeys; // Key is (open world mapID << 32) | creature template ID, for event spawns that stand in for a real spawn point and so never time out
     unordered_set<uint64> SelfDespawnOocTimerKeys; // Key is (open world mapID << 32) | creature template ID, for creatures whose own out-of-combat timer always despawns them there, so the event spawn lifetime backstop leaves them alone
     unordered_map<uint32, uint32> OocTimerKillSpawnDurationMSByCreatureTemplateID;
     unordered_map<uint32, vector<ObjectGuid::LowType>> VulakRequiredDragonSpawnIDsByMapID; // Keyed by map ID, since the raid instance copy of the zone has its own dragon spawn rows
@@ -2074,7 +2142,10 @@ public:
     void LoadCreatureMovementSoundData();
     void RemoveCreatureMovementSoundState(Creature* creature);
     void UpdateCreatureMovementSound(Creature* creature, uint32 diff);
-    void ProcessKillSpawnsForCreatureEvent(Creature* eventCreature, Unit* otherUnit, uint8 triggerTypeID);
+    void ProcessKillSpawnsForCreatureEvent(Creature* eventCreature, Unit* otherUnit, uint8 triggerTypeID, uint32 sequenceIndex = 0);
+    void ProcessHailKillSpawnsForCreature(Creature* creature, Player* player);
+    void UpdateCreatureKillSpawnProximity(Creature* creature, EverQuestCreatureKillSpawnWatchState* state, uint32 diff);
+    vector<Creature*> GetLivingCreaturesForKillSpawnAction(Map* map, uint32 creatureTemplateID);
     void UpdateCreatureKillSpawnCombatWatch(Creature* creature, uint32 diff);
     void RemoveCreatureKillSpawnCombatWatchState(Creature* creature);
     void ResolveVulakRequiredDragonSpawnPoints();
@@ -2093,6 +2164,8 @@ public:
         float minZ, float maxZ, bool failWhenNoPathAndNoValidZ, Movement::PointsArray& pathNodesOut, float& snappedTargetZOut);
     bool StartTerrainSnappedMoveToPoint(Creature* creature, float x, float y, float z, bool isRun);
     bool StartReactionGridWalk(Creature* creature, uint32 pathListID, vector<EverQuestPendingKillSpawnAction>& actionsOnArrival);
+    void SetReactionWalkPreciseArrival(Creature* creature);
+    void CastScriptedSpellAtUnit(Creature* caster, Unit* spellTarget, uint32 spellID);
     void SpawnReactionGameObject(Creature* summoner, uint32 gameObjectEntryID, float x, float y, float z, uint32 lifetimeSec);
     bool DoesPlayerMeetGossipRequirements(Player* player, Creature* creature, const EverQuestGossipReaction& gossipReaction);
     void UpdatePendingArrivalActions(Map* map, uint32 diff);
