@@ -15,6 +15,7 @@
 //  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #include "CellImpl.h"
+#include "Chat.h"
 #include "GridNotifiersImpl.h"
 #include "Group.h"
 #include "Map.h"
@@ -204,6 +205,15 @@ class EverQuest_BardSongAuraScript: public AuraScript
         Unit* caster = GetCaster();
         if (caster == nullptr)
             return;
+
+        // An instrument can leave the hands without an unequip (a two-hander pushing the off hand into the bags, a held item destroyed), so every pulse re-checks
+        // the song against the instrument in the ranged slot and the hands
+        if (caster->IsPlayer() == true && GetUnitOwner() == caster && EverQuest->IsBardSongBlockedByRangedSlotInstrumentForPlayer(caster->ToPlayer(), GetId()) == true)
+        {
+            ChatHandler(caster->ToPlayer()->GetSession()).PSendSysMessage("The instrument in your ranged slot ends your songs that it and the instruments in your hands cannot play.");
+            Remove();
+            return;
+        }
 
         // Don't allow pulsing bard songs during feign death
         if (caster->HasAuraType(SPELL_AURA_FEIGN_DEATH))

@@ -7450,50 +7450,70 @@ void EverQuestMod::SetInstrumentTotemCategoryIDFromConfigKey(const string& instr
         LOG_ERROR("module.EverQuest", "EverQuest: Unknown instrument type '{}' in mod_everquest_systemconfigs", instrumentTypeName);
 }
 
-// The instrument totem category of whatever sits in the ranged slot, or 0 when that is not an instrument
-uint32 EverQuestMod::GetRangedSlotInstrumentTotemCategoryForPlayer(Player* player)
+// The instrument types an item plays, or 0 when it is not an instrument.  Only the instrument categories count, since tradeskill tools carry a totem category too
+uint8 EverQuestMod::GetInstrumentMaskForItem(Item* item)
 {
-    if (player == nullptr)
+    if (item == nullptr)
         return 0;
-    Item* rangedItem = player->GetItemByPos(INVENTORY_SLOT_BAG_0, EQUIPMENT_SLOT_RANGED);
-    if (rangedItem == nullptr)
-        return 0;
-    ItemTemplate const* itemTemplate = rangedItem->GetTemplate();
+    ItemTemplate const* itemTemplate = item->GetTemplate();
     if (itemTemplate == nullptr || itemTemplate->TotemCategory == 0)
         return 0;
-
-    // Only the instrument categories count, since tradeskill tools carry a totem category too
     uint32 totemCategoryID = itemTemplate->TotemCategory;
-    if (totemCategoryID == ConfigSystemInstrumentTotemCategoryIDWind || totemCategoryID == ConfigSystemInstrumentTotemCategoryIDString
-        || totemCategoryID == ConfigSystemInstrumentTotemCategoryIDBrass || totemCategoryID == ConfigSystemInstrumentTotemCategoryIDPercussion
-        || totemCategoryID == ConfigSystemInstrumentTotemCategoryIDAll)
-        return totemCategoryID;
+    if (totemCategoryID == ConfigSystemInstrumentTotemCategoryIDAll)
+        return EQ_BARDINSTRUMENTMASK_ALL;
+    if (totemCategoryID == ConfigSystemInstrumentTotemCategoryIDWind)
+        return EQ_BARDINSTRUMENTMASK_WIND;
+    if (totemCategoryID == ConfigSystemInstrumentTotemCategoryIDString)
+        return EQ_BARDINSTRUMENTMASK_STRING;
+    if (totemCategoryID == ConfigSystemInstrumentTotemCategoryIDBrass)
+        return EQ_BARDINSTRUMENTMASK_BRASS;
+    if (totemCategoryID == ConfigSystemInstrumentTotemCategoryIDPercussion)
+        return EQ_BARDINSTRUMENTMASK_PERCUSSION;
     return 0;
 }
 
-bool EverQuestMod::IsBardSongPlayableWithInstrumentTotemCategory(uint32 spellID, uint32 instrumentTotemCategoryID)
+// The instrument types a bard may play while an instrument sits in the ranged slot: its own type plus those of any instrument held in either hand.
+// 0 means no instrument is in the ranged slot, so nothing is restricted
+uint8 EverQuestMod::GetRangedSlotRestrictedInstrumentMaskForPlayer(Player* player)
 {
-    if (instrumentTotemCategoryID == 0 || instrumentTotemCategoryID == ConfigSystemInstrumentTotemCategoryIDAll)
+    if (player == nullptr)
+        return 0;
+    uint8 allowedInstrumentMask = GetInstrumentMaskForItem(player->GetItemByPos(INVENTORY_SLOT_BAG_0, EQUIPMENT_SLOT_RANGED));
+    if (allowedInstrumentMask == 0)
+        return 0;
+    allowedInstrumentMask |= GetInstrumentMaskForItem(player->GetItemByPos(INVENTORY_SLOT_BAG_0, EQUIPMENT_SLOT_MAINHAND));
+    allowedInstrumentMask |= GetInstrumentMaskForItem(player->GetItemByPos(INVENTORY_SLOT_BAG_0, EQUIPMENT_SLOT_OFFHAND));
+    return allowedInstrumentMask;
+}
+
+bool EverQuestMod::IsBardSongPlayableWithInstrumentMask(uint32 spellID, uint8 allowedInstrumentMask)
+{
+    if (allowedInstrumentMask == 0 || allowedInstrumentMask == EQ_BARDINSTRUMENTMASK_ALL)
         return true;
 
     // Sung songs use no instrument, so any instrument leaves them alone
     switch (GetSpellDataForSpellID(spellID).FocusBoostType)
     {
-        case EQ_SPELLFOCUSBOOSTTYPE_BARDWIND:       return instrumentTotemCategoryID == ConfigSystemInstrumentTotemCategoryIDWind;
-        case EQ_SPELLFOCUSBOOSTTYPE_BARDSTRINGED:   return instrumentTotemCategoryID == ConfigSystemInstrumentTotemCategoryIDString;
-        case EQ_SPELLFOCUSBOOSTTYPE_BARDBRASS:      return instrumentTotemCategoryID == ConfigSystemInstrumentTotemCategoryIDBrass;
-        case EQ_SPELLFOCUSBOOSTTYPE_BARDPERCUSSION: return instrumentTotemCategoryID == ConfigSystemInstrumentTotemCategoryIDPercussion;
+        case EQ_SPELLFOCUSBOOSTTYPE_BARDWIND:       return (allowedInstrumentMask & EQ_BARDINSTRUMENTMASK_WIND) != 0;
+        case EQ_SPELLFOCUSBOOSTTYPE_BARDSTRINGED:   return (allowedInstrumentMask & EQ_BARDINSTRUMENTMASK_STRING) != 0;
+        case EQ_SPELLFOCUSBOOSTTYPE_BARDBRASS:      return (allowedInstrumentMask & EQ_BARDINSTRUMENTMASK_BRASS) != 0;
+        case EQ_SPELLFOCUSBOOSTTYPE_BARDPERCUSSION: return (allowedInstrumentMask & EQ_BARDINSTRUMENTMASK_PERCUSSION) != 0;
         default:                                    return true;
     }
 }
 
-// A bard with an instrument in the ranged slot only plays songs of that instrument type, or sung ones
+bool EverQuestMod::IsBardSongBlockedByRangedSlotInstrumentForPlayer(Player* player, uint32 spellID)
+{
+    return IsBardSongPlayableWithInstrumentMask(spellID, GetRangedSlotRestrictedInstrumentMaskForPlayer(player)) == false;
+}
+
+// A bard with an instrument in the ranged slot only plays songs of that instrument type, of an instrument held in hand, or sung ones
 bool EverQuestMod::HandleBardSongRangedSlotInstrumentOnCheckCast(Player* player, Spell* spell, SpellCastResult& result)
 {
     if (player == nullptr || spell == nullptr || spell->GetSpellInfo() == nullptr)
         return false;
-    uint32 instrumentTotemCategoryID = GetRangedSlotInstrumentTotemCategoryForPlayer(player);
-    if (instrumentTotemCategoryID == 0)
+    uint8 allowedInstrumentMask = GetRangedSlotRestrictedInstrumentMaskForPlayer(player);
+    if (allowedInstrumentMask == 0)
         return false;
     uint32 spellID = spell->GetSpellInfo()->Id;
 
@@ -7501,19 +7521,26 @@ bool EverQuestMod::HandleBardSongRangedSlotInstrumentOnCheckCast(Player* player,
     // of a running song and the spells an item casts carry an instrument type too
     if (IsSpellAnEQBardSong(spellID) == false && (spell->IsTriggered() == true || spell->m_CastItem != nullptr))
         return false;
-    if (IsBardSongPlayableWithInstrumentTotemCategory(spellID, instrumentTotemCategoryID) == true)
+    if (IsBardSongPlayableWithInstrumentMask(spellID, allowedInstrumentMask) == true)
         return false;
 
-    ChatHandler(player->GetSession()).PSendSysMessage("The instrument in your ranged slot only lets you play songs of its own instrument type, and sung ones.");
+    ChatHandler(player->GetSession()).PSendSysMessage("The instrument in your ranged slot only lets you play songs of its own instrument type, of an instrument in your hands, and sung ones.");
     result = SPELL_FAILED_DONT_REPORT;
     return true;
 }
 
-// Ends every running song the instrument in the ranged slot does not allow
+bool EverQuestBardSongInstrumentRecheckEvent::Execute(uint64 /*eventTime*/, uint32 /*diff*/)
+{
+    if (Owner->IsInWorld() == true)
+        EverQuest->CancelBardSongsBlockedByRangedSlotInstrumentForPlayer(Owner);
+    return true;
+}
+
+// Ends every running song the instruments in the ranged slot and hands do not allow
 void EverQuestMod::CancelBardSongsBlockedByRangedSlotInstrumentForPlayer(Player* player)
 {
-    uint32 instrumentTotemCategoryID = GetRangedSlotInstrumentTotemCategoryForPlayer(player);
-    if (instrumentTotemCategoryID == 0)
+    uint8 allowedInstrumentMask = GetRangedSlotRestrictedInstrumentMaskForPlayer(player);
+    if (allowedInstrumentMask == 0 || allowedInstrumentMask == EQ_BARDINSTRUMENTMASK_ALL)
         return;
 
     // Removing an aura invalidates the aura map iterators, so the songs get identified before any of them are taken off
@@ -7522,7 +7549,7 @@ void EverQuestMod::CancelBardSongsBlockedByRangedSlotInstrumentForPlayer(Player*
     {
         if (IsSpellAnEQBardSong(ownedAuraIter.first) == false)
             continue;
-        if (IsBardSongPlayableWithInstrumentTotemCategory(ownedAuraIter.first, instrumentTotemCategoryID) == true)
+        if (IsBardSongPlayableWithInstrumentMask(ownedAuraIter.first, allowedInstrumentMask) == true)
             continue;
         if (std::find(blockedSongSpellIDs.begin(), blockedSongSpellIDs.end(), ownedAuraIter.first) == blockedSongSpellIDs.end())
             blockedSongSpellIDs.push_back(ownedAuraIter.first);
@@ -7532,7 +7559,7 @@ void EverQuestMod::CancelBardSongsBlockedByRangedSlotInstrumentForPlayer(Player*
     for (uint32 blockedSongSpellID : blockedSongSpellIDs)
         player->RemoveAurasDueToSpell(blockedSongSpellID);
     if (player->IsInWorld() == true)
-        ChatHandler(player->GetSession()).PSendSysMessage("The instrument in your ranged slot ends your songs of other instrument types.");
+        ChatHandler(player->GetSession()).PSendSysMessage("The instrument in your ranged slot ends your songs that it and the instruments in your hands cannot play.");
 }
 
 uint8 EverQuestMod::GetEQCharmEffectMask(SpellInfo const* spellInfo)

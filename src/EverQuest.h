@@ -260,6 +260,12 @@ struct BuildValuesCachePosPointers;
 #define EQ_SPELLFOCUSBOOSTTYPE_BARDSTRINGED         4
 #define EQ_SPELLFOCUSBOOSTTYPE_BARDWIND             5
 
+#define EQ_BARDINSTRUMENTMASK_WIND                  0x01
+#define EQ_BARDINSTRUMENTMASK_STRING                0x02
+#define EQ_BARDINSTRUMENTMASK_BRASS                 0x04
+#define EQ_BARDINSTRUMENTMASK_PERCUSSION            0x08
+#define EQ_BARDINSTRUMENTMASK_ALL                   0x0F
+
 #define EQ_HASTE_TYPE_NONE                          0
 #define EQ_HASTE_TYPE_WORNITEM                      1
 #define EQ_HASTE_TYPE_SPELL_V1                      2
@@ -858,6 +864,17 @@ public:
 
 private:
     Creature* Owner;
+};
+
+// Rechecks running songs against the instruments once an equip has finished, since a swap between two equipped slots fires the equip hook while the other item is still out
+class EverQuestBardSongInstrumentRecheckEvent : public BasicEvent
+{
+public:
+    EverQuestBardSongInstrumentRecheckEvent(Player* owner) : Owner(owner) {}
+    bool Execute(uint64 eventTime, uint32 diff) override;
+
+private:
+    Player* Owner;
 };
 
 class EverQuestCreatureSocialAggroState : public DataMap::Base
@@ -2313,8 +2330,10 @@ public:
     void ClearPvPSnareDiminishingReturnState(Unit* unit);
     void CancelBardSongsOnPvPSilenceAuraApply(Unit* target, Aura* aura);
     void SetInstrumentTotemCategoryIDFromConfigKey(const string& instrumentTypeName, uint32 totemCategoryID);
-    uint32 GetRangedSlotInstrumentTotemCategoryForPlayer(Player* player);
-    bool IsBardSongPlayableWithInstrumentTotemCategory(uint32 spellID, uint32 instrumentTotemCategoryID);
+    uint8 GetInstrumentMaskForItem(Item* item);
+    uint8 GetRangedSlotRestrictedInstrumentMaskForPlayer(Player* player);
+    bool IsBardSongPlayableWithInstrumentMask(uint32 spellID, uint8 allowedInstrumentMask);
+    bool IsBardSongBlockedByRangedSlotInstrumentForPlayer(Player* player, uint32 spellID);
     bool HandleBardSongRangedSlotInstrumentOnCheckCast(Player* player, Spell* spell, SpellCastResult& result);
     void CancelBardSongsBlockedByRangedSlotInstrumentForPlayer(Player* player);
     uint8 GetEQCharmEffectMask(SpellInfo const* spellInfo);

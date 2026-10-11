@@ -489,9 +489,15 @@ public:
         if (EverQuest->IsEnabled == false)
             return;
 
-        // An instrument going into the ranged slot ends the songs it does not allow (a character still loading is handled at login)
-        if (bag == INVENTORY_SLOT_BAG_0 && slot == EQUIPMENT_SLOT_RANGED && player->IsInWorld() == true)
-            EverQuest->CancelBardSongsBlockedByRangedSlotInstrumentForPlayer(player);
+        // An instrument going into the ranged slot ends the songs it does not allow, and so does a hand item replacing an instrument that allowed them (a character still loading is handled at login).
+        // A hand item is checked once the equip finishes, since swapping the two hands fires this while the other hand is still empty
+        if (bag == INVENTORY_SLOT_BAG_0 && player->IsInWorld() == true)
+        {
+            if (slot == EQUIPMENT_SLOT_RANGED)
+                EverQuest->CancelBardSongsBlockedByRangedSlotInstrumentForPlayer(player);
+            else if ((slot == EQUIPMENT_SLOT_MAINHAND || slot == EQUIPMENT_SLOT_OFFHAND) && EverQuest->GetRangedSlotRestrictedInstrumentMaskForPlayer(player) != 0)
+                player->m_Events.AddEventAtOffset(new EverQuestBardSongInstrumentRecheckEvent(player), 1ms);
+        }
 
         // Equipping gear while illusioned can change change gear under some situations
         EverQuest->RefreshIllusionGearDisplayForPlayer(player);
@@ -510,6 +516,9 @@ public:
     {
         if (EverQuest->IsEnabled == false)
             return;
+
+        // Taking an instrument out of a hand ends the songs only it allowed beside the one in the ranged slot
+        EverQuest->CancelBardSongsBlockedByRangedSlotInstrumentForPlayer(player);
 
         EverQuest->RefreshBearFormArmorShiftForPlayer(player);
         EverQuest->RefreshClassAuraGearAurasForPlayer(player);
