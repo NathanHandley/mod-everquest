@@ -3502,7 +3502,7 @@ void EverQuestMod::LoadItemTemplateData()
 {
     ItemTemplatesByEntryID.clear();
     WornEffectSpellIDs.clear();
-    QueryResult queryResult = WorldDatabase.Query("SELECT ItemTemplateID, NPCEquipItemTemplateID, WornEffectSpellID, AllowedEQClassMask, NeverLootStack FROM mod_everquest_item_template ORDER BY ItemTemplateID;");
+    QueryResult queryResult = WorldDatabase.Query("SELECT ItemTemplateID, NPCEquipItemTemplateID, WornEffectSpellID, AllowedEQClassMask, NeverLootStack, SlotshiftNextItemTemplateID FROM mod_everquest_item_template ORDER BY ItemTemplateID;");
     if (queryResult)
     {
         do
@@ -3515,6 +3515,7 @@ void EverQuestMod::LoadItemTemplateData()
             everQuestItemTemplate.WornEffectSpellID = fields[2].Get<uint32>();
             everQuestItemTemplate.AllowedEQClassMask = fields[3].Get<uint32>();
             everQuestItemTemplate.NeverLootStack = fields[4].Get<uint8>() != 0;
+            everQuestItemTemplate.SlotshiftNextItemTemplateEntryID = fields[5].Get<uint32>();
             ItemTemplatesByEntryID[everQuestItemTemplate.ItemTemplateEntryID] = everQuestItemTemplate;
             if (everQuestItemTemplate.WornEffectSpellID != 0)
                 WornEffectSpellIDs.insert(everQuestItemTemplate.WornEffectSpellID);
@@ -3603,39 +3604,199 @@ void EverQuestMod::RemoveOrphanedItemEquipAurasForPlayer(Player* player)
     }
 }
 
-bool EverQuestMod::IsSlotshiftSpell(SpellInfo const* spellInfo)
+uint32 EverQuestMod::GetSlotshiftNextItemTemplateEntryID(uint32 itemTemplateEntryID)
 {
-    if (spellInfo == nullptr)
-        return false;
-    if (spellInfo->SpellName[0] == nullptr || strcmp(spellInfo->SpellName[0], EQ_SLOTSHIFT_SPELL_NAME) != 0)
-        return false;
-
-    // Every slotshift spell creates the next version of the item in its ring
-    return spellInfo->HasEffect(SPELL_EFFECT_CREATE_ITEM);
+    unordered_map<uint32, EverQuestItemTemplate>::const_iterator itemTemplateItr = ItemTemplatesByEntryID.find(itemTemplateEntryID);
+    if (itemTemplateItr == ItemTemplatesByEntryID.end())
+        return 0;
+    return itemTemplateItr->second.SlotshiftNextItemTemplateEntryID;
 }
 
-void EverQuestMod::RechargeSlotshiftItemForPlayer(Player* player, Item* item)
+bool EverQuestMod::AreItemTemplatesInSameSlotshiftRing(uint32 itemTemplateEntryID, uint32 otherItemTemplateEntryID)
 {
-    if (player == nullptr || item == nullptr)
-        return;
+    uint32 curItemTemplateEntryID = GetSlotshiftNextItemTemplateEntryID(itemTemplateEntryID);
+    for (uint32 step = 0; step < EQ_SLOTSHIFT_MAX_RING_SIZE && curItemTemplateEntryID != 0 && curItemTemplateEntryID != itemTemplateEntryID; ++step)
+    {
+        if (curItemTemplateEntryID == otherItemTemplateEntryID)
+            return true;
+        curItemTemplateEntryID = GetSlotshiftNextItemTemplateEntryID(curItemTemplateEntryID);
+    }
+    return false;
+}
+
+bool EverQuestMod::IsOtherSlotshiftVersionOfUniqueItemEquippedForPlayer(Player* player, Item* item, uint8 replacedEquipSlot)
+{
+    // Unique (lore) is counted per item entry, and every version of a slotshift item is its own entry, so without this one lore item could be worn twice
     ItemTemplate const* itemTemplate = item->GetTemplate();
-    if (itemTemplate == nullptr)
+    if (itemTemplate == nullptr || itemTemplate->MaxCount != 1)
+        return false;
+    if (GetSlotshiftNextItemTemplateEntryID(item->GetEntry()) == 0)
+        return false;
+    for (uint8 equipSlot = EQUIPMENT_SLOT_START; equipSlot < EQUIPMENT_SLOT_END; ++equipSlot)
+    {
+        // The item being swapped out by this equip doesn't count
+        if (equipSlot == replacedEquipSlot)
+            continue;
+        Item* equippedItem = player->GetItemByPos(INVENTORY_SLOT_BAG_0, equipSlot);
+        if (equippedItem == nullptr || equippedItem == item || equippedItem->GetEntry() == item->GetEntry())
+            continue;
+        if (AreItemTemplatesInSameSlotshiftRing(item->GetEntry(), equippedItem->GetEntry()) == true)
+            return true;
+    }
+    return false;
+}
+
+char const* EverQuestMod::GetSlotshiftSlotName(uint32 inventoryType)
+{
+    switch (inventoryType)
+    {
+        case INVTYPE_HEAD: return "Head";
+        case INVTYPE_NECK: return "Neck";
+        case INVTYPE_SHOULDERS: return "Shoulder";
+        case INVTYPE_CLOAK: return "Back";
+        case INVTYPE_CHEST: return "Chest";
+        case INVTYPE_ROBE: return "Chest";
+        case INVTYPE_WRISTS: return "Wrist";
+        case INVTYPE_HANDS: return "Hands";
+        case INVTYPE_WAIST: return "Waist";
+        case INVTYPE_LEGS: return "Legs";
+        case INVTYPE_FEET: return "Feet";
+        case INVTYPE_FINGER: return "Finger";
+        case INVTYPE_TRINKET: return "Trinket";
+        case INVTYPE_SHIELD: return "Shield";
+        case INVTYPE_RANGED: return "Ranged";
+        case INVTYPE_HOLDABLE: return "Held In Off Hand";
+        case INVTYPE_WEAPON: return "One-Hand";
+        case INVTYPE_WEAPONMAINHAND: return "Main Hand";
+        case INVTYPE_WEAPONOFFHAND: return "Off Hand";
+        case INVTYPE_2HWEAPON: return "Two-Hand";
+        default: return "another";
+    }
+}
+
+bool EverQuestMod::CanPlayerSlotshiftItem(Player* player, Item* item, bool sendFailMessage)
+{
+    if (player == nullptr)
+        return false;
+
+    char const* failMessage = nullptr;
+    if (item == nullptr)
+        failMessage = "Slotshift Transform has to be used on an item in your bags.";
+    else if (item->GetOwnerGUID() != player->GetGUID())
+        failMessage = "You can only slotshift your own items.";
+    else if (GetSlotshiftNextItemTemplateEntryID(item->GetEntry()) == 0 || sObjectMgr->GetItemTemplate(GetSlotshiftNextItemTemplateEntryID(item->GetEntry())) == nullptr)
+        failMessage = "That item can't slotshift.";
+    else if (Player::IsEquipmentPos(item->GetPos()) == true)
+        failMessage = "Unequip that item before you slotshift it.";
+    else if (Player::IsInventoryPos(item->GetPos()) == false)
+        failMessage = "The item has to be in your bags to slotshift it.";
+    else if (item->IsInTrade() == true)
+        failMessage = "You can't slotshift an item that is in a trade.";
+    else if (item->GetCount() != 1)
+        failMessage = "That item can't slotshift.";
+    else if (item->GetUInt32Value(ITEM_FIELD_DURABILITY) < item->GetUInt32Value(ITEM_FIELD_MAXDURABILITY))
+        failMessage = "Repair that item before you slotshift it.";
+    else
+    {
+        // Gems and added sockets can't come along to the new version, and they can't be taken out first either
+        for (uint8 enchantSlot = SOCK_ENCHANTMENT_SLOT; enchantSlot <= PRISMATIC_ENCHANTMENT_SLOT; ++enchantSlot)
+        {
+            if (item->GetEnchantmentId(EnchantmentSlot(enchantSlot)) == 0)
+                continue;
+            failMessage = "Items with gems or added sockets can't slotshift.";
+            break;
+        }
+
+        // The permanent enchantment stays behind with this version until it comes back, so there has to be room to remember it
+        if (failMessage == nullptr && item->GetEnchantmentId(PERM_ENCHANTMENT_SLOT) != 0 && IsItemTemplateIDAnEQItemTemplateID(item->GetEntry()) == true)
+        {
+            EverQuestPlayerItemEnchantMemoryState* memoryState = GetOrLoadItemEnchantMemoryForPlayer(player);
+            uint32 totalRememberedCount = 0;
+            for (uint32 rememberedIndex = 0; rememberedIndex < memoryState->RememberedEnchants.size(); ++rememberedIndex)
+                totalRememberedCount += memoryState->RememberedEnchants[rememberedIndex].Count;
+            if (totalRememberedCount >= EQ_ITEM_ENCHANT_MEMORY_MAX_PER_CHARACTER)
+                failMessage = "Too many enchantments are already waiting on other versions of your items, so this enchanted item can't slotshift until some of them return.";
+        }
+    }
+
+    if (failMessage == nullptr)
+        return true;
+    if (sendFailMessage == true)
+        ChatHandler(player->GetSession()).SendSysMessage(failMessage);
+    return false;
+}
+
+void EverQuestMod::SlotshiftItemForPlayer(Player* player, Item* item, Spell* slotshiftSpell)
+{
+    // The cast takes time, so the item gets checked again now that it lands
+    if (IsEnabled == false || slotshiftSpell == nullptr || CanPlayerSlotshiftItem(player, item, true) == false)
+        return;
+    ItemTemplate const* oldItemTemplate = item->GetTemplate();
+    uint32 nextItemTemplateEntryID = GetSlotshiftNextItemTemplateEntryID(item->GetEntry());
+    ItemTemplate const* nextItemTemplate = sObjectMgr->GetItemTemplate(nextItemTemplateEntryID);
+    if (oldItemTemplate == nullptr || nextItemTemplate == nullptr)
         return;
 
-    // An item created before slotshift was added to its template was saved with no charges, which the core reads as spent and refuses to cast
+    Item* newItem = Item::CreateItem(nextItemTemplateEntryID, 1, player);
+    if (newItem == nullptr)
+    {
+        LOG_ERROR("module.EverQuest", "EverQuestMod could not create item {} to slotshift item {} for player {} with GUID {}",
+            nextItemTemplateEntryID, item->GetEntry(), player->GetName(), player->GetGUID().GetCounter());
+        return;
+    }
+
+    // Every version of an item has the same use spells, so the charges left carry over instead of filling back up.  The sign is what makes
+    // a spell's charges expendable, so it follows the new version's template
     for (uint8 spellIndex = 0; spellIndex < MAX_ITEM_PROTO_SPELLS; ++spellIndex)
     {
-        _Spell const& itemSpell = itemTemplate->Spells[spellIndex];
-        if (itemSpell.SpellId <= 0 || itemSpell.SpellCharges == 0 || itemSpell.SpellTrigger != ITEM_SPELLTRIGGER_ON_USE)
+        if (oldItemTemplate->Spells[spellIndex].SpellId <= 0 || oldItemTemplate->Spells[spellIndex].SpellId != nextItemTemplate->Spells[spellIndex].SpellId)
             continue;
-        if (item->GetSpellCharges(spellIndex) == itemSpell.SpellCharges)
+        if (nextItemTemplate->Spells[spellIndex].SpellCharges == 0)
             continue;
-        if (IsSlotshiftSpell(sSpellMgr->GetSpellInfo(itemSpell.SpellId)) == false)
-            continue;
-
-        item->SetSpellCharges(spellIndex, itemSpell.SpellCharges);
-        item->SetState(ITEM_CHANGED, player);
+        int32 remainingCharges = std::abs(item->GetSpellCharges(spellIndex));
+        newItem->SetSpellCharges(spellIndex, nextItemTemplate->Spells[spellIndex].SpellCharges < 0 ? -remainingCharges : remainingCharges);
     }
+
+    if (item->IsSoulBound() == true)
+        newItem->SetBinding(true);
+    newItem->SetGuidValue(ITEM_FIELD_CREATOR, item->GetGuidValue(ITEM_FIELD_CREATOR));
+
+    // The new version takes the old one's bag slot, so the check counts that slot as free
+    uint8 bagSlot = item->GetBagSlot();
+    uint8 slot = item->GetSlot();
+    ItemPosCountVec destination;
+    InventoryResult storeResult = player->CanStoreItem(bagSlot, slot, destination, newItem, true);
+    if (storeResult != EQUIP_ERR_OK)
+    {
+        player->SendEquipError(storeResult, newItem, item);
+        delete newItem;
+        return;
+    }
+    std::string oldItemName = oldItemTemplate->Name1;
+    bool hadPermanentEnchant = item->GetEnchantmentId(PERM_ENCHANTMENT_SLOT) != 0;
+
+    // The permanent enchantment stays with this version and returns when the item is slotshifted back into it
+    RememberItemEnchantForItem(player, item);
+    player->DestroyItem(bagSlot, slot, true);
+
+    // The spell still points at the destroyed item, which may already be freed, so have it look the item up again (it finds nothing now)
+    slotshiftSpell->m_targets.Update(player);
+
+    Item* storedItem = player->StoreItem(destination, newItem, true);
+    if (storedItem == nullptr)
+        return;
+    player->ItemAddedQuestCheck(storedItem->GetEntry(), 1);
+    bool restoredPermanentEnchant = RestoreRememberedItemEnchantForItem(player, storedItem);
+
+    // Enchantment memory is written to the database right away, so the swapped inventory is saved with it.  Otherwise a crash before the next
+    // save would bring back the enchanted old version while its enchantment is also remembered (or lose one that was just paid back)
+    if (hadPermanentEnchant == true || restoredPermanentEnchant == true)
+    {
+        CharacterDatabaseTransaction trans = CharacterDatabase.BeginTransaction();
+        player->SaveInventoryAndGoldToDB(trans);
+        CharacterDatabase.CommitTransaction(trans);
+    }
+    ChatHandler(player->GetSession()).PSendSysMessage("Your |cffFFFFFF{}|r can now be worn in the {} slot.", oldItemName, GetSlotshiftSlotName(nextItemTemplate->InventoryType));
 }
 
 Spell* EverQuestMod::GetActiveItemTransformSpellForPlayer(Player* player)
@@ -3668,7 +3829,7 @@ bool EverQuestMod::DoesSpellConsumeAnItemForTransform(Spell* spell)
         if (spellInfo->Reagent[reagentIndex] > 0)
             return true;
 
-    // The slotshift rings and the expendable clickies eat the item that was clicked
+    // The expendable clickies eat the item that was clicked
     if (spell->m_CastItem == nullptr)
         return false;
     ItemTemplate const* castItemTemplate = spell->m_CastItem->GetTemplate();
@@ -3682,7 +3843,7 @@ bool EverQuestMod::DoesSpellConsumeAnItemForTransform(Spell* spell)
 
 bool EverQuestMod::IsItemConsumedByTransformSpell(Spell* spell, Item* item)
 {
-    // The clicked item itself, which is how a slotshift ring member is spent
+    // The clicked item itself, which is how an expendable clicky is spent
     if (spell->m_CastItem == item)
         return true;
 
@@ -3740,6 +3901,21 @@ void EverQuestMod::RememberItemEnchantForTransformedItem(Player* player, Item* i
     if (IsEnabled == false || player == nullptr || item == nullptr)
         return;
 
+    if (item->GetEnchantmentId(PERM_ENCHANTMENT_SLOT) == 0)
+        return;
+    Spell* transformSpell = GetActiveItemTransformSpellForPlayer(player);
+    if (transformSpell == nullptr)
+        return;
+    if (IsItemConsumedByTransformSpell(transformSpell, item) == false)
+        return;
+    RememberItemEnchantForItem(player, item);
+}
+
+void EverQuestMod::RememberItemEnchantForItem(Player* player, Item* item)
+{
+    if (IsEnabled == false || player == nullptr || item == nullptr)
+        return;
+
     // Only the permanent slot is remembered.  Temporary enchantments (oils, stones, poisons) run on a timer and are not
     uint32 enchantID = item->GetEnchantmentId(PERM_ENCHANTMENT_SLOT);
     if (enchantID == 0)
@@ -3747,12 +3923,6 @@ void EverQuestMod::RememberItemEnchantForTransformedItem(Player* player, Item* i
     if (IsItemTemplateIDAnEQItemTemplateID(item->GetEntry()) == false)
         return;
     if (item->GetOwnerGUID() != player->GetGUID())
-        return;
-
-    Spell* transformSpell = GetActiveItemTransformSpellForPlayer(player);
-    if (transformSpell == nullptr)
-        return;
-    if (IsItemConsumedByTransformSpell(transformSpell, item) == false)
         return;
 
     EverQuestPlayerItemEnchantMemoryState* memoryState = GetOrLoadItemEnchantMemoryForPlayer(player);

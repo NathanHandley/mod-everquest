@@ -54,7 +54,7 @@ class ByteBuffer;
 struct AreaTrigger;
 struct BuildValuesCachePosPointers;
 
-#define EQ_MOD_VERSION                              129
+#define EQ_MOD_VERSION                              130
 
 #define EQ_MOVEMENT_CAST_SNARE_DURATION_BUFFER_IN_MS 2000 // How much longer than the remaining cast time the casting slow is given, so a pushed-back cast keeps it
 
@@ -125,8 +125,6 @@ struct BuildValuesCachePosPointers;
 #define EQ_BASHKICKSTUN_NPC_IMMUNE_ABOVE_LEVEL      55
 
 #define EQ_STUN_NPC_IMMUNE_ABOVE_LEVEL              55 // TODO: Consider changing this for 61+ content
-
-#define EQ_SLOTSHIFT_SPELL_NAME                     "Slotshift" // Name the converter gives every slotshift spell
 
 // Pre-defined by the WoW core
 #define EQ_DAZE_SPELL_ID                            1604
@@ -486,6 +484,7 @@ enum EverQuestLossOfControlCategory
 #define EQ_PLAYER_CUSTOMDATA_ITEMENCHANTMEMORY      "EQItemEnchantMemory"
 #define EQ_PLAYER_CUSTOMDATA_CLIENTMOVESTATE        "EQClientMoveState"
 #define EQ_ITEM_ENCHANT_MEMORY_MAX_PER_CHARACTER    100     // Ceiling on enchantments one character can have owed back to them
+#define EQ_SLOTSHIFT_MAX_RING_SIZE                  16      // More versions than any slotshift ring has, so a bad ring in the data can't loop forever
 #define EQ_QUEST_FACTION_RECHECK_INTERVAL_IN_MS     1000
 #define EQ_CLASS_AURA_GEAR_REFRESH_INTERVAL_MS      2000    // Gear and pet based class auras rescan on this interval since some ways they change have no hook
 #define EQ_CLASS_AURA_MANA_CHECK_INTERVAL_MS        500     // How often the Enchanter mana threshold is checked
@@ -1006,6 +1005,7 @@ public:
     uint32 WornEffectSpellID = 0;
     uint32 AllowedEQClassMask = 0;
     bool NeverLootStack = false;                                    // Loot drops of this item are split into single copies so each can go to a different player
+    uint32 SlotshiftNextItemTemplateEntryID = 0;                    // Version of this item that Slotshift Transform turns it into, or 0 if it can't slotshift
 };
 
 class EverQuestAuctionRealmFilter
@@ -2207,8 +2207,12 @@ public:
     bool IsNeverLootStackItem(uint32 itemTemplateEntryID);
     bool IsItemEquipAuraSpell(SpellInfo const* spellInfo);
     void RemoveOrphanedItemEquipAurasForPlayer(Player* player);
-    bool IsSlotshiftSpell(SpellInfo const* spellInfo);
-    void RechargeSlotshiftItemForPlayer(Player* player, Item* item);
+    uint32 GetSlotshiftNextItemTemplateEntryID(uint32 itemTemplateEntryID);
+    bool AreItemTemplatesInSameSlotshiftRing(uint32 itemTemplateEntryID, uint32 otherItemTemplateEntryID);
+    bool IsOtherSlotshiftVersionOfUniqueItemEquippedForPlayer(Player* player, Item* item, uint8 replacedEquipSlot);
+    bool CanPlayerSlotshiftItem(Player* player, Item* item, bool sendFailMessage);
+    void SlotshiftItemForPlayer(Player* player, Item* item, Spell* slotshiftSpell);
+    char const* GetSlotshiftSlotName(uint32 inventoryType);
     Spell* GetActiveItemTransformSpellForPlayer(Player* player);
     bool DoesSpellConsumeAnItemForTransform(Spell* spell);
     bool IsItemConsumedByTransformSpell(Spell* spell, Item* item);
@@ -2216,6 +2220,7 @@ public:
     EverQuestPlayerItemEnchantMemoryState* GetOrLoadItemEnchantMemoryForPlayer(Player* player);
     bool RestoreRememberedItemEnchantForItem(Player* player, Item* item);
     void RememberItemEnchantForTransformedItem(Player* player, Item* item);
+    void RememberItemEnchantForItem(Player* player, Item* item);
     void RestoreRememberedItemEnchantForCreatedItem(Player* player, Item* item);
     void RestoreRememberedItemEnchantForLootedItem(Player* player, Item* item, ObjectGuid lootGUID);
     void RegisterEQWeaponPoisonProcSpells(SpellInfo* spellInfo);

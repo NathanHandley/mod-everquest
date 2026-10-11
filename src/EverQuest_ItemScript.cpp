@@ -19,6 +19,7 @@
 #include "ScriptMgr.h"
 #include "Spell.h"
 #include "SpellInfo.h"
+#include "SpellScript.h"
 
 #include "EverQuest.h"
 
@@ -46,24 +47,12 @@ class EverQuest_AllItemScript : public AllItemScript
 public:
     EverQuest_AllItemScript() : AllItemScript("EverQuest_AllItemScript") {}
 
-    bool CanItemUse(Player* player, Item* item, SpellCastTargets const& /*targets*/) override
-    {
-        if (EverQuest->IsEnabled == false)
-            return false;
-
-        // This runs before the cast checks charges, so a slotshift item that is out of charges gets them back here
-        EverQuest->RechargeSlotshiftItemForPlayer(player, item);
-
-        // Returning false lets the core carry on and cast the item's spell
-        return false;
-    }
-
     bool CanItemRemove(Player* player, Item* item) override
     {
         if (EverQuest->IsEnabled == false)
             return true;
 
-        // A slotshift or a transform destroys the old version of the item, and this is the last moment its enchantment can still be read off it
+        // A transform destroys the old version of the item, and this is the last moment its enchantment can still be read off it
         EverQuest->RememberItemEnchantForTransformedItem(player, item);
 
         // Returning true lets the core carry on and destroy the item
@@ -71,8 +60,41 @@ public:
     }
 };
 
+// Slotshift Transform targets an item in the bags like Disenchant does, and turns it into the version of it worn in the next slot
+class EverQuest_SlotshiftTransformSpellScript : public SpellScript
+{
+    PrepareSpellScript(EverQuest_SlotshiftTransformSpellScript);
+
+    SpellCastResult CheckCast()
+    {
+        if (EverQuest->IsEnabled == false)
+            return SPELL_FAILED_DONT_REPORT;
+        Player* player = GetCaster() != nullptr ? GetCaster()->ToPlayer() : nullptr;
+        if (player == nullptr)
+            return SPELL_FAILED_DONT_REPORT;
+        if (EverQuest->CanPlayerSlotshiftItem(player, GetExplTargetItem(), true) == false)
+            return SPELL_FAILED_DONT_REPORT;
+        return SPELL_CAST_OK;
+    }
+
+    void HandleSlotshiftTransform(SpellEffIndex /*effIndex*/)
+    {
+        Player* player = GetCaster() != nullptr ? GetCaster()->ToPlayer() : nullptr;
+        if (player == nullptr)
+            return;
+        EverQuest->SlotshiftItemForPlayer(player, GetExplTargetItem(), GetSpell());
+    }
+
+    void Register() override
+    {
+        OnCheckCast += SpellCheckCastFn(EverQuest_SlotshiftTransformSpellScript::CheckCast);
+        OnEffectHit += SpellEffectFn(EverQuest_SlotshiftTransformSpellScript::HandleSlotshiftTransform, EFFECT_0, SPELL_EFFECT_DUMMY);
+    }
+};
+
 void AddEverQuestItemScripts()
 {
     new EverQuest_ItemScript();
     new EverQuest_AllItemScript();
+    RegisterSpellScript(EverQuest_SlotshiftTransformSpellScript);
 }

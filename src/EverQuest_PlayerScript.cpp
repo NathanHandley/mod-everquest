@@ -114,7 +114,7 @@ public:
             EverQuest->DoCreatureEmoteEvent(killer, EQ_CREATURE_EMOTE_EVENT_KILLEDPC, killed);
     }
 
-    bool OnPlayerCanEquipItem(Player* player, uint8 /*slot*/, uint16& /*dest*/, Item* pItem, bool /*swap*/, bool not_loading) override
+    bool OnPlayerCanEquipItem(Player* player, uint8 slot, uint16& /*dest*/, Item* pItem, bool swap, bool not_loading) override
     {
         if (EverQuest->IsEnabled == false)
             return true;
@@ -134,6 +134,14 @@ public:
                 ChatHandler(player->GetSession()).PSendSysMessage("You cannot equip that while tethered. Your own level is {}, and it needs level {}.", mentorshipRealLevel, itemTemplate->RequiredLevel);
                 return false;
             }
+        }
+
+        // A lore item can't be worn in two slots at once by having another of its slotshift versions on too
+        uint8 replacedEquipSlot = (swap == true && pItem->GetTemplate() != nullptr) ? player->FindEquipSlot(pItem->GetTemplate(), slot, true) : uint8(NULL_SLOT);
+        if (EverQuest->IsOtherSlotshiftVersionOfUniqueItemEquippedForPlayer(player, pItem, replacedEquipSlot) == true)
+        {
+            ChatHandler(player->GetSession()).PSendSysMessage("You are already wearing another version of that lore item.");
+            return false;
         }
 
         if (EverQuest->IsItemEQClassAllowedForPlayer(player, pItem->GetEntry()) == true)
@@ -1305,7 +1313,7 @@ public:
         if (EverQuest->IsEnabled == false)
             return;
 
-        // A slotshift or transform just built the new version of an item, which may be owed the enchantment that its old version was carrying
+        // A transform just built the new version of an item, which may be owed the enchantment that its old version was carrying (Slotshift Transform pays its own back)
         EverQuest->RestoreRememberedItemEnchantForCreatedItem(player, item);
     }
 
