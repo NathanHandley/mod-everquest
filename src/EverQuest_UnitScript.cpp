@@ -676,7 +676,13 @@ public:
 
         // Compound Injury stacks only after the hit above was paid from the stacks already there, same as a melee swing.  Autoshots, abilities and spells, the ranger's or their pet's
         if (damage > 0)
+        {
             EverQuest->HandleClassAuraRangerDirectDamage(attacker, target, spellInfo);
+
+            // A Shaman's ranged autoattack (Auto Shot, Shoot, Throw) extends a damage over time effect the same as a melee swing
+            if (spellInfo->IsAutoRepeatRangedSpell() == true)
+                EverQuest->HandleClassAuraShamanStrike(attacker, target);
+        }
 
         if (EverQuest->ConfigSpellTalentAlignmentEnabled == false)
             return;
