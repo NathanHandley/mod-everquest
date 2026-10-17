@@ -354,6 +354,38 @@ class EverQuest_TelescopeAuraScript : public AuraScript
     }
 };
 
+// EQ invisibility uses the general WOW invisibility group so it is seen through by the same detection as WOW's, but the core also gives a player
+// in that group the 'invisibility glow' flag that turns on the client's full screen nether world effect.  This takes the flag back off right after
+// the core sets it, before any update goes out, unless a non-EQ invisibility in a glow group is also on the player
+class EverQuest_InvisibilityAuraScript : public AuraScript
+{
+    PrepareAuraScript(EverQuest_InvisibilityAuraScript);
+
+    void HandleApply(AuraEffect const* /*aurEff*/, AuraEffectHandleModes /*mode*/)
+    {
+        if (EverQuest->IsEnabled == false)
+            return;
+        Unit* target = GetTarget();
+        if (target == nullptr || target->IsPlayer() == false)
+            return;
+        for (AuraEffect const* invisibilityEffect : target->GetAuraEffectsByType(SPELL_AURA_MOD_INVISIBILITY))
+        {
+            int32 invisibilityType = invisibilityEffect->GetMiscValue();
+            if (invisibilityType != INVISIBILITY_GENERAL && invisibilityType != INVISIBILITY_UNK10)
+                continue;
+            uint32 spellID = invisibilityEffect->GetId();
+            if (spellID < EverQuest->ConfigSystemSpellDBCIDMin || spellID > EverQuest->ConfigSystemSpellDBCIDMax)
+                return;
+        }
+        target->RemoveByteFlag(PLAYER_FIELD_BYTES2, PLAYER_FIELD_BYTES_2_OFFSET_AURA_VISION, PLAYER_FIELD_BYTE2_INVISIBILITY_GLOW);
+    }
+
+    void Register() override
+    {
+        AfterEffectApply += AuraEffectApplyFn(EverQuest_InvisibilityAuraScript::HandleApply, EFFECT_ALL, SPELL_AURA_MOD_INVISIBILITY, AURA_EFFECT_HANDLE_CHANGE_AMOUNT_SEND_FOR_CLIENT_MASK);
+    }
+};
+
 void AddEverQuestSpellEffectScripts()
 {
     RegisterSpellScript(EverQuest_TelescopeAuraScript);
@@ -364,4 +396,5 @@ void AddEverQuestSpellEffectScripts()
     RegisterSpellScript(EverQuest_WipeHateListAuraScript);
     RegisterSpellScript(EverQuest_HarmonyAuraScript);
     RegisterSpellScript(EverQuest_CallPetSpellScript);
+    RegisterSpellScript(EverQuest_InvisibilityAuraScript);
 }
