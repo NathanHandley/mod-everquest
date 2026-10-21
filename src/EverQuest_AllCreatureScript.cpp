@@ -83,6 +83,7 @@ public:
             return;
         SetVisualEquipment(creature);
         ApplyLootWornEffectAuras(creature);
+        EverQuest->RefreshCarriedLightForCreatureFromPreloadedLoot(creature);
         SetupRangedAttack(creature);
         SetupSummonedPet(creature);
         EverQuest->SetupCreatureCombatAbilities(creature);

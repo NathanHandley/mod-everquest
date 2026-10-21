@@ -376,12 +376,10 @@ bool EverQuestMod::LoadConfigurationSystemDataFromDB()
                 ConfigSystemIllusionObjectTreeMaxDistance = (float)atof(value.c_str());
             else if (key == "HarmTouchPlayerPvPDamagePercent")
                 ConfigSystemHarmTouchPlayerPvPDamagePercent = (uint32)atoi(value.c_str());
-            else if (key == "ClamberMaxSlopeAngleInDegrees")
-                ConfigSystemClamberMaxSlopeAngleInDegrees = (float)atof(value.c_str());
-            else if (key == "ClamberMaxDropInYards")
-                ConfigSystemClamberMaxDropInYards = (float)atof(value.c_str());
-            else if (key == "ClamberMaxGapDepthInYards")
-                ConfigSystemClamberMaxGapDepthInYards = (float)atof(value.c_str());
+            else if (key == "CrouchSpellID")
+                ConfigSystemCrouchSpellID = (uint32)atoi(value.c_str());
+            else if (key == "CarriedLightSpellIDStart")
+                ConfigSystemCarriedLightSpellIDStart = (uint32)atoi(value.c_str());
             else if (key == "ClientDataVersion")
                 ConfigSystemClientDataVersion = (uint32)atoi(value.c_str());
             else if (key == "ClientDataVersionMismatchMessage")
@@ -3502,7 +3500,8 @@ void EverQuestMod::LoadItemTemplateData()
 {
     ItemTemplatesByEntryID.clear();
     WornEffectSpellIDs.clear();
-    QueryResult queryResult = WorldDatabase.Query("SELECT ItemTemplateID, NPCEquipItemTemplateID, WornEffectSpellID, AllowedEQClassMask, NeverLootStack, SlotshiftNextItemTemplateID FROM mod_everquest_item_template ORDER BY ItemTemplateID;");
+    CarriedLightTypesByItemTemplateID.clear();
+    QueryResult queryResult = WorldDatabase.Query("SELECT ItemTemplateID, NPCEquipItemTemplateID, WornEffectSpellID, AllowedEQClassMask, NeverLootStack, SlotshiftNextItemTemplateID, LightType FROM mod_everquest_item_template ORDER BY ItemTemplateID;");
     if (queryResult)
     {
         do
@@ -3519,6 +3518,11 @@ void EverQuestMod::LoadItemTemplateData()
             ItemTemplatesByEntryID[everQuestItemTemplate.ItemTemplateEntryID] = everQuestItemTemplate;
             if (everQuestItemTemplate.WornEffectSpellID != 0)
                 WornEffectSpellIDs.insert(everQuestItemTemplate.WornEffectSpellID);
+
+            // Light sources are kept apart so the carried light check, which looks at every equipped and backpack slot each second, searches a small map
+            uint8 lightType = fields[6].Get<uint8>();
+            if (lightType != 0 && lightType <= EQ_CARRIED_LIGHT_TYPE_COUNT)
+                CarriedLightTypesByItemTemplateID[everQuestItemTemplate.ItemTemplateEntryID] = lightType;
         } while (queryResult->NextRow());
     }
 }

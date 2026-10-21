@@ -217,6 +217,9 @@ public:
         // A purging immunity (PvP trinket, Divine Shield) has already stripped any mesmerize by the time this runs, so this is where it gets named
         EverQuest->ResolvePendingMesmerizeRemovalsOnAuraApply(unit, aura);
 
+        // Crouching stops the swing and any cast, and keeps the player from attacking or casting until they stand
+        EverQuest->HandleCrouchAuraApply(unit, aura);
+
         if (EverQuest->ConfigDazeEnabledInEQZones == false && aura->GetId() == EQ_DAZE_SPELL_ID)
         {
             uint32 mapID = unit->GetMapId();
@@ -368,6 +371,9 @@ public:
 
             // A Shaman turning Warspirit off loses the vigor it built
             EverQuest->HandleClassAuraShamanWarspiritRemove(unit, aurApp->GetBase());
+
+            // Standing up from a crouch lets the player attack and cast again
+            EverQuest->HandleCrouchAuraRemove(unit, aurApp->GetBase());
 
             // Tell whoever cast a mesmerize who broke it, whether by damage, a mana drain, a dispel or a purging immunity
             EverQuest->NotifyCasterOfBrokenMesmerize(unit, aurApp, mode);

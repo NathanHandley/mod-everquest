@@ -122,6 +122,9 @@ static size_t GetAuraUpdateEntryEndPosition(WorldPacket const& packet, size_t po
 // the base spell already shows the icon.  The visible aura slot belongs to the core, so the entries are taken out of the aura packets on the way out instead.  Players' own worn auras are untouched
 static bool IsAuraIconHiddenFromClient(bool isCreatureTarget, uint32 spellID)
 {
+    // The client draws carried light from the light source aura, so it must always reach every client (it hides its own icon)
+    if (EverQuest->IsCarriedLightSpell(spellID) == true)
+        return false;
     if (EverQuest->IsHiddenAuraIconSpell(spellID) == true)
         return true;
     return isCreatureTarget == true && EverQuest->ConfigCreatureWornEffectsHideAuraIcons == true && EverQuest->IsWornEffectSpell(spellID) == true;
@@ -493,6 +496,10 @@ public:
             return false;
         if (packet.GetOpcode() == CMSG_SET_FACTION_ATWAR)
             return HandleSetFactionAtWarPacketReceive(session);
+        if (packet.GetOpcode() == CMSG_ATTACKSWING)
+            return EverQuest->HandleCrouchAttackSwingPacketReceive(session, packet);
+        if (packet.GetOpcode() == CMSG_CANCEL_AURA)
+            return EverQuest->HandleCrouchCancelAuraPacketReceive(session, packet);
         if (packet.GetOpcode() != CMSG_AUCTION_LIST_ITEMS)
             return true;
         if (EverQuest->IsEnabled == false)

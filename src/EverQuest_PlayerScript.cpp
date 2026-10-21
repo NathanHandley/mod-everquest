@@ -510,6 +510,9 @@ public:
 
         // Prevent any left over buffs from other gear
         EverQuest->RemoveOrphanedItemEquipAurasForPlayer(player);
+
+        // A light source may have gone on
+        EverQuest->QueueCarriedLightRefreshForPlayer(player);
     }
 
     void OnPlayerUnequip(Player* player, Item* /*it*/) override
@@ -523,6 +526,25 @@ public:
         EverQuest->RefreshBearFormArmorShiftForPlayer(player);
         EverQuest->RefreshClassAuraGearAurasForPlayer(player);
         EverQuest->RemoveOrphanedItemEquipAurasForPlayer(player);
+        EverQuest->QueueCarriedLightRefreshForPlayer(player);
+    }
+
+    void OnPlayerStoreNewItem(Player* player, Item* /*item*/, uint32 /*count*/) override
+    {
+        if (EverQuest->IsEnabled == false)
+            return;
+
+        // A lightstone or light globe landing in the backpack lights it
+        EverQuest->QueueCarriedLightRefreshForPlayer(player);
+    }
+
+    void OnPlayerAfterMoveItemFromInventory(Player* player, Item* /*it*/, uint8 /*bag*/, uint8 /*slot*/, bool /*update*/) override
+    {
+        if (EverQuest->IsEnabled == false)
+            return;
+
+        // An item leaving the inventory (destroyed, sold, traded, mailed) may have been the light source
+        EverQuest->QueueCarriedLightRefreshForPlayer(player);
     }
 
     void OnPlayerUpdate(Player* player, uint32 p_time) override
@@ -535,6 +557,7 @@ public:
         EverQuest->ProcessLevelCapStateForPlayer(player);
         EverQuest->UpdateMentorshipForPlayer(player, p_time);
         EverQuest->UpdatePlayerIllusionGearDisplay(player, p_time);
+        EverQuest->UpdateCarriedLightForPlayer(player, p_time);
         EverQuest->ConsumePendingTemporaryFactionRecalculation(player);
         EverQuest->UpdateFactionGatedQuestsForPlayer(player, p_time);
         EverQuest->UpdatePlayerTracking(player, p_time);
@@ -900,11 +923,17 @@ public:
         // Start the grace timer for the client data version report (kicks stale clients that bypassed the update launcher)
         EverQuest->BeginClientVersionCheckForPlayer(player);
 
+        // Characters always log in standing
+        EverQuest->RemoveCrouchAtLogin(player);
+
         // Handle odd edge cases where a player logs in but the server doesn't know where to put them
         EverQuest->EnforceWorldDomainAtLogin(player);
 
         // Inventory is now loaded, so clean up other auras
         EverQuest->RemoveOrphanedItemEquipAurasForPlayer(player);
+
+        // Put the right light source aura on (or take a stale saved one off) before anyone sees the character
+        EverQuest->RefreshCarriedLightForPlayer(player);
 
         // Pick up a character that logged out inside a raid instance
         EverQuest->UpdateRaidLowInstanceStateForPlayer(player);
@@ -1089,6 +1118,9 @@ public:
 
         EverQuest->RestoreNativeDisplayAfterCorpseIllusion(player);
 
+        // Put the light source aura back if death took it
+        EverQuest->QueueCarriedLightRefreshForPlayer(player);
+
         // Only an accepted resurrection gives experience back, never walking to the corpse or taking the spirit healer
         if (restore_percent <= 0.0f && applySickness == false)
             EverQuest->RestoreDeathExpLossOnResurrectForPlayer(player);
@@ -1131,6 +1163,9 @@ public:
 
         // Stop tracking any illusion gear display state
         EverQuest->ClearIllusionTrackingForPlayer(player->GetGUID());
+
+        // Stop tracking the carried light check (the aura itself saves with the character and is re-checked at login)
+        EverQuest->ClearCarriedLightTrackingForPlayer(player->GetGUID());
 
         // Stop tracking any bear form armor shift
         EverQuest->ClearBearFormArmorShiftForPlayer(player->GetGUID());
@@ -1211,6 +1246,9 @@ public:
         // Catch map switches that bypass TeleportTo
         EverQuest->ClearTempFactionBonusForPlayer(player);
 
+        // Re-check the light source aura in the new map
+        EverQuest->QueueCarriedLightRefreshForPlayer(player);
+
         // Track entering and leaving raid instances, which drives whether a zone line back in should return the player to theirs
         EverQuest->UpdateRaidLowInstanceStateForPlayer(player);
 
@@ -1254,6 +1292,9 @@ public:
 
         // If a cosmetic illusion is active, swap the native display so the corpse created on release shows the illusion
         EverQuest->ApplyCorpseIllusionNativeDisplayOnDeath(player);
+
+        // Dying removes the light source aura unless the spell persists through death, so re-check it
+        EverQuest->QueueCarriedLightRefreshForPlayer(player);
     }
 
     void OnPlayerReleasedGhost(Player* player) override
@@ -1312,6 +1353,10 @@ public:
             return;
 
         EverQuest->RemoveVisualEquippedItemForCreatureGUIDIfExists(player->GetMap(), lootguid, item->GetTemplate()->ItemId);
+
+        // A corpse stops glowing once its light source is looted
+        if (lootguid.IsCreatureOrVehicle() == true)
+            EverQuest->RefreshCarriedLightForCreatureCorpse(player->GetMap()->GetCreature(lootguid));
 
         // A combine that produces more than one item returns them inside a container, so an item coming out of one can still be owed an enchantment
         EverQuest->RestoreRememberedItemEnchantForLootedItem(player, item, lootguid);

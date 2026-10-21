@@ -54,7 +54,7 @@ class ByteBuffer;
 struct AreaTrigger;
 struct BuildValuesCachePosPointers;
 
-#define EQ_MOD_VERSION                              130
+#define EQ_MOD_VERSION                              132
 
 #define EQ_MOVEMENT_CAST_SNARE_DURATION_BUFFER_IN_MS 2000 // How much longer than the remaining cast time the casting slow is given, so a pushed-back cast keeps it
 
@@ -417,12 +417,11 @@ struct BuildValuesCachePosPointers;
 #define EQ_MOVE_TEST_Z_DOWN_AMOUNT_FOR_WATER_TEST   10.0f   // How far to test down when looking for water in the Z testing
 #define EQ_MOVE_MAX_PATH_NODES                      512     // Hard cap on generated step nodes
 
-#define EQ_CLAMBER_SAMPLE_STEP_DISTANCE             1.0f    // Distance between floor samples along a clamber
-#define EQ_CLAMBER_MAX_PATH_NODES                   128     // Hard cap on floor samples along a clamber
-#define EQ_CLAMBER_MIN_DISTANCE                     1.0f    // Spots closer than this aren't worth clambering to
-#define EQ_CLAMBER_FLOOR_SEARCH_MARGIN              0.5f    // Extra height above the expected ground to start a floor search from
-#define EQ_CLAMBER_STANDING_TOLERANCE               1.0f    // How far off the floor the caster (or the picked spot) can be and still count as on it
-#define EQ_CLAMBER_STEP_ALLOWANCE                   0.5f    // Extra rise allowed between two samples beyond the slope limit, for small ledges and bumps
+#define EQ_CROUCH_COLLISION_HEIGHT_SCALE            0.5f    // Crouched height as a share of standing height (EQ ducking needs half the headroom); the client does the shrinking
+#define EQ_CROUCH_STAND_UP_HEADROOM_MARGIN          0.1f    // Extra room needed above the standing head height to stand up from a crouch
+
+#define EQ_CARRIED_LIGHT_TYPE_COUNT                 15      // EQ light types 1-15, each with its own light source aura (CarriedLightSpellIDStart + type - 1)
+#define EQ_CARRIED_LIGHT_REFRESH_TIME_IN_MS         1000    // How often a player's carried light is re-checked, since moving items around the backpack has no hook
 
 #define EQ_MOVE_PHASE_NONE                          0
 #define EQ_MOVE_PHASE_TRAVELING                     1
@@ -1085,6 +1084,12 @@ public:
     uint8 CharacterFaceByte = 0;
     bool CharacterUsingAltDisplay = false;
     uint64 CharacterGearSignature = 0;
+};
+
+class EverQuestPlayerCarriedLightState
+{
+public:
+    uint32 RefreshTimerMS = EQ_CARRIED_LIGHT_REFRESH_TIME_IN_MS; // Starts due, so the first update after tracking begins checks right away
 };
 
 class EverQuestCorpseIllusionRestoreData
@@ -1858,9 +1863,8 @@ public:
     float ConfigSystemIllusionObjectMaxDistance = 0;
     float ConfigSystemIllusionObjectTreeMaxDistance = 0;
     uint32 ConfigSystemHarmTouchPlayerPvPDamagePercent = 50;
-    float ConfigSystemClamberMaxSlopeAngleInDegrees = 85.0f;
-    float ConfigSystemClamberMaxDropInYards = 5.0f;
-    float ConfigSystemClamberMaxGapDepthInYards = 5.0f;
+    uint32 ConfigSystemCrouchSpellID = 0;
+    uint32 ConfigSystemCarriedLightSpellIDStart = 0;
     uint32 ConfigSystemClientDataVersion = 0;
     string ConfigSystemClientDataVersionMismatchMessage;
     uint32 ConfigSystemFactionGoodClassMask;
@@ -2055,6 +2059,9 @@ public:
     unordered_set<uint32> IllusionFormSpellIDs;
     unordered_map<uint32, vector<EverQuestIllusionObject>> IllusionObjectsByMapID;
     unordered_map<ObjectGuid, EverQuestPlayerIllusionState> PlayerIllusionStatesByPlayerGUID;
+    unordered_map<uint32, uint8> CarriedLightTypesByItemTemplateID; // EQ light type of every item that is a light source (nonzero only), loaded once at startup, read-only after
+    bool CarriedLightSpellsAvailable = false; // All the light source aura spells were found in the spell store at startup, read-only after
+    unordered_map<ObjectGuid, EverQuestPlayerCarriedLightState> PlayerCarriedLightStatesByPlayerGUID; // Guarded by RuntimeStateMutex
     unordered_map<uint32, list<EverQuestQuestCompletionReputation>> QuestCompletionReputationsByQuestTemplateID;
     unordered_map<uint32, list<EverQuestQuestReaction>> QuestReactionListByQuestTemplateID;
     unordered_map<uint32, EverQuestQuestFactionRequirement> QuestFactionRequirementByQuestTemplateID;
@@ -2449,6 +2456,28 @@ public:
     bool IsMovementCastSnareExemptForPlayer(Player* player);
     void RefreshClassAuraTogglesForPlayer(Player* player);
     bool HandleClassAuraToggleOnCheckCast(Player* player, Spell* spell, SpellCastResult& result);
+    bool IsCrouchSpell(uint32 spellID);
+    bool IsPlayerCrouched(Player* player);
+    bool HasRoomToStandUpFromCrouch(Player* player);
+    bool HandleCrouchOnCheckCast(Player* player, Spell* spell, SpellCastResult& result);
+    void HandleCrouchAuraApply(Unit* unit, Aura* aura);
+    void HandleCrouchAuraRemove(Unit* unit, Aura* aura);
+    void RemoveCrouchAtLogin(Player* player);
+    bool HandleCrouchCancelAuraPacketReceive(WorldSession* session, WorldPacket const& packet);
+    bool HandleCrouchAttackSwingPacketReceive(WorldSession* session, WorldPacket const& packet);
+    bool IsCarriedLightSpell(uint32 spellID);
+    void ValidateCarriedLightSpells();
+    uint8 GetCarriedLightTypeForItemTemplateID(uint32 itemTemplateID);
+    uint8 GetCarriedLightLevelForLightType(uint8 lightType);
+    uint8 CalculateCarriedLightTypeForPlayer(Player* player);
+    uint8 CalculateCarriedLightTypeForItemTemplateIDs(const vector<uint32>& itemTemplateIDs);
+    void ApplyCarriedLightAuraForUnit(Unit* unit, uint8 lightType);
+    void RefreshCarriedLightForPlayer(Player* player);
+    void RefreshCarriedLightForCreatureFromPreloadedLoot(Creature* creature);
+    void RefreshCarriedLightForCreatureCorpse(Creature* creature);
+    void QueueCarriedLightRefreshForPlayer(Player* player);
+    void UpdateCarriedLightForPlayer(Player* player, uint32 diffInMS);
+    void ClearCarriedLightTrackingForPlayer(ObjectGuid playerGUID);
     void HandleClassAuraShamanWarspiritRemove(Unit* unit, Aura* aura);
     void HandleClassAuraShamanWarspiritApply(Player* player, Aura* aura);
     void HandleEQDeathKnightTalentsOnSpellCast(Player* player, Spell* spell);

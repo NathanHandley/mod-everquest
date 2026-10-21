@@ -78,6 +78,10 @@ public:
         if (spell->GetCaster()->IsPlayer() == true && EverQuest->HandleBardSongRangedSlotInstrumentOnCheckCast(spell->GetCaster()->ToPlayer(), spell, res) == true)
             return;
 
+        // Crouch is a toggle, and nothing else can be cast while crouched
+        if (spell->GetCaster()->IsPlayer() == true && EverQuest->HandleCrouchOnCheckCast(spell->GetCaster()->ToPlayer(), spell, res) == true)
+            return;
+
         // Class auras: the Ranger's Endless Quiver and the Shaman's Warspirit are toggles, so casting one while it is up turns it off
         if (spell->GetCaster()->IsPlayer() == true && EverQuest->HandleClassAuraToggleOnCheckCast(spell->GetCaster()->ToPlayer(), spell, res) == true)
             return;
