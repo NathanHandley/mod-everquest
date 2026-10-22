@@ -1072,9 +1072,38 @@ void EverQuestMod::HandleClassAuraRangerDirectDamage(Unit* attacker, Unit* victi
     ApplyClassAuraRangerCompoundInjury(ranger, victim);
 }
 
+static bool IsPeriodicDamageAuraType(AuraType auraType)
+{
+    return auraType == SPELL_AURA_PERIODIC_DAMAGE || auraType == SPELL_AURA_PERIODIC_LEECH || auraType == SPELL_AURA_PERIODIC_DAMAGE_PERCENT;
+}
+
 static bool IsPeriodicDamageAura(Aura* aura)
 {
     return aura->HasEffectType(SPELL_AURA_PERIODIC_DAMAGE) == true || aura->HasEffectType(SPELL_AURA_PERIODIC_LEECH) == true || aura->HasEffectType(SPELL_AURA_PERIODIC_DAMAGE_PERCENT) == true;
+}
+
+// In EverQuest_IntensifyingPeriodicAuraScript.cpp
+void NoteEverQuestIntensifyingPeriodicTicksRestarting(AuraEffect const* auraEffect);
+
+// The core stops ticking an effect once it has ticked as often as the duration it landed with allows (AuraEffect::Update against GetTotalTicks), so time given
+// back past that point would show on the icon and deal nothing.  When the remaining time holds more ticks than the effect has left in its count, the count
+// restarts.  It is left alone otherwise, since ticks that count up (Curse of Agony, intensifying effects) read it
+static void RestartPeriodicDamageTicksIfOutOfCount(Aura* aura)
+{
+    for (uint8 effectIndex = 0; effectIndex < MAX_SPELL_EFFECTS; ++effectIndex)
+    {
+        AuraEffect* auraEffect = aura->GetEffect(effectIndex);
+        if (auraEffect == nullptr || auraEffect->IsPeriodic() == false || auraEffect->GetAmplitude() <= 0 || IsPeriodicDamageAuraType(auraEffect->GetAuraType()) == false)
+            continue;
+        int32 ticksLeftInTime = 0;
+        if (aura->GetDuration() >= auraEffect->GetPeriodicTimer())
+            ticksLeftInTime = 1 + (aura->GetDuration() - auraEffect->GetPeriodicTimer()) / auraEffect->GetAmplitude();
+        int32 ticksLeftInCount = auraEffect->GetTotalTicks() - (int32)auraEffect->GetTickNumber();
+        if (ticksLeftInTime <= ticksLeftInCount)
+            continue;
+        NoteEverQuestIntensifyingPeriodicTicksRestarting(auraEffect);
+        auraEffect->ResetTicks();
+    }
 }
 
 // Whether the aura of one spell is what keeps the aura of another on its target, directly or through the split blocks between them
@@ -1170,6 +1199,7 @@ void EverQuestMod::HandleClassAuraShamanStrike(Unit* attacker, Unit* victim)
         if (newDurationInMS <= aura->GetDuration())
             continue;
         aura->SetDuration(newDurationInMS);
+        RestartPeriodicDamageTicksIfOutOfCount(aura);
         aura->SetNeedClientUpdateForTargets();
     }
 }

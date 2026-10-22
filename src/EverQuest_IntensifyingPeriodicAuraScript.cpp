@@ -35,7 +35,24 @@ class EverQuest_IntensifyingPeriodicAuraScript : public AuraScript
         if (effectIndex >= MAX_SPELL_EFFECTS)
             return;
         BaseAmountByEffectIndex[effectIndex] = amount;
+
+        // A new or recast effect starts the ramp over (a recast restarts the tick count before the amount is recalculated)
+        if (aurEff->GetTickNumber() == 0)
+            TicksBeforeRestartByEffectIndex[effectIndex] = 0;
     }
+
+public:
+    // The shaman class aura restarts the tick count of an effect it gives time back to once that count runs out, and the ramp carries on from the ticks
+    // already done rather than starting over
+    void NoteTicksRestarting(AuraEffect const* aurEff)
+    {
+        uint8 effectIndex = aurEff->GetEffIndex();
+        if (effectIndex >= MAX_SPELL_EFFECTS)
+            return;
+        TicksBeforeRestartByEffectIndex[effectIndex] += aurEff->GetTickNumber();
+    }
+
+private:
 
     void ApplyRampForTick(AuraEffect* aurEff)
     {
@@ -59,7 +76,7 @@ class EverQuest_IntensifyingPeriodicAuraScript : public AuraScript
         int32 totalTicks = aurEff->GetTotalTicks();
         if (totalTicks > 1)
         {
-            float tickProgress = float(aurEff->GetTickNumber() - 1) / float(totalTicks - 1);
+            float tickProgress = float(TicksBeforeRestartByEffectIndex[effectIndex] + aurEff->GetTickNumber() - 1) / float(totalTicks - 1);
             if (tickProgress > 1.0f)
                 tickProgress = 1.0f;
             rampMultiplier = rampStartMultiplier + ((2.0f - (2.0f * rampStartMultiplier)) * tickProgress);
@@ -79,7 +96,15 @@ class EverQuest_IntensifyingPeriodicAuraScript : public AuraScript
     }
 
     int32 BaseAmountByEffectIndex[MAX_SPELL_EFFECTS] = { 0, 0, 0 };
+    uint32 TicksBeforeRestartByEffectIndex[MAX_SPELL_EFFECTS] = { 0, 0, 0 };
 };
+
+void NoteEverQuestIntensifyingPeriodicTicksRestarting(AuraEffect const* auraEffect)
+{
+    EverQuest_IntensifyingPeriodicAuraScript* script = auraEffect->GetBase()->GetScript<EverQuest_IntensifyingPeriodicAuraScript>("EverQuest_IntensifyingPeriodicAuraScript");
+    if (script != nullptr)
+        script->NoteTicksRestarting(auraEffect);
+}
 
 void AddEverQuestIntensifyingPeriodicAuraScripts()
 {
