@@ -546,7 +546,18 @@ public:
 
     void ModifyHealReceived(Unit* target, Unit* healer, uint32& heal, SpellInfo const* spellInfo) override
     {
-        if (EverQuest->IsEnabled == false || EverQuest->ConfigSpellTalentAlignmentEnabled == false)
+        if (EverQuest->IsEnabled == false)
+            return;
+        ApplyTalentHealingMods(target, healer, heal, spellInfo);
+
+        // A buff that raises maximum health never heals for more than it raised it, so this comes after everything that grows the heal.  The core hands over the
+        // unit doing the healing as 'target'
+        EverQuest->ClampHealToSpellMaximumHealthIncrease(target, heal, spellInfo);
+    }
+
+    void ApplyTalentHealingMods(Unit* target, Unit* healer, uint32& heal, SpellInfo const* spellInfo)
+    {
+        if (EverQuest->ConfigSpellTalentAlignmentEnabled == false)
             return;
         if (target == nullptr || healer == nullptr || spellInfo == nullptr || heal == 0)
             return;

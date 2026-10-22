@@ -11902,6 +11902,60 @@ void EverQuestMod::TryDoCreatureEnrageRiposteCounter(Unit* victim, Unit* attacke
     }
 }
 
+// An on next swing ability an enraged creature riposted, held until the ability has finished so the counter swing lands after it rather than while the ability
+// is still picking its targets.  A swing and the ability it carries run start to finish on one thread
+struct EverQuestPendingEnrageRiposte
+{
+    Spell const* RipostedSpell = nullptr;
+    uint32 SpellID = 0;
+    ObjectGuid CasterGUID;
+    ObjectGuid CreatureGUID;
+};
+static thread_local EverQuestPendingEnrageRiposte PendingEnrageRiposte;
+
+bool EverQuestMod::IsSpellRipostedByCreatureEnrage(Spell* spell, Unit* target, SpellMissInfo missCondition)
+{
+    // An on next swing ability (Heroic Strike, Maul, Cleave, Raptor Strike) takes the place of a swing, so an enraged creature ripostes it the same as one.  Only
+    // the target it was aimed at does, not the extra targets of Cleave or a glyphed Maul.  A result that is not about the swing landing (immune, evade, resist,
+    // reflect) stands
+    if (spell == nullptr || target == nullptr || spell->IsNextMeleeSwingSpell() == false)
+        return false;
+    if (missCondition != SPELL_MISS_NONE && missCondition != SPELL_MISS_MISS && missCondition != SPELL_MISS_DODGE && missCondition != SPELL_MISS_PARRY
+        && missCondition != SPELL_MISS_BLOCK)
+        return false;
+    Unit* caster = spell->GetCaster() != nullptr ? spell->GetCaster()->ToUnit() : nullptr;
+    if (caster == nullptr || target != spell->m_targets.GetUnitTarget())
+        return false;
+    // Only the ability that was waiting on the swing, not one cast outright with the same attribute (a triggered or scripted cast)
+    if (caster->GetCurrentSpell(CURRENT_MELEE_SPELL) != spell)
+        return false;
+    if (IsCreatureEnragedForRiposte(target, caster) == false)
+        return false;
+
+    PendingEnrageRiposte.RipostedSpell = spell;
+    PendingEnrageRiposte.SpellID = spell->GetSpellInfo()->Id;
+    PendingEnrageRiposte.CasterGUID = caster->GetGUID();
+    PendingEnrageRiposte.CreatureGUID = target->GetGUID();
+    return true;
+}
+
+void EverQuestMod::HandleCreatureEnrageRiposteOnSpellCast(Spell* spell, Unit* caster)
+{
+    // Spells the ability sets off finish first, so a different spell leaves the riposte waiting.  One left behind by an ability that failed after picking its
+    // targets is replaced by the next riposte
+    if (PendingEnrageRiposte.RipostedSpell == nullptr || PendingEnrageRiposte.RipostedSpell != spell || caster == nullptr)
+        return;
+    if (PendingEnrageRiposte.SpellID != spell->GetSpellInfo()->Id || PendingEnrageRiposte.CasterGUID != caster->GetGUID())
+        return;
+    ObjectGuid creatureGUID = PendingEnrageRiposte.CreatureGUID;
+    PendingEnrageRiposte = EverQuestPendingEnrageRiposte();
+
+    Unit* enragedCreature = ObjectAccessor::GetUnit(*caster, creatureGUID);
+    if (enragedCreature == nullptr)
+        return;
+    TryDoCreatureEnrageRiposteCounter(enragedCreature, caster);
+}
+
 void EverQuestMod::ApplyCreatureCombatAbilityDamageMod(Unit* attacker, uint32& damage)
 {
     if (attacker == nullptr || attacker->IsCreature() == false || damage == 0)
@@ -16173,6 +16227,57 @@ bool EverQuestMod::IsSpellDamageFixed(uint32 spellID)
     if (spellDataItr == SpellDataBySpellID.end())
         return false;
     return spellDataItr->second.DamageIsFixed;
+}
+
+// The maximum health increase (the converter's maximum health aura) of a spell or of a split block chained from it, since one EQ spell's effects can be spread
+// over several blocks
+static bool TryGetSpellMaximumHealthIncrease(SpellInfo const* spellInfo, Unit* caster, int32& maximumHealthIncrease, uint8 depth)
+{
+    for (uint8 i = 0; i < MAX_SPELL_EFFECTS; ++i)
+    {
+        if (spellInfo->Effects[i].Effect == SPELL_EFFECT_APPLY_AURA && spellInfo->Effects[i].ApplyAuraName == SPELL_AURA_230)
+        {
+            maximumHealthIncrease = spellInfo->Effects[i].CalcValue(caster);
+            return true;
+        }
+    }
+
+    // A split block can chain a further split block, but never deeply
+    if (depth >= 3)
+        return false;
+    int32 const linkTypes[2] = { SPELL_LINK_AURA, SPELL_LINK_HIT };
+    for (int32 linkType : linkTypes)
+    {
+        std::vector<int32> const* linkedSpellIDs = sSpellMgr->GetSpellLinked((int32)spellInfo->Id + linkType);
+        if (linkedSpellIDs == nullptr)
+            continue;
+        for (int32 linkedSpellID : *linkedSpellIDs)
+        {
+            if (linkedSpellID <= 0)
+                continue;
+            SpellInfo const* linkedSpellInfo = sSpellMgr->GetSpellInfo((uint32)linkedSpellID);
+            if (linkedSpellInfo != nullptr && TryGetSpellMaximumHealthIncrease(linkedSpellInfo, caster, maximumHealthIncrease, depth + 1) == true)
+                return true;
+        }
+    }
+    return false;
+}
+
+// An EverQuest buff that raises maximum health and heals too never heals for more than it raised the maximum, whatever spell power, talents and crits added.  The
+// converter already holds the heal's own amount to the increase
+void EverQuestMod::ClampHealToSpellMaximumHealthIncrease(Unit* caster, uint32& heal, SpellInfo const* spellInfo)
+{
+    if (caster == nullptr || spellInfo == nullptr || heal == 0)
+        return;
+    if (spellInfo->HasEffect(SPELL_EFFECT_HEAL) == false)
+        return;
+    if (IsSpellAnEQSpell(spellInfo->Id) == false)
+        return;
+    int32 maximumHealthIncrease = 0;
+    if (TryGetSpellMaximumHealthIncrease(spellInfo, caster, maximumHealthIncrease, 0) == false || maximumHealthIncrease <= 0)
+        return;
+    if (heal > uint32(maximumHealthIncrease))
+        heal = uint32(maximumHealthIncrease);
 }
 
 float EverQuestMod::GetSpellIntensifyingRampStartMultiplier(uint32 spellID, uint8 effectIndex)

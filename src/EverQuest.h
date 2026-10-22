@@ -2614,6 +2614,8 @@ public:
     bool IsCreatureAreaSwingRoundInProgress();
     bool IsCreatureEnragedForRiposte(Unit const* unit, Unit const* attacker);
     void TryDoCreatureEnrageRiposteCounter(Unit* victim, Unit* attacker);
+    bool IsSpellRipostedByCreatureEnrage(Spell* spell, Unit* target, SpellMissInfo missCondition);
+    void HandleCreatureEnrageRiposteOnSpellCast(Spell* spell, Unit* caster);
     void ApplyCreatureCombatAbilityDamageMod(Unit* attacker, uint32& damage);
     float GetCreatureSpellDamageMultiplier(Unit const* attacker);
     bool IsEQWorldBossTierCreature(Unit const* unit);
@@ -2786,6 +2788,7 @@ public:
     bool IsSpellAnEQSpell(uint32 spellID);
     bool IsSpellDamageFixed(uint32 spellID);
     float GetSpellIntensifyingRampStartMultiplier(uint32 spellID, uint8 effectIndex);
+    void ClampHealToSpellMaximumHealthIncrease(Unit* caster, uint32& heal, SpellInfo const* spellInfo);
     bool ShouldSpellPreserveSwingTimers(uint32 spellID);
     void StashSwingTimersBeforeSpellCast(Player* player, Spell* spell);
     void RestoreSwingTimersAfterSpellCast(Unit* caster, Spell* spell);

@@ -400,6 +400,16 @@ public:
         }
     }
 
+    void OnAfterSpellHitResult(Spell* spell, Unit* target, TargetInfo& targetInfo) override
+    {
+        if (EverQuest->IsEnabled == false)
+            return;
+
+        // An enraged creature ripostes an on next swing ability aimed at it, the same as the swing the ability replaced
+        if (EverQuest->IsSpellRipostedByCreatureEnrage(spell, target, targetInfo.missCondition) == true)
+            targetInfo.missCondition = SPELL_MISS_PARRY;
+    }
+
     void OnSpellCast(Spell* spell, Unit* caster , SpellInfo const* spellInfo, bool /*skipCheck*/) override
     {
         if (spell == nullptr)
@@ -419,6 +429,9 @@ public:
 
         // Give back the swing time the core just reset away.  This runs before the EverQuest spell checks below, since WoW spells can be configured for it too
         EverQuest->RestoreSwingTimersAfterSpellCast(caster, spell);
+
+        // The counter swing of an enraged creature that riposted this on next swing ability (WoW spells)
+        EverQuest->HandleCreatureEnrageRiposteOnSpellCast(spell, caster);
 
         // The casting slow lifts the moment the cast lands.  This is above the EverQuest spell checks below, since the WoW class spells can carry it too
         if (caster != nullptr && caster->IsPlayer() == true && spellInfo != nullptr && spell->IsTriggered() == false && EverQuest->IsMovementCastSnareSpell(spellInfo->Id) == true)
