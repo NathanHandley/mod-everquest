@@ -768,7 +768,7 @@ public:
         if (spell->m_spellInfo->Id < EverQuest->ConfigSystemSpellDBCIDMin || spell->m_spellInfo->Id > EverQuest->ConfigSystemSpellDBCIDMax)
             return;
 
-        for (uint8 effectIndex = EFFECT_0; effectIndex <= EFFECT_2; effectIndex++)
+        for (uint8 effectIndex = EFFECT_0; effectIndex < MAX_SPELL_EFFECTS; effectIndex++)
         {
             auto const& succorEffect = spell->m_spellInfo->Effects[effectIndex];
             if ((succorEffect.Effect == SPELL_EFFECT_DUMMY ||
@@ -783,7 +783,7 @@ public:
         }
 
         // Spells with their own teleport effect (like the legacy stone) apply the gate tether by triggering the gate spell from a later effect slot.
-        for (uint8 effectIndex = EFFECT_1; effectIndex <= EFFECT_2; effectIndex++)
+        for (uint8 effectIndex = EFFECT_1; effectIndex < MAX_SPELL_EFFECTS; effectIndex++)
         {
             auto const& triggerEffect = spell->m_spellInfo->Effects[effectIndex];
             if (triggerEffect.Effect != SPELL_EFFECT_TRIGGER_SPELL || triggerEffect.TriggerSpell == 0)

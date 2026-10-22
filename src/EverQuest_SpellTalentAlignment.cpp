@@ -218,6 +218,11 @@ void EverQuestSpellTalentAlignment::Load()
                     && effectInfo.ApplyAuraName != SPELL_AURA_ADD_PCT_MODIFIER)
                     continue;
 
+                // A per-effect modifier is about one effect of the few spells it was made for (Chilled to the Bone's slow), which a family mask can't
+                // say, so those only reach EQ spells through an explicit alignment
+                if (IsPerEffectSpellModOp(effectInfo.MiscValue) == true)
+                    continue;
+
                 EverQuestTalentModAlignment alignment;
                 if (BuildAlignmentForMask(talentSpellInfo, effectInfo.SpellClassMask, alignment) == false)
                     continue;
@@ -289,14 +294,32 @@ bool EverQuestSpellTalentAlignment::DoesSpellInfoHeal(SpellInfo const* spellInfo
 
 bool EverQuestSpellTalentAlignment::DoesEffectDealDamage(SpellInfo const* spellInfo, uint8 effectIndex)
 {
+    return DoesEffectDealDirectDamage(spellInfo, effectIndex) || DoesEffectDealPeriodicDamage(spellInfo, effectIndex);
+}
+
+bool EverQuestSpellTalentAlignment::DoesEffectDealDirectDamage(SpellInfo const* spellInfo, uint8 effectIndex)
+{
     SpellEffectInfo const& effectInfo = spellInfo->Effects[effectIndex];
-    if (effectInfo.Effect == SPELL_EFFECT_SCHOOL_DAMAGE || effectInfo.Effect == SPELL_EFFECT_HEALTH_LEECH)
-        return true;
-    if (effectInfo.ApplyAuraName == SPELL_AURA_PERIODIC_DAMAGE
+    return effectInfo.Effect == SPELL_EFFECT_SCHOOL_DAMAGE || effectInfo.Effect == SPELL_EFFECT_HEALTH_LEECH;
+}
+
+bool EverQuestSpellTalentAlignment::DoesEffectDealPeriodicDamage(SpellInfo const* spellInfo, uint8 effectIndex)
+{
+    SpellEffectInfo const& effectInfo = spellInfo->Effects[effectIndex];
+    return effectInfo.ApplyAuraName == SPELL_AURA_PERIODIC_DAMAGE
         || effectInfo.ApplyAuraName == SPELL_AURA_PERIODIC_DAMAGE_PERCENT
-        || effectInfo.ApplyAuraName == SPELL_AURA_PERIODIC_LEECH)
-        return true;
-    return false;
+        || effectInfo.ApplyAuraName == SPELL_AURA_PERIODIC_LEECH;
+}
+
+bool EverQuestSpellTalentAlignment::DoesEffectDealDirectHeal(SpellInfo const* spellInfo, uint8 effectIndex)
+{
+    SpellEffectInfo const& effectInfo = spellInfo->Effects[effectIndex];
+    return effectInfo.Effect == SPELL_EFFECT_HEAL || effectInfo.Effect == SPELL_EFFECT_HEAL_MAX_HEALTH;
+}
+
+bool EverQuestSpellTalentAlignment::DoesEffectDealPeriodicHeal(SpellInfo const* spellInfo, uint8 effectIndex)
+{
+    return spellInfo->Effects[effectIndex].ApplyAuraName == SPELL_AURA_PERIODIC_HEAL;
 }
 
 bool EverQuestSpellTalentAlignment::DoesSpellInfoDealDirectDamage(SpellInfo const* spellInfo)
@@ -313,33 +336,39 @@ bool EverQuestSpellTalentAlignment::DoesSpellInfoDealDirectDamage(SpellInfo cons
 bool EverQuestSpellTalentAlignment::DoesSpellInfoDealAreaDamage(SpellInfo const* spellInfo)
 {
     for (uint8 effectIndex = 0; effectIndex < MAX_SPELL_EFFECTS; ++effectIndex)
-    {
-        if (DoesEffectDealDamage(spellInfo, effectIndex) == false)
-            continue;
-        SpellEffectInfo const& effectInfo = spellInfo->Effects[effectIndex];
-        uint32 targetA = effectInfo.TargetA.GetTarget();
-        uint32 targetB = effectInfo.TargetB.GetTarget();
-
-        // The converter set area damage with implicit targets 15 (source area enemy) or 16 (destination area enemy)
-        if (targetA == TARGET_UNIT_SRC_AREA_ENEMY || targetA == TARGET_UNIT_DEST_AREA_ENEMY || targetB == TARGET_UNIT_SRC_AREA_ENEMY || targetB == TARGET_UNIT_DEST_AREA_ENEMY)
+        if (DoesEffectDealAreaDamage(spellInfo, effectIndex) == true)
             return true;
-    }
     return false;
+}
+
+bool EverQuestSpellTalentAlignment::DoesEffectDealAreaDamage(SpellInfo const* spellInfo, uint8 effectIndex)
+{
+    if (DoesEffectDealDamage(spellInfo, effectIndex) == false)
+        return false;
+    SpellEffectInfo const& effectInfo = spellInfo->Effects[effectIndex];
+    uint32 targetA = effectInfo.TargetA.GetTarget();
+    uint32 targetB = effectInfo.TargetB.GetTarget();
+
+    // The converter set area damage with implicit targets 15 (source area enemy) or 16 (destination area enemy)
+    return targetA == TARGET_UNIT_SRC_AREA_ENEMY || targetA == TARGET_UNIT_DEST_AREA_ENEMY || targetB == TARGET_UNIT_SRC_AREA_ENEMY || targetB == TARGET_UNIT_DEST_AREA_ENEMY;
 }
 
 bool EverQuestSpellTalentAlignment::DoesSpellInfoDealPointBlankAreaDamage(SpellInfo const* spellInfo)
 {
     for (uint8 effectIndex = 0; effectIndex < MAX_SPELL_EFFECTS; ++effectIndex)
-    {
-        if (DoesEffectDealDamage(spellInfo, effectIndex) == false)
-            continue;
-        SpellEffectInfo const& effectInfo = spellInfo->Effects[effectIndex];
-
-        // The converter set caster-centered area damage as target A 22 (source is caster) with target B 15 (source area enemy)
-        if (effectInfo.TargetA.GetTarget() == TARGET_SRC_CASTER && effectInfo.TargetB.GetTarget() == TARGET_UNIT_SRC_AREA_ENEMY)
+        if (DoesEffectDealPointBlankAreaDamage(spellInfo, effectIndex) == true)
             return true;
-    }
     return false;
+}
+
+bool EverQuestSpellTalentAlignment::DoesEffectDealPointBlankAreaDamage(SpellInfo const* spellInfo, uint8 effectIndex)
+{
+    if (DoesEffectDealDamage(spellInfo, effectIndex) == false)
+        return false;
+    SpellEffectInfo const& effectInfo = spellInfo->Effects[effectIndex];
+
+    // The converter set caster-centered area damage as target A 22 (source is caster) with target B 15 (source area enemy)
+    return effectInfo.TargetA.GetTarget() == TARGET_SRC_CASTER && effectInfo.TargetB.GetTarget() == TARGET_UNIT_SRC_AREA_ENEMY;
 }
 
 bool EverQuestSpellTalentAlignment::DoesSpellInfoDealDirectHeal(SpellInfo const* spellInfo)
@@ -357,20 +386,23 @@ bool EverQuestSpellTalentAlignment::DoesSpellInfoDealDirectHeal(SpellInfo const*
 bool EverQuestSpellTalentAlignment::DoesSpellInfoDealAreaHeal(SpellInfo const* spellInfo)
 {
     for (uint8 effectIndex = 0; effectIndex < MAX_SPELL_EFFECTS; ++effectIndex)
-    {
-        // The converter set group heals with implicit target 20 (caster area party), caster-centered area heals with target A 22 (source is caster), and targeted area heals with target B 31 (destination area ally) or 34 (destination area party)
-        SpellEffectInfo const& effectInfo = spellInfo->Effects[effectIndex];
-        bool healsInSomeWay = effectInfo.Effect == SPELL_EFFECT_HEAL || effectInfo.Effect == SPELL_EFFECT_HEAL_MAX_HEALTH
-            || effectInfo.ApplyAuraName == SPELL_AURA_PERIODIC_HEAL;
-        if (healsInSomeWay == false)
-            continue;
-        uint32 targetA = effectInfo.TargetA.GetTarget();
-        uint32 targetB = effectInfo.TargetB.GetTarget();
-        if (targetA == TARGET_UNIT_CASTER_AREA_PARTY || targetA == TARGET_SRC_CASTER
-            || targetB == TARGET_UNIT_DEST_AREA_ALLY || targetB == TARGET_UNIT_DEST_AREA_PARTY)
+        if (DoesEffectDealAreaHeal(spellInfo, effectIndex) == true)
             return true;
-    }
     return false;
+}
+
+bool EverQuestSpellTalentAlignment::DoesEffectDealAreaHeal(SpellInfo const* spellInfo, uint8 effectIndex)
+{
+    // The converter set group heals with implicit target 20 (caster area party), caster-centered area heals with target A 22 (source is caster), and targeted area heals with target B 31 (destination area ally) or 34 (destination area party)
+    SpellEffectInfo const& effectInfo = spellInfo->Effects[effectIndex];
+    bool healsInSomeWay = effectInfo.Effect == SPELL_EFFECT_HEAL || effectInfo.Effect == SPELL_EFFECT_HEAL_MAX_HEALTH
+        || effectInfo.ApplyAuraName == SPELL_AURA_PERIODIC_HEAL;
+    if (healsInSomeWay == false)
+        return false;
+    uint32 targetA = effectInfo.TargetA.GetTarget();
+    uint32 targetB = effectInfo.TargetB.GetTarget();
+    return targetA == TARGET_UNIT_CASTER_AREA_PARTY || targetA == TARGET_SRC_CASTER
+        || targetB == TARGET_UNIT_DEST_AREA_ALLY || targetB == TARGET_UNIT_DEST_AREA_PARTY;
 }
 
 bool EverQuestSpellTalentAlignment::DoesSpellInfoDealSingleTargetDirectHeal(SpellInfo const* spellInfo)
@@ -415,17 +447,22 @@ bool EverQuestSpellTalentAlignment::DoesSpellInfoLeech(SpellInfo const* spellInf
 bool EverQuestSpellTalentAlignment::DoesSpellInfoSummonAPet(SpellInfo const* spellInfo)
 {
     for (uint8 effectIndex = 0; effectIndex < MAX_SPELL_EFFECTS; ++effectIndex)
-    {
-        // The converter set EQ pet summons as summon pet effects, or as plain summons whose generated summon properties mark an ally pet when the EQ level and behavior pet config is on
-        SpellEffectInfo const& effectInfo = spellInfo->Effects[effectIndex];
-        if (effectInfo.Effect == SPELL_EFFECT_SUMMON_PET)
+        if (DoesEffectSummonAPet(spellInfo, effectIndex) == true)
             return true;
-        if (effectInfo.Effect == SPELL_EFFECT_SUMMON)
-        {
-            SummonPropertiesEntry const* summonProperties = sSummonPropertiesStore.LookupEntry(effectInfo.MiscValueB);
-            if (summonProperties != nullptr && summonProperties->Category == SUMMON_CATEGORY_ALLY && summonProperties->Type == SUMMON_TYPE_PET)
-                return true;
-        }
+    return false;
+}
+
+bool EverQuestSpellTalentAlignment::DoesEffectSummonAPet(SpellInfo const* spellInfo, uint8 effectIndex)
+{
+    // The converter set EQ pet summons as summon pet effects, or as plain summons whose generated summon properties mark an ally pet when the EQ level and behavior pet config is on
+    SpellEffectInfo const& effectInfo = spellInfo->Effects[effectIndex];
+    if (effectInfo.Effect == SPELL_EFFECT_SUMMON_PET)
+        return true;
+    if (effectInfo.Effect == SPELL_EFFECT_SUMMON)
+    {
+        SummonPropertiesEntry const* summonProperties = sSummonPropertiesStore.LookupEntry(effectInfo.MiscValueB);
+        if (summonProperties != nullptr && summonProperties->Category == SUMMON_CATEGORY_ALLY && summonProperties->Type == SUMMON_TYPE_PET)
+            return true;
     }
     return false;
 }
@@ -455,25 +492,68 @@ bool EverQuestSpellTalentAlignment::IsEffectAStrengthReduction(SpellInfo const* 
     return effectInfo.BasePoints < 0;
 }
 
-bool EverQuestSpellTalentAlignment::DoesModTargetAStrengthReduction(SpellInfo const* eqSpellInfo, SpellModifier const* spellMod)
+bool EverQuestSpellTalentAlignment::DoesSpellInfoReduceStrength(SpellInfo const* spellInfo)
 {
-    // A modifier like Improved Curse of Weakness targets one effect index, so it only aligns when the EQ effect in that slot is the strength reduction (a debuff can bundle several stats, one per effect slot)
-    switch (spellMod->op)
+    // A debuff can bundle several stats, one per effect slot, and a modifier like Improved Curse of Weakness is then pointed at the strength one
+    // by SetTalentModEQSpellEffectReach
+    for (uint8 effectIndex = 0; effectIndex < MAX_SPELL_EFFECTS; ++effectIndex)
+        if (IsEffectAStrengthReduction(spellInfo, effectIndex) == true)
+            return true;
+    return false;
+}
+
+bool EverQuestSpellTalentAlignment::IsPerEffectSpellModOp(int32 spellModOp)
+{
+    return spellModOp == SPELLMOD_EFFECT1 || spellModOp == SPELLMOD_EFFECT2 || spellModOp == SPELLMOD_EFFECT3;
+}
+
+bool EverQuestSpellTalentAlignment::IsEffectWhatAlignmentIsAbout(EverQuestTalentModAlignment const& alignment, SpellInfo const* eqSpellInfo, uint8 effectIndex)
+{
+    // The same shapes DoesAlignmentReachEQSpell tests the whole spell for, narrowed to one effect
+    switch (alignment.SpellRestriction)
     {
-        case SPELLMOD_EFFECT1: return IsEffectAStrengthReduction(eqSpellInfo, EFFECT_0);
-        case SPELLMOD_EFFECT2: return IsEffectAStrengthReduction(eqSpellInfo, EFFECT_1);
-        case SPELLMOD_EFFECT3: return IsEffectAStrengthReduction(eqSpellInfo, EFFECT_2);
+        case EQTALENTRESTRICTION_CURE: return eqSpellInfo->Effects[effectIndex].Effect == SPELL_EFFECT_DISPEL;
+        case EQTALENTRESTRICTION_STRENGTH_DEBUFF: return IsEffectAStrengthReduction(eqSpellInfo, effectIndex);
+        case EQTALENTRESTRICTION_PET_SUMMON: return DoesEffectSummonAPet(eqSpellInfo, effectIndex);
+        case EQTALENTRESTRICTION_WEAPON_POISON: return DoesEffectDealDamage(eqSpellInfo, effectIndex);
+        // Damage only counts in the school that let the alignment reach the spell, so a row that reached it through its heal leaves its damage alone
+        case EQTALENTRESTRICTION_DIRECT_DAMAGE: return IsSchoolOfAlignment(alignment, eqSpellInfo) && DoesEffectDealDirectDamage(eqSpellInfo, effectIndex);
+        case EQTALENTRESTRICTION_AREA_DAMAGE: return IsSchoolOfAlignment(alignment, eqSpellInfo) && DoesEffectDealAreaDamage(eqSpellInfo, effectIndex);
+        case EQTALENTRESTRICTION_POINT_BLANK_AREA_DAMAGE: return IsSchoolOfAlignment(alignment, eqSpellInfo) && DoesEffectDealPointBlankAreaDamage(eqSpellInfo, effectIndex);
+        case EQTALENTRESTRICTION_PERIODIC_DAMAGE: return IsSchoolOfAlignment(alignment, eqSpellInfo) && DoesEffectDealPeriodicDamage(eqSpellInfo, effectIndex);
+        case EQTALENTRESTRICTION_DIRECT_HEAL:
+        case EQTALENTRESTRICTION_SINGLE_TARGET_DIRECT_HEAL: return DoesEffectDealDirectHeal(eqSpellInfo, effectIndex);
+        case EQTALENTRESTRICTION_AREA_HEAL: return DoesEffectDealAreaHeal(eqSpellInfo, effectIndex);
+        case EQTALENTRESTRICTION_PERIODIC_HEAL: return DoesEffectDealPeriodicHeal(eqSpellInfo, effectIndex);
         default:
         {
-            for (uint8 effectIndex = 0; effectIndex < MAX_SPELL_EFFECTS; ++effectIndex)
-                if (IsEffectAStrengthReduction(eqSpellInfo, effectIndex) == true)
-                    return true;
+            if (alignment.AffectsHealing == true && (DoesEffectDealDirectHeal(eqSpellInfo, effectIndex) == true || DoesEffectDealPeriodicHeal(eqSpellInfo, effectIndex) == true))
+                return true;
+            if (IsSchoolOfAlignment(alignment, eqSpellInfo) == true && DoesEffectDealDamage(eqSpellInfo, effectIndex) == true)
+                return true;
             return false;
         }
     }
 }
 
-bool EverQuestSpellTalentAlignment::DoesAlignmentReachEQSpell(EverQuestTalentModAlignment const& alignment, SpellInfo const* eqSpellInfo, SpellModifier const* spellMod)
+bool EverQuestSpellTalentAlignment::IsSchoolOfAlignment(EverQuestTalentModAlignment const& alignment, SpellInfo const* eqSpellInfo)
+{
+    return alignment.AffectsDamage == true && (alignment.SchoolMask & eqSpellInfo->SchoolMask) != 0;
+}
+
+bool EverQuestSpellTalentAlignment::IsTalentEffectTheModSource(SpellInfo const* talentSpellInfo, uint8 talentEffectIndex, SpellModifier const* spellMod)
+{
+    // Modifiers are matched back to their talent effect by class mask, and two effects of one talent can share a mask.  A per-effect modifier must
+    // also match the op, so it never borrows the alignment of a sibling effect that changes something else
+    SpellEffectInfo const& talentEffectInfo = talentSpellInfo->Effects[talentEffectIndex];
+    if (talentEffectInfo.SpellClassMask != spellMod->mask)
+        return false;
+    if (IsPerEffectSpellModOp(spellMod->op) == true && talentEffectInfo.MiscValue != spellMod->op)
+        return false;
+    return true;
+}
+
+bool EverQuestSpellTalentAlignment::DoesAlignmentReachEQSpell(EverQuestTalentModAlignment const& alignment, SpellInfo const* eqSpellInfo)
 {
     // Cures and strength debuffs are neither damage nor healing, so those restrictions are their own reach tests
     if (alignment.SpellRestriction == EQTALENTRESTRICTION_CURE)
@@ -483,7 +563,7 @@ bool EverQuestSpellTalentAlignment::DoesAlignmentReachEQSpell(EverQuestTalentMod
     }
     else if (alignment.SpellRestriction == EQTALENTRESTRICTION_STRENGTH_DEBUFF)
     {
-        if (DoesModTargetAStrengthReduction(eqSpellInfo, spellMod) == false)
+        if (DoesSpellInfoReduceStrength(eqSpellInfo) == false)
             return false;
     }
     else if (alignment.SpellRestriction == EQTALENTRESTRICTION_PET_SUMMON)
@@ -580,7 +660,7 @@ bool EverQuestSpellTalentAlignment::ShouldTalentModAffectEQSpell(SpellInfo const
 
     for (uint8 effectIndex = 0; effectIndex < MAX_SPELL_EFFECTS; ++effectIndex)
     {
-        if (talentSpellInfo->Effects[effectIndex].SpellClassMask != spellMod->mask)
+        if (IsTalentEffectTheModSource(talentSpellInfo, effectIndex, spellMod) == false)
             continue;
 
         auto alignmentEntry = AlignmentsByTalentSpellIDAndEffect.find(MakeAlignmentKey(talentSpellInfo->Id, effectIndex));
@@ -589,9 +669,61 @@ bool EverQuestSpellTalentAlignment::ShouldTalentModAffectEQSpell(SpellInfo const
 
         for (EverQuestTalentModAlignment const& alignment : alignmentEntry->second)
         {
-            if (DoesAlignmentReachEQSpell(alignment, eqSpellInfo, spellMod) == true)
+            if (DoesAlignmentReachEQSpell(alignment, eqSpellInfo) == true)
                 return true;
         }
     }
     return false;
+}
+
+void EverQuestSpellTalentAlignment::SetTalentModEQSpellEffectReach(SpellInfo const* talentSpellInfo, SpellInfo const* eqSpellInfo, SpellModifier const* spellMod,
+    uint8 effectIndex, bool& affected)
+{
+    // A per-effect modifier (SPELLMOD_EFFECT1..3) names a slot of the WOW spells it was made for, and EQ spells lay their effects out in their own
+    // order (up to 12 of them), so on an EQ spell it changes the effects its alignment is about wherever they sit.  The core's slot rule stays for
+    // anything no alignment reached
+    if (IsLoaded == false)
+        return;
+    if (IsPerEffectSpellModOp(spellMod->op) == false)
+        return;
+    if (IsEQSpell(eqSpellInfo) == false)
+        return;
+    if (ExcludedTalentSpellIDs.count(talentSpellInfo->Id) > 0)
+        return;
+
+    bool isInSlot = affected;
+    bool isReachedByAlignment = false;
+    bool isEffectReached = false;
+    for (uint8 talentEffectIndex = 0; talentEffectIndex < MAX_SPELL_EFFECTS; ++talentEffectIndex)
+    {
+        if (IsTalentEffectTheModSource(talentSpellInfo, talentEffectIndex, spellMod) == false)
+            continue;
+
+        auto alignmentEntry = AlignmentsByTalentSpellIDAndEffect.find(MakeAlignmentKey(talentSpellInfo->Id, talentEffectIndex));
+        if (alignmentEntry == AlignmentsByTalentSpellIDAndEffect.end())
+            continue;
+
+        for (EverQuestTalentModAlignment const& alignment : alignmentEntry->second)
+        {
+            if (DoesAlignmentReachEQSpell(alignment, eqSpellInfo) == false)
+                continue;
+            isReachedByAlignment = true;
+
+            // A spell the alignment reaches without any effect of the shape it is about (a weapon poison proc that only snares) keeps the slot rule,
+            // so the modifier still lands somewhere the way it did before
+            bool hasEffectItIsAbout = false;
+            for (uint8 eqEffectIndex = 0; eqEffectIndex < MAX_SPELL_EFFECTS; ++eqEffectIndex)
+            {
+                if (IsEffectWhatAlignmentIsAbout(alignment, eqSpellInfo, eqEffectIndex) == true)
+                {
+                    hasEffectItIsAbout = true;
+                    break;
+                }
+            }
+            if (hasEffectItIsAbout == true ? IsEffectWhatAlignmentIsAbout(alignment, eqSpellInfo, effectIndex) : isInSlot)
+                isEffectReached = true;
+        }
+    }
+    if (isReachedByAlignment == true)
+        affected = isEffectReached;
 }

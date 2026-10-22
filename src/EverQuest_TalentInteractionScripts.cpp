@@ -574,7 +574,7 @@ class EverQuest_DemonicEmpowermentSpellScript : public SpellScript
     }
 };
 
-// Whether an EverQuest spell deals damage, directly, over time or as a lifetap, on its own or through a spell it triggers or links (a split block)
+// Whether an EverQuest spell deals damage, directly, over time or as a lifetap, on its own or through a spell it triggers or links
 static bool DoesEQSpellDealDamageForTalents(SpellInfo const* spellInfo, uint8 depth)
 {
     if (spellInfo == nullptr)
@@ -592,9 +592,8 @@ static bool DoesEQSpellDealDamageForTalents(SpellInfo const* spellInfo, uint8 de
         if (triggerSpellID != 0 && triggerSpellID != spellInfo->Id && DoesEQSpellDealDamageForTalents(sSpellMgr->GetSpellInfo(triggerSpellID), depth + 1) == true)
             return true;
     }
-    // Aura links too: a split whose first block and second block both carry an aura (a debuff first, the damage over time in the split) is chained that way
-    int32 linkKeys[3] = { (int32)spellInfo->Id + SPELL_LINK_CAST, (int32)spellInfo->Id + SPELL_LINK_HIT, (int32)spellInfo->Id + SPELL_LINK_AURA };
-    for (uint8 k = 0; k < 3; ++k)
+    int32 linkKeys[2] = { (int32)spellInfo->Id + SPELL_LINK_CAST, (int32)spellInfo->Id + SPELL_LINK_HIT };
+    for (uint8 k = 0; k < 2; ++k)
     {
         std::vector<int32> const* linkedSpellIDs = sSpellMgr->GetSpellLinked(linkKeys[k]);
         if (linkedSpellIDs == nullptr)

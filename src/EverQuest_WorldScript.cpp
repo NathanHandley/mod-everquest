@@ -137,10 +137,10 @@ public:
         EverQuest->ResolveCreaturePresenceGroupSpawnPoints();
         EverQuest->ResolveVulakRequiredDragonSpawnPoints();
 
-        // Song split blocks are chained through spell_linked_spell, which the core loads well after the module config does
+        // What a song chains into comes from spell_linked_spell, which the core loads well after the module config does
         EverQuest->LoadBardSongEffectSpellIDs();
 
-        // Which spells keep a damage over time copy per caster depends on the split blocks they chain and on every block's finished spell attributes
+        // Which spells keep a damage over time copy per caster depends on the spells they chain and on every one's finished spell attributes
         EverQuest->BuildPerCasterDoTSpells();
 
         // Gate spells are found by their spell effects, so the spell store has to be loaded first

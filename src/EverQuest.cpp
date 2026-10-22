@@ -3532,11 +3532,6 @@ bool EverQuestMod::IsWornEffectSpell(uint32 spellID)
     return WornEffectSpellIDs.find(spellID) != WornEffectSpellIDs.end();
 }
 
-bool EverQuestMod::IsHiddenAuraIconSpell(uint32 spellID)
-{
-    return HiddenAuraIconSpellIDs.find(spellID) != HiddenAuraIconSpellIDs.end();
-}
-
 bool EverQuestMod::IsNeverLootStackItem(uint32 itemTemplateEntryID)
 {
     unordered_map<uint32, EverQuestItemTemplate>::const_iterator itemTemplateItr = ItemTemplatesByEntryID.find(itemTemplateEntryID);
@@ -5140,8 +5135,7 @@ void EverQuestMod::LoadSpellData()
 {
     SpellDataBySpellID.clear();
     BardSongTickSpellIDs.clear();
-    HiddenAuraIconSpellIDs.clear();
-    QueryResult queryResult = WorldDatabase.Query("SELECT SpellID, AuraDurationBaseInMS, AuraDurationAddPerLevelInMS, AuraDurationMaxInMS, AuraDurationCalcMinLevel, AuraDurationCalcMaxLevel, RecourseSpellID, SpellIDCastOnMeleeAttacker, FocusBoostType, PeriodicAuraSpellID, PeriodicAuraSpellRadius, MaleFormSpellID, FemaleFormSpellID, EffectFailChancePercent, EffectFailableType, StunUsesBashKickChance, SpellIDCastOnTargetWhenStunLands, AuraStaysOnSecondaryClassSwitch, MinTargetLevel, MaxCreatureTargetLevel, ResistDiff, HasteType, ModFactionRepValue, IllusionFormAlignment, IllusionFormEQRaceID, PersistOnClassChange, IllusionObjectClass, ManaGainSpellPowerCoefficient, DamageIsFixed, IntensifyingRampStartMultiplier1, IntensifyingRampStartMultiplier2, IntensifyingRampStartMultiplier3, CasterVisualKitID, CreatureLossOfControlGrantsImmunity, HideAuraIcon, EQResistType, IsEQPartialResistCapable FROM mod_everquest_spell ORDER BY SpellID;");
+    QueryResult queryResult = WorldDatabase.Query("SELECT SpellID, AuraDurationBaseInMS, AuraDurationAddPerLevelInMS, AuraDurationMaxInMS, AuraDurationCalcMinLevel, AuraDurationCalcMaxLevel, RecourseSpellID, SpellIDCastOnMeleeAttacker, FocusBoostType, PeriodicAuraSpellID, PeriodicAuraSpellRadius, MaleFormSpellID, FemaleFormSpellID, EffectFailChancePercent, EffectFailableType, StunUsesBashKickChance, SpellIDCastOnTargetWhenStunLands, AuraStaysOnSecondaryClassSwitch, MinTargetLevel, MaxCreatureTargetLevel, ResistDiff, HasteType, ModFactionRepValue, IllusionFormAlignment, IllusionFormEQRaceID, PersistOnClassChange, IllusionObjectClass, ManaGainSpellPowerCoefficient, DamageIsFixed, IntensifyingRampStartMultiplier1, IntensifyingRampStartMultiplier2, IntensifyingRampStartMultiplier3, IntensifyingRampStartMultiplier4, IntensifyingRampStartMultiplier5, IntensifyingRampStartMultiplier6, IntensifyingRampStartMultiplier7, IntensifyingRampStartMultiplier8, IntensifyingRampStartMultiplier9, IntensifyingRampStartMultiplier10, IntensifyingRampStartMultiplier11, IntensifyingRampStartMultiplier12, CasterVisualKitID, CreatureLossOfControlGrantsImmunity, EQResistType, IsEQPartialResistCapable FROM mod_everquest_spell ORDER BY SpellID;");
     if (queryResult)
     {
         do
@@ -5178,19 +5172,15 @@ void EverQuestMod::LoadSpellData()
             everQuestSpell.IllusionObjectClass = fields[26].Get<uint8>();
             everQuestSpell.ManaGainSpellPowerCoefficient = fields[27].Get<float>();
             everQuestSpell.DamageIsFixed = fields[28].Get<bool>();
-            everQuestSpell.IntensifyingRampStartMultipliers[0] = fields[29].Get<float>();
-            everQuestSpell.IntensifyingRampStartMultipliers[1] = fields[30].Get<float>();
-            everQuestSpell.IntensifyingRampStartMultipliers[2] = fields[31].Get<float>();
-            everQuestSpell.CasterVisualKitID = fields[32].Get<uint32>();
-            everQuestSpell.CreatureLossOfControlGrantsImmunity = fields[33].Get<uint8>() != 0;
-            everQuestSpell.HideAuraIcon = fields[34].Get<uint8>() != 0;
-            everQuestSpell.EQResistType = fields[35].Get<uint8>();
-            everQuestSpell.IsEQPartialResistCapable = fields[36].Get<uint8>() != 0;
+            for (uint8 effectIndex = 0; effectIndex < MAX_SPELL_EFFECTS; ++effectIndex)
+                everQuestSpell.IntensifyingRampStartMultipliers[effectIndex] = fields[29 + effectIndex].Get<float>();
+            everQuestSpell.CasterVisualKitID = fields[29 + MAX_SPELL_EFFECTS].Get<uint32>();
+            everQuestSpell.CreatureLossOfControlGrantsImmunity = fields[30 + MAX_SPELL_EFFECTS].Get<uint8>() != 0;
+            everQuestSpell.EQResistType = fields[31 + MAX_SPELL_EFFECTS].Get<uint8>();
+            everQuestSpell.IsEQPartialResistCapable = fields[32 + MAX_SPELL_EFFECTS].Get<uint8>() != 0;
             SpellDataBySpellID[everQuestSpell.SpellID] = everQuestSpell;
             if (everQuestSpell.PeriodicAuraSpellID != 0)
                 BardSongTickSpellIDs.insert(everQuestSpell.PeriodicAuraSpellID);
-            if (everQuestSpell.HideAuraIcon == true)
-                HiddenAuraIconSpellIDs.insert(everQuestSpell.SpellID);
         } while (queryResult->NextRow());
     }
 }
@@ -5221,14 +5211,14 @@ void EverQuestMod::BuildPerCasterDoTSpells()
 {
     // In EQ a recast of a spell refreshes the one copy on the target no matter who cast it, which is what the shared copy attribute does for every converted aura spell.
     // Damage over time is the exception, since every caster's damage should land.  A detrimental spell that ticks damage keeps a copy per caster instead, and so does
-    // every block its aura chains to or from, because the core adds, refreshes and removes a chained block by its caster.  A shared block in a per caster chain would be
+    // every spell its aura chains to or from, because the core adds, refreshes and removes a chained spell by its caster.  A shared spell in a per caster chain would be
     // taken away when the first caster's copy ends.  What those spells do besides damage still only counts once (EnforceSharedEffectsAcrossPerCasterDoTCopies)
     PerCasterDoTSpellIDs.clear();
     if (ConfigSpellDisableStackingOfSameDOT == false)
     {
-        // Anything reached through a link is a split block, and the rest are the spells that get cast
+        // Anything reached through a link is a chained spell, and the rest are the spells that get cast
         int32 linkTypes[2] = { SPELL_LINK_AURA, SPELL_LINK_HIT };
-        unordered_set<uint32> splitBlockSpellIDs;
+        unordered_set<uint32> chainedSpellIDs;
         for (unordered_map<uint32, EverQuestSpell>::const_iterator spellItr = SpellDataBySpellID.begin(); spellItr != SpellDataBySpellID.end(); ++spellItr)
         {
             for (int32 linkType : linkTypes)
@@ -5238,14 +5228,14 @@ void EverQuestMod::BuildPerCasterDoTSpells()
                     continue;
                 for (int32 linkedSpellID : *linkedSpellIDs)
                     if (linkedSpellID > 0)
-                        splitBlockSpellIDs.insert((uint32)linkedSpellID);
+                        chainedSpellIDs.insert((uint32)linkedSpellID);
             }
         }
 
         for (unordered_map<uint32, EverQuestSpell>::const_iterator spellItr = SpellDataBySpellID.begin(); spellItr != SpellDataBySpellID.end(); ++spellItr)
         {
             uint32 castSpellID = spellItr->first;
-            if (splitBlockSpellIDs.find(castSpellID) != splitBlockSpellIDs.end())
+            if (chainedSpellIDs.find(castSpellID) != chainedSpellIDs.end())
                 continue;
             if (IsWornEffectSpell(castSpellID) == true || IsClassAuraSpell(castSpellID) == true)
                 continue;
@@ -5253,7 +5243,7 @@ void EverQuestMod::BuildPerCasterDoTSpells()
             if (castSpellInfo == nullptr || castSpellInfo->IsPassive() == true)
                 continue;
 
-            // Only the cast spell can say whether the whole thing is detrimental.  Its split blocks are aimed at whoever the cast spell hit, as that unit casting on
+            // Only the cast spell can say whether the whole thing is detrimental.  A spell it chains is aimed at whoever the cast spell hit, as that unit casting on
             // itself, which the core reads as a helpful effect
             bool hasEffect = false;
             bool hasPositiveEffect = false;
@@ -5268,7 +5258,7 @@ void EverQuestMod::BuildPerCasterDoTSpells()
             if (hasEffect == false || hasPositiveEffect == true)
                 continue;
 
-            // Gather the cast spell and every split block under it
+            // Gather the cast spell and every spell chained under it
             vector<uint32> blockSpellIDs;
             vector<pair<uint32, uint32>> auraLinks;
             blockSpellIDs.push_back(castSpellID);
@@ -5292,7 +5282,7 @@ void EverQuestMod::BuildPerCasterDoTSpells()
                 }
             }
 
-            // The blocks that tick damage, then everything joined to one of them by an aura link
+            // The spells that tick damage, then everything joined to one of them by an aura link
             unordered_set<uint32> perCasterBlockSpellIDs;
             for (uint32 blockSpellID : blockSpellIDs)
             {
@@ -5363,7 +5353,7 @@ void EverQuestMod::BuildPerCasterDoTSpells()
             }
         }
 
-        // The core handles a chained block by the caster of the aura that chains it, so a chain with a per caster copy on only one end loses or keeps the wrong block
+        // The core handles a chained spell by the caster of the aura that chains it, so a chain with a per caster copy on only one end loses or keeps the wrong spell
         for (unordered_map<uint32, EverQuestSpell>::const_iterator spellItr = SpellDataBySpellID.begin(); spellItr != SpellDataBySpellID.end(); ++spellItr)
         {
             std::vector<int32> const* linkedSpellIDs = sSpellMgr->GetSpellLinked((int32)spellItr->first + SPELL_LINK_AURA);
@@ -5432,7 +5422,7 @@ bool EverQuestMod::IsPerCasterDoTSpell(uint32 spellID)
 
 void EverQuestMod::LoadBardSongEffectSpellIDs()
 {
-    // A song's effects can be spread across its tick spell and the split blocks that tick chains into, and only spell_linked_spell knows about those blocks
+    // A song's effects are its tick spell and anything that tick chains into (a stun), and only spell_linked_spell knows about those chained spells
     BardSongEffectSpellIDs.clear();
     for (uint32 tickSpellID : BardSongTickSpellIDs)
     {
@@ -6365,7 +6355,7 @@ bool EverQuestMod::IsCreatureCharmBlockedByCharmLimits(uint32 spellID, Unit* tar
     return true;
 }
 
-uint8 EverQuestMod::GetCharmProtectedDispelEffectMaskForTarget(SpellInfo const* spellInfo, Unit* target)
+uint32 EverQuestMod::GetCharmProtectedDispelEffectMaskForTarget(SpellInfo const* spellInfo, Unit* target)
 {
     if (spellInfo == nullptr || target == nullptr)
         return 0;
@@ -6392,7 +6382,7 @@ uint8 EverQuestMod::GetCharmProtectedDispelEffectMaskForTarget(SpellInfo const* 
     if (charmMechanicMask == 0 && charmDispelMask == 0)
         return 0;
 
-    uint8 blockedEffectMask = 0;
+    uint32 blockedEffectMask = 0;
     for (uint8 i = 0; i < MAX_SPELL_EFFECTS; ++i)
     {
         int32 effectMiscValue = spellInfo->Effects[i].MiscValue;
@@ -6402,14 +6392,14 @@ uint8 EverQuestMod::GetCharmProtectedDispelEffectMaskForTarget(SpellInfo const* 
             if (effectMiscValue < 0 || effectMiscValue >= (int32)MAX_MECHANIC)
                 continue;
             if ((charmMechanicMask & (1ULL << effectMiscValue)) != 0)
-                blockedEffectMask |= (uint8)(1 << i);
+                blockedEffectMask |= (1u << i);
         }
         else if (spellInfo->Effects[i].Effect == SPELL_EFFECT_DISPEL)
         {
             if (effectMiscValue <= DISPEL_NONE || effectMiscValue >= DISPEL_MAX)
                 continue;
             if ((SpellInfo::GetDispelMask((DispelType)effectMiscValue) & charmDispelMask) != 0)
-                blockedEffectMask |= (uint8)(1 << i);
+                blockedEffectMask |= (1u << i);
         }
     }
     return blockedEffectMask;
@@ -6544,7 +6534,7 @@ bool EverQuestMod::IsEQBossTierCreature(Unit* unit)
     return difficultyType == EQ_CREATURE_DIFFICULTY_RAIDBOSS || difficultyType == EQ_CREATURE_DIFFICULTY_RAIDMINIBOSS;
 }
 
-uint8 EverQuestMod::GetBossInterruptProtectedEffectMaskForTarget(SpellInfo const* spellInfo, Unit* target)
+uint32 EverQuestMod::GetBossInterruptProtectedEffectMaskForTarget(SpellInfo const* spellInfo, Unit* target)
 {
     if (ConfigSpellBossInterruptImmunityEnabled == false)
         return 0;
@@ -6553,10 +6543,10 @@ uint8 EverQuestMod::GetBossInterruptProtectedEffectMaskForTarget(SpellInfo const
     if (IsEQBossTierCreature(target) == false)
         return 0;
 
-    uint8 interruptEffectMask = 0;
+    uint32 interruptEffectMask = 0;
     for (uint8 i = 0; i < MAX_SPELL_EFFECTS; ++i)
         if (spellInfo->Effects[i].Effect == SPELL_EFFECT_INTERRUPT_CAST)
-            interruptEffectMask |= (uint8)(1 << i);
+            interruptEffectMask |= (1u << i);
     if (interruptEffectMask == 0)
         return 0;
 
@@ -6567,7 +6557,7 @@ uint8 EverQuestMod::GetBossInterruptProtectedEffectMaskForTarget(SpellInfo const
     return interruptEffectMask;
 }
 
-uint8 EverQuestMod::GetBossSilenceProtectedEffectMaskForTarget(SpellInfo const* spellInfo, Unit* target)
+uint32 EverQuestMod::GetBossSilenceProtectedEffectMaskForTarget(SpellInfo const* spellInfo, Unit* target)
 {
     if (ConfigSpellBossSilenceImmunityEnabled == false)
         return 0;
@@ -6577,19 +6567,19 @@ uint8 EverQuestMod::GetBossSilenceProtectedEffectMaskForTarget(SpellInfo const* 
         return 0;
 
     // The mechanic catches the converted EQ silences (which are tagged Silenced) and the aura types catch everything else
-    uint8 silenceEffectMask = 0;
+    uint32 silenceEffectMask = 0;
     for (uint8 i = 0; i < MAX_SPELL_EFFECTS; ++i)
     {
         if (spellInfo->Effects[i].IsEffect() == false)
             continue;
         if (spellInfo->Effects[i].IsAura(SPELL_AURA_MOD_SILENCE) == true || spellInfo->Effects[i].IsAura(SPELL_AURA_MOD_PACIFY_SILENCE) == true
             || spellInfo->Effects[i].Mechanic == MECHANIC_SILENCE)
-            silenceEffectMask |= (uint8)(1 << i);
+            silenceEffectMask |= (1u << i);
     }
     return silenceEffectMask;
 }
 
-uint8 EverQuestMod::GetCreatureStunProtectedEffectMaskForTarget(SpellInfo const* spellInfo, Unit* target, Unit* caster)
+uint32 EverQuestMod::GetCreatureStunProtectedEffectMaskForTarget(SpellInfo const* spellInfo, Unit* target, Unit* caster)
 {
     // An EverQuest creature the EQ stun rules already protect is protected from WoW stuns as well
     if (ConfigSpellCreatureWoWStunImmunityEnabled == false)
@@ -6615,13 +6605,13 @@ uint8 EverQuestMod::GetCreatureStunProtectedEffectMaskForTarget(SpellInfo const*
     if (target->GetLevel() <= EQ_STUN_NPC_IMMUNE_ABOVE_LEVEL)
         return 0;
 
-    uint8 stunEffectMask = 0;
+    uint32 stunEffectMask = 0;
     for (uint8 i = 0; i < MAX_SPELL_EFFECTS; ++i)
     {
         if (spellInfo->Effects[i].IsEffect() == false)
             continue;
         if (spellInfo->Effects[i].IsAura(SPELL_AURA_MOD_STUN) == true || spellInfo->Effects[i].Mechanic == MECHANIC_STUN)
-            stunEffectMask |= (uint8)(1 << i);
+            stunEffectMask |= (1u << i);
     }
     return stunEffectMask;
 }
@@ -6787,7 +6777,7 @@ void EverQuestMod::ApplyPvPCrowdControlRulesToAuraMaxDuration(Aura const* aura, 
     target->IncrDiminishing(group);
 }
 
-uint8 EverQuestMod::GetPvPChainedCrowdControlImmuneEffectMaskForTarget(Spell* spell, Unit* target)
+uint32 EverQuestMod::GetPvPChainedCrowdControlImmuneEffectMaskForTarget(Spell* spell, Unit* target)
 {
     if (ConfigSpellPvPChainedCrowdControlDiminishingReturnsEnabled == false)
         return 0;
@@ -6809,10 +6799,10 @@ uint8 EverQuestMod::GetPvPChainedCrowdControlImmuneEffectMaskForTarget(Spell* sp
     if (target->ApplyDiminishingToDuration(group, probeDurationInMS, originalCaster, target->GetDiminishing(group), 0) != 0.0f)
         return 0;
 
-    uint8 immuneEffectMask = 0;
+    uint32 immuneEffectMask = 0;
     for (uint8 i = 0; i < MAX_SPELL_EFFECTS; ++i)
         if (spellInfo->Effects[i].IsUnitOwnedAuraEffect() == true)
-            immuneEffectMask |= (uint8)(1 << i);
+            immuneEffectMask |= (1u << i);
     return immuneEffectMask;
 }
 
@@ -6861,7 +6851,7 @@ bool EverQuestMod::IsEQCreatureLossOfControlOnPlayer(SpellInfo const* spellInfo,
 
 // Effects of a creature's EverQuest spell that would take away a kind of control the player is currently immune to (they were recently put under it
 // by an ability that does more than take control away).  The rest of the spell still lands
-uint8 EverQuestMod::GetCreatureLossOfControlImmuneEffectMaskForTarget(Spell* spell, Unit* target, bool& isWholeSpellImmune)
+uint32 EverQuestMod::GetCreatureLossOfControlImmuneEffectMaskForTarget(Spell* spell, Unit* target, bool& isWholeSpellImmune)
 {
     isWholeSpellImmune = false;
     if (ConfigSpellCreatureLossOfControlPlayerImmunityMultiplier <= 0.0f)
@@ -6879,16 +6869,16 @@ uint8 EverQuestMod::GetCreatureLossOfControlImmuneEffectMaskForTarget(Spell* spe
         return 0;
 
     uint64 nowMS = uint64(GameTime::GetGameTimeMS().count());
-    uint8 immuneEffectMask = 0;
-    uint8 allEffectMask = 0;
+    uint32 immuneEffectMask = 0;
+    uint32 allEffectMask = 0;
     for (uint8 i = 0; i < MAX_SPELL_EFFECTS; ++i)
     {
         if (spellInfo->Effects[i].Effect == 0)
             continue;
-        allEffectMask |= (uint8)(1 << i);
+        allEffectMask |= (1u << i);
         uint32 category = GetLossOfControlCategoryForSpellEffect(spellInfo, i);
         if (category != EQ_LOSS_OF_CONTROL_NONE && immunityState->ImmuneUntilGameTimeMS[category] > nowMS)
-            immuneEffectMask |= (uint8)(1 << i);
+            immuneEffectMask |= (1u << i);
     }
     isWholeSpellImmune = (immuneEffectMask != 0 && immuneEffectMask == allEffectMask);
     return immuneEffectMask;
@@ -7375,14 +7365,14 @@ void EverQuestMod::CancelBardSongsOnPvPSilenceAuraApply(Unit* target, Aura* aura
     AuraApplication const* auraApplication = aura->GetApplicationOfTarget(target->GetGUID());
     if (auraApplication == nullptr)
         return;
-    uint8 appliedEffectMask = auraApplication->GetEffectMask();
+    uint32 appliedEffectMask = auraApplication->GetEffectMask();
     SpellInfo const* spellInfo = aura->GetSpellInfo();
     if (spellInfo == nullptr)
         return;
     bool isSilence = false;
     for (uint8 i = 0; i < MAX_SPELL_EFFECTS; ++i)
     {
-        if ((appliedEffectMask & (uint8)(1 << i)) == 0)
+        if ((appliedEffectMask & (1u << i)) == 0)
             continue;
 
         // The mechanic catches the converted EQ silences (which are tagged Silenced) and the aura types catch everything else
@@ -7566,7 +7556,7 @@ void EverQuestMod::CancelBardSongsBlockedByRangedSlotInstrumentForPlayer(Player*
         ChatHandler(player->GetSession()).PSendSysMessage("The instrument in your ranged slot ends your songs that it and the instruments in your hands cannot play.");
 }
 
-uint8 EverQuestMod::GetEQCharmEffectMask(SpellInfo const* spellInfo)
+uint32 EverQuestMod::GetEQCharmEffectMask(SpellInfo const* spellInfo)
 {
     if (spellInfo == nullptr)
         return 0;
@@ -7576,10 +7566,10 @@ uint8 EverQuestMod::GetEQCharmEffectMask(SpellInfo const* spellInfo)
     // Bard charm songs land their charm through the song's tick spell
     if (IsSpellAnEQSpell(spellInfo->Id) == false && BardSongTickSpellIDs.find(spellInfo->Id) == BardSongTickSpellIDs.end())
         return 0;
-    uint8 charmEffectMask = 0;
+    uint32 charmEffectMask = 0;
     for (uint8 i = 0; i < MAX_SPELL_EFFECTS; ++i)
         if (spellInfo->Effects[i].IsAura(SPELL_AURA_MOD_CHARM) == true || spellInfo->Effects[i].IsAura(SPELL_AURA_AOE_CHARM) == true)
-            charmEffectMask |= (uint8)(1 << i);
+            charmEffectMask |= (1u << i);
     return charmEffectMask;
 }
 
@@ -7595,7 +7585,7 @@ bool EverQuestMod::IsEQCharmBlockedInPvP(SpellInfo const* spellInfo, Unit* targe
     return IsPvPCrowdControlDurationCappedForTarget(target, caster);
 }
 
-uint8 EverQuestMod::GetPvPEQCharmImmuneEffectMaskForTarget(Spell* spell, Unit* target)
+uint32 EverQuestMod::GetPvPEQCharmImmuneEffectMaskForTarget(Spell* spell, Unit* target)
 {
     if (spell == nullptr || target == nullptr)
         return 0;
@@ -8271,7 +8261,7 @@ void EverQuestMod::EnforcePerCasterDoTCopyRulesOnAuraApply(Unit* unit, Aura* aur
 
     EnforceSharedEffectsAcrossPerCasterDoTCopies(unit, spellID, aura, nullptr);
 
-    // A refresh also refreshes the split blocks chained off of this aura, which puts their amounts back without this hook running for them
+    // A refresh also refreshes the spells chained off of this aura, which puts their amounts back without this hook running for them
     EnforceSharedEffectsOnAuraLinkedPerCasterDoTSpells(unit, spellID, casterGUID, 0);
 }
 
@@ -8292,7 +8282,7 @@ void EverQuestMod::EnforcePerCasterDoTCopyRulesOnAuraRemove(Unit* unit, Aura* au
 
 void EverQuestMod::EnforceSharedEffectsOnAuraLinkedPerCasterDoTSpells(Unit* unit, uint32 spellID, ObjectGuid casterGUID, uint8 depth)
 {
-    // A split block can chain a further split block, but never deeply
+    // A chained spell can chain a further spell, but never deeply
     if (depth > 3)
         return;
     std::vector<int32> const* linkedSpellIDs = sSpellMgr->GetSpellLinked((int32)spellID + SPELL_LINK_AURA);
@@ -8304,7 +8294,7 @@ void EverQuestMod::EnforceSharedEffectsOnAuraLinkedPerCasterDoTSpells(Unit* unit
             continue;
         if (IsPerCasterDoTSpell((uint32)linkedSpellID) == true)
         {
-            // The caster's own copy of the block is the one that was refreshed.  It came back at its natural amounts, so a slow on a boss is weakened again
+            // The caster's own copy of the chained spell is the one that was refreshed.  It came back at its natural amounts, so a slow on a boss is weakened again
             // before the copies are sorted out
             Aura* refreshedCopy = unit->GetOwnedAura((uint32)linkedSpellID, casterGUID);
             if (refreshedCopy != nullptr)
@@ -16229,9 +16219,8 @@ bool EverQuestMod::IsSpellDamageFixed(uint32 spellID)
     return spellDataItr->second.DamageIsFixed;
 }
 
-// The maximum health increase (the converter's maximum health aura) of a spell or of a split block chained from it, since one EQ spell's effects can be spread
-// over several blocks
-static bool TryGetSpellMaximumHealthIncrease(SpellInfo const* spellInfo, Unit* caster, int32& maximumHealthIncrease, uint8 depth)
+// The maximum health increase (the converter's maximum health aura) of a spell
+static bool TryGetSpellMaximumHealthIncrease(SpellInfo const* spellInfo, Unit* caster, int32& maximumHealthIncrease)
 {
     for (uint8 i = 0; i < MAX_SPELL_EFFECTS; ++i)
     {
@@ -16239,25 +16228,6 @@ static bool TryGetSpellMaximumHealthIncrease(SpellInfo const* spellInfo, Unit* c
         {
             maximumHealthIncrease = spellInfo->Effects[i].CalcValue(caster);
             return true;
-        }
-    }
-
-    // A split block can chain a further split block, but never deeply
-    if (depth >= 3)
-        return false;
-    int32 const linkTypes[2] = { SPELL_LINK_AURA, SPELL_LINK_HIT };
-    for (int32 linkType : linkTypes)
-    {
-        std::vector<int32> const* linkedSpellIDs = sSpellMgr->GetSpellLinked((int32)spellInfo->Id + linkType);
-        if (linkedSpellIDs == nullptr)
-            continue;
-        for (int32 linkedSpellID : *linkedSpellIDs)
-        {
-            if (linkedSpellID <= 0)
-                continue;
-            SpellInfo const* linkedSpellInfo = sSpellMgr->GetSpellInfo((uint32)linkedSpellID);
-            if (linkedSpellInfo != nullptr && TryGetSpellMaximumHealthIncrease(linkedSpellInfo, caster, maximumHealthIncrease, depth + 1) == true)
-                return true;
         }
     }
     return false;
@@ -16274,7 +16244,7 @@ void EverQuestMod::ClampHealToSpellMaximumHealthIncrease(Unit* caster, uint32& h
     if (IsSpellAnEQSpell(spellInfo->Id) == false)
         return;
     int32 maximumHealthIncrease = 0;
-    if (TryGetSpellMaximumHealthIncrease(spellInfo, caster, maximumHealthIncrease, 0) == false || maximumHealthIncrease <= 0)
+    if (TryGetSpellMaximumHealthIncrease(spellInfo, caster, maximumHealthIncrease) == false || maximumHealthIncrease <= 0)
         return;
     if (heal > uint32(maximumHealthIncrease))
         heal = uint32(maximumHealthIncrease);
@@ -16282,7 +16252,7 @@ void EverQuestMod::ClampHealToSpellMaximumHealthIncrease(Unit* caster, uint32& h
 
 float EverQuestMod::GetSpellIntensifyingRampStartMultiplier(uint32 spellID, uint8 effectIndex)
 {
-    if (effectIndex >= 3)
+    if (effectIndex >= MAX_SPELL_EFFECTS)
         return 0.0f;
     std::unordered_map<uint32, EverQuestSpell>::const_iterator spellDataItr = SpellDataBySpellID.find(spellID);
     if (spellDataItr == SpellDataBySpellID.end())
@@ -17576,8 +17546,8 @@ void EverQuestMod::NotifyPlayerOfDispelledAura(Player* player, AuraApplication* 
     if (spellInfo == nullptr)
         return;
 
-    // Don't give messages for the chain "split" auras, whether hidden or only left visible for the combat log
-    if (spellInfo->HasAttribute(SPELL_ATTR0_DO_NOT_DISPLAY) == true || IsHiddenAuraIconSpell(spellInfo->Id) == true)
+    // Don't give messages for hidden auras
+    if (spellInfo->HasAttribute(SPELL_ATTR0_DO_NOT_DISPLAY) == true)
         return;
 
     // An absorb shield that soaked its last point is removed with the same reason code as a dispel, so skip a spent shield
@@ -20581,7 +20551,7 @@ void EverQuestMod::MoveAuraToModAuraTable(Player* player, CharacterDatabaseTrans
         keptSpellsList = "0"; // No spell uses id 0, so NOT IN (0) keeps nothing
 
     transaction->Append("DELETE FROM `mod_everquest_character_class_aura` WHERE guid = {} and eqclass = {}", player->GetGUID().GetCounter(), curEQClass);
-    transaction->Append("INSERT IGNORE INTO mod_everquest_character_class_aura (guid, class, eqclass, casterGuid, itemGuid, spell, effectMask, recalculateMask, stackCount, amount0, amount1, amount2, base_amount0, base_amount1, base_amount2, maxDuration, remainTime, remainCharges) SELECT guid, {}, {}, casterGuid, itemGuid, spell, effectMask, recalculateMask, stackCount, amount0, amount1, amount2, base_amount0, base_amount1, base_amount2, maxDuration, remainTime, remainCharges FROM character_aura WHERE guid = {} AND itemGuid = 0 AND spell NOT IN ({})", player->getClass(), curEQClass, player->GetGUID().GetCounter(), keptSpellsList);
+    transaction->Append("INSERT IGNORE INTO mod_everquest_character_class_aura (guid, class, eqclass, casterGuid, itemGuid, spell, effectMask, recalculateMask, stackCount, amount0, amount1, amount2, base_amount0, base_amount1, base_amount2, maxDuration, remainTime, remainCharges, amount3, amount4, amount5, amount6, amount7, amount8, amount9, amount10, amount11, base_amount3, base_amount4, base_amount5, base_amount6, base_amount7, base_amount8, base_amount9, base_amount10, base_amount11) SELECT guid, {}, {}, casterGuid, itemGuid, spell, effectMask, recalculateMask, stackCount, amount0, amount1, amount2, base_amount0, base_amount1, base_amount2, maxDuration, remainTime, remainCharges, amount3, amount4, amount5, amount6, amount7, amount8, amount9, amount10, amount11, base_amount3, base_amount4, base_amount5, base_amount6, base_amount7, base_amount8, base_amount9, base_amount10, base_amount11 FROM character_aura WHERE guid = {} AND itemGuid = 0 AND spell NOT IN ({})", player->getClass(), curEQClass, player->GetGUID().GetCounter(), keptSpellsList);
     transaction->Append("DELETE FROM `character_aura` WHERE guid = {} AND spell NOT IN ({})", player->GetGUID().GetCounter(), keptSpellsList);
 }
 
@@ -20899,7 +20869,7 @@ bool EverQuestMod::PerformClassSwitch(Player* player)
 
         transaction->Append("INSERT IGNORE INTO character_talent (guid, spell, specMask) SELECT guid, spell, specMask FROM mod_everquest_character_class_talent WHERE guid = {} AND eqclass = {}", player->GetGUID().GetCounter(), nextSecondaryEQClass);
         transaction->Append("INSERT IGNORE INTO character_glyphs (guid, talentGroup, glyph1, glyph2, glyph3, glyph4, glyph5, glyph6) SELECT guid, talentGroup, glyph1, glyph2, glyph3, glyph4, glyph5, glyph6 FROM mod_everquest_character_class_glyphs WHERE guid = {} AND eqclass = {}", player->GetGUID().GetCounter(), nextSecondaryEQClass);
-        transaction->Append("INSERT IGNORE INTO character_aura (guid, casterGuid, itemGuid, spell, effectMask, recalculateMask, stackCount, amount0, amount1, amount2, base_amount0, base_amount1, base_amount2, maxDuration, remainTime, remainCharges) SELECT guid, casterGuid, itemGuid, spell, effectMask, recalculateMask, stackCount, amount0, amount1, amount2, base_amount0, base_amount1, base_amount2, maxDuration, remainTime, remainCharges FROM mod_everquest_character_class_aura WHERE guid = {} AND eqclass = {}", player->GetGUID().GetCounter(), nextSecondaryEQClass);
+        transaction->Append("INSERT IGNORE INTO character_aura (guid, casterGuid, itemGuid, spell, effectMask, recalculateMask, stackCount, amount0, amount1, amount2, base_amount0, base_amount1, base_amount2, maxDuration, remainTime, remainCharges, amount3, amount4, amount5, amount6, amount7, amount8, amount9, amount10, amount11, base_amount3, base_amount4, base_amount5, base_amount6, base_amount7, base_amount8, base_amount9, base_amount10, base_amount11) SELECT guid, casterGuid, itemGuid, spell, effectMask, recalculateMask, stackCount, amount0, amount1, amount2, base_amount0, base_amount1, base_amount2, maxDuration, remainTime, remainCharges, amount3, amount4, amount5, amount6, amount7, amount8, amount9, amount10, amount11, base_amount3, base_amount4, base_amount5, base_amount6, base_amount7, base_amount8, base_amount9, base_amount10, base_amount11 FROM mod_everquest_character_class_aura WHERE guid = {} AND eqclass = {}", player->GetGUID().GetCounter(), nextSecondaryEQClass);
         transaction->Append("INSERT IGNORE INTO `character_inventory` (`guid`, `bag`, `slot`, `item`) SELECT `guid`, `bag`, `slot`, `item` FROM mod_everquest_character_class_inventory WHERE guid = {} AND eqclass = {}", player->GetGUID().GetCounter(), nextSecondaryEQClass);
 
         // The rows just went live, so they have to stop being storage rows

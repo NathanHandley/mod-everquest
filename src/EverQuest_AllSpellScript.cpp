@@ -147,7 +147,7 @@ public:
             res = SPELL_FAILED_HIGHLEVEL;
     }
 
-    void OnScaleAuraUnitAdd(Spell* spell, Unit* target, uint32 effectMask, bool /*checkIfValid*/, bool /*implicit*/, uint8 /*auraScaleMask*/, TargetInfo& targetInfo) override
+    void OnScaleAuraUnitAdd(Spell* spell, Unit* target, uint32 effectMask, bool /*checkIfValid*/, bool /*implicit*/, uint32 /*auraScaleMask*/, TargetInfo& targetInfo) override
     {
         if (EverQuest->IsEnabled == false)
             return;
@@ -167,84 +167,84 @@ public:
         // An object illusion form and levitation crash the client the instant they overlap, so neither is ever allowed to land together
         if (EverQuest->IsLevitationBlockedByIllusionObjectForm(spellInfo, target) == true)
         {
-            uint8 levitationEffectMask = 0;
+            uint32 levitationEffectMask = 0;
             for (uint8 i = 0; i < MAX_SPELL_EFFECTS; ++i)
             {
                 if (spellInfo->Effects[i].Effect != SPELL_EFFECT_APPLY_AURA)
                     continue;
                 if (spellInfo->Effects[i].ApplyAuraName == SPELL_AURA_HOVER || spellInfo->Effects[i].ApplyAuraName == SPELL_AURA_FEATHER_FALL
                     || spellInfo->Effects[i].ApplyAuraName == SPELL_AURA_WATER_WALK)
-                    levitationEffectMask |= (uint8)(1 << i);
+                    levitationEffectMask |= (1u << i);
             }
-            targetInfo.effectMask = targetInfo.effectMask & (uint8)(~levitationEffectMask);
+            targetInfo.effectMask = targetInfo.effectMask & ~levitationEffectMask;
         }
         if (EverQuest->IsIllusionObjectFormBlockedByLevitation(spellInfo->Id, target) == true)
             targetInfo.effectMask = 0;
 
         // A charm a player put on a creature is never stripped by an ally dispel sweeping over it (Tremor Totem and the like)
-        uint8 charmProtectedEffectMask = EverQuest->GetCharmProtectedDispelEffectMaskForTarget(spellInfo, target);
+        uint32 charmProtectedEffectMask = EverQuest->GetCharmProtectedDispelEffectMaskForTarget(spellInfo, target);
         if (charmProtectedEffectMask != 0)
-            targetInfo.effectMask = targetInfo.effectMask & (uint8)(~charmProtectedEffectMask);
+            targetInfo.effectMask = targetInfo.effectMask & ~charmProtectedEffectMask;
 
         // An EverQuest boss ignores interrupts, unless it is in the middle of a heal
-        uint8 bossInterruptProtectedEffectMask = EverQuest->GetBossInterruptProtectedEffectMaskForTarget(spellInfo, target);
+        uint32 bossInterruptProtectedEffectMask = EverQuest->GetBossInterruptProtectedEffectMaskForTarget(spellInfo, target);
         if (bossInterruptProtectedEffectMask != 0)
-            targetInfo.effectMask = targetInfo.effectMask & (uint8)(~bossInterruptProtectedEffectMask);
+            targetInfo.effectMask = targetInfo.effectMask & ~bossInterruptProtectedEffectMask;
 
         // A player recently put under a creature's stun, fear, charm or mesmerize by an ability that does more than that is immune to more of it for a while
         bool isWholeSpellLossOfControlImmune = false;
-        uint8 lossOfControlImmuneEffectMask = EverQuest->GetCreatureLossOfControlImmuneEffectMaskForTarget(spell, target, isWholeSpellLossOfControlImmune);
+        uint32 lossOfControlImmuneEffectMask = EverQuest->GetCreatureLossOfControlImmuneEffectMaskForTarget(spell, target, isWholeSpellLossOfControlImmune);
         if (lossOfControlImmuneEffectMask != 0)
         {
             // Every effect adds the target on its own, so only the call carrying the first immune effect reports
-            uint8 firstImmuneEffectBit = (uint8)(lossOfControlImmuneEffectMask & (uint8)(~lossOfControlImmuneEffectMask + 1));
+            uint32 firstImmuneEffectBit = lossOfControlImmuneEffectMask & (~lossOfControlImmuneEffectMask + 1);
             if (isWholeSpellLossOfControlImmune == true && (effectMask & firstImmuneEffectBit) != 0 && spell->GetOriginalCaster() != nullptr)
                 spell->GetOriginalCaster()->SendSpellMiss(target, spellInfo->Id, SPELL_MISS_IMMUNE);
-            targetInfo.effectMask = targetInfo.effectMask & (uint8)(~lossOfControlImmuneEffectMask);
+            targetInfo.effectMask = targetInfo.effectMask & ~lossOfControlImmuneEffectMask;
         }
 
         // An EverQuest boss is never silenced
-        uint8 bossSilenceProtectedEffectMask = EverQuest->GetBossSilenceProtectedEffectMaskForTarget(spellInfo, target);
+        uint32 bossSilenceProtectedEffectMask = EverQuest->GetBossSilenceProtectedEffectMaskForTarget(spellInfo, target);
         if (bossSilenceProtectedEffectMask != 0)
-            targetInfo.effectMask = targetInfo.effectMask & (uint8)(~bossSilenceProtectedEffectMask);
+            targetInfo.effectMask = targetInfo.effectMask & ~bossSilenceProtectedEffectMask;
 
         // A WoW stun is held to the same level rule the EverQuest stun spells already follow
-        uint8 creatureStunProtectedEffectMask = EverQuest->GetCreatureStunProtectedEffectMaskForTarget(spellInfo, target, spell->GetCaster()->ToUnit());
+        uint32 creatureStunProtectedEffectMask = EverQuest->GetCreatureStunProtectedEffectMaskForTarget(spellInfo, target, spell->GetCaster()->ToUnit());
         if (creatureStunProtectedEffectMask != 0)
-            targetInfo.effectMask = targetInfo.effectMask & (uint8)(~creatureStunProtectedEffectMask);
+            targetInfo.effectMask = targetInfo.effectMask & ~creatureStunProtectedEffectMask;
 
         // Chained crowd control a player is already diminished to immune against never lands, so it cannot interrupt a cast
-        uint8 pvpImmuneEffectMask = EverQuest->GetPvPChainedCrowdControlImmuneEffectMaskForTarget(spell, target);
+        uint32 pvpImmuneEffectMask = EverQuest->GetPvPChainedCrowdControlImmuneEffectMaskForTarget(spell, target);
         if (pvpImmuneEffectMask != 0)
         {
             // Every effect adds the target on its own, so only the call carrying the first aura effect reports
-            uint8 firstImmuneEffectBit = (uint8)(pvpImmuneEffectMask & (uint8)(~pvpImmuneEffectMask + 1));
+            uint32 firstImmuneEffectBit = pvpImmuneEffectMask & (~pvpImmuneEffectMask + 1);
             if ((effectMask & firstImmuneEffectBit) != 0 && spell->GetOriginalCaster() != nullptr)
                 spell->GetOriginalCaster()->SendSpellMiss(target, spellInfo->Id, SPELL_MISS_IMMUNE);
-            targetInfo.effectMask = targetInfo.effectMask & (uint8)(~pvpImmuneEffectMask);
+            targetInfo.effectMask = targetInfo.effectMask & ~pvpImmuneEffectMask;
         }
 
         // EverQuest charms have no hold on players in pvp
-        uint8 pvpCharmImmuneEffectMask = EverQuest->GetPvPEQCharmImmuneEffectMaskForTarget(spell, target);
+        uint32 pvpCharmImmuneEffectMask = EverQuest->GetPvPEQCharmImmuneEffectMaskForTarget(spell, target);
         if (pvpCharmImmuneEffectMask != 0)
         {
-            uint8 firstImmuneEffectBit = (uint8)(pvpCharmImmuneEffectMask & (uint8)(~pvpCharmImmuneEffectMask + 1));
+            uint32 firstImmuneEffectBit = pvpCharmImmuneEffectMask & (~pvpCharmImmuneEffectMask + 1);
             Unit* immuneReportCaster = (spell->GetOriginalCaster() != nullptr) ? spell->GetOriginalCaster() : spell->GetCaster()->ToUnit();
             if ((effectMask & firstImmuneEffectBit) != 0 && immuneReportCaster != nullptr)
                 immuneReportCaster->SendSpellMiss(target, spellInfo->Id, SPELL_MISS_IMMUNE);
-            targetInfo.effectMask = targetInfo.effectMask & (uint8)(~pvpCharmImmuneEffectMask);
+            targetInfo.effectMask = targetInfo.effectMask & ~pvpCharmImmuneEffectMask;
         }
 
         if (EverQuest->ShouldStripBashKickStunBeforeItLands(spellInfo->Id, target) == false)
             return;
 
-        uint8 stunEffectMask = 0;
+        uint32 stunEffectMask = 0;
         for (uint8 i = 0; i < MAX_SPELL_EFFECTS; ++i)
             if (spellInfo->Effects[i].Effect == SPELL_EFFECT_APPLY_AURA && spellInfo->Effects[i].ApplyAuraName == SPELL_AURA_MOD_STUN)
-                stunEffectMask |= (uint8)(1 << i);
+                stunEffectMask |= (1u << i);
         if (stunEffectMask == 0)
             return;
-        targetInfo.effectMask = targetInfo.effectMask & (uint8)(~stunEffectMask);
+        targetInfo.effectMask = targetInfo.effectMask & ~stunEffectMask;
     }
 
     void OnSpellPrepare(Spell* spell, Unit* caster, SpellInfo const* spellInfo) override

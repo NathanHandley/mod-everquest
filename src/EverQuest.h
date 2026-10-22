@@ -54,7 +54,7 @@ class ByteBuffer;
 struct AreaTrigger;
 struct BuildValuesCachePosPointers;
 
-#define EQ_MOD_VERSION                              132
+#define EQ_MOD_VERSION                              133
 
 #define EQ_MOVEMENT_CAST_SNARE_DURATION_BUFFER_IN_MS 2000 // How much longer than the remaining cast time the casting slow is given, so a pushed-back cast keeps it
 
@@ -549,10 +549,9 @@ public:
     uint8 IllusionObjectClass = EQ_ILLUSION_OBJECT_CLASS_NONE;
     float ManaGainSpellPowerCoefficient = 0.0f;
     bool DamageIsFixed = false;
-    float IntensifyingRampStartMultipliers[3] = { 0.0f, 0.0f, 0.0f }; // Per spell effect index.  First tick as a fraction of the average tick for an EQ intensifying ("Splurt") formula, 0 = no ramp
+    float IntensifyingRampStartMultipliers[MAX_SPELL_EFFECTS] = { }; // Per spell effect index.  First tick as a fraction of the average tick for an EQ intensifying ("Splurt") formula, 0 = no ramp
     uint32 CasterVisualKitID = 0; // SpellVisualKit played on a creature caster when the spell goes off (instant dragon breaths, whose own visual leaves it out)
     bool CreatureLossOfControlGrantsImmunity = false; // When a creature lands this spell's stun, fear, charm or mesmerize on a player, the player gets a short immunity to it
-    bool HideAuraIcon = false; // A split block left visible only so its damage or healing shows in the combat log, whose icon would duplicate the base spell's
     uint8 EQResistType = 0; // EQ resist type (1 Magic, 2 Fire, 3 Cold, 4 Poison, 5 Disease) whose resist the target rolls against, 0 = no EQ resist roll
     bool IsEQPartialResistCapable = false; // TAKP IsPartialCapableSpell, so only a deep resist roll fully resists it
 };
@@ -2043,7 +2042,6 @@ public:
     unordered_map<uint32, EverQuestItemTemplate> ItemTemplatesByEntryID;
     unordered_map<uint64, vector<EverQuestGearSwapCandidate>> GearSwapCandidatesByLookupKey;
     unordered_set<uint32> WornEffectSpellIDs;
-    unordered_set<uint32> HiddenAuraIconSpellIDs;
     unordered_set<uint32> EQWeaponPoisonProcSpellIDs;
     unordered_map<uint32, SpellInfo*> LoadedEQSpellInfosBySpellID;
     unordered_set<uint32> PerCasterDoTSpellIDs; // Every converted spell that keeps one copy per caster so each caster's damage over time lands, built once at startup, read-only after
@@ -2227,7 +2225,6 @@ public:
     void BuildAuctionScanResultPacket(EverQuestAuctionSearchScan& scan, WorldPacket& resultPacket);
     void SendAuctionScanResultPacket(WorldSession* session, WorldPacket& resultPacket);
     bool IsWornEffectSpell(uint32 spellID);
-    bool IsHiddenAuraIconSpell(uint32 spellID);
     bool IsNeverLootStackItem(uint32 itemTemplateEntryID);
     bool IsItemEquipAuraSpell(SpellInfo const* spellInfo);
     void RemoveOrphanedItemEquipAurasForPlayer(Player* player);
@@ -2311,7 +2308,7 @@ public:
     void CastWeaponProcSpell(Player* player, Unit* victim, uint32 spellID);
     bool IsCastingWeaponProcSpell();
     bool IsCreatureCharmBlockedByCharmLimits(uint32 spellID, Unit* target, Unit* caster);
-    uint8 GetCharmProtectedDispelEffectMaskForTarget(SpellInfo const* spellInfo, Unit* target);
+    uint32 GetCharmProtectedDispelEffectMaskForTarget(SpellInfo const* spellInfo, Unit* target);
     bool IsHealingSpell(SpellInfo const* spellInfo);
     bool IsGateSpell(SpellInfo const* spellInfo);
     bool IsDispelSpell(SpellInfo const* spellInfo);
@@ -2319,16 +2316,16 @@ public:
     bool IsUnitCastingGateSpell(Unit* unit);
     bool IsUnitCastingDispelSpell(Unit* unit);
     bool IsEQBossTierCreature(Unit* unit);
-    uint8 GetBossInterruptProtectedEffectMaskForTarget(SpellInfo const* spellInfo, Unit* target);
-    uint8 GetBossSilenceProtectedEffectMaskForTarget(SpellInfo const* spellInfo, Unit* target);
-    uint8 GetCreatureStunProtectedEffectMaskForTarget(SpellInfo const* spellInfo, Unit* target, Unit* caster);
+    uint32 GetBossInterruptProtectedEffectMaskForTarget(SpellInfo const* spellInfo, Unit* target);
+    uint32 GetBossSilenceProtectedEffectMaskForTarget(SpellInfo const* spellInfo, Unit* target);
+    uint32 GetCreatureStunProtectedEffectMaskForTarget(SpellInfo const* spellInfo, Unit* target, Unit* caster);
     bool ApplyBardSongFearDiminishingReturnsOnAuraApply(Unit* target, Aura* aura);
     void RemoveCreatureFearDiminishingReturnState(Creature* creature);
     DiminishingGroup GetEQCrowdControlDiminishingGroup(SpellInfo const* spellInfo);
     bool IsPvPCrowdControlDurationCappedForTarget(Unit* target, Unit* caster);
     bool IsCrowdControlAppliedPastCoreDiminishingReturns(SpellInfo const* spellInfo, DiminishingGroup group, Unit* target, Unit* caster);
     void ApplyPvPCrowdControlRulesToAuraMaxDuration(Aura const* aura, int32& maxDuration);
-    uint8 GetPvPChainedCrowdControlImmuneEffectMaskForTarget(Spell* spell, Unit* target);
+    uint32 GetPvPChainedCrowdControlImmuneEffectMaskForTarget(Spell* spell, Unit* target);
     bool HandlePvPChainedCrowdControlDiminishingReturnsOnAuraApply(Unit* target, Aura* aura);
     bool IsEQSnareSpell(SpellInfo const* spellInfo);
     bool IsPvPSnareAuraApplication(Unit* target, Unit* caster);
@@ -2343,12 +2340,12 @@ public:
     bool IsBardSongBlockedByRangedSlotInstrumentForPlayer(Player* player, uint32 spellID);
     bool HandleBardSongRangedSlotInstrumentOnCheckCast(Player* player, Spell* spell, SpellCastResult& result);
     void CancelBardSongsBlockedByRangedSlotInstrumentForPlayer(Player* player);
-    uint8 GetEQCharmEffectMask(SpellInfo const* spellInfo);
+    uint32 GetEQCharmEffectMask(SpellInfo const* spellInfo);
     bool IsEQCharmBlockedInPvP(SpellInfo const* spellInfo, Unit* target, Unit* caster);
-    uint8 GetPvPEQCharmImmuneEffectMaskForTarget(Spell* spell, Unit* target);
+    uint32 GetPvPEQCharmImmuneEffectMaskForTarget(Spell* spell, Unit* target);
     uint32 GetLossOfControlCategoryForSpellEffect(SpellInfo const* spellInfo, uint8 effectIndex);
     bool IsEQCreatureLossOfControlOnPlayer(SpellInfo const* spellInfo, Unit* caster, Unit* target);
-    uint8 GetCreatureLossOfControlImmuneEffectMaskForTarget(Spell* spell, Unit* target, bool& isWholeSpellImmune);
+    uint32 GetCreatureLossOfControlImmuneEffectMaskForTarget(Spell* spell, Unit* target, bool& isWholeSpellImmune);
     bool HandleCreatureLossOfControlOnPlayerAuraApply(Unit* target, Aura* aura);
     void ProcessEQFearBreakChecksForPlayer(Player* player, uint32 diff);
     SpellMissInfo RollEQSpellHitResultWithResistDiff(Unit* caster, Unit* target, SpellInfo const* spellInfo);

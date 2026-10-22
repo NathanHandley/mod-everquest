@@ -43,7 +43,7 @@ enum EverQuestTalentAlignmentRestriction : uint8
     EQTALENTRESTRICTION_PERIODIC_HEAL = 7,           // Only EQ spells with a heal over time effect
     EQTALENTRESTRICTION_PERIODIC_DAMAGE = 8,         // Only EQ spells with a damage over time effect
     EQTALENTRESTRICTION_CURE = 9,                    // EQ dispel / cure spells, reached regardless of the damage and healing flags
-    EQTALENTRESTRICTION_STRENGTH_DEBUFF = 10,        // The effect the modifier targets is a strength reduction, reached regardless of the damage and healing flags
+    EQTALENTRESTRICTION_STRENGTH_DEBUFF = 10,        // EQ spells with a strength reduction, reached regardless of the damage and healing flags
     EQTALENTRESTRICTION_PET_SUMMON = 11,             // EQ pet summoning spells, reached regardless of the damage and healing flags
     EQTALENTRESTRICTION_WEAPON_POISON = 12           // Spells that an EQ rogue weapon poison procs, reached regardless of the damage and healing flags
 };
@@ -64,6 +64,7 @@ public:
 
     void Load();
     bool ShouldTalentModAffectEQSpell(SpellInfo const* talentSpellInfo, SpellInfo const* eqSpellInfo, SpellModifier const* spellMod);
+    void SetTalentModEQSpellEffectReach(SpellInfo const* talentSpellInfo, SpellInfo const* eqSpellInfo, SpellModifier const* spellMod, uint8 effectIndex, bool& affected);
 
     static bool DoesSpellInfoDamage(SpellInfo const* spellInfo);
     static bool DoesSpellInfoHeal(SpellInfo const* spellInfo);
@@ -92,10 +93,22 @@ private:
     void BuildPlayerSpellsByFamily();
     bool BuildAlignmentForMask(SpellInfo const* talentSpellInfo, flag96 const& classMask, EverQuestTalentModAlignment& alignmentOut);
     void ApplyExplicitAlignmentsToSpell(uint32 targetSpellID, uint32 rowSpellID, std::vector<std::pair<uint8, EverQuestTalentModAlignment>> const& explicitAlignments, uint32& explicitModifierCount);
-    bool DoesAlignmentReachEQSpell(EverQuestTalentModAlignment const& alignment, SpellInfo const* eqSpellInfo, SpellModifier const* spellMod);
+    bool DoesAlignmentReachEQSpell(EverQuestTalentModAlignment const& alignment, SpellInfo const* eqSpellInfo);
+    static bool IsEffectWhatAlignmentIsAbout(EverQuestTalentModAlignment const& alignment, SpellInfo const* eqSpellInfo, uint8 effectIndex);
+    static bool IsPerEffectSpellModOp(int32 spellModOp);
     static bool IsEffectAStrengthReduction(SpellInfo const* spellInfo, uint8 effectIndex);
-    static bool DoesModTargetAStrengthReduction(SpellInfo const* eqSpellInfo, SpellModifier const* spellMod);
+    static bool DoesSpellInfoReduceStrength(SpellInfo const* spellInfo);
     static bool DoesEffectDealDamage(SpellInfo const* spellInfo, uint8 effectIndex);
+    static bool DoesEffectDealDirectDamage(SpellInfo const* spellInfo, uint8 effectIndex);
+    static bool DoesEffectDealPeriodicDamage(SpellInfo const* spellInfo, uint8 effectIndex);
+    static bool DoesEffectDealDirectHeal(SpellInfo const* spellInfo, uint8 effectIndex);
+    static bool DoesEffectDealPeriodicHeal(SpellInfo const* spellInfo, uint8 effectIndex);
+    static bool DoesEffectSummonAPet(SpellInfo const* spellInfo, uint8 effectIndex);
+    static bool DoesEffectDealAreaDamage(SpellInfo const* spellInfo, uint8 effectIndex);
+    static bool DoesEffectDealPointBlankAreaDamage(SpellInfo const* spellInfo, uint8 effectIndex);
+    static bool DoesEffectDealAreaHeal(SpellInfo const* spellInfo, uint8 effectIndex);
+    static bool IsSchoolOfAlignment(EverQuestTalentModAlignment const& alignment, SpellInfo const* eqSpellInfo);
+    static bool IsTalentEffectTheModSource(SpellInfo const* talentSpellInfo, uint8 talentEffectIndex, SpellModifier const* spellMod);
     static bool IsEQSpell(SpellInfo const* spellInfo);
     static uint64 MakeAlignmentKey(uint32 talentSpellID, uint8 effectIndex)
     {

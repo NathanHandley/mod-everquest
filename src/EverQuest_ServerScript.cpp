@@ -107,6 +107,8 @@ static size_t GetAuraUpdateEntryEndPosition(WorldPacket const& packet, size_t po
         return pos;
     uint8 flags = packet.read<uint8>(pos);
     pos += 3; // Flags, caster level, stack amount or charges
+    if ((flags & AFLAG_EXTENDED_EFFECTS) != 0)
+        pos += 2; // Active effects past the third
     if ((flags & AFLAG_CASTER) == 0)
     {
         uint64 casterGUID = 0;
@@ -118,15 +120,12 @@ static size_t GetAuraUpdateEntryEndPosition(WorldPacket const& packet, size_t po
 }
 
 // Creatures carry the worn effect auras of the loot they rolled (ApplyLootWornEffectAuras), and EverQuest.CreatureWornEffects.HideAuraIcons keeps those icons off the client while
-// the effect stays.  Split blocks that are only left visible so their damage or healing reaches the combat log (mod_everquest_spell.HideAuraIcon) are kept off every unit, since
-// the base spell already shows the icon.  The visible aura slot belongs to the core, so the entries are taken out of the aura packets on the way out instead.  Players' own worn auras are untouched
+// the effect stays.  The visible aura slot belongs to the core, so the entries are taken out of the aura packets on the way out instead.  Players' own worn auras are untouched
 static bool IsAuraIconHiddenFromClient(bool isCreatureTarget, uint32 spellID)
 {
     // The client draws carried light from the light source aura, so it must always reach every client (it hides its own icon)
     if (EverQuest->IsCarriedLightSpell(spellID) == true)
         return false;
-    if (EverQuest->IsHiddenAuraIconSpell(spellID) == true)
-        return true;
     return isCreatureTarget == true && EverQuest->ConfigCreatureWornEffectsHideAuraIcons == true && EverQuest->IsWornEffectSpell(spellID) == true;
 }
 
@@ -134,7 +133,7 @@ static bool HandleAuraUpdatePacketSend(WorldSession* session, WorldPacket const&
 {
     if (EverQuest->IsEnabled == false)
         return true;
-    if (EverQuest->ConfigCreatureWornEffectsHideAuraIcons == false && EverQuest->HiddenAuraIconSpellIDs.empty() == true)
+    if (EverQuest->ConfigCreatureWornEffectsHideAuraIcons == false)
         return true;
 
     try

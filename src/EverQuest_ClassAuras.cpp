@@ -1106,25 +1106,6 @@ static void RestartPeriodicDamageTicksIfOutOfCount(Aura* aura)
     }
 }
 
-// Whether the aura of one spell is what keeps the aura of another on its target, directly or through the split blocks between them
-static bool DoesSpellAuraChainToSpell(uint32 spellID, uint32 chainedSpellID, uint8 depth)
-{
-    // A split block can chain a further split block, but never deeply
-    if (depth > 3)
-        return false;
-    std::vector<int32> const* linkedSpellIDs = sSpellMgr->GetSpellLinked((int32)spellID + SPELL_LINK_AURA);
-    if (linkedSpellIDs == nullptr)
-        return false;
-    for (int32 linkedSpellID : *linkedSpellIDs)
-    {
-        if (linkedSpellID <= 0)
-            continue;
-        if ((uint32)linkedSpellID == chainedSpellID || DoesSpellAuraChainToSpell((uint32)linkedSpellID, chainedSpellID, depth + 1) == true)
-            return true;
-    }
-    return false;
-}
-
 void EverQuestMod::HandleClassAuraShamanStrike(Unit* attacker, Unit* victim)
 {
     if (IsClassAuraSystemEnabled() == false)
@@ -1141,9 +1122,7 @@ void EverQuestMod::HandleClassAuraShamanStrike(Unit* attacker, Unit* victim)
     // Every swing extends one damage over time effect, the one closest to running out, and only out of those this shaman put on the target.  Another caster's copy
     // of the same spell is never touched.  Time is only ever given back up to the duration the effect landed with, so one already at its full duration is passed over
     ObjectGuid shamanGUID = shaman->GetGUID();
-    std::vector<Aura*> shamanAuras;
-    size_t soonestAuraIndex = 0;
-    bool hasSoonestAura = false;
+    Aura* soonestAura = nullptr;
     Unit::AuraApplicationMap const& victimAuras = victim->GetAppliedAuras();
     for (Unit::AuraApplicationMap::const_iterator auraIter = victimAuras.begin(); auraIter != victimAuras.end(); ++auraIter)
     {
@@ -1153,55 +1132,17 @@ void EverQuestMod::HandleClassAuraShamanStrike(Unit* attacker, Unit* victim)
         // A channeled drain belongs to the channel, which ends it on its own schedule
         if (aura->GetSpellInfo()->IsChanneled() == true)
             continue;
-        shamanAuras.push_back(aura);
         if (IsPeriodicDamageAura(aura) == false || aura->GetDuration() >= aura->GetMaxDuration())
             continue;
-        if (hasSoonestAura == false || aura->GetDuration() < shamanAuras[soonestAuraIndex]->GetDuration())
-        {
-            soonestAuraIndex = shamanAuras.size() - 1;
-            hasSoonestAura = true;
-        }
+        if (soonestAura == nullptr || aura->GetDuration() < soonestAura->GetDuration())
+            soonestAura = aura;
     }
-    if (hasSoonestAura == false)
+    if (soonestAura == nullptr)
         return;
 
-    // One spell can be spread over several split blocks, each its own aura, and the core removes a chained block when the aura chaining it ends.  The blocks of
-    // the chosen spell are extended together so the damage is not cut off early and the spell still ends as one
-    std::vector<bool> isAuraInChain(shamanAuras.size(), false);
-    isAuraInChain[soonestAuraIndex] = true;
-    bool addedAny = true;
-    while (addedAny == true)
-    {
-        addedAny = false;
-        for (size_t i = 0; i < shamanAuras.size(); ++i)
-        {
-            if (isAuraInChain[i] == true)
-                continue;
-            for (size_t j = 0; j < shamanAuras.size(); ++j)
-            {
-                if (isAuraInChain[j] == false)
-                    continue;
-                if (DoesSpellAuraChainToSpell(shamanAuras[i]->GetId(), shamanAuras[j]->GetId(), 0) == false
-                    && DoesSpellAuraChainToSpell(shamanAuras[j]->GetId(), shamanAuras[i]->GetId(), 0) == false)
-                    continue;
-                isAuraInChain[i] = true;
-                addedAny = true;
-                break;
-            }
-        }
-    }
-    for (size_t i = 0; i < shamanAuras.size(); ++i)
-    {
-        if (isAuraInChain[i] == false)
-            continue;
-        Aura* aura = shamanAuras[i];
-        int32 newDurationInMS = std::min(aura->GetDuration() + extendInMS, aura->GetMaxDuration());
-        if (newDurationInMS <= aura->GetDuration())
-            continue;
-        aura->SetDuration(newDurationInMS);
-        RestartPeriodicDamageTicksIfOutOfCount(aura);
-        aura->SetNeedClientUpdateForTargets();
-    }
+    soonestAura->SetDuration(std::min(soonestAura->GetDuration() + extendInMS, soonestAura->GetMaxDuration()));
+    RestartPeriodicDamageTicksIfOutOfCount(soonestAura);
+    soonestAura->SetNeedClientUpdateForTargets();
 }
 
 // A spell counts as damaging when any one of its effects takes health outright or over time
@@ -2438,7 +2379,7 @@ static uint32 CountClassAuraRangerLaunchAmmoShots(Player* player, Spell* spell, 
     std::list<TargetInfo>* targetInfos = spell->GetUniqueTargetInfo();
     for (TargetInfo const& targetInfo : *targetInfos)
     {
-        uint8 effectMask = targetInfo.effectMask;
+        uint32 effectMask = targetInfo.effectMask;
         for (uint8 i = 0; i < MAX_SPELL_EFFECTS; ++i)
         {
             if ((effectMask & (1 << i)) == 0)

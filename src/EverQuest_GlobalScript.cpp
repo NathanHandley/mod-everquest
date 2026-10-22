@@ -134,7 +134,7 @@ public:
         if (hasAuraEffect == true && EverQuest->IsWornEffectSpell(spell->Id) == false && (EverQuest->ConfigSystemRoguePoisonMarkerSpellID == 0 || spell->Id != EverQuest->ConfigSystemRoguePoisonMarkerSpellID))
             spell->AttributesCu |= SPELL_ATTR0_CU_SINGLE_AURA_STACK;
 
-        // Damage over time is the exception to the shared copy, but which spells that covers can't be settled until every block of a split spell has its attributes, so
+        // Damage over time is the exception to the shared copy, but which spells that covers can't be settled until every spell chained to it has its attributes, so
         // it's finished at startup (BuildPerCasterDoTSpells)
         if (hasAuraEffect == true)
             EverQuest->RememberLoadedEQSpellInfo(spell);
@@ -164,8 +164,7 @@ public:
             {
                 if (spell->Effects[i].IsEffect() == false)
                     continue;
-                spell->AttributesCu &= ~(SPELL_ATTR0_CU_NEGATIVE_EFF0 << i);
-                spell->AttributesCu |= (SPELL_ATTR0_CU_POSITIVE_EFF0 << i);
+                spell->ForceEffectPositive(i);
             }
         }
     }
@@ -248,6 +247,18 @@ public:
         if (EverQuestTalentAlignment->ShouldTalentModAffectEQSpell(affectSpell, checkSpell, mod) == true)
             return false;
         return true;
+    }
+
+    void OnIsSpellEffectAffectedBySpellMod(SpellInfo const* affectSpell, SpellInfo const* checkSpell, SpellModifier const* mod, uint8 effIndex, bool& affected) override
+    {
+        // A talent that changes one effect of its WOW spells changes the matching effects of an EQ spell, wherever they sit among its 12
+        if (EverQuest->IsEnabled == false)
+            return;
+        if (EverQuest->ConfigSpellTalentAlignmentEnabled == false)
+            return;
+        if (affectSpell == nullptr || checkSpell == nullptr || mod == nullptr)
+            return;
+        EverQuestTalentAlignment->SetTalentModEQSpellEffectReach(affectSpell, checkSpell, mod, effIndex, affected);
     }
 };
 
