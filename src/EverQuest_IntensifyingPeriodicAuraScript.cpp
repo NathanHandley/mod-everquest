@@ -36,9 +36,16 @@ class EverQuest_IntensifyingPeriodicAuraScript : public AuraScript
             return;
         BaseAmountByEffectIndex[effectIndex] = amount;
 
-        // A new or recast effect starts the ramp over (a recast restarts the tick count before the amount is recalculated)
+        // A new or recast effect starts the ramp over (a recast restarts the tick count before the amount is recalculated).  A tick count the shaman
+        // class aura just restarted is also at 0 until the next tick, so a recalculation then only starts over if the duration was put back to full,
+        // which a recast does and the time given back almost never does
         if (aurEff->GetTickNumber() == 0)
+        {
+            if (IsTickRestartPendingByEffectIndex[effectIndex] == true && GetDuration() < GetMaxDuration())
+                return;
             TicksBeforeRestartByEffectIndex[effectIndex] = 0;
+            IsTickRestartPendingByEffectIndex[effectIndex] = false;
+        }
     }
 
 public:
@@ -50,6 +57,7 @@ public:
         if (effectIndex >= MAX_SPELL_EFFECTS)
             return;
         TicksBeforeRestartByEffectIndex[effectIndex] += aurEff->GetTickNumber();
+        IsTickRestartPendingByEffectIndex[effectIndex] = true;
     }
 
 private:
@@ -62,6 +70,9 @@ private:
         uint8 effectIndex = aurEff->GetEffIndex();
         if (effectIndex >= MAX_SPELL_EFFECTS)
             return;
+
+        // The restarted count is ticking again
+        IsTickRestartPendingByEffectIndex[effectIndex] = false;
 
         float rampStartMultiplier = EverQuest->GetSpellIntensifyingRampStartMultiplier(GetId(), effectIndex);
         if (rampStartMultiplier <= 0.0f)
@@ -97,6 +108,7 @@ private:
 
     int32 BaseAmountByEffectIndex[MAX_SPELL_EFFECTS] = { 0, 0, 0 };
     uint32 TicksBeforeRestartByEffectIndex[MAX_SPELL_EFFECTS] = { 0, 0, 0 };
+    bool IsTickRestartPendingByEffectIndex[MAX_SPELL_EFFECTS] = { };
 };
 
 void NoteEverQuestIntensifyingPeriodicTicksRestarting(AuraEffect const* auraEffect)

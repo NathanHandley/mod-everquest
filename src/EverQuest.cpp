@@ -11908,7 +11908,15 @@ bool EverQuestMod::IsSpellRipostedByCreatureEnrage(Spell* spell, Unit* target, S
     // An on next swing ability (Heroic Strike, Maul, Cleave, Raptor Strike) takes the place of a swing, so an enraged creature ripostes it the same as one.  Only
     // the target it was aimed at does, not the extra targets of Cleave or a glyphed Maul.  A result that is not about the swing landing (immune, evade, resist,
     // reflect) stands
-    if (spell == nullptr || target == nullptr || spell->IsNextMeleeSwingSpell() == false)
+    if (spell == nullptr || target == nullptr)
+        return false;
+
+    // A fresh result for the target this spell was aimed at replaces any riposte left by an earlier spell that had the same address (one that failed after
+    // picking its targets and was freed)
+    if (PendingEnrageRiposte.RipostedSpell == spell && target == spell->m_targets.GetUnitTarget())
+        PendingEnrageRiposte = EverQuestPendingEnrageRiposte();
+
+    if (spell->IsNextMeleeSwingSpell() == false)
         return false;
     if (missCondition != SPELL_MISS_NONE && missCondition != SPELL_MISS_MISS && missCondition != SPELL_MISS_DODGE && missCondition != SPELL_MISS_PARRY
         && missCondition != SPELL_MISS_BLOCK)
@@ -11939,6 +11947,20 @@ void EverQuestMod::HandleCreatureEnrageRiposteOnSpellCast(Spell* spell, Unit* ca
         return;
     ObjectGuid creatureGUID = PendingEnrageRiposte.CreatureGUID;
     PendingEnrageRiposte = EverQuestPendingEnrageRiposte();
+
+    // Only a cast that really holds the parry against that creature, never a later spell that took over the freed address of a failed one without
+    // reaching its target
+    bool isParriedTarget = false;
+    for (TargetInfo const& targetInfo : *spell->GetUniqueTargetInfo())
+    {
+        if (targetInfo.targetGUID == creatureGUID && targetInfo.missCondition == SPELL_MISS_PARRY)
+        {
+            isParriedTarget = true;
+            break;
+        }
+    }
+    if (isParriedTarget == false)
+        return;
 
     Unit* enragedCreature = ObjectAccessor::GetUnit(*caster, creatureGUID);
     if (enragedCreature == nullptr)

@@ -1089,6 +1089,7 @@ class EverQuestPlayerCarriedLightState
 {
 public:
     uint32 RefreshTimerMS = EQ_CARRIED_LIGHT_REFRESH_TIME_IN_MS; // Starts due, so the first update after tracking begins checks right away
+    vector<ObjectGuid> PendingCorpseRefreshGUIDs; // Corpses whose light this player's next update re-checks, after loot left them some way other than a plain loot
 };
 
 class EverQuestCorpseIllusionRestoreData
@@ -2473,6 +2474,7 @@ public:
     void RefreshCarriedLightForCreatureFromPreloadedLoot(Creature* creature);
     void RefreshCarriedLightForCreatureCorpse(Creature* creature);
     void QueueCarriedLightRefreshForPlayer(Player* player);
+    void QueueCarriedLightCorpseRefreshForPlayer(Player* player, ObjectGuid corpseGUID);
     void UpdateCarriedLightForPlayer(Player* player, uint32 diffInMS);
     void ClearCarriedLightTrackingForPlayer(ObjectGuid playerGUID);
     void HandleClassAuraShamanWarspiritRemove(Unit* unit, Aura* aura);

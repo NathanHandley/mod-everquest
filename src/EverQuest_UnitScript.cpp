@@ -372,7 +372,7 @@ public:
             // A Shaman turning Warspirit off loses the vigor it built
             EverQuest->HandleClassAuraShamanWarspiritRemove(unit, aurApp->GetBase());
 
-            // Standing up from a crouch lets the player attack and cast again
+            // Standing up from a crouch lets the player attack and cast again, and a crouched player stays unable to when a real pacify or silence ends
             EverQuest->HandleCrouchAuraRemove(unit, aurApp->GetBase());
 
             // Tell whoever cast a mesmerize who broke it, whether by damage, a mana drain, a dispel or a purging immunity

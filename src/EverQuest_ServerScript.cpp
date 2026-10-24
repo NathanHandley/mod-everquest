@@ -499,6 +499,14 @@ public:
             return EverQuest->HandleCrouchAttackSwingPacketReceive(session, packet);
         if (packet.GetOpcode() == CMSG_CANCEL_AURA)
             return EverQuest->HandleCrouchCancelAuraPacketReceive(session, packet);
+        if (packet.GetOpcode() == CMSG_LOOT_MASTER_GIVE)
+        {
+            // The master looter's next update re-checks the light of the corpse, once the item handed out is marked looted.  The handler only gives from
+            // the corpse the master looter has open
+            if (EverQuest->IsEnabled == true && session->GetPlayer() != nullptr)
+                EverQuest->QueueCarriedLightCorpseRefreshForPlayer(session->GetPlayer(), session->GetPlayer()->GetLootGUID());
+            return true;
+        }
         if (packet.GetOpcode() != CMSG_AUCTION_LIST_ITEMS)
             return true;
         if (EverQuest->IsEnabled == false)

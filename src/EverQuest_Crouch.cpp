@@ -107,8 +107,21 @@ void EverQuestMod::HandleCrouchAuraApply(Unit* unit, Aura* aura)
 
 void EverQuestMod::HandleCrouchAuraRemove(Unit* unit, Aura* aura)
 {
-    if (unit == nullptr || aura == nullptr || IsCrouchSpell(aura->GetId()) == false || unit->IsPlayer() == false)
+    if (unit == nullptr || aura == nullptr || unit->IsPlayer() == false)
         return;
+
+    // A real pacify or silence ending clears its flag even while the player is still crouched (this runs after the aura's effects
+    // are taken off), so put the flags back for the crouch
+    if (IsCrouchSpell(aura->GetId()) == false)
+    {
+        if (IsPlayerCrouched(unit->ToPlayer()) == false)
+            return;
+        if (aura->HasEffectType(SPELL_AURA_MOD_PACIFY) == true || aura->HasEffectType(SPELL_AURA_MOD_PACIFY_SILENCE) == true)
+            unit->SetUnitFlag(UNIT_FLAG_PACIFIED);
+        if (aura->HasEffectType(SPELL_AURA_MOD_SILENCE) == true || aura->HasEffectType(SPELL_AURA_MOD_PACIFY_SILENCE) == true)
+            unit->SetUnitFlag(UNIT_FLAG_SILENCED);
+        return;
+    }
 
     // Leave the flags to any real pacify or silence still on the player
     if (unit->HasPacifyAura() == false && unit->HasPacifySilenceAura() == false)

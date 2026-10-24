@@ -547,6 +547,16 @@ public:
         EverQuest->QueueCarriedLightRefreshForPlayer(player);
     }
 
+    void OnPlayerGroupRollRewardItem(Player* player, Item* /*item*/, uint32 /*count*/, RollVote /*voteType*/, Roll* roll) override
+    {
+        if (EverQuest->IsEnabled == false)
+            return;
+
+        // A corpse stops glowing once its light source is won.  The item is already marked looted, but this can run on a thread other than the winner's
+        if (roll != nullptr && roll->getLoot() != nullptr)
+            EverQuest->QueueCarriedLightCorpseRefreshForPlayer(player, roll->getLoot()->sourceWorldObjectGUID);
+    }
+
     void OnPlayerUpdate(Player* player, uint32 p_time) override
     {
         if (EverQuest->IsEnabled == false)

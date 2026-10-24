@@ -55,6 +55,10 @@ public:
             spell->AttributesEx3 |= SPELL_ATTR3_ALLOW_AURA_WHILE_DEAD;
         }
 
+        // A creature's light source is only put on when it enters the world, so an evade must not take it away
+        if (EverQuest->IsCarriedLightSpell(spell->Id))
+            spell->AttributesCu |= SPELL_ATTR0_CU_IGNORE_EVADE;
+
         // Since _ApplyAllItemMods runs at login, setting not save here prevest auras from hanging over and duplicating up
         if (EverQuest->IsItemEquipAuraSpell(spell) == true)
             spell->AttributesCu |= SPELL_ATTR0_CU_AURA_CANNOT_BE_SAVED;

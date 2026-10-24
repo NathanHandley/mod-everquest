@@ -41,9 +41,10 @@ using namespace std;
 //
 // Threading: the periodic check runs from OnPlayerUpdate on the player's map thread.  Login, logout and startup run on the
 // world thread, outside the map update window, and the item hooks run on whichever of the two is processing the player.
-// The light types and spell ID start are loaded once at startup and only read after.  The per-player timer map is guarded
-// by RuntimeStateMutex, held only around find/insert/erase, and each player's entry is only touched by the thread
-// processing that player.  The lock is never held across the aura calls, which can re-enter mod hooks.
+// The light types and spell ID start are loaded once at startup and only read after.  The per-player state map and its
+// entries are guarded by RuntimeStateMutex, since a group roll can finish on another map's thread and queue a corpse
+// re-check for its winner.  Queued corpses are only looked up in the player's own map on the player's own update.  The
+// lock is never held across the aura calls, which can re-enter mod hooks.
 
 bool EverQuestMod::IsCarriedLightSpell(uint32 spellID)
 {
@@ -227,19 +228,57 @@ void EverQuestMod::RefreshCarriedLightForCreatureFromPreloadedLoot(Creature* cre
     ApplyCarriedLightAuraForUnit(creature, lightType);
 }
 
+// A free for all item is never marked looted on the corpse, since everyone gets their own copy, so it counts as taken once anyone has taken theirs
+static bool HasAnyPlayerLootedFreeForAllItem(QuestItemMap const& playerItems, uint8 lootIndex)
+{
+    for (QuestItemMap::const_iterator playerItr = playerItems.begin(); playerItr != playerItems.end(); ++playerItr)
+    {
+        if (playerItr->second == nullptr)
+            continue;
+        for (QuestItem const& playerItem : *playerItr->second)
+            if (playerItem.index == lootIndex && playerItem.is_looted == true)
+                return true;
+    }
+    return false;
+}
+
 void EverQuestMod::RefreshCarriedLightForCreatureCorpse(Creature* creature)
 {
-    // Runs from OnPlayerLootItem on the looter's map thread, which is the corpse's.  Only the items still on the corpse count
+    // Runs on the corpse's map thread, from OnPlayerLootItem or the update of a player who handed out or won its loot.  Only the items still on the corpse count
     if (creature == nullptr || CarriedLightSpellsAvailable == false || creature->IsAlive() == true)
         return;
     vector<uint32> remainingItemTemplateIDs;
-    for (LootItem const& lootItem : creature->loot.items)
-        if (lootItem.is_looted == false)
-            remainingItemTemplateIDs.push_back(lootItem.itemid);
-    for (LootItem const& lootItem : creature->loot.quest_items)
-        if (lootItem.is_looted == false)
-            remainingItemTemplateIDs.push_back(lootItem.itemid);
+    for (size_t itemIndex = 0; itemIndex < creature->loot.items.size(); ++itemIndex)
+    {
+        LootItem const& lootItem = creature->loot.items[itemIndex];
+        if (lootItem.is_looted == true)
+            continue;
+        if (lootItem.freeforall == true && HasAnyPlayerLootedFreeForAllItem(creature->loot.GetPlayerFFAItems(), (uint8)itemIndex) == true)
+            continue;
+        remainingItemTemplateIDs.push_back(lootItem.itemid);
+    }
+    for (size_t itemIndex = 0; itemIndex < creature->loot.quest_items.size(); ++itemIndex)
+    {
+        LootItem const& lootItem = creature->loot.quest_items[itemIndex];
+        if (lootItem.is_looted == true)
+            continue;
+        if (lootItem.freeforall == true && HasAnyPlayerLootedFreeForAllItem(creature->loot.GetPlayerQuestItems(), (uint8)itemIndex) == true)
+            continue;
+        remainingItemTemplateIDs.push_back(lootItem.itemid);
+    }
     ApplyCarriedLightAuraForUnit(creature, CalculateCarriedLightTypeForItemTemplateIDs(remainingItemTemplateIDs));
+}
+
+void EverQuestMod::QueueCarriedLightCorpseRefreshForPlayer(Player* player, ObjectGuid corpseGUID)
+{
+    // Master loot and group rolls take items off a corpse without OnPlayerLootItem, and the item is only marked looted after the hooks they do have (a roll
+    // can also finish on the corpse's map thread for a winner on another map).  So the corpse is re-checked on this player's next update on their own map thread
+    if (player == nullptr || CarriedLightSpellsAvailable == false || corpseGUID.IsCreatureOrVehicle() == false)
+        return;
+    std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+    unordered_map<ObjectGuid, EverQuestPlayerCarriedLightState>::iterator carriedLightStateItr = PlayerCarriedLightStatesByPlayerGUID.find(player->GetGUID());
+    if (carriedLightStateItr != PlayerCarriedLightStatesByPlayerGUID.end())
+        carriedLightStateItr->second.PendingCorpseRefreshGUIDs.push_back(corpseGUID);
 }
 
 void EverQuestMod::QueueCarriedLightRefreshForPlayer(Player* player)
@@ -259,19 +298,29 @@ void EverQuestMod::UpdateCarriedLightForPlayer(Player* player, uint32 diffInMS)
     if (player == nullptr || CarriedLightSpellsAvailable == false)
         return;
 
-    EverQuestPlayerCarriedLightState* carriedLightState = nullptr;
+    // The periodic check is the authority, since moving items around the backpack has no hook and other things (death, class switches,
+    // aura clears) can take the aura away.  The state is only read and written under the lock, since a group roll can queue work for this
+    // player from another map's thread
+    bool isRefreshDue = false;
+    vector<ObjectGuid> corpseRefreshGUIDs;
     {
         std::lock_guard<std::mutex> lock(RuntimeStateMutex);
-        carriedLightState = &PlayerCarriedLightStatesByPlayerGUID[player->GetGUID()];
+        EverQuestPlayerCarriedLightState& carriedLightState = PlayerCarriedLightStatesByPlayerGUID[player->GetGUID()];
+        carriedLightState.RefreshTimerMS += diffInMS;
+        if (carriedLightState.RefreshTimerMS >= EQ_CARRIED_LIGHT_REFRESH_TIME_IN_MS)
+        {
+            carriedLightState.RefreshTimerMS = 0;
+            isRefreshDue = true;
+        }
+        corpseRefreshGUIDs.swap(carriedLightState.PendingCorpseRefreshGUIDs);
     }
 
-    // The periodic check is the authority, since moving items around the backpack has no hook and other things (death, class switches,
-    // aura clears) can take the aura away
-    carriedLightState->RefreshTimerMS += diffInMS;
-    if (carriedLightState->RefreshTimerMS < EQ_CARRIED_LIGHT_REFRESH_TIME_IN_MS)
-        return;
-    carriedLightState->RefreshTimerMS = 0;
-    RefreshCarriedLightForPlayer(player);
+    // A corpse on another map than this player's is left alone
+    for (ObjectGuid const& corpseGUID : corpseRefreshGUIDs)
+        RefreshCarriedLightForCreatureCorpse(player->GetMap()->GetCreature(corpseGUID));
+
+    if (isRefreshDue == true)
+        RefreshCarriedLightForPlayer(player);
 }
 
 void EverQuestMod::ClearCarriedLightTrackingForPlayer(ObjectGuid playerGUID)
