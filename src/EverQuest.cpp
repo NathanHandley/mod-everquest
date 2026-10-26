@@ -645,7 +645,7 @@ void EverQuestMod::LoadConfigurationFile()
 void EverQuestMod::LoadCreatureData()
 {
     CreaturesByTemplateID.clear();
-    QueryResult queryResult = WorldDatabase.Query("SELECT CreatureTemplateID, CanShowHeldLootItems, CanShowHeldLootShields, SpawnLimit, RangedAttackEnabled, RangedAttackMinRange, RangedAttackMaxRange, RangedAttackDamageModPct, AgroSocialDistanceMod, EnrageEnabled, EnrageHPPct, EnrageDurationInMS, EnrageCooldownInMS, FlurryEnabled, FlurryChancePct, RampageEnabled, RampageChancePct, RampageRange, RampageDamagePct, WildRampageEnabled, WildRampageChancePct, WildRampageMaxTargets, WildRampageDamagePct, AttackRoundTimeInMS, DifficultyType, GossipIsOnlyFromHailText, SpellDamageMultiplier, GossipHelloAchievementID FROM mod_everquest_creature ORDER BY CreatureTemplateID;");
+    QueryResult queryResult = WorldDatabase.Query("SELECT CreatureTemplateID, CanShowHeldLootItems, CanShowHeldLootShields, SpawnLimit, RangedAttackEnabled, RangedAttackMinRange, RangedAttackMaxRange, RangedAttackDamageModPct, AgroSocialDistanceMod, EnrageEnabled, EnrageHPPct, EnrageDurationInMS, EnrageCooldownInMS, FlurryEnabled, FlurryChancePct, RampageEnabled, RampageChancePct, RampageRange, RampageDamagePct, WildRampageEnabled, WildRampageChancePct, WildRampageMaxTargets, WildRampageDamagePct, AttackRoundTimeInMS, DifficultyType, GossipIsOnlyFromHailText, SpellDamageMultiplier, GossipHelloAchievementID, DefaultHeldMainhandItemID, DefaultHeldOffhandItemID FROM mod_everquest_creature ORDER BY CreatureTemplateID;");
     if (queryResult)
     {
         do
@@ -681,6 +681,8 @@ void EverQuestMod::LoadCreatureData()
             everQuestCreature.GossipIsOnlyFromHailText = fields[25].Get<bool>();
             everQuestCreature.SpellDamageMultiplier = fields[26].Get<float>();
             everQuestCreature.GossipHelloAchievementID = fields[27].Get<uint32>();
+            everQuestCreature.DefaultHeldMainhandItemID = fields[28].Get<uint32>();
+            everQuestCreature.DefaultHeldOffhandItemID = fields[29].Get<uint32>();
             CreaturesByTemplateID[everQuestCreature.CreatureTemplateID] = everQuestCreature;
         } while (queryResult->NextRow());
     }

@@ -268,7 +268,7 @@ private:
         EverQuest->ClearVisualEquippedItemsForCreatureGUID(creature->GetMap(), creature->GetGUID());
 
         EverQuestCreature eqCreature = EverQuest->GetCreatureDataForCreatureTemplateID(creature->GetEntry());
-        if (eqCreature.CanShowHeldLootItems == false || EverQuest->HasPreloadedLootItemIDsForCreatureGUID(creature->GetMap(), creature->GetGUID()) == false)
+        if (eqCreature.CanShowHeldLootItems == false)
             return;
 
         // Prioritize what items to show as worn
@@ -277,7 +277,10 @@ private:
         vector<ItemTemplate const*> shields;
         vector<ItemTemplate const*> heldItems;
         vector<ItemTemplate const*> fishingPoles;
-        for (uint32 itemTemplateID : EverQuest->GetPreloadedLootIDsForCreatureGUID(creature->GetMap(), creature->GetGUID()))
+        vector<uint32> preloadedLootItemTemplateIDs;
+        if (EverQuest->HasPreloadedLootItemIDsForCreatureGUID(creature->GetMap(), creature->GetGUID()) == true)
+            preloadedLootItemTemplateIDs = EverQuest->GetPreloadedLootIDsForCreatureGUID(creature->GetMap(), creature->GetGUID());
+        for (uint32 itemTemplateID : preloadedLootItemTemplateIDs)
         {
             uint32 itemTemplateForNPCEquipID = EverQuest->GetNPCEquipItemTemplateIDForItemTemplate(itemTemplateID);
             ItemTemplate const* itemTemplate = sObjectMgr->GetItemTemplate(itemTemplateForNPCEquipID);
@@ -328,6 +331,20 @@ private:
             }
             else if (heldItems.size() > 0)
                 offHandItem = heldItems[0];
+        }
+
+        // Without anything from the loot, show the creature's own weapon models like EQ does (only for show, so never dual wielding)
+        if (mainHandItem == nullptr && offHandItem == nullptr)
+        {
+            if (eqCreature.DefaultHeldMainhandItemID != 0)
+                mainHandItem = sObjectMgr->GetItemTemplate(EverQuest->GetNPCEquipItemTemplateIDForItemTemplate(eqCreature.DefaultHeldMainhandItemID));
+            bool isMainHandTwoHanded = mainHandItem != nullptr && mainHandItem->InventoryType == INVTYPE_2HWEAPON;
+            if (eqCreature.DefaultHeldOffhandItemID != 0 && isMainHandTwoHanded == false)
+            {
+                offHandItem = sObjectMgr->GetItemTemplate(EverQuest->GetNPCEquipItemTemplateIDForItemTemplate(eqCreature.DefaultHeldOffhandItemID));
+                if (offHandItem != nullptr && offHandItem->InventoryType == INVTYPE_SHIELD && eqCreature.CanShowHeldLootShields == false)
+                    offHandItem = nullptr;
+            }
         }
 
         // Show needed visuals
