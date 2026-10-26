@@ -177,8 +177,10 @@ private:
             && EverQuest->HasCreatureLootDataForCreatureTemplateEntryID(creature->GetEntry()) == false)
             return;
 
-        // Reset the ranged visual slot in case this creature object is being recycled
-        creature->SetUInt32Value(UNIT_VIRTUAL_ITEM_SLOT_ID + 2, 0);
+        // Reset the ranged visual slot in case this creature object is being recycled (SetVisualEquipment, which runs first, already did for
+        // creatures with creature data, and may have put their weapon model bow there)
+        if (EverQuest->HasCreatureDataForCreatureTemplateID(creature->GetEntry()) == false)
+            creature->SetUInt32Value(UNIT_VIRTUAL_ITEM_SLOT_ID + 2, 0);
 
         if (EverQuest->ConfigCombatSkillsRangedAttackEnabled == false || EverQuest->ConfigSystemRangedAttackSpellID == 0)
             return;
@@ -252,6 +254,11 @@ private:
         }
     }
 
+    static bool IsRangedInventoryType(uint32 inventoryType)
+    {
+        return inventoryType == INVTYPE_RANGED || inventoryType == INVTYPE_RANGEDRIGHT || inventoryType == INVTYPE_THROWN;
+    }
+
     void SetVisualEquipment(Creature* creature)
     {
         // Skip non-eq creatures
@@ -265,6 +272,7 @@ private:
         // Reset
         creature->SetUInt32Value(UNIT_VIRTUAL_ITEM_SLOT_ID + 0, 0);
         creature->SetUInt32Value(UNIT_VIRTUAL_ITEM_SLOT_ID + 1, 0);
+        creature->SetUInt32Value(UNIT_VIRTUAL_ITEM_SLOT_ID + 2, 0);
         EverQuest->ClearVisualEquippedItemsForCreatureGUID(creature->GetMap(), creature->GetGUID());
 
         EverQuestCreature eqCreature = EverQuest->GetCreatureDataForCreatureTemplateID(creature->GetEntry());
@@ -333,18 +341,37 @@ private:
                 offHandItem = heldItems[0];
         }
 
-        // Without anything from the loot, show the creature's own weapon models like EQ does (only for show, so never dual wielding)
+        // Without anything from the loot, show the creature's own weapon models like EQ does (only for show, so never dual wielding).  A bow
+        // (EQ's archers) goes in the ranged slot, drawn in hand when it's all the creature holds
+        ItemTemplate const* rangedItem = nullptr;
         if (mainHandItem == nullptr && offHandItem == nullptr)
         {
             if (eqCreature.DefaultHeldMainhandItemID != 0)
                 mainHandItem = sObjectMgr->GetItemTemplate(EverQuest->GetNPCEquipItemTemplateIDForItemTemplate(eqCreature.DefaultHeldMainhandItemID));
+            if (mainHandItem != nullptr && IsRangedInventoryType(mainHandItem->InventoryType) == true)
+            {
+                rangedItem = mainHandItem;
+                mainHandItem = nullptr;
+            }
             bool isMainHandTwoHanded = mainHandItem != nullptr && mainHandItem->InventoryType == INVTYPE_2HWEAPON;
             if (eqCreature.DefaultHeldOffhandItemID != 0 && isMainHandTwoHanded == false)
             {
                 offHandItem = sObjectMgr->GetItemTemplate(EverQuest->GetNPCEquipItemTemplateIDForItemTemplate(eqCreature.DefaultHeldOffhandItemID));
                 if (offHandItem != nullptr && offHandItem->InventoryType == INVTYPE_SHIELD && eqCreature.CanShowHeldLootShields == false)
                     offHandItem = nullptr;
+                if (offHandItem != nullptr && IsRangedInventoryType(offHandItem->InventoryType) == true)
+                {
+                    if (rangedItem == nullptr)
+                        rangedItem = offHandItem;
+                    offHandItem = nullptr;
+                }
             }
+        }
+        if (rangedItem != nullptr)
+        {
+            creature->SetUInt32Value(UNIT_VIRTUAL_ITEM_SLOT_ID + 2, rangedItem->ItemId);
+            if (mainHandItem == nullptr && offHandItem == nullptr)
+                creature->SetSheath(SHEATH_STATE_RANGED);
         }
 
         // Show needed visuals

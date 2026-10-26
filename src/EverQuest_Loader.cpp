@@ -14,6 +14,7 @@
 //  You should have received a copy of the GNU General Public License
 //  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+#include "EQAreaTriggerHooks.h"
 #include "EQMovementHooks.h"
 #include "EverQuest_MovementGenerator.h"
 
@@ -53,6 +54,7 @@ void AddEverQuestTransportScripts();
 void AddEverQuestGossipScripts();
 void AddEverQuestMiscScripts();
 void AddEverQuestAreaTriggerScripts();
+bool HandleEverQuestZoneLineAreaTriggerForGameMaster(Player* player, AreaTrigger const* trigger);
 void AddEverQuestSpellEffectScripts();
 
 void Addmod_everquestScripts()
@@ -93,6 +95,9 @@ void Addmod_everquestScripts()
 
     // EverQuest grids and roam boxes are the idle movement of spawns on EverQuest maps (the core asks through this hook)
     EverQuestMovementHooks::IdleMovementSelector = &SelectEverQuestIdleMovementGenerator;
+
+    // Game masters skip area trigger scripts, so the core hands their EverQuest zone lines over through this
+    EverQuestAreaTriggerHooks::GameMasterZoneLineHandler = &HandleEverQuestZoneLineAreaTriggerForGameMaster;
     AddEverQuestGossipScripts();
     AddEverQuestMiscScripts();
     AddEverQuestAreaTriggerScripts();

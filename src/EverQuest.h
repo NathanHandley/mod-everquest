@@ -419,6 +419,8 @@ struct BuildValuesCachePosPointers;
 #define EQ_MOVEMENT_ROAM_GROUND_SEARCH              300.0f  // How far down a roam point's floor is looked for
 #define EQ_MOVEMENT_DEFAULT_RANDOM_TIMER_IN_MS      14000   // The EQ server's random timer when its range is empty
 #define EQ_ZONE_LINE_KEPT_Z_LIFT                    0.5f    // Yards added to a height a zone line keeps from the player
+#define EQ_ZONE_LINE_GROUND_SEARCH_UP               20.0f   // How far above a kept height a zone line looks for the next zone's ground
+#define EQ_ZONE_LINE_GROUND_SEARCH_DOWN             60.0f   // How far below a kept height a zone line looks for the next zone's ground
 
 #define EQ_CROUCH_COLLISION_HEIGHT_SCALE            0.5f    // Crouched height as a share of standing height (EQ ducking needs half the headroom); the client does the shrinking
 #define EQ_CROUCH_STAND_UP_HEADROOM_MARGIN          0.1f    // Extra room needed above the standing head height to stand up from a crouch
@@ -2691,6 +2693,7 @@ public:
     // the trigger has no teleport row
     bool GetZoneLineDestination(Player* player, AreaTrigger const* trigger, uint32& mapID, float& x, float& y, float& z, float& orientation);
     bool DoesZoneLineKeepPlayerPosition(uint32 areaTriggerID);
+    bool HandleZoneLineAreaTrigger(Player* player, AreaTrigger const* trigger);
     bool TryZoneLineIntoInstanceRaidLow(Player* player, AreaTrigger const* trigger);
     uint32 GetInstanceDungeonMapIDForMap(uint32 mapID);
     bool IsMapInstanceDungeon(uint32 mapID);

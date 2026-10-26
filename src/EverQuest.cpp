@@ -13802,6 +13802,27 @@ bool EverQuestMod::DoesZoneLineKeepPlayerPosition(uint32 areaTriggerID)
     return ZoneLineKeepFlagsByAreaTriggerID.find(areaTriggerID) != ZoneLineKeepFlagsByAreaTriggerID.end();
 }
 
+bool EverQuestMod::HandleZoneLineAreaTrigger(Player* player, AreaTrigger const* trigger)
+{
+    if (IsEnabled == false || player == nullptr || trigger == nullptr)
+        return false;
+
+    // A raid still inside (or a corpse left behind) wins over dungeon mode, since a zone can have both kinds of instance copy
+    if (TryZoneLineIntoInstanceRaidLow(player, trigger) == true)
+        return true;
+    if (TryZoneLineIntoInstanceDungeon(player, trigger) == true)
+        return true;
+
+    // EQ zone lines that keep the player's own position on an axis can't be done by the teleport row, which only has fixed values
+    if (DoesZoneLineKeepPlayerPosition(trigger->entry) == false)
+        return false;
+    uint32 targetMapID = 0;
+    float targetX, targetY, targetZ, targetOrientation;
+    if (GetZoneLineDestination(player, trigger, targetMapID, targetX, targetY, targetZ, targetOrientation) == false)
+        return false;
+    return player->TeleportTo(targetMapID, targetX, targetY, targetZ, targetOrientation, TELE_TO_NOT_LEAVE_TRANSPORT);
+}
+
 bool EverQuestMod::GetZoneLineDestination(Player* player, AreaTrigger const* trigger, uint32& mapID, float& x, float& y, float& z, float& orientation)
 {
     if (player == nullptr || trigger == nullptr)
@@ -13817,8 +13838,9 @@ bool EverQuestMod::GetZoneLineDestination(Player* player, AreaTrigger const* tri
     z = areaTriggerTeleport->target_Z;
     orientation = areaTriggerTeleport->target_Orientation;
 
-    // EQ zones share one scale, so a value kept from the player lines up with the same spot along the next zone's edge.  A kept height
-    // gets a little lift so the player lands on the ground instead of in it
+    // EQ zones share one scale, so a value kept from the player lines up with the same spot along the next zone's edge (EQ's long zone
+    // lines, such as between the Commonlands, keep how far along the line the player was).  Ground heights there differ between the two
+    // zones, so the player lands on the next zone's floor near that height (EQ's best Z) instead of in it or above it
     auto keepFlagsIter = ZoneLineKeepFlagsByAreaTriggerID.find(trigger->entry);
     if (keepFlagsIter != ZoneLineKeepFlagsByAreaTriggerID.end())
     {
@@ -13831,6 +13853,15 @@ bool EverQuestMod::GetZoneLineDestination(Player* player, AreaTrigger const* tri
             z = player->GetPositionZ() + EQ_ZONE_LINE_KEPT_Z_LIFT;
         if (keepFlags.KeepOrientation == true)
             orientation = player->GetOrientation();
+        if (keepFlags.KeepX == true || keepFlags.KeepY == true || keepFlags.KeepZ == true)
+        {
+            if (EQZoneMap const* targetZoneMap = sEQZoneMapMgr->GetZoneMap(mapID))
+            {
+                float groundZ = targetZoneMap->FindBestZ(x, y, z, EQ_ZONE_LINE_GROUND_SEARCH_UP, EQ_ZONE_LINE_GROUND_SEARCH_DOWN);
+                if (groundZ > EQ_ZONE_MAP_INVALID_HEIGHT)
+                    z = groundZ + EQ_ZONE_LINE_KEPT_Z_LIFT;
+            }
+        }
     }
     return true;
 }

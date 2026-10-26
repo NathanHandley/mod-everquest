@@ -18,6 +18,7 @@
 #include "Player.h"
 #include "ScriptMgr.h"
 
+#include "EQZoneMap.h"
 #include "EverQuest.h"
 
 using namespace std;
@@ -31,25 +32,17 @@ public:
 
     bool OnTrigger(Player* player, AreaTrigger const* trigger) override
     {
-        if (EverQuest->IsEnabled == false)
-            return false;
-
-        // A raid still inside (or a corpse left behind) wins over dungeon mode, since a zone can have both kinds of instance copy
-        if (EverQuest->TryZoneLineIntoInstanceRaidLow(player, trigger) == true)
-            return true;
-        if (EverQuest->TryZoneLineIntoInstanceDungeon(player, trigger) == true)
-            return true;
-
-        // EQ zone lines that keep the player's own position on an axis can't be done by the teleport row, which only has fixed values
-        if (EverQuest->DoesZoneLineKeepPlayerPosition(trigger->entry) == false)
-            return false;
-        uint32 targetMapID = 0;
-        float targetX, targetY, targetZ, targetOrientation;
-        if (EverQuest->GetZoneLineDestination(player, trigger, targetMapID, targetX, targetY, targetZ, targetOrientation) == false)
-            return false;
-        return player->TeleportTo(targetMapID, targetX, targetY, targetZ, targetOrientation, TELE_TO_NOT_LEAVE_TRANSPORT);
+        return EverQuest->HandleZoneLineAreaTrigger(player, trigger);
     }
 };
+
+// The core skips area trigger scripts for game masters, so it asks this for their zone lines (EverQuestAreaTriggerHooks)
+bool HandleEverQuestZoneLineAreaTriggerForGameMaster(Player* player, AreaTrigger const* trigger)
+{
+    if (trigger == nullptr || sEQZoneMapMgr->IsEverQuestMap(trigger->map) == false)
+        return false;
+    return EverQuest->HandleZoneLineAreaTrigger(player, trigger);
+}
 
 void AddEverQuestAreaTriggerScripts()
 {
