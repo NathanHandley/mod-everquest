@@ -54,7 +54,7 @@ class ByteBuffer;
 struct AreaTrigger;
 struct BuildValuesCachePosPointers;
 
-#define EQ_MOD_VERSION                              133
+#define EQ_MOD_VERSION                              134
 
 #define EQ_MOVEMENT_CAST_SNARE_DURATION_BUFFER_IN_MS 2000 // How much longer than the remaining cast time the casting slow is given, so a pushed-back cast keeps it
 
@@ -117,7 +117,8 @@ struct BuildValuesCachePosPointers;
 #define EQ_EQCLASS_WIZARD                           12
 #define EQ_EQCLASS_MAGICIAN                         13
 #define EQ_EQCLASS_ENCHANTER                        14
-#define EQ_EQCLASS_HIGHEST_ID                       14 // used by eqadvrestore, needed because "None" is an actual slot
+#define EQ_EQCLASS_BEASTLORD                        15
+#define EQ_EQCLASS_HIGHEST_ID                       15 // used by eqadvrestore, needed because "None" is an actual slot
 
 #define EQ_BASHKICKSTUN_BASE_CHANCE                 45
 #define EQ_BASHKICKSTUN_BASE_CHANCE_ABOVE_LEVEL_60  40
@@ -402,34 +403,28 @@ struct BuildValuesCachePosPointers;
 #define EQ_GRID_RANDOM_CENTER_POINT                 8
 #define EQ_GRID_RANDOM_PATH                         9
 
-#define EQ_CREATURE_MOVEMENT_NO_CUSTOM              0      
-#define EQ_CREATURE_MOVEMENT_CUSTOM_WAYPOINT        1
-#define EQ_CREATURE_MOVEMENT_CUSTOM_ROAMING         2
+#define EQ_GRID_PAUSE_TYPE_RANDOM_HALF              0       // EQ grid pause types (grid.type2)
+#define EQ_GRID_PAUSE_TYPE_FULL                     1
+#define EQ_GRID_PAUSE_TYPE_RANDOM                   2
 
-#define EQ_MOVE_RETURN_TO_AGRO_ID                   20000
-#define EQ_MOVE_TO_ROAM_POINT                       20001
-#define EQ_MOVE_TO_WAYPOINT_POINT                   20002
-
-#define EQ_MOVE_SMALL_STEP_SIZE_DISTANCE            10.0f   // Minimum distance between nodes when making small steps
-#define EQ_MOVE_SMALL_STEP_SIZE_LAST_DISTANCE       5.0f    // How much minimium distance to allow on the last node
-#define EQ_MOVE_SMALL_STEP_DISTANCE_TO_END          0.25f   // If within this distance, end movement to current node
-#define EQ_MOVE_UNDER_WATER_SURFACE_SKIM_REDICTION  3.0f    // How far to reduce a position if a tested z position hit water
-#define EQ_MOVE_TEST_Z_DOWN_AMOUNT_FOR_WATER_TEST   10.0f   // How far to test down when looking for water in the Z testing
-#define EQ_MOVE_MAX_PATH_NODES                      512     // Hard cap on generated step nodes
+#define EQ_MOVEMENT_RESUME_DELAY_IN_MS              1000    // A mover waits this long before carrying on after combat (the EQ server's minimum loiter)
+#define EQ_MOVEMENT_ARRIVE_DISTANCE                 1.0f    // Within this many yards of a point counts as there
+#define EQ_MOVEMENT_MAX_TRAVEL_LEGS                 10      // A trip to one point is given up as arrived after this many cut short paths
+#define EQ_MOVEMENT_RANDOM_PATH_DEFAULT_PAUSE_IN_SEC 38     // A random path's pause at its destination when no waypoint sets one (EQ server value)
+#define EQ_MOVEMENT_LOS_HEIGHT                      2.0f    // Line of sight to waypoints is checked this far above the floor
+#define EQ_MOVEMENT_ROAM_RETURN_HOME_PERCENT        5       // Chance a roamer heads back to its spawn point instead of a new point (EQ server value)
+#define EQ_MOVEMENT_ROAM_CEILING_START_HEIGHT       2.0f    // The ceiling above a roam spawn point is looked for from this far above it
+#define EQ_MOVEMENT_ROAM_CEILING_SEARCH             150.0f  // How far up the ceiling above a roam spawn point is looked for
+#define EQ_MOVEMENT_ROAM_CEILING_CLEARANCE          0.3f    // A roam point's floor is looked for from this far under that ceiling
+#define EQ_MOVEMENT_ROAM_GROUND_SEARCH              300.0f  // How far down a roam point's floor is looked for
+#define EQ_MOVEMENT_DEFAULT_RANDOM_TIMER_IN_MS      14000   // The EQ server's random timer when its range is empty
+#define EQ_ZONE_LINE_KEPT_Z_LIFT                    0.5f    // Yards added to a height a zone line keeps from the player
 
 #define EQ_CROUCH_COLLISION_HEIGHT_SCALE            0.5f    // Crouched height as a share of standing height (EQ ducking needs half the headroom); the client does the shrinking
 #define EQ_CROUCH_STAND_UP_HEADROOM_MARGIN          0.1f    // Extra room needed above the standing head height to stand up from a crouch
 
 #define EQ_CARRIED_LIGHT_TYPE_COUNT                 15      // EQ light types 1-15, each with its own light source aura (CarriedLightSpellIDStart + type - 1)
 #define EQ_CARRIED_LIGHT_REFRESH_TIME_IN_MS         1000    // How often a player's carried light is re-checked, since moving items around the backpack has no hook
-
-#define EQ_MOVE_PHASE_NONE                          0
-#define EQ_MOVE_PHASE_TRAVELING                     1
-#define EQ_MOVE_PHASE_WAITING_FOR_TIMER             2
-#define EQ_MOVE_PHASE_AGRO                          3
-#define EQ_MOVE_PHASE_RETURNING_FROM_AGRO           4
-
-#define EQ_MOVE_PATH_MAX_RETRY_COUNT                10
 
 #define EQ_FORAGE_TYPE_FOOD                         0
 #define EQ_FORAGE_TYPE_DRINK                        1
@@ -1451,7 +1446,6 @@ public:
     float RoamMaxZ = 0;
     uint32 RoamMinDelayInMS = 0;
     uint32 RoamMaxDelayInMS = 0;
-    int32 DespawnAtWaypointNum = -1;
     bool DisableGroundContour = false;
 };
 
@@ -1465,6 +1459,8 @@ public:
     float Y = 0;
     float Z = 0;
     uint32 PauseInSec = 0;
+    float Heading = -1.0f; // WoW orientation to face on arrival, or -1 to keep facing the way it walked
+    bool IsCenterPoint = false;
 };
 
 class EverQuestAutoLearnSpell
@@ -1523,6 +1519,16 @@ public:
     float Y = 0;
     float Z = 0;
     float Orientation = 0;
+};
+
+// An EQ zone line that keeps the player's own value on an axis (or their facing) instead of the teleport row's value
+class EverQuestZoneLineKeepFlags
+{
+public:
+    bool KeepX = false;
+    bool KeepY = false;
+    bool KeepZ = false;
+    bool KeepOrientation = false;
 };
 
 class EverQuestZone
@@ -2108,6 +2114,7 @@ public:
     unordered_map<uint32, vector<EverQuestForageZoneItem>> ForageZoneItemsByMapID;
     unordered_map<uint32, uint32> ForageZoneItemTotalChanceByMapID;
     unordered_map<uint32, EverQuestZoneSafePoint> ZoneSafePointByMapID;
+    unordered_map<uint32, EverQuestZoneLineKeepFlags> ZoneLineKeepFlagsByAreaTriggerID;
     unordered_map<uint32, EverQuestZone> ZoneByMapID;
     unordered_map<uint32, vector<EverQuestZoneTeleportDestination>> ZoneTeleportDestinationsByMapID;
     unordered_set<uint32> InstanceRaidLowMapIDs;
@@ -2181,11 +2188,7 @@ public:
     void EnqueuePendingKillSpawnAction(Map* map, EverQuestPendingKillSpawnAction& action);
     void UpdatePendingKillSpawnActions(Map* map, uint32 diff);
     bool StartReactionWalk(Creature* creature, float x, float y, float z, float orientation, bool hasOrientation, bool isRun, vector<EverQuestPendingKillSpawnAction>& actionsOnArrival, bool reissueMoveWhenStalled = false);
-    float GetTerrainSnappedZ(Creature* creature, float priorX, float priorY, float priorZ, float initialTargetX, float initialTargetY, float initialTargetZ,
-        bool& foundValidZ, bool disableGroundContour, float minZ = 0, float maxZ = 0);
-    bool BuildTerrainSnappedMovementPath(Creature* creature, float initialTargetX, float initialTargetY, float initialTargetZ, bool disableGroundContour,
-        float minZ, float maxZ, bool failWhenNoPathAndNoValidZ, Movement::PointsArray& pathNodesOut, float& snappedTargetZOut);
-    bool StartTerrainSnappedMoveToPoint(Creature* creature, float x, float y, float z, bool isRun);
+    bool StartEverQuestMoveToPoint(Creature* creature, float x, float y, float z, bool isRun);
     bool StartReactionGridWalk(Creature* creature, uint32 pathListID, vector<EverQuestPendingKillSpawnAction>& actionsOnArrival);
     void SetReactionWalkPreciseArrival(Creature* creature);
     void CastScriptedSpellAtUnit(Creature* caster, Unit* spellTarget, uint32 spellID);
@@ -2660,6 +2663,7 @@ public:
     void LoadForageData();
     const vector<EverQuestForageZoneItem>& GetForageZoneItemsInMap(uint32 mapID);
     void LoadZoneSafePointData();
+    void LoadZoneLineData();
     void SendPlayerToZoneSafePoint(Player* player, bool includeGroup);
     void ValidateGraveyardDomainConfiguration();
     uint32 GetNearestEverQuestGraveyardIDForPosition(uint32 mapID, float x, float y, float z);
@@ -2681,6 +2685,10 @@ public:
     void ClearRaidLowInstanceStateForPlayer(ObjectGuid playerGUID);
     bool HasOccupiedRaidLowInstanceForMap(ObjectGuid playerGUID, uint32 raidLowMapID);
     bool ShouldZoneLineEnterInstanceRaidLow(Player* player, uint32 raidLowMapID);
+    // Where a zone line sends the player: the trigger's teleport row, with the axes the EQ zone line keeps taken from the player.  False when
+    // the trigger has no teleport row
+    bool GetZoneLineDestination(Player* player, AreaTrigger const* trigger, uint32& mapID, float& x, float& y, float& z, float& orientation);
+    bool DoesZoneLineKeepPlayerPosition(uint32 areaTriggerID);
     bool TryZoneLineIntoInstanceRaidLow(Player* player, AreaTrigger const* trigger);
     uint32 GetInstanceDungeonMapIDForMap(uint32 mapID);
     bool IsMapInstanceDungeon(uint32 mapID);

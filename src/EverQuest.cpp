@@ -51,6 +51,8 @@
 #include "MotionMaster.h"
 #include "MovementGenerator.h"
 #include "PathGenerator.h"
+#include "EQPathBuilder.h"
+#include "EQZoneMap.h"
 #include "GridTerrainData.h"
 #include "CharacterCache.h"
 #include "ObjectAccessor.h"
@@ -2870,240 +2872,15 @@ bool EverQuestMod::IsCreatureInReactionWalk(Creature* creature)
     return ReactionWalkCreatureKeys.find(std::make_pair(mapInstanceKey, creature->GetGUID())) != ReactionWalkCreatureKeys.end();
 }
 
-float EverQuestMod::GetTerrainSnappedZ(Creature* creature, float priorX, float priorY, float priorZ, float initialTargetX, float initialTargetY, float initialTargetZ,
-    bool& foundValidZ, bool disableGroundContour, float minZ, float maxZ)
-{
-    if (disableGroundContour == true)
-    {
-        foundValidZ = true;
-        return initialTargetZ;
-    }
-
-    foundValidZ = false;
-
-    // Prior point might be in water
-    bool isPriorPointInWater = false;
-    if (priorX != 0 && priorY != 0 && priorZ != 0)
-    {
-        LiquidData priorLiquidDataBelow = creature->GetMap()->GetLiquidData(creature->GetPhaseMask(), priorX, priorY, priorZ, 0, {});
-        if (priorLiquidDataBelow.Status)
-            isPriorPointInWater = true;
-    }
-
-    // Calculate a solid floor
-    float solidFloorZ = -20001;
-    if (minZ != 0 && maxZ != 0)
-    {
-        solidFloorZ = creature->GetMapHeight(initialTargetX, initialTargetY, maxZ, true, maxZ - minZ);
-    }
-    else
-    {
-        float targetTestZ = initialTargetZ;
-        int floorLoopNum = 0;
-        float curAddedZStep = 0;
-        if (isPriorPointInWater == false)
-            curAddedZStep = 1.0f;
-        while (solidFloorZ < -20000)
-        {
-            targetTestZ = initialTargetZ + (floorLoopNum * curAddedZStep);
-            curAddedZStep += 1.0f;
-            float floorSearchDist = floorLoopNum * 20.0f;
-            if (floorSearchDist > 0.0f)
-                solidFloorZ = creature->GetMapHeight(initialTargetX, initialTargetY, targetTestZ, true, floorSearchDist);
-            floorLoopNum++;
-            if (floorLoopNum >= 10)
-                break;
-        }
-    }
-
-    if (solidFloorZ < -20000)
-    {
-        // No solid floor means it's out of bounds or over a large body of water, so first test if it's a body of water
-        LiquidData targetLiquidDataBelow = creature->GetMap()->GetLiquidData(creature->GetPhaseMask(), initialTargetX, initialTargetY, initialTargetZ - EQ_MOVE_TEST_Z_DOWN_AMOUNT_FOR_WATER_TEST, 0, {});
-        if (targetLiquidDataBelow.Status)
-        {
-            foundValidZ = true;
-            if (isPriorPointInWater == true && priorZ <= (targetLiquidDataBelow.Level - EQ_MOVE_UNDER_WATER_SURFACE_SKIM_REDICTION))
-                return priorZ;
-            else
-                return targetLiquidDataBelow.Level - EQ_MOVE_UNDER_WATER_SURFACE_SKIM_REDICTION;
-        }
-        else
-            return initialTargetZ;
-    }
-    else
-    {
-        foundValidZ = true;
-        if (isPriorPointInWater == true)
-        {
-            LiquidData targetLiquidDataAtRef = creature->GetMap()->GetLiquidData(creature->GetPhaseMask(), initialTargetX, initialTargetY, initialTargetZ, 0, {});
-            if (targetLiquidDataAtRef.Status)
-            {
-                float skimLevel = targetLiquidDataAtRef.Level - EQ_MOVE_UNDER_WATER_SURFACE_SKIM_REDICTION;
-                if (solidFloorZ > priorZ || solidFloorZ > skimLevel)
-                    return solidFloorZ;
-                else if (priorZ > skimLevel)
-                    return skimLevel;
-                else
-                    return priorZ;
-            }
-        }
-        return solidFloorZ;
-    }
-}
-
-bool EverQuestMod::BuildTerrainSnappedMovementPath(Creature* creature, float initialTargetX, float initialTargetY, float initialTargetZ, bool disableGroundContour,
-    float minZ, float maxZ, bool failWhenNoPathAndNoValidZ, Movement::PointsArray& pathNodesOut, float& snappedTargetZOut)
-{
-    pathNodesOut.clear();
-
-    bool foundValidZ = false;
-    float terrainSnappedTargetZ = GetTerrainSnappedZ(creature, 0, 0, 0, initialTargetX, initialTargetY, initialTargetZ, foundValidZ, disableGroundContour, minZ, maxZ);
-    snappedTargetZOut = terrainSnappedTargetZ;
-
-    // Generate a base path to make sure it exists
-    PathGenerator path(creature);
-    bool result = path.CalculatePath(initialTargetX, initialTargetY, initialTargetZ, false);
-    PathType pathType = path.GetPathType();
-    bool pathFound = ((result == true) && ((pathType & PATHFIND_NOPATH) == 0));
-    Movement::PointsArray fallbackPath;
-    const Movement::PointsArray* pathNodesPtr = &path.GetPath();
-
-    // If there is no single spline-based path, it was probably too long so break it into parts
-    if (pathFound == false)
-    {
-        float distToTarget = creature->GetExactDist(initialTargetX, initialTargetY, terrainSnappedTargetZ);
-        if (distToTarget > 30.0f)
-        {
-            const float MAX_SAFE_SEGMENT = 220.0f;
-
-            Position current = creature->GetPosition();
-            float dx = initialTargetX - current.GetPositionX();
-            float dy = initialTargetY - current.GetPositionY();
-            float dz = terrainSnappedTargetZ - current.GetPositionZ();
-            float dist = std::sqrt(dx * dx + dy * dy + dz * dz);
-
-            if (dist > 5.0f)
-            {
-                float ratio = std::min(1.0f, MAX_SAFE_SEGMENT / dist);
-                float interX = current.GetPositionX() + dx * ratio;
-                float interY = current.GetPositionY() + dy * ratio;
-                float interZ = current.GetPositionZ() + dz * ratio;
-
-                PathGenerator shortPath(creature);
-                bool shortResult = shortPath.CalculatePath(interX, interY, interZ, false);
-                if (shortResult && (shortPath.GetPathType() & PATHFIND_NOPATH) == 0)
-                {
-                    fallbackPath = shortPath.GetPath();
-                    if (fallbackPath.size() >= 2)
-                    {
-                        pathNodesPtr = &fallbackPath;
-                        pathFound = true;
-                    }
-                }
-            }
-        }
-    }
-
-    if (pathFound == false && foundValidZ == false && failWhenNoPathAndNoValidZ == true)
-        return false;
-
-    const Movement::PointsArray& pathNodes = *pathNodesPtr;
-    if (pathNodes.size() < 2)
-        return false;
-
-    // Walk the path to generate steps that are small enough to snap the character to the Z
-    Movement::PointsArray& waypointPath = pathNodesOut;
-    waypointPath.emplace_back(creature->GetPositionX(), creature->GetPositionY(), creature->GetPositionZ());
-    Position previousPosition = creature->GetPosition();
-    float priorInterimZ = -100001.0f;
-    for (int cornerIndex = 1; cornerIndex < (int)pathNodes.size(); ++cornerIndex)
-    {
-        Position corner(pathNodes[cornerIndex].x, pathNodes[cornerIndex].y, pathNodes[cornerIndex].z);
-        bool isFinalCorner = (cornerIndex == (int)pathNodes.size() - 1);
-
-        float segDX = corner.GetPositionX() - previousPosition.GetPositionX();
-        float segDY = corner.GetPositionY() - previousPosition.GetPositionY();
-        float segDZ = corner.GetPositionZ() - previousPosition.GetPositionZ();
-        float segLength = std::sqrt(segDX * segDX + segDY * segDY + segDZ * segDZ);
-
-        if (segLength < 0.001f)
-            continue;
-
-        float ux = segDX / segLength;
-        float uy = segDY / segLength;
-        float uz = segDZ / segLength;
-
-        float endThreshold = isFinalCorner ? EQ_MOVE_SMALL_STEP_SIZE_LAST_DISTANCE : EQ_MOVE_SMALL_STEP_SIZE_DISTANCE;
-        float remainingDistance = segLength;
-
-        bool nodeCapReached = false;
-        while (remainingDistance > endThreshold)
-        {
-            // Prevent oversizing paths
-            if (waypointPath.size() >= EQ_MOVE_MAX_PATH_NODES)
-            {
-                nodeCapReached = true;
-                break;
-            }
-
-            float interimX = previousPosition.GetPositionX() + ux * EQ_MOVE_SMALL_STEP_SIZE_DISTANCE;
-            float interimY = previousPosition.GetPositionY() + uy * EQ_MOVE_SMALL_STEP_SIZE_DISTANCE;
-            float interimZ = previousPosition.GetPositionZ() + uz * EQ_MOVE_SMALL_STEP_SIZE_DISTANCE;
-
-            if (priorInterimZ < -100000)
-                priorInterimZ = interimZ;
-
-            interimZ = GetTerrainSnappedZ(creature, previousPosition.GetPositionX(), previousPosition.GetPositionY(),
-                previousPosition.GetPositionZ(), interimX, interimY, priorInterimZ, foundValidZ, disableGroundContour, minZ, maxZ);
-
-            waypointPath.emplace_back(interimX, interimY, interimZ);
-            previousPosition = Position(interimX, interimY, interimZ);
-            remainingDistance -= EQ_MOVE_SMALL_STEP_SIZE_DISTANCE;
-            priorInterimZ = interimZ;
-        }
-
-        // When cap is hit, stop at the last interim node instead of an unsnapped one
-        if (nodeCapReached)
-            break;
-
-        // Add corner
-        float refZ = (priorInterimZ < -100000.0f) ? corner.GetPositionZ() : priorInterimZ;
-        float cornerZ = GetTerrainSnappedZ(creature, previousPosition.GetPositionX(), previousPosition.GetPositionY(),
-            previousPosition.GetPositionZ(), corner.GetPositionX(), corner.GetPositionY(), refZ,
-            foundValidZ, disableGroundContour, minZ, maxZ);
-
-        waypointPath.emplace_back(corner.GetPositionX(), corner.GetPositionY(), cornerZ);
-        previousPosition = Position(corner.GetPositionX(), corner.GetPositionY(), cornerZ);
-        priorInterimZ = cornerZ;
-    }
-
-    // Add for saftey, though this shouldn't happen...
-    if (waypointPath.size() <= 1)
-        waypointPath.emplace_back(initialTargetX, initialTargetY, terrainSnappedTargetZ);
-
-    return true;
-}
-
-bool EverQuestMod::StartTerrainSnappedMoveToPoint(Creature* creature, float x, float y, float z, bool isRun)
+// A scripted walk or run to a point.  On an EverQuest map the core builds every move the EQ way (on the floor the whole way, along the navigation
+// mesh where it can't go straight), so a plain point move is all it takes
+bool EverQuestMod::StartEverQuestMoveToPoint(Creature* creature, float x, float y, float z, bool isRun)
 {
     if (creature == nullptr)
         return false;
-
-    // A placed creature can be told to ignore the ground contour by its zone data, and a scripted spawn has no such row
-    bool disableGroundContour = false;
-    if (creature->GetSpawnId() != 0)
-        disableGroundContour = GetCreatureInstanceData(creature->GetSpawnId()).DisableGroundContour;
-
-    // The roam box is deliberately not used here, since a scripted destination is usually outside of it
-    Movement::PointsArray pathNodes;
-    float snappedTargetZ = z;
-    if (BuildTerrainSnappedMovementPath(creature, x, y, z, disableGroundContour, 0, 0, false, pathNodes, snappedTargetZ) == false)
-        return false;
-
     creature->SetWalk(isRun == false);
     creature->GetMotionMaster()->Clear(false);
-    creature->GetMotionMaster()->MoveSplinePath(&pathNodes, isRun == true ? FORCED_MOVEMENT_RUN : FORCED_MOVEMENT_WALK);
+    creature->GetMotionMaster()->MovePoint(EQ_REACTION_WALK_POINT_ID, x, y, z, isRun == true ? FORCED_MOVEMENT_RUN : FORCED_MOVEMENT_WALK, 0.0f, 0.0f, true, false);
     return true;
 }
 
@@ -3155,13 +2932,7 @@ bool EverQuestMod::StartReactionWalk(Creature* creature, float x, float y, float
     creature->ReplaceAllNpcFlags(UNIT_NPC_FLAG_NONE);
 
     // Take the creature off whatever it was doing so its normal waypoint or roaming generator does not fight the walk
-    if (StartTerrainSnappedMoveToPoint(creature, x, y, z, isRun) == false)
-    {
-        // Nothing walkable could be built, so fall back to letting the core path it however it can
-        creature->SetWalk(isRun == false);
-        creature->GetMotionMaster()->Clear();
-        creature->GetMotionMaster()->MovePoint(EQ_REACTION_WALK_POINT_ID, x, y, z);
-    }
+    StartEverQuestMoveToPoint(creature, x, y, z, isRun);
     LOG_DEBUG("module.EverQuest", "EverQuestMod::StartReactionWalk creature {} walking {} yards to ({}, {}, {}) with a {} ms timeout", creature->GetEntry(), creature->GetExactDist(x, y, z), x, y, z, timeoutMS);
     return true;
 }
@@ -3271,6 +3042,20 @@ bool EverQuestMod::StartReactionGridWalk(Creature* creature, uint32 pathListID, 
     }
     creature->ReplaceAllNpcFlags(UNIT_NPC_FLAG_NONE);
 
+    // On an EverQuest map the grid's nodes become the corners of an EQ path, which walks every leg on the floor
+    if (EQZoneMap const* eqZoneMap = creature->GetMap()->GetEQZoneMap())
+    {
+        Movement::PointsArray routeCorners;
+        routeCorners.push_back(G3D::Vector3(creature->GetPositionX(), creature->GetPositionY(), creature->GetPositionZ()));
+        routeCorners.insert(routeCorners.end(), pathPoints.begin(), pathPoints.end());
+        G3D::Vector3 pathEnd = routeCorners.back();
+        pathEnd.z = EQPathBuilder::GetGroundZ(eqZoneMap, creature, pathEnd.x, pathEnd.y, pathEnd.z);
+        Movement::PointsArray groundPathPoints;
+        EQPathBuilder::BuildPath(eqZoneMap, creature, routeCorners.front(), pathEnd, routeCorners, groundPathPoints);
+        if (groundPathPoints.size() >= 2)
+            pathPoints = groundPathPoints;
+    }
+
     // Take the creature off whatever it was doing so its normal waypoint or roaming generator does not fight the walk
     creature->SetWalk(true);
     creature->GetMotionMaster()->Clear();
@@ -3359,7 +3144,7 @@ void EverQuestMod::UpdatePendingArrivalActions(Map* map, uint32 diff)
         Creature* stalledMover = map->GetCreature(stalledWatcher.MoverGUID);
         if (stalledMover == nullptr || stalledMover->IsInWorld() == false || stalledMover->IsAlive() == false)
             continue;
-        StartTerrainSnappedMoveToPoint(stalledMover, stalledWatcher.DestinationX, stalledWatcher.DestinationY, stalledWatcher.DestinationZ, stalledWatcher.IsPreciseArrival == false);
+        StartEverQuestMoveToPoint(stalledMover, stalledWatcher.DestinationX, stalledWatcher.DestinationY, stalledWatcher.DestinationZ, stalledWatcher.IsPreciseArrival == false);
         LOG_DEBUG("module.EverQuest", "EverQuestMod::UpdatePendingArrivalActions creature {} stalled {} yards short of its reaction walk, so the next leg was built", stalledMover->GetEntry(), stalledMover->GetExactDist2d(stalledWatcher.DestinationX, stalledWatcher.DestinationY));
     }
 
@@ -10731,7 +10516,7 @@ void EverQuestMod::SaveAdventurerDisqualifiedForPlayer(Player* player)
 static const char* const EQ_ADVENTURER_LOSS_LEVEL_COLUMNS[EQ_EQCLASS_HIGHEST_ID + 1] =
 {
     "levelNone", "levelWarrior", "levelCleric", "levelPaladin", "levelRanger", "levelShadowKnight", "levelDruid", "levelMonk",
-    "levelBard", "levelRogue", "levelShaman", "levelNecromancer", "levelWizard", "levelMagician", "levelEnchanter"
+    "levelBard", "levelRogue", "levelShaman", "levelNecromancer", "levelWizard", "levelMagician", "levelEnchanter", "levelBeastlord"
 };
 
 static std::string GetEquipmentSlotNameFromSlot(uint8 equipSlot)
@@ -10780,13 +10565,13 @@ void EverQuestMod::SaveAdventurerLevelSnapshotForPlayer(Player* player)
     }
 
     CharacterDatabase.Execute("INSERT INTO `mod_everquest_character_adventurer_loss` "
-        "(`guid`, `lossTimestamp`, `lossSecondaryClass`, `levelNone`, `levelWarrior`, `levelCleric`, `levelPaladin`, `levelRanger`, `levelShadowKnight`, `levelDruid`, `levelMonk`, `levelBard`, `levelRogue`, `levelShaman`, `levelNecromancer`, `levelWizard`, `levelMagician`, `levelEnchanter`) "
-        "VALUES ({}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}) "
+        "(`guid`, `lossTimestamp`, `lossSecondaryClass`, `levelNone`, `levelWarrior`, `levelCleric`, `levelPaladin`, `levelRanger`, `levelShadowKnight`, `levelDruid`, `levelMonk`, `levelBard`, `levelRogue`, `levelShaman`, `levelNecromancer`, `levelWizard`, `levelMagician`, `levelEnchanter`, `levelBeastlord`) "
+        "VALUES ({}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}) "
         "ON DUPLICATE KEY UPDATE `lossTimestamp` = VALUES(`lossTimestamp`), `lossSecondaryClass` = VALUES(`lossSecondaryClass`), "
         "`levelNone` = VALUES(`levelNone`), `levelWarrior` = VALUES(`levelWarrior`), `levelCleric` = VALUES(`levelCleric`), `levelPaladin` = VALUES(`levelPaladin`), "
         "`levelRanger` = VALUES(`levelRanger`), `levelShadowKnight` = VALUES(`levelShadowKnight`), `levelDruid` = VALUES(`levelDruid`), `levelMonk` = VALUES(`levelMonk`), "
         "`levelBard` = VALUES(`levelBard`), `levelRogue` = VALUES(`levelRogue`), `levelShaman` = VALUES(`levelShaman`), `levelNecromancer` = VALUES(`levelNecromancer`), "
-        "`levelWizard` = VALUES(`levelWizard`), `levelMagician` = VALUES(`levelMagician`), `levelEnchanter` = VALUES(`levelEnchanter`)",
+        "`levelWizard` = VALUES(`levelWizard`), `levelMagician` = VALUES(`levelMagician`), `levelEnchanter` = VALUES(`levelEnchanter`), `levelBeastlord` = VALUES(`levelBeastlord`)",
         player->GetGUID().GetCounter(),
         uint32(GameTime::GetGameTime().count()),
         uint32(GetCurrentSecondEQClassForPlayer(player)),
@@ -10804,7 +10589,8 @@ void EverQuestMod::SaveAdventurerLevelSnapshotForPlayer(Player* player)
         uint32(levelsByEQClass[EQ_EQCLASS_NECROMANCER]),
         uint32(levelsByEQClass[EQ_EQCLASS_WIZARD]),
         uint32(levelsByEQClass[EQ_EQCLASS_MAGICIAN]),
-        uint32(levelsByEQClass[EQ_EQCLASS_ENCHANTER]));
+        uint32(levelsByEQClass[EQ_EQCLASS_ENCHANTER]),
+        uint32(levelsByEQClass[EQ_EQCLASS_BEASTLORD]));
 }
 
 bool EverQuestMod::TryGetAdventurerLevelSnapshotForPlayerGUID(uint32 playerGUIDCounter, EverQuestAdventurerLossSnapshot& snapshotOut)
@@ -13018,7 +12804,7 @@ void EverQuestMod::LoadCreatureInstanceData()
 {
     CreatureInstancesByCreatureGUID.clear();
 
-    QueryResult queryResult = WorldDatabase.Query("SELECT CreatureGUID, WanderType, PauseType, MapID, WaypointID, DoesRoam, RoamMinX, RoamMaxX, RoamMinY, RoamMaxY, RoamMinZ, RoamMaxZ, RoamMinDelayInMS, RoamMaxDelayInMS, DespawnAtWaypointNum, DisableGroundContour FROM mod_everquest_creature_instance;");
+    QueryResult queryResult = WorldDatabase.Query("SELECT CreatureGUID, WanderType, PauseType, MapID, WaypointID, DoesRoam, RoamMinX, RoamMaxX, RoamMinY, RoamMaxY, RoamMinZ, RoamMaxZ, RoamMinDelayInMS, RoamMaxDelayInMS, DisableGroundContour FROM mod_everquest_creature_instance;");
     if (queryResult)
     {
         do
@@ -13039,8 +12825,7 @@ void EverQuestMod::LoadCreatureInstanceData()
             creatureInstance.RoamMaxZ = fields[11].Get<float>();
             creatureInstance.RoamMinDelayInMS = fields[12].Get<uint32>();
             creatureInstance.RoamMaxDelayInMS = fields[13].Get<uint32>();
-            creatureInstance.DespawnAtWaypointNum = fields[14].Get<int32>();
-            creatureInstance.DisableGroundContour = fields[15].Get<uint8>() == 1 ? true : false;
+            creatureInstance.DisableGroundContour = fields[14].Get<uint8>() == 1 ? true : false;
             CreatureInstancesByCreatureGUID[creatureInstance.CreatureGUID] = creatureInstance;
         } while (queryResult->NextRow());
     }
@@ -13063,7 +12848,7 @@ void EverQuestMod::LoadCreatureWaypointData()
 {
     CreatureWaypointsByMapIDAndWaypointID.clear();
 
-    QueryResult queryResult = WorldDatabase.Query("SELECT MapID, WaypointID, Number, X, Y, Z, PauseInSec FROM mod_everquest_creature_waypoint;");
+    QueryResult queryResult = WorldDatabase.Query("SELECT MapID, WaypointID, Number, X, Y, Z, PauseInSec, Heading, IsCenterPoint FROM mod_everquest_creature_waypoint ORDER BY MapID, WaypointID, Number;");
     if (queryResult)
     {
         do
@@ -13077,6 +12862,8 @@ void EverQuestMod::LoadCreatureWaypointData()
             creatureWaypoint.Y = fields[4].Get<float>();
             creatureWaypoint.Z = fields[5].Get<float>();
             creatureWaypoint.PauseInSec = fields[6].Get<uint32>();
+            creatureWaypoint.Heading = fields[7].Get<float>();
+            creatureWaypoint.IsCenterPoint = fields[8].Get<uint8>() != 0;
             CreatureWaypointsByMapIDAndWaypointID[creatureWaypoint.MapID][creatureWaypoint.WaypointID].push_back(creatureWaypoint);
         } while (queryResult->NextRow());
     }
@@ -13148,6 +12935,26 @@ void EverQuestMod::LoadZoneSafePointData()
             zoneSafePoint.Z = fields[3].Get<float>();
             zoneSafePoint.Orientation = fields[4].Get<float>();
             ZoneSafePointByMapID[zoneSafePoint.MapID] = zoneSafePoint;
+        } while (queryResult->NextRow());
+    }
+}
+
+void EverQuestMod::LoadZoneLineData()
+{
+    ZoneLineKeepFlagsByAreaTriggerID.clear();
+
+    QueryResult queryResult = WorldDatabase.Query("SELECT AreaTriggerID, KeepX, KeepY, KeepZ, KeepOrientation FROM mod_everquest_zone_line;");
+    if (queryResult)
+    {
+        do
+        {
+            Field* fields = queryResult->Fetch();
+            EverQuestZoneLineKeepFlags keepFlags;
+            keepFlags.KeepX = fields[1].Get<uint8>() != 0;
+            keepFlags.KeepY = fields[2].Get<uint8>() != 0;
+            keepFlags.KeepZ = fields[3].Get<uint8>() != 0;
+            keepFlags.KeepOrientation = fields[4].Get<uint8>() != 0;
+            ZoneLineKeepFlagsByAreaTriggerID[fields[0].Get<uint32>()] = keepFlags;
         } while (queryResult->NextRow());
     }
 }
@@ -13988,7 +13795,12 @@ bool EverQuestMod::ShouldZoneLineEnterInstanceRaidLow(Player* player, uint32 rai
     return HasOccupiedRaidLowInstanceForMap(player->GetGUID(), raidLowMapID);
 }
 
-bool EverQuestMod::TryZoneLineIntoInstanceRaidLow(Player* player, AreaTrigger const* trigger)
+bool EverQuestMod::DoesZoneLineKeepPlayerPosition(uint32 areaTriggerID)
+{
+    return ZoneLineKeepFlagsByAreaTriggerID.find(areaTriggerID) != ZoneLineKeepFlagsByAreaTriggerID.end();
+}
+
+bool EverQuestMod::GetZoneLineDestination(Player* player, AreaTrigger const* trigger, uint32& mapID, float& x, float& y, float& z, float& orientation)
 {
     if (player == nullptr || trigger == nullptr)
         return false;
@@ -13997,7 +13809,38 @@ bool EverQuestMod::TryZoneLineIntoInstanceRaidLow(Player* player, AreaTrigger co
     if (areaTriggerTeleport == nullptr)
         return false;
 
-    uint32 raidLowMapID = GetInstanceRaidLowMapIDForMap(areaTriggerTeleport->target_mapId);
+    mapID = areaTriggerTeleport->target_mapId;
+    x = areaTriggerTeleport->target_X;
+    y = areaTriggerTeleport->target_Y;
+    z = areaTriggerTeleport->target_Z;
+    orientation = areaTriggerTeleport->target_Orientation;
+
+    // EQ zones share one scale, so a value kept from the player lines up with the same spot along the next zone's edge.  A kept height
+    // gets a little lift so the player lands on the ground instead of in it
+    auto keepFlagsIter = ZoneLineKeepFlagsByAreaTriggerID.find(trigger->entry);
+    if (keepFlagsIter != ZoneLineKeepFlagsByAreaTriggerID.end())
+    {
+        EverQuestZoneLineKeepFlags const& keepFlags = keepFlagsIter->second;
+        if (keepFlags.KeepX == true)
+            x = player->GetPositionX();
+        if (keepFlags.KeepY == true)
+            y = player->GetPositionY();
+        if (keepFlags.KeepZ == true)
+            z = player->GetPositionZ() + EQ_ZONE_LINE_KEPT_Z_LIFT;
+        if (keepFlags.KeepOrientation == true)
+            orientation = player->GetOrientation();
+    }
+    return true;
+}
+
+bool EverQuestMod::TryZoneLineIntoInstanceRaidLow(Player* player, AreaTrigger const* trigger)
+{
+    uint32 targetMapID = 0;
+    float targetX, targetY, targetZ, targetOrientation;
+    if (GetZoneLineDestination(player, trigger, targetMapID, targetX, targetY, targetZ, targetOrientation) == false)
+        return false;
+
+    uint32 raidLowMapID = GetInstanceRaidLowMapIDForMap(targetMapID);
     if (raidLowMapID == 0)
         return false;
     if (player->GetMapId() == raidLowMapID)
@@ -14006,20 +13849,17 @@ bool EverQuestMod::TryZoneLineIntoInstanceRaidLow(Player* player, AreaTrigger co
         return false;
 
     // If the core refuses the instance (no raid group, bound elsewhere, full) then fall through and let the zone line work normally
-    return player->TeleportTo(raidLowMapID, areaTriggerTeleport->target_X, areaTriggerTeleport->target_Y, areaTriggerTeleport->target_Z,
-        areaTriggerTeleport->target_Orientation, TELE_TO_NOT_LEAVE_TRANSPORT);
+    return player->TeleportTo(raidLowMapID, targetX, targetY, targetZ, targetOrientation, TELE_TO_NOT_LEAVE_TRANSPORT);
 }
 
 bool EverQuestMod::TryZoneLineIntoInstanceDungeon(Player* player, AreaTrigger const* trigger)
 {
-    if (player == nullptr || trigger == nullptr)
+    uint32 targetMapID = 0;
+    float targetX, targetY, targetZ, targetOrientation;
+    if (GetZoneLineDestination(player, trigger, targetMapID, targetX, targetY, targetZ, targetOrientation) == false)
         return false;
 
-    AreaTriggerTeleport const* areaTriggerTeleport = sObjectMgr->GetAreaTriggerTeleport(trigger->entry);
-    if (areaTriggerTeleport == nullptr)
-        return false;
-
-    uint32 dungeonMapID = GetInstanceDungeonMapIDForMap(areaTriggerTeleport->target_mapId);
+    uint32 dungeonMapID = GetInstanceDungeonMapIDForMap(targetMapID);
     if (dungeonMapID == 0)
         return false;
     if (player->GetMapId() == dungeonMapID)
@@ -14028,8 +13868,7 @@ bool EverQuestMod::TryZoneLineIntoInstanceDungeon(Player* player, AreaTrigger co
         return false;
 
     // If the core refuses the instance (full, someone else's group already inside, too many instances this hour) then fall through and let the zone line put the player in the open world copy of the zone instead
-    return player->TeleportTo(dungeonMapID, areaTriggerTeleport->target_X, areaTriggerTeleport->target_Y, areaTriggerTeleport->target_Z,
-        areaTriggerTeleport->target_Orientation, TELE_TO_NOT_LEAVE_TRANSPORT);
+    return player->TeleportTo(dungeonMapID, targetX, targetY, targetZ, targetOrientation, TELE_TO_NOT_LEAVE_TRANSPORT);
 }
 
 uint32 EverQuestMod::GetInstanceMapIDForZoneTeleport(Player* player, uint32 destinationMapID)
@@ -20977,6 +20816,7 @@ std::string GetEQClassStringFromID(uint8 classID)
     case EQ_EQCLASS_WIZARD:         return "Wizard (WIZ)";
     case EQ_EQCLASS_MAGICIAN:       return "Magician (MAG)";
     case EQ_EQCLASS_ENCHANTER:      return "Enchanter (ENC)";
+    case EQ_EQCLASS_BEASTLORD:      return "Beastlord (BST)";
     default:                        return "None";
     }
 }
@@ -20999,6 +20839,7 @@ std::string GetEQClassCommandNameFromID(uint8 classID)
     case EQ_EQCLASS_WIZARD:         return "wizard";
     case EQ_EQCLASS_MAGICIAN:       return "magician";
     case EQ_EQCLASS_ENCHANTER:      return "enchanter";
+    case EQ_EQCLASS_BEASTLORD:      return "beastlord";
     default:                        return "none";
     }
 }
@@ -21029,7 +20870,7 @@ void EverQuestMod::SendClassInfoAddonMessageToPlayer(Player* player)
             << "|" << uint32(currentSecondClass) << "|" << uint32(nextSecondClass)
             << "|" << GetSecondaryExpPoolForPlayer(player) << "|" << ConfigSecondaryExpPoolMaxPooled;
 
-    for (int16 eqClassID = EQ_EQCLASS_NONE; eqClassID <= EQ_EQCLASS_ENCHANTER; ++eqClassID)
+    for (int16 eqClassID = EQ_EQCLASS_NONE; eqClassID <= EQ_EQCLASS_HIGHEST_ID; ++eqClassID)
     {
         // None is always listed and every other class must be flagged as an eligible secondary
         if (eqClassID != EQ_EQCLASS_NONE)
@@ -21127,7 +20968,7 @@ static bool ConvertClientBagPositionToServer(uint8 clientBagID, uint8 clientSlot
 
 bool EverQuestMod::IsEQClassValidEquipmentStorageTargetForPlayer(Player* player, uint8 eqClassID)
 {
-    if (eqClassID > EQ_EQCLASS_ENCHANTER)
+    if (eqClassID > EQ_EQCLASS_HIGHEST_ID)
         return false;
     if (eqClassID == GetCurrentSecondEQClassForPlayer(player))
         return false;

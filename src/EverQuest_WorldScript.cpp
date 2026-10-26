@@ -82,6 +82,7 @@ public:
         EverQuest->LoadPlayerClassStartItemData();
         EverQuest->LoadForageData();
         EverQuest->LoadZoneSafePointData();
+        EverQuest->LoadZoneLineData();
         EverQuest->LoadZoneData();
         EverQuest->AlignRaidInstanceResetTimes();
         EverQuest->LoadZoneTeleportDestinationData();

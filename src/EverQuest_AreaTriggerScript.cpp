@@ -22,7 +22,8 @@
 
 using namespace std;
 
-// Attached by the converter (areatrigger_scripts) to every zone line whose destination zone has an instance copy
+// Attached by the converter (areatrigger_scripts) to every zone line whose destination zone has an instance copy, and to every zone line that
+// keeps the player's own position on an axis
 class EverQuest_ZoneLineAreaTriggerScript : public AreaTriggerScript
 {
 public:
@@ -36,8 +37,17 @@ public:
         // A raid still inside (or a corpse left behind) wins over dungeon mode, since a zone can have both kinds of instance copy
         if (EverQuest->TryZoneLineIntoInstanceRaidLow(player, trigger) == true)
             return true;
+        if (EverQuest->TryZoneLineIntoInstanceDungeon(player, trigger) == true)
+            return true;
 
-        return EverQuest->TryZoneLineIntoInstanceDungeon(player, trigger);
+        // EQ zone lines that keep the player's own position on an axis can't be done by the teleport row, which only has fixed values
+        if (EverQuest->DoesZoneLineKeepPlayerPosition(trigger->entry) == false)
+            return false;
+        uint32 targetMapID = 0;
+        float targetX, targetY, targetZ, targetOrientation;
+        if (EverQuest->GetZoneLineDestination(player, trigger, targetMapID, targetX, targetY, targetZ, targetOrientation) == false)
+            return false;
+        return player->TeleportTo(targetMapID, targetX, targetY, targetZ, targetOrientation, TELE_TO_NOT_LEAVE_TRANSPORT);
     }
 };
 

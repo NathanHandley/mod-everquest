@@ -14,6 +14,9 @@
 //  You should have received a copy of the GNU General Public License
 //  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+#include "EQMovementHooks.h"
+#include "EverQuest_MovementGenerator.h"
+
 void AddEverQuestPlayerScripts();
 void AddEverQuestWorldScripts();
 void AddEverQuestUnitScripts();
@@ -47,7 +50,6 @@ void AddEverQuestCommandScripts();
 void AddEverQuestServerScripts();
 void AddEverQuestGlobalScripts();
 void AddEverQuestTransportScripts();
-void AddEverQuestCreatureInstanceScripts();
 void AddEverQuestGossipScripts();
 void AddEverQuestMiscScripts();
 void AddEverQuestAreaTriggerScripts();
@@ -88,7 +90,9 @@ void Addmod_everquestScripts()
     AddEverQuestServerScripts();
     AddEverQuestGlobalScripts();
     AddEverQuestTransportScripts();
-    AddEverQuestCreatureInstanceScripts();
+
+    // EverQuest grids and roam boxes are the idle movement of spawns on EverQuest maps (the core asks through this hook)
+    EverQuestMovementHooks::IdleMovementSelector = &SelectEverQuestIdleMovementGenerator;
     AddEverQuestGossipScripts();
     AddEverQuestMiscScripts();
     AddEverQuestAreaTriggerScripts();

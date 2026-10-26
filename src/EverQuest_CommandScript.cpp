@@ -81,7 +81,7 @@ static string GetEligibleSecondClassListForPlayer(Player* player)
 {
     const EverQuestClassMap classMap = EverQuest->GetClassMapForWOWClassID(player->getClass());
     std::string list = "none";
-    for (uint8 eqClassID = EQ_EQCLASS_WARRIOR; eqClassID <= EQ_EQCLASS_ENCHANTER; ++eqClassID)
+    for (uint8 eqClassID = EQ_EQCLASS_WARRIOR; eqClassID <= EQ_EQCLASS_HIGHEST_ID; ++eqClassID)
     {
         uint32 classBit = 1u << (eqClassID - 1);
         if ((classMap.EQClassIDEligibleSecondMask & classBit) != 0)
@@ -1089,6 +1089,8 @@ public:
             classInt = EQ_EQCLASS_DRUID;
         else if (className.starts_with("Mo") || className.starts_with("mo") || className.starts_with("MO"))
             classInt = EQ_EQCLASS_MONK;
+        else if (className.starts_with("Be") || className.starts_with("be") || className.starts_with("BE"))
+            classInt = EQ_EQCLASS_BEASTLORD;
         else if (className.starts_with("B") || className.starts_with("b"))
             classInt = EQ_EQCLASS_BARD;
         else if (className.starts_with("Ro") || className.starts_with("ro") || className.starts_with("RO"))
@@ -1360,7 +1362,7 @@ public:
 
         // Secondary Classes
         handler->PSendSysMessage("Secondary EQ Class List:");
-        for (int16 eqClassID = EQ_EQCLASS_NONE; eqClassID <= EQ_EQCLASS_ENCHANTER; ++eqClassID)
+        for (int16 eqClassID = EQ_EQCLASS_NONE; eqClassID <= EQ_EQCLASS_HIGHEST_ID; ++eqClassID)
         {
             // None is always top result
             if (eqClassID != EQ_EQCLASS_NONE)
