@@ -12958,6 +12958,27 @@ void EverQuestMod::LoadZoneLineData()
             ZoneLineKeepFlagsByAreaTriggerID[fields[0].Get<uint32>()] = keepFlags;
         } while (queryResult->NextRow());
     }
+
+    // The zone line boxes by map, read straight from the table since the core's area trigger store may not be loaded yet
+    ZoneLineBoxesByMapID.clear();
+    queryResult = WorldDatabase.Query("SELECT a.entry, a.map, a.x, a.y, a.z, a.length, a.width, a.height, a.orientation FROM areatrigger a INNER JOIN mod_everquest_zone_line z ON z.AreaTriggerID = a.entry WHERE a.radius = 0;");
+    if (queryResult)
+    {
+        do
+        {
+            Field* fields = queryResult->Fetch();
+            EverQuestZoneLineBox zoneLineBox;
+            zoneLineBox.AreaTriggerID = fields[0].Get<uint32>();
+            zoneLineBox.X = fields[2].Get<float>();
+            zoneLineBox.Y = fields[3].Get<float>();
+            zoneLineBox.Z = fields[4].Get<float>();
+            zoneLineBox.Length = fields[5].Get<float>();
+            zoneLineBox.Width = fields[6].Get<float>();
+            zoneLineBox.Height = fields[7].Get<float>();
+            zoneLineBox.Orientation = fields[8].Get<float>();
+            ZoneLineBoxesByMapID[fields[1].Get<uint32>()].push_back(zoneLineBox);
+        } while (queryResult->NextRow());
+    }
 }
 
 static thread_local bool IsResolvingGraveyardDomain = false;
@@ -13796,7 +13817,7 @@ bool EverQuestMod::ShouldZoneLineEnterInstanceRaidLow(Player* player, uint32 rai
     return HasOccupiedRaidLowInstanceForMap(player->GetGUID(), raidLowMapID);
 }
 
-bool EverQuestMod::DoesZoneLineKeepPlayerPosition(uint32 areaTriggerID)
+bool EverQuestMod::IsEverQuestZoneLine(uint32 areaTriggerID)
 {
     return ZoneLineKeepFlagsByAreaTriggerID.find(areaTriggerID) != ZoneLineKeepFlagsByAreaTriggerID.end();
 }
@@ -13812,8 +13833,9 @@ bool EverQuestMod::HandleZoneLineAreaTrigger(Player* player, AreaTrigger const* 
     if (TryZoneLineIntoInstanceDungeon(player, trigger) == true)
         return true;
 
-    // EQ zone lines that keep the player's own position on an axis can't be done by the teleport row, which only has fixed values
-    if (DoesZoneLineKeepPlayerPosition(trigger->entry) == false)
+    // EQ zone lines are all placed here, since the teleport row only has fixed values that aren't on the ground (and those that keep the
+    // player's own position on an axis can't be done by it at all)
+    if (IsEverQuestZoneLine(trigger->entry) == false)
         return false;
     uint32 targetMapID = 0;
     float targetX, targetY, targetZ, targetOrientation;
@@ -13838,31 +13860,147 @@ bool EverQuestMod::GetZoneLineDestination(Player* player, AreaTrigger const* tri
     orientation = areaTriggerTeleport->target_Orientation;
 
     // EQ zones share one scale, so a value kept from the player lines up with the same spot along the next zone's edge (EQ's long zone
-    // lines, such as between the Commonlands, keep how far along the line the player was).  Ground heights there differ between the two
-    // zones, so the player lands on the next zone's floor near that height (EQ's best Z) instead of in it or above it
+    // lines, such as between the Commonlands, keep how far along the line the player was)
     auto keepFlagsIter = ZoneLineKeepFlagsByAreaTriggerID.find(trigger->entry);
-    if (keepFlagsIter != ZoneLineKeepFlagsByAreaTriggerID.end())
+    if (keepFlagsIter == ZoneLineKeepFlagsByAreaTriggerID.end())
+        return true;
+    EverQuestZoneLineKeepFlags const& keepFlags = keepFlagsIter->second;
+    if (keepFlags.KeepX == true)
+        x = player->GetPositionX();
+    if (keepFlags.KeepY == true)
+        y = player->GetPositionY();
+    if (keepFlags.KeepZ == true)
+        z = player->GetPositionZ() + EQ_ZONE_LINE_KEPT_Z_LIFT;
+    if (keepFlags.KeepOrientation == true)
+        orientation = player->GetOrientation();
+
+    // EQ's arrival heights are over the floor (EQ positions sit above the feet) and kept ones come from the other zone's ground, so the
+    // player is put on the next zone's ground near that height (EQ's best Z).  An arrival in a zone line box would send the player straight back
+    if (EQZoneMap const* targetZoneMap = sEQZoneMapMgr->GetZoneMap(mapID))
     {
-        EverQuestZoneLineKeepFlags const& keepFlags = keepFlagsIter->second;
-        if (keepFlags.KeepX == true)
-            x = player->GetPositionX();
-        if (keepFlags.KeepY == true)
-            y = player->GetPositionY();
-        if (keepFlags.KeepZ == true)
-            z = player->GetPositionZ() + EQ_ZONE_LINE_KEPT_Z_LIFT;
-        if (keepFlags.KeepOrientation == true)
-            orientation = player->GetOrientation();
-        if (keepFlags.KeepX == true || keepFlags.KeepY == true || keepFlags.KeepZ == true)
-        {
-            if (EQZoneMap const* targetZoneMap = sEQZoneMapMgr->GetZoneMap(mapID))
-            {
-                float groundZ = targetZoneMap->FindBestZ(x, y, z, EQ_ZONE_LINE_GROUND_SEARCH_UP, EQ_ZONE_LINE_GROUND_SEARCH_DOWN);
-                if (groundZ > EQ_ZONE_MAP_INVALID_HEIGHT)
-                    z = groundZ + EQ_ZONE_LINE_KEPT_Z_LIFT;
-            }
-        }
+        AlignZoneLineArrivalToGround(targetZoneMap, x, y, z);
+        MoveZoneLineArrivalOutOfZoneLines(mapID, targetZoneMap, x, y, z, orientation);
     }
     return true;
+}
+
+// False when there's neither ground nor liquid near the spot (z is left as it was)
+bool EverQuestMod::AlignZoneLineArrivalToGround(EQZoneMap const* zoneMap, float x, float y, float& z)
+{
+    // An arrival in liquid stays where it is, so the player swims from there
+    EQZoneLiquidInfo liquidInfo;
+    if (zoneMap->GetLiquidInfo(x, y, z, 0.0f, liquidInfo) == true && z < liquidInfo.SurfaceZ)
+        return true;
+    float groundZ = zoneMap->FindBestZ(x, y, z, EQ_ZONE_LINE_GROUND_SEARCH_UP, EQ_ZONE_LINE_GROUND_SEARCH_DOWN);
+    if (groundZ <= EQ_ZONE_MAP_INVALID_HEIGHT)
+        return false;
+
+    // Ground under liquid puts the player on the liquid's surface instead of on the bottom
+    if (zoneMap->GetLiquidInfo(x, y, groundZ, 0.0f, liquidInfo) == true && liquidInfo.SurfaceZ > groundZ)
+    {
+        z = liquidInfo.SurfaceZ;
+        return true;
+    }
+    z = groundZ + EQ_ZONE_LINE_ARRIVAL_GROUND_LIFT;
+    return true;
+}
+
+// Same test as the client's (AreaTriggerContains), which is the one that fires the trigger
+static bool IsPointInEverQuestZoneLineBox(EverQuestZoneLineBox const& zoneLineBox, float x, float y, float z)
+{
+    float offsetX = x - zoneLineBox.X;
+    float offsetY = y - zoneLineBox.Y;
+    float cosOrientation = std::cos(zoneLineBox.Orientation);
+    float sinOrientation = std::sin(zoneLineBox.Orientation);
+    float alongLength = offsetX * cosOrientation + offsetY * sinOrientation;
+    float alongWidth = -offsetX * sinOrientation + offsetY * cosOrientation;
+    return std::fabs(alongLength) < zoneLineBox.Length * 0.5f && std::fabs(alongWidth) < zoneLineBox.Width * 0.5f
+        && std::fabs(z - zoneLineBox.Z) < zoneLineBox.Height * 0.5f;
+}
+
+// How far a point inside the box goes along a direction before it leaves the box's sides
+static float GetEverQuestZoneLineBoxExitDistance(EverQuestZoneLineBox const& zoneLineBox, float x, float y, float directionX, float directionY)
+{
+    float offsetX = x - zoneLineBox.X;
+    float offsetY = y - zoneLineBox.Y;
+    float cosOrientation = std::cos(zoneLineBox.Orientation);
+    float sinOrientation = std::sin(zoneLineBox.Orientation);
+    float positions[2] = { offsetX * cosOrientation + offsetY * sinOrientation, -offsetX * sinOrientation + offsetY * cosOrientation };
+    float directions[2] = { directionX * cosOrientation + directionY * sinOrientation, -directionX * sinOrientation + directionY * cosOrientation };
+    float halfSizes[2] = { zoneLineBox.Length * 0.5f, zoneLineBox.Width * 0.5f };
+    float exitDistance = std::numeric_limits<float>::max();
+    for (int axis = 0; axis < 2; ++axis)
+    {
+        if (directions[axis] > 0.0001f)
+            exitDistance = std::min(exitDistance, (halfSizes[axis] - positions[axis]) / directions[axis]);
+        else if (directions[axis] < -0.0001f)
+            exitDistance = std::min(exitDistance, (-halfSizes[axis] - positions[axis]) / directions[axis]);
+    }
+    return std::max(exitDistance, 0.0f);
+}
+
+void EverQuestMod::MoveZoneLineArrivalOutOfZoneLines(uint32 mapID, EQZoneMap const* zoneMap, float& x, float& y, float& z, float orientation)
+{
+    auto zoneLineBoxesIter = ZoneLineBoxesByMapID.find(mapID);
+    if (zoneLineBoxesIter == ZoneLineBoxesByMapID.end())
+        return;
+    vector<EverQuestZoneLineBox> const& zoneLineBoxes = zoneLineBoxesIter->second;
+    for (int move = 0; move < EQ_ZONE_LINE_ARRIVAL_MAX_MOVES; ++move)
+    {
+        EverQuestZoneLineBox const* holdingBox = nullptr;
+        for (EverQuestZoneLineBox const& zoneLineBox : zoneLineBoxes)
+        {
+            if (IsPointInEverQuestZoneLineBox(zoneLineBox, x, y, z) == true)
+            {
+                holdingBox = &zoneLineBox;
+                break;
+            }
+        }
+        if (holdingBox == nullptr)
+            return;
+
+        // Forward first (the way the player is going into the zone), then out through the box's sides, nearest first.  A spot past a wall,
+        // or off the zone's geometry (a kept facing can point back out of the zone, and zone lines often sit at the end of a tunnel),
+        // doesn't count
+        float cosBox = std::cos(holdingBox->Orientation);
+        float sinBox = std::sin(holdingBox->Orientation);
+        float directions[5][2] = { { std::cos(orientation), std::sin(orientation) }, { cosBox, sinBox }, { -cosBox, -sinBox }, { -sinBox, cosBox },
+            { sinBox, -cosBox } };
+        float moveDistances[5];
+        for (int directionIndex = 0; directionIndex < 5; ++directionIndex)
+            moveDistances[directionIndex] = GetEverQuestZoneLineBoxExitDistance(*holdingBox, x, y, directions[directionIndex][0], directions[directionIndex][1])
+                + EQ_ZONE_LINE_ARRIVAL_CLEARANCE;
+        for (int sortedCount = 2; sortedCount < 5; ++sortedCount)
+        {
+            for (int directionIndex = sortedCount; directionIndex > 1 && moveDistances[directionIndex] < moveDistances[directionIndex - 1]; --directionIndex)
+            {
+                std::swap(moveDistances[directionIndex], moveDistances[directionIndex - 1]);
+                std::swap(directions[directionIndex][0], directions[directionIndex - 1][0]);
+                std::swap(directions[directionIndex][1], directions[directionIndex - 1][1]);
+            }
+        }
+        bool moved = false;
+        for (int directionIndex = 0; directionIndex < 5 && moved == false; ++directionIndex)
+        {
+            float moveDistance = moveDistances[directionIndex];
+            float movedX = x + directions[directionIndex][0] * moveDistance;
+            float movedY = y + directions[directionIndex][1] * moveDistance;
+            float movedZ = z;
+            if (AlignZoneLineArrivalToGround(zoneMap, movedX, movedY, movedZ) == false)
+                continue;
+            if (zoneMap->IsInLineOfSight(x, y, z + EQ_ZONE_LINE_ARRIVAL_LOS_HEIGHT, movedX, movedY, movedZ + EQ_ZONE_LINE_ARRIVAL_LOS_HEIGHT) == false)
+                continue;
+            x = movedX;
+            y = movedY;
+            z = movedZ;
+            moved = true;
+        }
+        if (moved == false)
+        {
+            LOG_DEBUG("module.EverQuest", "EverQuestMod: zone line arrival on map {} at ({}, {}, {}) is in zone line {} with no clear way out", mapID, x, y, z, holdingBox->AreaTriggerID);
+            return;
+        }
+    }
 }
 
 bool EverQuestMod::TryZoneLineIntoInstanceRaidLow(Player* player, AreaTrigger const* trigger)
@@ -18975,6 +19113,14 @@ void EverQuestMod::ApplyMentorshipLevelForPlayer(Player* player, uint8 newLevel)
     PlayerClassLevelInfo classLevelInfo;
     sObjectMgr->GetPlayerClassLevelInfo(player->getClass(), newLevel, &classLevelInfo);
 
+    // Player::_ApplyAllLevelScaleItemMods takes every worn item's stats off and back on, and with them off the maximums drop to the bare
+    // level's (a mentor's 5.8K mana pool to about 1.2K), which pulls current health and mana down to that.  Player::GiveLevel hides it with
+    // a full refill, so what the player had is put back here instead, capped by the new maximums
+    uint32 health = player->GetHealth();
+    uint32 powers[MAX_POWERS];
+    for (uint8 powerIndex = POWER_MANA; powerIndex < MAX_POWERS; ++powerIndex)
+        powers[powerIndex] = player->GetPower(Powers(powerIndex));
+
     player->_ApplyAllLevelScaleItemMods(false);
     player->SetLevel(newLevel, true);
     player->SetUInt32Value(PLAYER_NEXT_LEVEL_XP, sObjectMgr->GetXPForLevel(newLevel));
@@ -18984,11 +19130,17 @@ void EverQuestMod::ApplyMentorshipLevelForPlayer(Player* player, uint8 newLevel)
 
     player->SetCreateHealth(classLevelInfo.basehealth);
     player->SetCreateMana(classLevelInfo.basemana);
-
-    // Unit::SetMaxHealth and Unit::SetMaxPower pull current health and mana down with them, so no clamping is needed
     player->UpdateAllStats();
 
     player->_ApplyAllLevelScaleItemMods(true);
+
+    // Unit::SetHealth and Unit::SetPower cap at the maximum, and SetHealth keeps a dead player at 0 or 1
+    if (player->IsAlive() == true)
+    {
+        player->SetHealth(health);
+        for (uint8 powerIndex = POWER_MANA; powerIndex < MAX_POWERS; ++powerIndex)
+            player->SetPower(Powers(powerIndex), powers[powerIndex]);
+    }
 
     if (Pet* pet = player->GetPet())
         pet->SynchronizeLevelWithOwner();

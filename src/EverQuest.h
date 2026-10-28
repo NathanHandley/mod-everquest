@@ -51,6 +51,7 @@ class Pet;
 class AuraApplication;
 class WorldPacket;
 class ByteBuffer;
+class EQZoneMap;
 struct AreaTrigger;
 struct BuildValuesCachePosPointers;
 
@@ -421,6 +422,10 @@ struct BuildValuesCachePosPointers;
 #define EQ_ZONE_LINE_KEPT_Z_LIFT                    0.5f    // Yards added to a height a zone line keeps from the player
 #define EQ_ZONE_LINE_GROUND_SEARCH_UP               20.0f   // How far above a kept height a zone line looks for the next zone's ground
 #define EQ_ZONE_LINE_GROUND_SEARCH_DOWN             60.0f   // How far below a kept height a zone line looks for the next zone's ground
+#define EQ_ZONE_LINE_ARRIVAL_GROUND_LIFT            0.05f   // Yards a zone line arrival is put over the ground, so the client's floor test can't miss it
+#define EQ_ZONE_LINE_ARRIVAL_CLEARANCE              0.5f    // Yards past the edge of a zone line box that an arrival inside one is moved to (a short step back re-enters it)
+#define EQ_ZONE_LINE_ARRIVAL_LOS_HEIGHT             1.5f    // Height over the ground that a moved arrival needs a clear line from the original spot at
+#define EQ_ZONE_LINE_ARRIVAL_MAX_MOVES              4       // Most zone line boxes an arrival is moved out of, one after another
 
 #define EQ_CROUCH_COLLISION_HEIGHT_SCALE            0.5f    // Crouched height as a share of standing height (EQ ducking needs half the headroom); the client does the shrinking
 #define EQ_CROUCH_STAND_UP_HEADROOM_MARGIN          0.1f    // Extra room needed above the standing head height to stand up from a crouch
@@ -1524,7 +1529,8 @@ public:
     float Orientation = 0;
 };
 
-// An EQ zone line that keeps the player's own value on an axis (or their facing) instead of the teleport row's value
+// An EQ zone line's own values: which axes (and facing) it keeps from the player instead of the teleport row's values.  Every EQ zone
+// line has one, since the mod places every EQ zone line arrival
 class EverQuestZoneLineKeepFlags
 {
 public:
@@ -1532,6 +1538,20 @@ public:
     bool KeepY = false;
     bool KeepZ = false;
     bool KeepOrientation = false;
+};
+
+// An EQ zone line's area trigger box, which an arrival on its map has to land outside of
+class EverQuestZoneLineBox
+{
+public:
+    uint32 AreaTriggerID = 0;
+    float X = 0.0f;
+    float Y = 0.0f;
+    float Z = 0.0f;
+    float Length = 0.0f;
+    float Width = 0.0f;
+    float Height = 0.0f;
+    float Orientation = 0.0f;
 };
 
 class EverQuestZone
@@ -2118,6 +2138,7 @@ public:
     unordered_map<uint32, uint32> ForageZoneItemTotalChanceByMapID;
     unordered_map<uint32, EverQuestZoneSafePoint> ZoneSafePointByMapID;
     unordered_map<uint32, EverQuestZoneLineKeepFlags> ZoneLineKeepFlagsByAreaTriggerID;
+    unordered_map<uint32, vector<EverQuestZoneLineBox>> ZoneLineBoxesByMapID;
     unordered_map<uint32, EverQuestZone> ZoneByMapID;
     unordered_map<uint32, vector<EverQuestZoneTeleportDestination>> ZoneTeleportDestinationsByMapID;
     unordered_set<uint32> InstanceRaidLowMapIDs;
@@ -2688,10 +2709,12 @@ public:
     void ClearRaidLowInstanceStateForPlayer(ObjectGuid playerGUID);
     bool HasOccupiedRaidLowInstanceForMap(ObjectGuid playerGUID, uint32 raidLowMapID);
     bool ShouldZoneLineEnterInstanceRaidLow(Player* player, uint32 raidLowMapID);
-    // Where a zone line sends the player: the trigger's teleport row, with the axes the EQ zone line keeps taken from the player.  False when
-    // the trigger has no teleport row
+    // Where a zone line sends the player: the trigger's teleport row, with the axes the EQ zone line keeps taken from the player, set on the
+    // ground and moved out of any zone line box there.  False when the trigger has no teleport row
     bool GetZoneLineDestination(Player* player, AreaTrigger const* trigger, uint32& mapID, float& x, float& y, float& z, float& orientation);
-    bool DoesZoneLineKeepPlayerPosition(uint32 areaTriggerID);
+    bool IsEverQuestZoneLine(uint32 areaTriggerID);
+    bool AlignZoneLineArrivalToGround(EQZoneMap const* zoneMap, float x, float y, float& z);
+    void MoveZoneLineArrivalOutOfZoneLines(uint32 mapID, EQZoneMap const* zoneMap, float& x, float& y, float& z, float orientation);
     bool HandleZoneLineAreaTrigger(Player* player, AreaTrigger const* trigger);
     bool TryZoneLineIntoInstanceRaidLow(Player* player, AreaTrigger const* trigger);
     uint32 GetInstanceDungeonMapIDForMap(uint32 mapID);
