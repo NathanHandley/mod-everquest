@@ -13682,14 +13682,14 @@ bool EverQuestMod::IsCreatureBlockedFromInstanceMap(uint32 creatureTemplateID, M
 {
     if (map == nullptr)
         return false;
-    // Only a dungeon instance restricts its creatures (no raid creatures of any tier), while a raid instance holds every creature the open world zone does
+    // Only a dungeon instance restricts its creatures (no raid bosses or raid mini bosses, though raid trash is allowed), while a raid instance holds every creature the open world zone does
     if (IsMapInstanceDungeon(map->GetId()) == false)
         return false;
     if (HasCreatureDataForCreatureTemplateID(creatureTemplateID) == false)
         return false;
 
     uint32 difficultyType = GetCreatureDataForCreatureTemplateID(creatureTemplateID).DifficultyType;
-    return (difficultyType == EQ_CREATURE_DIFFICULTY_RAIDTRASH || difficultyType == EQ_CREATURE_DIFFICULTY_RAIDBOSS || difficultyType == EQ_CREATURE_DIFFICULTY_RAIDMINIBOSS);
+    return (difficultyType == EQ_CREATURE_DIFFICULTY_RAIDBOSS || difficultyType == EQ_CREATURE_DIFFICULTY_RAIDMINIBOSS);
 }
 
 void EverQuestMod::SpawnGameEventCreaturesIntoLiveInstances(int16 eventID)
