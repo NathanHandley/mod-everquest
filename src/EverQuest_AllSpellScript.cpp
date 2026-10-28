@@ -416,15 +416,35 @@ public:
             targetInfo.missCondition = SPELL_MISS_PARRY;
     }
 
-    void OnDispelSelection(Spell* spell, Unit* /*target*/, bool& oldestFirst) override
+    // Auras with a full duration over 20 seconds (or none at all) come off first, so short refreshing ones like Replenishment and bard song ticks don't soak up the dispels.
+    // This is the duration the aura was applied with, not the time left.  It can't come from the SpellInfo since EQ spells all use the infinite placeholder duration there,
+    // and get their real duration from CalculateEQSpellMaxDuration
+    static bool IsLongDispelAura(Aura const* aura)
+    {
+        int32 fullDurationInMS = aura->GetMaxDuration();
+        return fullDurationInMS < 0 || fullDurationInMS > 20000;
+    }
+
+    static bool IsEQDispelChargeRemovedBefore(std::pair<Aura*, uint8> const& left, std::pair<Aura*, uint8> const& right)
+    {
+        bool isLeftLong = IsLongDispelAura(left.first);
+        bool isRightLong = IsLongDispelAura(right.first);
+        if (isLeftLong != isRightLong)
+            return isLeftLong;
+        return left.first->GetApplySequence() > right.first->GetApplySequence();
+    }
+
+    void OnDispelSelection(Spell* spell, Unit* /*target*/, DispelChargesList& dispelList, bool& inListOrder) override
     {
         if (EverQuest->IsEnabled == false || spell == nullptr)
             return;
 
-        // EQ dispels take buffs off in the order they landed, so the oldest goes first, then the next oldest
+        // EQ dispels take buffs off newest first (last in, first out), going through the long buffs before any short ones
         uint32 spellID = spell->GetSpellInfo()->Id;
-        if (spellID >= EverQuest->ConfigSystemSpellDBCIDMin && spellID <= EverQuest->ConfigSystemSpellDBCIDMax)
-            oldestFirst = true;
+        if (spellID < EverQuest->ConfigSystemSpellDBCIDMin || spellID > EverQuest->ConfigSystemSpellDBCIDMax)
+            return;
+        dispelList.sort(IsEQDispelChargeRemovedBefore);
+        inListOrder = true;
     }
 
     void OnSpellCast(Spell* spell, Unit* caster , SpellInfo const* spellInfo, bool /*skipCheck*/) override
