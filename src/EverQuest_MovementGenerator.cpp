@@ -212,16 +212,7 @@ void EverQuestMovementGenerator::StartTravel(Creature* owner)
     owner->AddUnitState(UNIT_STATE_ROAMING_MOVE);
 
     Movement::MoveSplineInit init(owner);
-    if (CreatureInstance.DisableGroundContour == true)
-    {
-        // A grid made for a floating or flying creature keeps its own heights
-        Movement::PointsArray path;
-        path.push_back(G3D::Vector3(owner->GetPositionX(), owner->GetPositionY(), owner->GetPositionZ()));
-        path.push_back(G3D::Vector3(TravelTarget.GetPositionX(), TravelTarget.GetPositionY(), TravelTarget.GetPositionZ()));
-        init.MovebyPath(path);
-    }
-    else
-        init.MoveTo(TravelTarget.GetPositionX(), TravelTarget.GetPositionY(), TravelTarget.GetPositionZ(), true, false);
+    init.MoveTo(TravelTarget.GetPositionX(), TravelTarget.GetPositionY(), TravelTarget.GetPositionZ(), true, false);
     init.SetWalk(true);
     init.Launch();
 }
