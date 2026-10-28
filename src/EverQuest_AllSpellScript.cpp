@@ -416,6 +416,17 @@ public:
             targetInfo.missCondition = SPELL_MISS_PARRY;
     }
 
+    void OnDispelSelection(Spell* spell, Unit* /*target*/, bool& oldestFirst) override
+    {
+        if (EverQuest->IsEnabled == false || spell == nullptr)
+            return;
+
+        // EQ dispels take buffs off in the order they landed, so the oldest goes first, then the next oldest
+        uint32 spellID = spell->GetSpellInfo()->Id;
+        if (spellID >= EverQuest->ConfigSystemSpellDBCIDMin && spellID <= EverQuest->ConfigSystemSpellDBCIDMax)
+            oldestFirst = true;
+    }
+
     void OnSpellCast(Spell* spell, Unit* caster , SpellInfo const* spellInfo, bool /*skipCheck*/) override
     {
         if (spell == nullptr)
