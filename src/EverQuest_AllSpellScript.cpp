@@ -249,6 +249,12 @@ public:
 
     void OnSpellPrepare(Spell* spell, Unit* caster, SpellInfo const* spellInfo) override
     {
+        // EQ targeted area spells land around the target where it is when the cast completes, so a pack that follows the caster
+        // during the cast is still caught around its target
+        if (EverQuest->IsEnabled == true && spell != nullptr && spellInfo != nullptr
+            && spellInfo->Id >= EverQuest->ConfigSystemSpellDBCIDMin && spellInfo->Id <= EverQuest->ConfigSystemSpellDBCIDMax)
+            spell->SetDstFollowsExplicitTarget(true);
+
         // A cast started while already moving pays for it in movement speed until the cast ends
         if (EverQuest->IsEnabled == true && caster != nullptr && caster->IsPlayer() == true)
             EverQuest->ApplyMovementCastSnareForPlayer(caster->ToPlayer(), spell);
