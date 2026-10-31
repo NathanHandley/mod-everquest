@@ -2040,6 +2040,8 @@ public:
     float ConfigSecondaryExpPoolGainPercent;
     uint32 ConfigSecondaryExpPoolMaxPooled;
     uint32 ConfigPlayerLevelCap;
+    uint32 ConfigExperienceBurningCrusadeBaseCreatureLevel;
+    uint32 ConfigExperienceNorthrendBaseCreatureLevel;
     bool ConfigPlayerHeavyArmorIgnoresBearFormMultiplier;
     bool ConfigPlayerAddHearthstoneToNewCharacters;
     bool ConfigPlayerAddMasterTotemToShamans;
@@ -2623,6 +2625,7 @@ public:
     void GrantLegacyAchievementIfEligible(Player* player);
     void GrantStartAchievementIfMissing(Player* player);
     uint8 GetLevelForEQRules(Unit const* unit);
+    uint8 GetContentLevelsForEQCreatureKill(Unit const* victim, uint8 contentLevels);
     void GrantCreatureGossipHelloAchievement(Player* player, Creature* creature);
     void ApplyAdventurerAuraStateOnLogin(Player* player);
     bool IsMapIDAnEverQuestMap(uint32 mapID);

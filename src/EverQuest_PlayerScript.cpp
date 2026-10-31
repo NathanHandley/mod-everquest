@@ -467,6 +467,14 @@ public:
         EverQuest->HandleLevelCapOnBeforeExperienceGain(player, level);
     }
 
+    void OnPlayerBeforeGetContentLevelsForXPGain(Unit const* victim, uint8& contentLevels) override
+    {
+        if (EverQuest->IsEnabled == false)
+            return;
+
+        contentLevels = EverQuest->GetContentLevelsForEQCreatureKill(victim, contentLevels);
+    }
+
     bool OnPlayerCanGiveLevel(Player* player, uint8 newLevel) override
     {
         if (EverQuest->IsEnabled == false)

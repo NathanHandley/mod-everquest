@@ -203,6 +203,23 @@ EverQuest.AlternateGroupExperienceFormula.AddPercentPerMember = 20
 
 ###################################################################################################
 #
+# 	EverQuest.Experience.BurningCrusadeBaseCreatureLevel
+#		EverQuest creatures this level or higher pay the Burning Crusade base kill experience
+#       instead of the classic one that every Norrath map has.  0 turns this off
+#	Default: 0 (the Shadows of Luclin expansion and later use 58)
+#
+# 	EverQuest.Experience.NorthrendBaseCreatureLevel
+#		EverQuest creatures this level or higher pay the Northrend base kill experience instead,
+#       which wins over the setting above.  0 turns this off
+#	Default: 0 (the Shadows of Luclin expansion and later use 68)
+#
+###################################################################################################
+
+EverQuest.Experience.BurningCrusadeBaseCreatureLevel = 0
+EverQuest.Experience.NorthrendBaseCreatureLevel = 0
+
+###################################################################################################
+#
 # 	EverQuest.Mentorship.Enabled
 #		If true, two grouped characters can tether themselves together so that they are semi-near in
 #        level and can tackle content together.  Started from the right click menu on a targeted group

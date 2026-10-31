@@ -175,6 +175,8 @@ EverQuestMod::EverQuestMod() :
     ConfigSecondaryExpPoolGainPercent(25.0f),
     ConfigSecondaryExpPoolMaxPooled(1000000),
     ConfigPlayerLevelCap(0),
+    ConfigExperienceBurningCrusadeBaseCreatureLevel(0),
+    ConfigExperienceNorthrendBaseCreatureLevel(0),
     ConfigPlayerAddHearthstoneToNewCharacters(true),
     ConfigPlayerAddMasterTotemToShamans(true),
     ConfigPlayerAddRacialGuiseItemOnLogin(true),
@@ -587,6 +589,10 @@ void EverQuestMod::LoadConfigurationFile()
 
     // Player Level Cap
     ConfigPlayerLevelCap = sConfigMgr->GetOption<uint32>("EverQuest.Player.LevelCap", 0);
+
+    // Kill experience
+    ConfigExperienceBurningCrusadeBaseCreatureLevel = sConfigMgr->GetOption<uint32>("EverQuest.Experience.BurningCrusadeBaseCreatureLevel", 0);
+    ConfigExperienceNorthrendBaseCreatureLevel = sConfigMgr->GetOption<uint32>("EverQuest.Experience.NorthrendBaseCreatureLevel", 0);
 
     // Mentorship
     ConfigMentorshipEnabled = sConfigMgr->GetOption<bool>("EverQuest.Mentorship.Enabled", true);
@@ -9863,6 +9869,20 @@ uint8 EverQuestMod::GetLevelForEQRules(Unit const* unit)
     return uint8(levelEQ + ((uint32(unit->GetLevel()) - creatureTemplate->minlevel) * (maxLevelEQ - levelEQ)) / (creatureTemplate->maxlevel - creatureTemplate->minlevel));
 }
 
+// Every EverQuest map counts as classic content, so high level EverQuest creatures need to be moved up to the base experience that WOW pays at those levels
+uint8 EverQuestMod::GetContentLevelsForEQCreatureKill(Unit const* victim, uint8 contentLevels)
+{
+    Creature const* creature = victim->ToCreature();
+    if (creature == nullptr || HasCreatureDataForCreatureTemplateID(creature->GetEntry()) == false)
+        return contentLevels;
+    uint32 creatureLevel = victim->GetLevel();
+    if (ConfigExperienceNorthrendBaseCreatureLevel > 0 && creatureLevel >= ConfigExperienceNorthrendBaseCreatureLevel)
+        return CONTENT_71_80;
+    if (ConfigExperienceBurningCrusadeBaseCreatureLevel > 0 && creatureLevel >= ConfigExperienceBurningCrusadeBaseCreatureLevel)
+        return CONTENT_61_70;
+    return contentLevels;
+}
+
 void EverQuestMod::GrantStartAchievementIfMissing(Player* player)
 {
     uint8 raceID = player->getRace(true);
@@ -10209,7 +10229,7 @@ float EverQuestMod::GetGroupExperienceCorrectionForKill(Player* killer, Unit* vi
         return 1.0f;
 
     // Acore::XP::Gain is deliberately not used here.  Only the ratio of the two bases matters, and the creature multipliers Gain adds cancel out of it
-    ContentLevels victimContentLevels = GetContentLevelsForMapAndZone(victim->GetMapId(), victim->GetZoneId());
+    ContentLevels victimContentLevels = Acore::XP::GetContentLevelsForKill(victim);
     uint32 coreBaseExperience = Acore::XP::BaseGain(levels.CoreReferenceLevel, victim->GetLevel(), victimContentLevels);
     if (coreBaseExperience == 0)
         return 1.0f;
