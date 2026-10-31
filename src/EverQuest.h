@@ -272,6 +272,7 @@ struct BuildValuesCachePosPointers;
 #define EQ_HASTE_TYPE_WORNITEM                      1
 #define EQ_HASTE_TYPE_SPELL_V1                      2
 #define EQ_HASTE_TYPE_SPELL_V2                      3
+#define EQ_HASTE_TYPE_SPELL_V3                      4
 
 #define EQ_WOW_FLAT_ATTACK_POWER_BUFF_SPELL_GROUP_ID    1004 // WOW's stock "Flat AP Buffs" group (Battle Shout, Blessing of Might)
 #define EQ_WOW_FLAT_ATTACK_POWER_DEBUFF_SPELL_GROUP_ID  1062 // WOW's stock "AP Debuffs" group (Demoralizing Shout/Roar, Vindication, Curse of Weakness)

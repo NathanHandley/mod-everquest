@@ -7608,8 +7608,8 @@ void EverQuestMod::EnforceEQHastePercentCapOnUnit(Unit* unit, vector<EverQuestUn
     uint32 auraTypesToProcess[2] = { SPELL_AURA_MOD_MELEE_HASTE, SPELL_AURA_MOD_RANGED_HASTE };
     for (uint32 auraType : auraTypesToProcess)
     {
-        // Find the strongest active effect per category (haste types 1 = worn, 2 = spell/song/clicky, 3 = v2)
-        int winnerIndexByHasteType[4] = { -1, -1, -1, -1 };
+        // Find the strongest active effect per category (haste types 1 = worn, 2 = spell/song/clicky, 3 = v2, 4 = v3)
+        int winnerIndexByHasteType[5] = { -1, -1, -1, -1, -1 };
         for (size_t i = 0; i < trackedHasteAuraEffects.size(); ++i)
         {
             EverQuestUnitHasteAuraEffect& trackedHasteAuraEffect = trackedHasteAuraEffects[i];
@@ -7618,7 +7618,7 @@ void EverQuestMod::EnforceEQHastePercentCapOnUnit(Unit* unit, vector<EverQuestUn
             if (GetTrackedAuraEffectOnUnit(unit, trackedHasteAuraEffect.SpellID, trackedHasteAuraEffect.EffectIndex, trackedHasteAuraEffect.CasterGUID) == nullptr)
                 continue;
             uint32 hasteType = trackedHasteAuraEffect.HasteType;
-            if (hasteType < EQ_HASTE_TYPE_WORNITEM || hasteType > EQ_HASTE_TYPE_SPELL_V2)
+            if (hasteType < EQ_HASTE_TYPE_WORNITEM || hasteType > EQ_HASTE_TYPE_SPELL_V3)
                 hasteType = EQ_HASTE_TYPE_SPELL_V1;
             int winnerIndex = winnerIndexByHasteType[hasteType];
             if (winnerIndex == -1 || trackedHasteAuraEffect.NaturalAmount > trackedHasteAuraEffects[winnerIndex].NaturalAmount)
@@ -7630,8 +7630,9 @@ void EverQuestMod::EnforceEQHastePercentCapOnUnit(Unit* unit, vector<EverQuestUn
         float categoryCapMod = ConfigSpellHasteCapMod < 0.0f ? 0.0f : ConfigSpellHasteCapMod;
         float wornBelowLevel26CapPercent = 10.0f * categoryCapMod;
         float spellV2MaxContributionPercent = 10.0f * categoryCapMod;
+        float spellV3MaxContributionPercent = (unitLevel > 50 ? 25.0f : 10.0f) * categoryCapMod;
 
-        float contributionsByHasteType[4] = { 0, 0, 0, 0 };
+        float contributionsByHasteType[5] = { 0, 0, 0, 0, 0 };
         if (winnerIndexByHasteType[1] >= 0)
         {
             float wornAmount = (float)trackedHasteAuraEffects[winnerIndexByHasteType[1]].NaturalAmount;
@@ -7650,6 +7651,10 @@ void EverQuestMod::EnforceEQHastePercentCapOnUnit(Unit* unit, vector<EverQuestUn
         if ((float)cappedTotalAmount > capPercent)
             cappedTotalAmount = (int32)std::floor(capPercent);
 
+        // v3 is the one category that goes on top of the cap
+        if (winnerIndexByHasteType[EQ_HASTE_TYPE_SPELL_V3] >= 0)
+            cappedTotalAmount += (int32)std::lround(std::min((float)trackedHasteAuraEffects[winnerIndexByHasteType[EQ_HASTE_TYPE_SPELL_V3]].NaturalAmount, spellV3MaxContributionPercent));
+
         // The whole total rides on the strongest category winner and everything else is zeroed, because the unit multiplies its haste effects together and each
         // applied amount is a whole percent.  Splitting the total across the effects has to round every factor, and the rounded factors multiply out short of the
         // target (15% and 30% give 1.495, not the 1.50 a 50% cap calls for), so the ceiling could never actually be reached.  One carrier makes the applied total
@@ -7665,7 +7670,7 @@ void EverQuestMod::EnforceEQHastePercentCapOnUnit(Unit* unit, vector<EverQuestUn
             if (auraEffect == nullptr)
                 continue;
             uint32 hasteType = trackedHasteAuraEffect.HasteType;
-            if (hasteType < EQ_HASTE_TYPE_WORNITEM || hasteType > EQ_HASTE_TYPE_SPELL_V2)
+            if (hasteType < EQ_HASTE_TYPE_WORNITEM || hasteType > EQ_HASTE_TYPE_SPELL_V3)
                 hasteType = EQ_HASTE_TYPE_SPELL_V1;
 
             int32 newAmount = 0;
