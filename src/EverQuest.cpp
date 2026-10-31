@@ -8591,7 +8591,7 @@ bool EverQuestMod::AreNonFactionQuestObjectivesMetForPlayer(Player* player, Ques
 void EverQuestMod::LoadGossipReactions()
 {
     GossipReactionsByGossipCreatureTemplateID.clear();
-    QueryResult queryResult = WorldDatabase.Query("SELECT GossipCreatureTemplateID, NpcTextID, OptionID, OptionText, ReactionType, SayText, TargetCreatureTemplateID, UsePlayerX, UsePlayerY, UsePlayerZ, AddedPlayerX, AddedPlayerY, UsePlayerOrientation, UseNpcX, UseNpcY, UseNpcZ, UseNpcOrientation, PositionX, PositionY, PositionZ, Orientation, DelayInMS, MovementIsRun, FiresOnArrival, PathListID, GameObjectEntryID, GameObjectLifetimeSec, RequiredQuestID, RequiredNearX, RequiredNearY, RequiredNearZ, RequiredNearDistance, SpellID FROM mod_everquest_gossip_reaction ORDER BY GossipCreatureTemplateID, ID;");
+    QueryResult queryResult = WorldDatabase.Query("SELECT GossipCreatureTemplateID, NpcTextID, OptionID, OptionText, ReactionType, SayText, TargetCreatureTemplateID, UsePlayerX, UsePlayerY, UsePlayerZ, AddedPlayerX, AddedPlayerY, UsePlayerOrientation, UseNpcX, UseNpcY, UseNpcZ, UseNpcOrientation, PositionX, PositionY, PositionZ, Orientation, DelayInMS, MovementIsRun, FiresOnArrival, PathListID, GameObjectEntryID, GameObjectLifetimeSec, RequiredQuestID, RequiredNearX, RequiredNearY, RequiredNearZ, RequiredNearDistance, SpellID, ItemTemplateID FROM mod_everquest_gossip_reaction ORDER BY GossipCreatureTemplateID, ID;");
     if (queryResult)
     {
         do
@@ -8632,7 +8632,67 @@ void EverQuestMod::LoadGossipReactions()
             gossipReaction.RequiredNearZ = fields[30].Get<float>();
             gossipReaction.RequiredNearDistance = fields[31].Get<float>();
             gossipReaction.SpellID = fields[32].Get<uint32>();
+            gossipReaction.ItemTemplateID = fields[33].Get<uint32>();
             GossipReactionsByGossipCreatureTemplateID[gossipReaction.GossipCreatureTemplateID].push_back(gossipReaction);
+        } while (queryResult->NextRow());
+    }
+}
+
+void EverQuestMod::LoadTimedPortData()
+{
+    TimedPorts.clear();
+    TimedPortWarnings.clear();
+
+    QueryResult queryResult = WorldDatabase.Query("SELECT MapID, X, Y, Z, Radius, DestinationMapID, DestinationX, DestinationY, DestinationZ, DestinationOrientation, CycleInSeconds, OffsetInSeconds, RequiredItemTemplateID, MissingItemText FROM mod_everquest_timed_port ORDER BY ID;");
+    if (queryResult)
+    {
+        do
+        {
+            Field* fields = queryResult->Fetch();
+            EverQuestTimedPort timedPort;
+            timedPort.MapID = fields[0].Get<uint32>();
+            timedPort.X = fields[1].Get<float>();
+            timedPort.Y = fields[2].Get<float>();
+            timedPort.Z = fields[3].Get<float>();
+            timedPort.Radius = fields[4].Get<float>();
+            timedPort.DestinationMapID = fields[5].Get<uint32>();
+            timedPort.DestinationX = fields[6].Get<float>();
+            timedPort.DestinationY = fields[7].Get<float>();
+            timedPort.DestinationZ = fields[8].Get<float>();
+            timedPort.DestinationOrientation = fields[9].Get<float>();
+            timedPort.CycleInSeconds = fields[10].Get<uint32>();
+            timedPort.OffsetInSeconds = fields[11].Get<uint32>();
+            timedPort.RequiredItemTemplateID = fields[12].Get<uint32>();
+            timedPort.MissingItemText = fields[13].Get<std::string>();
+            if (timedPort.CycleInSeconds == 0)
+            {
+                LOG_ERROR("module.EverQuest", "EverQuestMod::LoadTimedPortData skipped a timed port on map {}, as it has no cycle", timedPort.MapID);
+                continue;
+            }
+            TimedPorts.push_back(timedPort);
+        } while (queryResult->NextRow());
+    }
+
+    queryResult = WorldDatabase.Query("SELECT MapID, X, Y, Radius, CycleInSeconds, OffsetInSeconds, Text FROM mod_everquest_timed_port_warning ORDER BY ID;");
+    if (queryResult)
+    {
+        do
+        {
+            Field* fields = queryResult->Fetch();
+            EverQuestTimedPortWarning timedPortWarning;
+            timedPortWarning.MapID = fields[0].Get<uint32>();
+            timedPortWarning.X = fields[1].Get<float>();
+            timedPortWarning.Y = fields[2].Get<float>();
+            timedPortWarning.Radius = fields[3].Get<float>();
+            timedPortWarning.CycleInSeconds = fields[4].Get<uint32>();
+            timedPortWarning.OffsetInSeconds = fields[5].Get<uint32>();
+            timedPortWarning.Text = fields[6].Get<std::string>();
+            if (timedPortWarning.CycleInSeconds == 0)
+            {
+                LOG_ERROR("module.EverQuest", "EverQuestMod::LoadTimedPortData skipped a timed port warning on map {}, as it has no cycle", timedPortWarning.MapID);
+                continue;
+            }
+            TimedPortWarnings.push_back(timedPortWarning);
         } while (queryResult->NextRow());
     }
 }
@@ -8854,6 +8914,11 @@ bool EverQuestMod::HandleGossipSelect(Player* player, Creature* creature, uint32
         {
             if (gossipReaction.SpellID != 0 && player->IsAlive() == true)
                 CastScriptedSpellAtUnit(creature, player, gossipReaction.SpellID);
+        } break;
+        case EQ_QUEST_REACTION_GIVEITEM:
+        {
+            if (gossipReaction.ItemTemplateID != 0)
+                player->AddItem(gossipReaction.ItemTemplateID, 1);
         } break;
         case EQ_QUEST_REACTION_ATTACKPLAYER:
         {
@@ -14256,6 +14321,89 @@ void EverQuestMod::UpdateRestrictedMapPlayerCheck(uint32 diff)
         if (RelocatePlayerOutOfRestrictedMap(player) == true)
             ChatHandler(player->GetSession()).PSendSysMessage("You have been returned, as you were somewhere you are not permitted to be.");
     }
+}
+
+// Like the restricted map sweep this runs from the world update, after the map updates have been waited on, so it can look at every
+// online player and move them.  The schedule comes from the wall clock, so a restart keeps the same times and nothing has to be saved
+void EverQuestMod::UpdateTimedPorts(uint32 diff)
+{
+    if (TimedPorts.empty() == true && TimedPortWarnings.empty() == true)
+        return;
+
+    TimedPortCheckTimerInMS += diff;
+    if (TimedPortCheckTimerInMS < IN_MILLISECONDS)
+        return;
+    TimedPortCheckTimerInMS = 0;
+
+    uint64 currentTimeInSeconds = (uint64)GameTime::GetGameTime().count();
+    vector<const EverQuestTimedPort*> duePorts;
+    for (EverQuestTimedPort& timedPort : TimedPorts)
+    {
+        uint64 cycleNumber = (currentTimeInSeconds - timedPort.OffsetInSeconds) / timedPort.CycleInSeconds;
+        if (cycleNumber == timedPort.LastCycleNumber)
+            continue;
+        if (timedPort.LastCycleNumber != 0)
+            duePorts.push_back(&timedPort);
+        timedPort.LastCycleNumber = cycleNumber;
+    }
+    vector<const EverQuestTimedPortWarning*> dueWarnings;
+    for (EverQuestTimedPortWarning& timedPortWarning : TimedPortWarnings)
+    {
+        uint64 cycleNumber = (currentTimeInSeconds - timedPortWarning.OffsetInSeconds) / timedPortWarning.CycleInSeconds;
+        if (cycleNumber == timedPortWarning.LastCycleNumber)
+            continue;
+        if (timedPortWarning.LastCycleNumber != 0)
+            dueWarnings.push_back(&timedPortWarning);
+        timedPortWarning.LastCycleNumber = cycleNumber;
+    }
+    if (duePorts.empty() == true && dueWarnings.empty() == true)
+        return;
+
+    WorldSessionMgr::SessionMap const& sessions = sWorldSessionMgr->GetAllSessions();
+    for (WorldSessionMgr::SessionMap::const_iterator sessionIter = sessions.begin(); sessionIter != sessions.end(); ++sessionIter)
+    {
+        if (sessionIter->second == nullptr)
+            continue;
+        Player* player = sessionIter->second->GetPlayer();
+        if (player == nullptr || player->IsInWorld() == false || player->IsBeingTeleported() == true)
+            continue;
+
+        for (const EverQuestTimedPortWarning* timedPortWarning : dueWarnings)
+        {
+            if (player->GetMapId() != timedPortWarning->MapID)
+                continue;
+            if (timedPortWarning->Radius > 0 && player->GetExactDist2d(timedPortWarning->X, timedPortWarning->Y) > timedPortWarning->Radius)
+                continue;
+            ChatHandler(player->GetSession()).SendSysMessage(timedPortWarning->Text);
+        }
+
+        for (const EverQuestTimedPort* timedPort : duePorts)
+        {
+            if (player->GetMapId() != timedPort->MapID || player->GetExactDist(timedPort->X, timedPort->Y, timedPort->Z) > timedPort->Radius)
+                continue;
+            ApplyTimedPortToPlayer(player, *timedPort);
+            break;
+        }
+    }
+}
+
+void EverQuestMod::ApplyTimedPortToPlayer(Player* player, const EverQuestTimedPort& timedPort)
+{
+    if (player->IsAlive() == false || player->IsInFlight() == true)
+        return;
+
+    if (timedPort.RequiredItemTemplateID != 0 && player->HasItemCount(timedPort.RequiredItemTemplateID, 1) == false)
+    {
+        if (timedPort.MissingItemText.empty() == false)
+            ChatHandler(player->GetSession()).SendSysMessage(timedPort.MissingItemText);
+        return;
+    }
+
+    if (player->TeleportTo({ timedPort.DestinationMapID, {timedPort.DestinationX, timedPort.DestinationY, timedPort.DestinationZ, timedPort.DestinationOrientation} }) == false)
+        return;
+
+    if (timedPort.RequiredItemTemplateID != 0)
+        player->DestroyItemCount(timedPort.RequiredItemTemplateID, 1, true);
 }
 
 void EverQuestMod::BeginClientVersionCheckForPlayer(Player* player)

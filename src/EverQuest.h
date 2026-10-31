@@ -55,7 +55,7 @@ class EQZoneMap;
 struct AreaTrigger;
 struct BuildValuesCachePosPointers;
 
-#define EQ_MOD_VERSION                              136
+#define EQ_MOD_VERSION                              137
 
 #define EQ_MOVEMENT_CAST_SNARE_DURATION_BUFFER_IN_MS 2000 // How much longer than the remaining cast time the casting slow is given, so a pushed-back cast keeps it
 
@@ -301,6 +301,7 @@ struct BuildValuesCachePosPointers;
 #define EQ_QUEST_REACTION_SPAWNOBJECT               12
 #define EQ_QUEST_REACTION_ATTACKNPC                 13
 #define EQ_QUEST_REACTION_NPCSAY                    14  // Another creature (by template) says the line instead of the one being talked to
+#define EQ_QUEST_REACTION_GIVEITEM                  15  // Gossip only, the player is handed an item
 
 #define EQ_GOSSIP_SENDER_VENDOR                     1001 // Marks the 'browse goods' line on a reaction menu, which shares its action numbers with the option IDs
 
@@ -1388,6 +1389,42 @@ public:
     bool MovementIsRun = false;
     bool FiresOnArrival = false;
     uint32 SpellID = 0;
+    uint32 ItemTemplateID = 0;
+};
+
+// A place that sends whoever is standing there to another zone on a fixed schedule, like the spires in Norrath and the Nexus
+class EverQuestTimedPort
+{
+public:
+    uint32 MapID = 0;
+    float X = 0;
+    float Y = 0;
+    float Z = 0;
+    float Radius = 0;
+    uint32 DestinationMapID = 0;
+    float DestinationX = 0;
+    float DestinationY = 0;
+    float DestinationZ = 0;
+    float DestinationOrientation = 0;
+    uint32 CycleInSeconds = 0;
+    uint32 OffsetInSeconds = 0;
+    uint32 RequiredItemTemplateID = 0; // Destroyed on use, and anyone without one is left behind
+    string MissingItemText;
+    uint64 LastCycleNumber = 0;
+};
+
+// A line shown ahead of a timed port.  With no radius, it reaches everyone on the map
+class EverQuestTimedPortWarning
+{
+public:
+    uint32 MapID = 0;
+    float X = 0;
+    float Y = 0;
+    float Radius = 0;
+    uint32 CycleInSeconds = 0;
+    uint32 OffsetInSeconds = 0;
+    string Text;
+    uint64 LastCycleNumber = 0;
 };
 
 class EverQuestTriggeredQuestKillSpawn
@@ -2107,6 +2144,9 @@ public:
     std::mutex CycleSpawnCheckTimerMutex;
     unordered_map<uint64, int32> CycleSpawnCheckTimerInMSByMapInstanceKey;
     uint32 RestrictedMapCheckTimerInMS = 0;
+    vector<EverQuestTimedPort> TimedPorts;
+    vector<EverQuestTimedPortWarning> TimedPortWarnings;
+    uint32 TimedPortCheckTimerInMS = 0;
     unordered_map<ObjectGuid, EverQuestPlayerClientVersionCheckState> PendingClientVersionChecksByPlayerGUID;
     unordered_map<ObjectGuid, deque<uint32>> PlayerCasterConcurrentBardSongs;
     unordered_set<ObjectGuid> PlayersWithAuctionUsableFilterActive;
@@ -2528,6 +2568,7 @@ public:
     void RefreshFactionGatedQuestsForPlayer(Player* player);
     bool AreNonFactionQuestObjectivesMetForPlayer(Player* player, Quest const* quest, uint16 questLogSlot);
     void LoadGossipReactions();
+    void LoadTimedPortData();
     bool HandleGossipHello(Player* player, Creature* creature);
     bool HandleGossipSelect(Player* player, Creature* creature, uint32 sender, uint32 action);
     string FormatGossipTextForPlayer(Player* player, const string& text);
@@ -2741,6 +2782,8 @@ public:
     bool IsMapRestrictedForPlayers(uint32 mapID);
     bool RelocatePlayerOutOfRestrictedMap(Player* player);
     void UpdateRestrictedMapPlayerCheck(uint32 diff);
+    void UpdateTimedPorts(uint32 diff);
+    void ApplyTimedPortToPlayer(Player* player, const EverQuestTimedPort& timedPort);
     void BeginClientVersionCheckForPlayer(Player* player);
     void HandleClientVersionReportForPlayer(Player* player, uint32 reportedVersion);
     void FailClientVersionCheckForPlayer(Player* player, EverQuestPlayerClientVersionCheckState& checkState);

@@ -69,6 +69,7 @@ public:
         EverQuest->LoadQuestReactions();
         EverQuest->LoadQuestFactionRequirements();
         EverQuest->LoadGossipReactions();
+        EverQuest->LoadTimedPortData();
         EverQuest->LoadPetData();
         EverQuest->LoadPetSilentDisplayData();
         EverQuest->LoadDruidFormDisplayData();
@@ -97,6 +98,7 @@ public:
             return;
 
         EverQuest->UpdateRestrictedMapPlayerCheck(diff);
+        EverQuest->UpdateTimedPorts(diff);
         EverQuest->UpdateClientVersionChecks(diff);
         EverQuest->ProcessPendingEquipmentStorageTransactions();
         EverQuest->ProcessPendingGateReturns();
