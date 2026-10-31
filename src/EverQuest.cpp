@@ -645,7 +645,7 @@ void EverQuestMod::LoadConfigurationFile()
 void EverQuestMod::LoadCreatureData()
 {
     CreaturesByTemplateID.clear();
-    QueryResult queryResult = WorldDatabase.Query("SELECT CreatureTemplateID, CanShowHeldLootItems, CanShowHeldLootShields, SpawnLimit, RangedAttackEnabled, RangedAttackMinRange, RangedAttackMaxRange, RangedAttackDamageModPct, AgroSocialDistanceMod, EnrageEnabled, EnrageHPPct, EnrageDurationInMS, EnrageCooldownInMS, FlurryEnabled, FlurryChancePct, RampageEnabled, RampageChancePct, RampageRange, RampageDamagePct, WildRampageEnabled, WildRampageChancePct, WildRampageMaxTargets, WildRampageDamagePct, AttackRoundTimeInMS, DifficultyType, GossipIsOnlyFromHailText, SpellDamageMultiplier, GossipHelloAchievementID, DefaultHeldMainhandItemID, DefaultHeldOffhandItemID FROM mod_everquest_creature ORDER BY CreatureTemplateID;");
+    QueryResult queryResult = WorldDatabase.Query("SELECT CreatureTemplateID, CanShowHeldLootItems, CanShowHeldLootShields, SpawnLimit, RangedAttackEnabled, RangedAttackMinRange, RangedAttackMaxRange, RangedAttackDamageModPct, AgroSocialDistanceMod, EnrageEnabled, EnrageHPPct, EnrageDurationInMS, EnrageCooldownInMS, FlurryEnabled, FlurryChancePct, RampageEnabled, RampageChancePct, RampageRange, RampageDamagePct, WildRampageEnabled, WildRampageChancePct, WildRampageMaxTargets, WildRampageDamagePct, AttackRoundTimeInMS, DifficultyType, GossipIsOnlyFromHailText, SpellDamageMultiplier, GossipHelloAchievementID, DefaultHeldMainhandItemID, DefaultHeldOffhandItemID, LevelEQ, MaxLevelEQ FROM mod_everquest_creature ORDER BY CreatureTemplateID;");
     if (queryResult)
     {
         do
@@ -683,6 +683,8 @@ void EverQuestMod::LoadCreatureData()
             everQuestCreature.GossipHelloAchievementID = fields[27].Get<uint32>();
             everQuestCreature.DefaultHeldMainhandItemID = fields[28].Get<uint32>();
             everQuestCreature.DefaultHeldOffhandItemID = fields[29].Get<uint32>();
+            everQuestCreature.LevelEQ = uint8(fields[30].Get<uint32>());
+            everQuestCreature.MaxLevelEQ = uint8(fields[31].Get<uint32>());
             CreaturesByTemplateID[everQuestCreature.CreatureTemplateID] = everQuestCreature;
         } while (queryResult->NextRow());
     }
@@ -6048,7 +6050,7 @@ bool EverQuestMod::IsSpellBlockedByMinTargetLevel(uint32 spellID, Unit* target, 
     const EverQuestSpell& spellData = GetSpellDataForSpellID(spellID);
     if (spellData.MinTargetLevel == 0)
         return false;
-    if (target->GetLevel() >= spellData.MinTargetLevel)
+    if (GetLevelForEQRules(target) >= spellData.MinTargetLevel)
         return false;
     return true;
 }
@@ -6067,7 +6069,7 @@ bool EverQuestMod::IsSpellBlockedByMaxCreatureTargetLevel(uint32 spellID, Unit* 
     const EverQuestSpell& spellData = GetSpellDataForSpellID(spellID);
     if (spellData.MaxCreatureTargetLevel == 0)
         return false;
-    if (target->GetLevel() <= spellData.MaxCreatureTargetLevel)
+    if (GetLevelForEQRules(target) <= spellData.MaxCreatureTargetLevel)
         return false;
     return true;
 }
@@ -6389,7 +6391,7 @@ uint32 EverQuestMod::GetCreatureStunProtectedEffectMaskForTarget(SpellInfo const
     if (spellInfo->Id >= ConfigSystemSpellDBCIDMin && spellInfo->Id <= ConfigSystemSpellDBCIDMax && IsSpellAnEQSpell(spellInfo->Id) == true)
         return 0;
 
-    if (target->GetLevel() <= EQ_STUN_NPC_IMMUNE_ABOVE_LEVEL)
+    if (GetLevelForEQRules(target) <= EQ_STUN_NPC_IMMUNE_ABOVE_LEVEL)
         return 0;
 
     uint32 stunEffectMask = 0;
@@ -6816,7 +6818,7 @@ bool EverQuestMod::RollEQResist(Unit* caster, Unit* target, SpellInfo const* spe
     int32 partialModifier = (150 * (resistChance - roll)) / resistChance;
     if (caster->IsPlayer() == false)
     {
-        int32 levelDiff = int32(target->GetLevel()) - int32(caster->GetLevel());
+        int32 levelDiff = int32(GetLevelForEQRules(target)) - int32(GetLevelForEQRules(caster));
         if (levelDiff >= 20)
             partialModifier += int32(float(levelDiff) * 1.5f);
     }
@@ -6936,7 +6938,7 @@ int32 EverQuestMod::GetWipeHateListChanceOnLanding(Unit* target, int32 baseChanc
 {
     if (target == nullptr || baseChance <= 0)
         return 0;
-    uint8 targetLevel = target->GetLevel();
+    uint8 targetLevel = GetLevelForEQRules(target);
     if (targetLevel < EQ_WIPE_HATE_LIST_FULL_CHANCE_BELOW_LEVEL)
         return 100;
     float chance = float(baseChance);
@@ -9840,6 +9842,27 @@ void EverQuestMod::GrantLegacyAchievementIfEligible(Player* player)
     player->CompletedAchievement(achievementEntry);
 }
 
+// A Luclin creature keeps its EverQuest level for EverQuest's level rules, as its WOW level was stretched to fill out 60-70.  Anything else just goes by its level
+uint8 EverQuestMod::GetLevelForEQRules(Unit const* unit)
+{
+    Creature const* creature = unit->ToCreature();
+    if (creature == nullptr)
+        return unit->GetLevel();
+    unordered_map<uint32, EverQuestCreature>::const_iterator creatureIterator = CreaturesByTemplateID.find(creature->GetEntry());
+    if (creatureIterator == CreaturesByTemplateID.end() || creatureIterator->second.LevelEQ == 0)
+        return unit->GetLevel();
+
+    // Where this one sits in its level range carries over to the EverQuest range
+    uint8 levelEQ = creatureIterator->second.LevelEQ;
+    uint8 maxLevelEQ = creatureIterator->second.MaxLevelEQ;
+    CreatureTemplate const* creatureTemplate = creature->GetCreatureTemplate();
+    if (maxLevelEQ <= levelEQ || creatureTemplate->maxlevel <= creatureTemplate->minlevel || unit->GetLevel() <= creatureTemplate->minlevel)
+        return levelEQ;
+    if (unit->GetLevel() >= creatureTemplate->maxlevel)
+        return maxLevelEQ;
+    return uint8(levelEQ + ((uint32(unit->GetLevel()) - creatureTemplate->minlevel) * (maxLevelEQ - levelEQ)) / (creatureTemplate->maxlevel - creatureTemplate->minlevel));
+}
+
 void EverQuestMod::GrantStartAchievementIfMissing(Player* player)
 {
     uint8 raceID = player->getRace(true);
@@ -11244,7 +11267,7 @@ void EverQuestMod::TryDoCreatureEQMeleeExtraAttacks(Unit* attacker, Unit* victim
             return;
     }
 
-    uint32 level = creature->GetLevel();
+    uint32 level = GetLevelForEQRules(creature);
     uint32 weaponSkill = GetEQNPCMeleeWeaponSkillForLevel(level);
     if (weaponSkill == 0)
         return;
@@ -12769,8 +12792,8 @@ bool EverQuestMod::RollBashKickStunLands(Unit* attacker, Unit* defender)
     if (attacker == nullptr || defender == nullptr)
         return false;
 
-    int attackerLevel = (int)attacker->GetLevel();
-    int defenderLevel = (int)defender->GetLevel();
+    int attackerLevel = (int)GetLevelForEQRules(attacker);
+    int defenderLevel = (int)GetLevelForEQRules(defender);
 
     // NPC defenders above the base immunity level can never be stunned by bash/kick (raid-tier mobs)
     // TODO: Make this a config in case the world gets scaled to 80

@@ -382,7 +382,7 @@ public:
             maxDuration = curSpell.AuraDurationMaxInMS;
             return;
         }
-        uint8 casterLevel = caster->GetLevel();
+        uint8 casterLevel = EverQuest->GetLevelForEQRules(caster);
         if (casterLevel < curSpell.AuraDurationCalcMinLevel)
         {
             maxDuration = curSpell.AuraDurationBaseInMS;
