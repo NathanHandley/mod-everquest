@@ -9348,7 +9348,8 @@ void EverQuestMod::TryResummonTemporaryUnsummonedEQPet(Player* player)
 void EverQuestMod::LoadCreatePlayerData()
 {
     PlayerCreateInfoByRaceIDThenClassID.clear();
-    QueryResult queryResult = WorldDatabase.Query("SELECT race, class, map, zone, position_x, position_y, position_z, orientation, illusionitem, startachievement FROM mod_everquest_playercreateinfo;");
+    PlayerCreateInfoStartOptionsByKey.clear();
+    QueryResult queryResult = WorldDatabase.Query("SELECT race, class, map, zone, position_x, position_y, position_z, orientation, illusionitem, startachievement, StartOption, defaultsecondclass, extrastartitem FROM mod_everquest_playercreateinfo;");
     if (queryResult)
     {
         do
@@ -9366,7 +9367,13 @@ void EverQuestMod::LoadCreatePlayerData()
             everQuestPlayerCreateInfo.Orientation = fields[7].Get<float>();
             everQuestPlayerCreateInfo.IllusionItemID = fields[8].Get<uint32>();
             everQuestPlayerCreateInfo.StartAchievementID = fields[9].Get<uint32>();
-            PlayerCreateInfoByRaceIDThenClassID[everQuestPlayerCreateInfo.RaceID][everQuestPlayerCreateInfo.ClassID] = everQuestPlayerCreateInfo;
+            everQuestPlayerCreateInfo.StartOption = fields[10].Get<uint8>();
+            everQuestPlayerCreateInfo.DefaultSecondClass = fields[11].Get<uint8>();
+            everQuestPlayerCreateInfo.ExtraStartItemID = fields[12].Get<uint32>();
+            if (everQuestPlayerCreateInfo.StartOption == 0)
+                PlayerCreateInfoByRaceIDThenClassID[everQuestPlayerCreateInfo.RaceID][everQuestPlayerCreateInfo.ClassID] = everQuestPlayerCreateInfo;
+            else
+                PlayerCreateInfoStartOptionsByKey[GetPlayerCreateInfoStartOptionKey(everQuestPlayerCreateInfo.RaceID, everQuestPlayerCreateInfo.ClassID, everQuestPlayerCreateInfo.StartOption)] = everQuestPlayerCreateInfo;
         } while (queryResult->NextRow());
     }
 }
@@ -9709,7 +9716,7 @@ void EverQuestMod::AddRacialGuiseItemForPlayer(Player* player)
         return;
     if (HasCreatePlayerData(player->getRace(), player->getClass()) == false)
         return;
-    uint32 guiseItemID = GetPlayerCreateInfo(player->getRace(), player->getClass()).IllusionItemID;
+    uint32 guiseItemID = GetPlayerCreateInfoForPlayer(player).IllusionItemID;
     if (guiseItemID == 0)
         return;
     if (GetIssuedIllusionItemIDForPlayer(player) != 0)
@@ -9839,7 +9846,7 @@ void EverQuestMod::GrantStartAchievementIfMissing(Player* player)
     uint8 classID = player->getClass();
     if (HasCreatePlayerData(raceID, classID) == false)
         return;
-    uint32 startAchievementID = GetPlayerCreateInfo(raceID, classID).StartAchievementID;
+    uint32 startAchievementID = GetPlayerCreateInfoForPlayer(player).StartAchievementID;
     if (startAchievementID == 0 || player->HasAchieved(startAchievementID) == true)
         return;
 
@@ -11013,6 +11020,33 @@ bool EverQuestMod::HasCreatePlayerData(uint8 raceID, uint8 classID)
         return false;
     else
         return true;
+}
+
+uint32 EverQuestMod::GetPlayerCreateInfoStartOptionKey(uint8 raceID, uint8 classID, uint8 startOption)
+{
+    return (uint32(raceID) << 16) | (uint32(classID) << 8) | startOption;
+}
+
+// With no other towns to pick from, which is the case before Luclin, nothing is stored for any character
+uint8 EverQuestMod::GetPlayerStartOption(Player* player)
+{
+    if (PlayerCreateInfoStartOptionsByKey.empty() == true)
+        return 0;
+    QueryResult queryResult = CharacterDatabase.Query("SELECT startOption FROM mod_everquest_character_settings WHERE guid = {}", player->GetGUID().GetCounter());
+    if (!queryResult)
+        return 0;
+    return queryResult->Fetch()[0].Get<uint8>();
+}
+
+// The town picked when the character was created, or the normal one
+const EverQuestPlayerCreateInfo& EverQuestMod::GetPlayerCreateInfoForPlayer(Player* player)
+{
+    uint8 raceID = player->getRace(true);
+    uint8 classID = player->getClass();
+    auto startOptionItr = PlayerCreateInfoStartOptionsByKey.find(GetPlayerCreateInfoStartOptionKey(raceID, classID, GetPlayerStartOption(player)));
+    if (startOptionItr != PlayerCreateInfoStartOptionsByKey.end())
+        return startOptionItr->second;
+    return GetPlayerCreateInfo(raceID, classID);
 }
 
 const EverQuestPlayerCreateInfo& EverQuestMod::GetPlayerCreateInfo(uint8 raceID, uint8 classID)
@@ -13376,7 +13410,7 @@ bool EverQuestMod::TryReturnCharacterToNorrathAtLogin(Player* player, uint32 arr
     // And where this race and class starts out in Norrath behind that, matching what RelocatePlayerOutOfRestrictedMap falls back on
     if (destinationMapID == 0 && HasCreatePlayerData(player->getRace(), player->getClass()) == true)
     {
-        const EverQuestPlayerCreateInfo& createInfo = GetPlayerCreateInfo(player->getRace(), player->getClass());
+        const EverQuestPlayerCreateInfo& createInfo = GetPlayerCreateInfoForPlayer(player);
         if (IsMapIDAnEverQuestMap(createInfo.MapID) == true)
         {
             destinationMapID = createInfo.MapID;
@@ -14275,15 +14309,18 @@ bool EverQuestMod::RelocatePlayerOutOfRestrictedMap(Player* player)
         return false;
     }
 
-    const EverQuestPlayerCreateInfo& createInfo = GetPlayerCreateInfo(player->getRace(), player->getClass());
-    if (IsMapRestrictedForPlayers(createInfo.MapID) == true)
+    // A town picked at creation can be on a restricted map when the normal one isn't
+    const EverQuestPlayerCreateInfo* createInfo = &GetPlayerCreateInfoForPlayer(player);
+    if (IsMapRestrictedForPlayers(createInfo->MapID) == true)
+        createInfo = &GetPlayerCreateInfo(player->getRace(), player->getClass());
+    if (IsMapRestrictedForPlayers(createInfo->MapID) == true)
     {
         LOG_ERROR("module.EverQuest", "EverQuestMod could not relocate player {} with GUID {} off of restricted map {}, as their EverQuest start map {} is restricted as well. Check EverQuest.Map.MaxExpansionID and EverQuest.Map.RestrictPlayersToNorrath",
-            player->GetName(), player->GetGUID().GetCounter(), player->GetMapId(), createInfo.MapID);
+            player->GetName(), player->GetGUID().GetCounter(), player->GetMapId(), createInfo->MapID);
         return false;
     }
 
-    player->TeleportTo({ createInfo.MapID, {createInfo.PositionX, createInfo.PositionY, createInfo.PositionZ, createInfo.Orientation} });
+    player->TeleportTo({ createInfo->MapID, {createInfo->PositionX, createInfo->PositionY, createInfo->PositionZ, createInfo->Orientation} });
     return true;
 }
 
@@ -16930,10 +16967,13 @@ void EverQuestMod::SetNextSecondEQClassForPlayer(Player* player, uint8 nextEQCla
 void EverQuestMod::SetInitialEQClassesForPlayer(Player* player)
 {
     const EverQuestClassMap classMap = GetClassMapForWOWClassID(player->getClass());
+    uint8 defaultSecondClass = classMap.EQClassIDDefaultSecond;
+    if (HasCreatePlayerData(player->getRace(), player->getClass()) == true && GetPlayerCreateInfoForPlayer(player).DefaultSecondClass != 0)
+        defaultSecondClass = GetPlayerCreateInfoForPlayer(player).DefaultSecondClass;
     EverQuestPlayerControllerData controllerData;
     controllerData.GUID = player->GetGUID().GetCounter();
-    controllerData.CurrentSecondClass = classMap.EQClassIDDefaultSecond;
-    controllerData.NextSecondClass = classMap.EQClassIDDefaultSecond;
+    controllerData.CurrentSecondClass = defaultSecondClass;
+    controllerData.NextSecondClass = defaultSecondClass;
     controllerData.SecondaryExpPool = 0;
     {
         std::lock_guard<std::mutex> lock(RuntimeStateMutex);
@@ -16957,9 +16997,23 @@ void EverQuestMod::SetInitialCreatePositionForPlayer(Player* player)
     if (HasCreatePlayerData(player->getRace(), player->getClass()) == false)
         return;
 
-    const EverQuestPlayerCreateInfo& createInfo = GetPlayerCreateInfo(player->getRace(), player->getClass());
+    // An option that isn't in the table is the normal town, since the byte comes from the client
+    const EverQuestPlayerCreateInfo* createInfo = &GetPlayerCreateInfo(player->getRace(), player->getClass());
+    auto startOptionItr = PlayerCreateInfoStartOptionsByKey.find(GetPlayerCreateInfoStartOptionKey(player->getRace(), player->getClass(), player->GetCreateOutfitId()));
+    if (startOptionItr != PlayerCreateInfoStartOptionsByKey.end())
+    {
+        createInfo = &startOptionItr->second;
+        const EverQuestClassMap classMap = GetClassMapForWOWClassID(player->getClass());
+        CharacterDatabase.Execute("INSERT INTO `mod_everquest_character_settings` (`guid`, `currentSecondaryClass`, `nextSecondaryClass`, `secondaryExpPool`, `startOption`) VALUES ({}, {}, {}, 0, {}) ON DUPLICATE KEY UPDATE `startOption` = {}",
+            player->GetGUID().GetCounter(), classMap.EQClassIDDefaultSecond, classMap.EQClassIDDefaultSecond, createInfo->StartOption, createInfo->StartOption);
+
+        // The Hearthstone goes by the core's bind, which would otherwise come from the normal town's playercreateinfo row at first login
+        CharacterDatabase.Execute("REPLACE INTO `character_homebind` (`guid`, `mapId`, `zoneId`, `posX`, `posY`, `posZ`) VALUES ({}, {}, {}, {}, {}, {})",
+            player->GetGUID().GetCounter(), createInfo->MapID, createInfo->ZoneID, createInfo->PositionX, createInfo->PositionY, createInfo->PositionZ);
+    }
+
     CharacterDatabase.Execute("UPDATE `characters` SET `map` = {}, `zone` = {}, `position_x` = {}, `position_y` = {}, `position_z` = {}, `orientation` = {} WHERE `guid` = {}",
-        createInfo.MapID, createInfo.ZoneID, createInfo.PositionX, createInfo.PositionY, createInfo.PositionZ, createInfo.Orientation, player->GetGUID().GetCounter());
+        createInfo->MapID, createInfo->ZoneID, createInfo->PositionX, createInfo->PositionY, createInfo->PositionZ, createInfo->Orientation, player->GetGUID().GetCounter());
 }
 
 EverQuestPlayerControllerData EverQuestMod::GetPlayerControllerData(Player* player)

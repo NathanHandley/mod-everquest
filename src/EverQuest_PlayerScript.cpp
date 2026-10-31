@@ -991,9 +991,11 @@ public:
 
             if (EverQuest->HasCreatePlayerData(player->getRace(), player->getClass()) == true)
             {
-                EverQuestPlayerCreateInfo createInfo = EverQuest->GetPlayerCreateInfo(player->getRace(), player->getClass());
+                EverQuestPlayerCreateInfo createInfo = EverQuest->GetPlayerCreateInfoForPlayer(player);
                 EverQuest->SetNewBindHome(player, player->GetGUID().GetCounter(), createInfo.MapID, createInfo.ZoneID, createInfo.PositionX,
                     createInfo.PositionY, createInfo.PositionZ);
+                if (createInfo.ExtraStartItemID != 0)
+                    player->AddItem(createInfo.ExtraStartItemID, 1);
                 if (EverQuest->ConfigDeathKnightsStartLikeOtherClasses == true && player->getClass() == CLASS_DEATH_KNIGHT)
                 {
                     player->RemoveAura(48266); // Take off Blood Presence

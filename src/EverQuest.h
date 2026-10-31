@@ -55,7 +55,7 @@ class EQZoneMap;
 struct AreaTrigger;
 struct BuildValuesCachePosPointers;
 
-#define EQ_MOD_VERSION                              137
+#define EQ_MOD_VERSION                              138
 
 #define EQ_MOVEMENT_CAST_SNARE_DURATION_BUFFER_IN_MS 2000 // How much longer than the remaining cast time the casting slow is given, so a pushed-back cast keeps it
 
@@ -1298,6 +1298,9 @@ public:
     float Orientation = 0;
     uint32 IllusionItemID = 0;
     uint32 StartAchievementID = 0;
+    uint8 StartOption = 0;
+    uint8 DefaultSecondClass = 0;
+    uint32 ExtraStartItemID = 0;
 };
 
 class EverQuestQuestCompletionReputation
@@ -2133,6 +2136,7 @@ public:
     unordered_map<uint32, vector<EverQuestGossipReaction>> GossipReactionsByGossipCreatureTemplateID;
     unordered_map<uint32, EverQuestPet> PetDataByCreatureTemplateID;
     unordered_map<uint8, unordered_map<uint8, EverQuestPlayerCreateInfo>> PlayerCreateInfoByRaceIDThenClassID;
+    unordered_map<uint32, EverQuestPlayerCreateInfo> PlayerCreateInfoStartOptionsByKey;
     unordered_map<uint8, list<uint32>> PlayerAutoLearnSkillsByEQClassID;
     unordered_map<uint8, list<EverQuestAutoLearnSpell>> PlayerAutoLearnSpellsByClassID;
     unordered_map<uint8, vector<uint32>> PlayerClassStartItemWOWIDsByEQClassID;
@@ -2591,6 +2595,9 @@ public:
     void LoadCreatePlayerData();
     bool HasCreatePlayerData(uint8 raceID, uint8 classID);
     const EverQuestPlayerCreateInfo& GetPlayerCreateInfo(uint8 raceID, uint8 classID);
+    const EverQuestPlayerCreateInfo& GetPlayerCreateInfoForPlayer(Player* player);
+    uint32 GetPlayerCreateInfoStartOptionKey(uint8 raceID, uint8 classID, uint8 startOption);
+    uint8 GetPlayerStartOption(Player* player);
     void LoadAutoLearnSkillsData();
     const list<uint32>& GetAutoLearnSkillsForClass(uint8 classID);
     void LoadAutoLearnSpellsData();
