@@ -63,6 +63,20 @@ struct BuildValuesCachePosPointers;
 #define EQ_ITEM_FOCUS_TYPE_CAST_TIME                3
 #define EQ_ITEM_FOCUS_TYPE_DURATION                 4
 #define EQ_ITEM_FOCUS_TYPE_MANA_COST                5
+#define EQ_DISCIPLINE_REUSE_SECONDS_PER_LEVEL       54
+#define EQ_DISCIPLINE_UNHOLY_AURA_SPELL_ID          97687
+#define EQ_DISCIPLINE_HARM_TOUCH_SPELL_ID           86909
+#define EQ_DISCIPLINE_MIN_REUSE_SECONDS             234
+#define EQ_DISCIPLINE_REUSE_LEVEL_CAP               60      // Short reuses stop shortening at this level
+#define EQ_DISCIPLINE_REUSE_LEVEL_CAP_BELOW_SECONDS 1620
+#define EQ_ITEM_FOCUS_TYPE_RANGE                    6
+#define EQ_ITEM_FOCUS_TYPE_REAGENT                  7
+#define EQ_ITEM_FOCUS_TYPE_HATE_INCREASE            8
+#define EQ_ITEM_FOCUS_TYPE_HATE_DECREASE            9
+#define EQ_ITEM_FOCUS_RANGE_SPELL_ID_SHORT          97693   // A worn range focus keeps one of these on the wearer: the client only reads range from a spell mod
+#define EQ_ITEM_FOCUS_RANGE_SPELL_ID_LONG           97694
+#define EQ_ITEM_FOCUS_RANGE_PERCENT_SHORT           8
+#define EQ_ITEM_FOCUS_RANGE_PERCENT_LONG            10
 
 #define EQ_MOVEMENT_CAST_SNARE_DURATION_BUFFER_IN_MS 2000 // How much longer than the remaining cast time the casting slow is given, so a pushed-back cast keeps it
 
@@ -1539,6 +1553,43 @@ public:
     bool IsCenterPoint = false;
 };
 
+#define EQ_MOUNT_SADDLE_REST_SPELL_ID               97695
+#define EQ_SPELL_ID_YAULP_V                         94243   // Yaulp V and VI have a mana regen part, and EQ doesn't let it run from a saddle
+#define EQ_SPELL_ID_YAULP_VI                        95021
+#define EQ_TRAP_CHECK_INTERVAL_IN_MS                1000
+#define EQ_TRAP_TRIGGER_LIFETIME_IN_MS              10000
+#define EQ_TRAP_TRIGGER_FACTION                     14      // Monster: it needs to count as an enemy of whoever walked in
+
+class EverQuestTrap
+{
+public:
+    uint32 ID = 0;
+    float X = 0;
+    float Y = 0;
+    float Z = 0;
+    float Radius = 0;
+    float MaxZDifference = 0;
+    uint32 ChancePercent = 0;
+    uint32 SpellID = 0;
+    uint32 RespawnInSeconds = 0;
+    uint32 RespawnVarianceInSeconds = 0;
+};
+
+class EverQuestPlayerTrapState : public DataMap::Base
+{
+public:
+    uint32 MSSinceCheck = 0;
+};
+
+class EverQuestDiscipline
+{
+public:
+    uint32 SpellID = 0;
+    uint32 ReuseInSeconds = 0;
+    bool IsTimed = true;                                    // One at a time: a running timed discipline holds the next one back, a waiting one is replaced
+    unordered_map<uint8, uint8> UseLevelsByEQClassID;
+};
+
 class EverQuestAutoLearnSpell
 {
 public:
@@ -2022,6 +2073,7 @@ public:
     bool ConfigSpellMovementCastSnareEnabled;
     bool ConfigSpellMovementCastJumpCancelEnabled;
     bool ConfigSpellClassAurasEnabled = true;
+    bool ConfigSpellDisciplinesEnabled = true;
     bool ConfigCombatSkillsDisableBashKickStunOnPlayers;
     bool ConfigCombatSkillsDisabledBashKickStunInterruptsPlayerCast;
     bool ConfigCombatSkillsRangedAttackEnabled;
@@ -2143,6 +2195,10 @@ public:
     unordered_map<uint64, vector<EverQuestTriggeredQuestKillSpawn>> TriggeredQuestKillSpawnsByMapInstanceKey;
     unordered_map<uint32, EverQuestItemTemplate> ItemTemplatesByEntryID;
     unordered_map<uint32, EverQuestItemFocus> ItemFocusByItemTemplateID;
+    unordered_map<uint32, EverQuestDiscipline> DisciplinesBySpellID;    // Filled at startup, and only read after
+    unordered_map<uint32, vector<EverQuestTrap>> TrapsByMapID;          // Filled at startup, and only read after
+    std::mutex TrapRearmTimesMutex;
+    unordered_map<uint64, time_t> TrapRearmTimesByMapInstanceAndTrapKey;
     unordered_map<uint32, uint32> WarderLookCreatureTemplateIDsByKey; // (owner race, start option), filled at startup and only read after
     unordered_map<uint64, vector<EverQuestGearSwapCandidate>> GearSwapCandidatesByLookupKey;
     unordered_set<uint32> WornEffectSpellIDs;
@@ -2763,6 +2819,15 @@ public:
     // Worn item focus effects: the best worn focus of a type that covers the spell, as a percent.  Only the strongest counts, as in EQ
     void LoadItemFocusDataFromDB();
     uint32 GetItemFocusPercentForPlayer(Player* player, uint32 focusType, SpellInfo const* spellInfo);
+    void RefreshItemFocusRangeAuraForPlayer(Player* player);
+    void LoadDisciplineData();
+    void UpdateEQMountRulesForPlayer(Player* player);
+    void LoadTrapData();
+    void UpdateTrapsForPlayer(Player* player, uint32 diffInMS);
+    bool IsDisciplineSpell(uint32 spellID);
+    bool HandleDisciplineOnCheckCast(Player* player, Spell* spell, SpellCastResult& res);
+    void HandleDisciplineCast(Player* player, SpellInfo const* spellInfo);
+    void RemoveActiveDisciplines(Player* player);
     void ApplyItemFocusToSpellAmount(Unit* caster, uint32 focusType, SpellInfo const* spellInfo, int32& amount);
     void RemoveEQMountWhereNotAllowed(Player* player);
     void RemoveEQMountAtLogin(Player* player);

@@ -74,6 +74,8 @@ public:
         EverQuest->LoadPetData();
         EverQuest->LoadPetSilentDisplayData();
         EverQuest->LoadWarderLookData();
+        EverQuest->LoadDisciplineData();
+        EverQuest->LoadTrapData();
         EverQuest->LoadDruidFormDisplayData();
         EverQuest->LoadCreatePlayerData();
         EverQuest->LoadCreatureLootData();

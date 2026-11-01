@@ -493,6 +493,7 @@ void EverQuestMod::LoadConfigurationFile()
     ConfigSpellMovementCastSnareEnabled = sConfigMgr->GetOption<bool>("EverQuest.Spells.MovementCastSnareEnabled", true);
     ConfigSpellMovementCastJumpCancelEnabled = sConfigMgr->GetOption<bool>("EverQuest.Spells.MovementCastJumpCancelEnabled", true);
     ConfigSpellClassAurasEnabled = sConfigMgr->GetOption<bool>("EverQuest.Spells.ClassAurasEnabled", true);
+    ConfigSpellDisciplinesEnabled = sConfigMgr->GetOption<bool>("EverQuest.Spells.DisciplinesEnabled", true);
     ConfigSpellHasteCapPercent = sConfigMgr->GetOption<float>("EverQuest.Spells.HasteCapPercent", 50.0f);
     ConfigSpellHasteCapMod = sConfigMgr->GetOption<float>("EverQuest.Spells.HasteCapMod", 0.5f);
     ConfigSpellAttackPowerHighestOnlyEnabled = sConfigMgr->GetOption<bool>("EverQuest.Spells.AttackPowerHighestOnlyEnabled", true);
@@ -3394,6 +3395,189 @@ uint32 EverQuestMod::GetItemFocusPercentForPlayer(Player* player, uint32 focusTy
             bestPercent = focusIter->second.Percent;
     }
     return bestPercent;
+}
+
+void EverQuestMod::RefreshItemFocusRangeAuraForPlayer(Player* player)
+{
+    if (ItemFocusByItemTemplateID.empty() == true)
+        return;
+    uint32 bestPercent = 0;
+    for (uint8 equipSlot = EQUIPMENT_SLOT_START; equipSlot < EQUIPMENT_SLOT_END; ++equipSlot)
+    {
+        Item* item = player->GetItemByPos(INVENTORY_SLOT_BAG_0, equipSlot);
+        if (item == nullptr)
+            continue;
+        auto focusIter = ItemFocusByItemTemplateID.find(item->GetEntry());
+        if (focusIter != ItemFocusByItemTemplateID.end() && focusIter->second.FocusType == EQ_ITEM_FOCUS_TYPE_RANGE && focusIter->second.Percent > bestPercent)
+            bestPercent = focusIter->second.Percent;
+    }
+    uint32 wantedSpellID = 0;
+    if (bestPercent >= EQ_ITEM_FOCUS_RANGE_PERCENT_LONG)
+        wantedSpellID = EQ_ITEM_FOCUS_RANGE_SPELL_ID_LONG;
+    else if (bestPercent != 0)
+        wantedSpellID = EQ_ITEM_FOCUS_RANGE_SPELL_ID_SHORT;
+    for (uint32 spellID : { uint32(EQ_ITEM_FOCUS_RANGE_SPELL_ID_SHORT), uint32(EQ_ITEM_FOCUS_RANGE_SPELL_ID_LONG) })
+    {
+        if (spellID != wantedSpellID)
+            player->RemoveAurasDueToSpell(spellID);
+    }
+    if (wantedSpellID != 0 && player->HasAura(wantedSpellID) == false)
+        player->AddAura(wantedSpellID, player);
+}
+
+void EverQuestMod::LoadTrapData()
+{
+    TrapsByMapID.clear();
+    QueryResult queryResult = WorldDatabase.Query("SELECT ID, MapID, X, Y, Z, Radius, MaxZDifference, ChancePercent, SpellID, RespawnInSeconds, RespawnVarianceInSeconds FROM mod_everquest_trap;");
+    if (queryResult)
+    {
+        do
+        {
+            Field* fields = queryResult->Fetch();
+            EverQuestTrap trap;
+            trap.ID = fields[0].Get<uint32>();
+            trap.X = fields[2].Get<float>();
+            trap.Y = fields[3].Get<float>();
+            trap.Z = fields[4].Get<float>();
+            trap.Radius = fields[5].Get<float>();
+            trap.MaxZDifference = fields[6].Get<float>();
+            trap.ChancePercent = fields[7].Get<uint32>();
+            trap.SpellID = fields[8].Get<uint32>();
+            trap.RespawnInSeconds = fields[9].Get<uint32>();
+            trap.RespawnVarianceInSeconds = fields[10].Get<uint32>();
+            TrapsByMapID[fields[1].Get<uint32>()].push_back(trap);
+        } while (queryResult->NextRow());
+    }
+}
+
+void EverQuestMod::UpdateTrapsForPlayer(Player* player, uint32 diffInMS)
+{
+    if (TrapsByMapID.empty() == true)
+        return;
+    auto trapsIter = TrapsByMapID.find(player->GetMapId());
+    if (trapsIter == TrapsByMapID.end() || player->IsAlive() == false || player->IsGameMaster() == true || player->IsInFlight() == true)
+        return;
+    EverQuestPlayerTrapState* trapState = player->CustomData.GetDefault<EverQuestPlayerTrapState>("EQTrap");
+    trapState->MSSinceCheck += diffInMS;
+    if (trapState->MSSinceCheck < EQ_TRAP_CHECK_INTERVAL_IN_MS)
+        return;
+    trapState->MSSinceCheck = 0;
+
+    time_t now = GameTime::GetGameTime().count();
+    for (EverQuestTrap const& trap : trapsIter->second)
+    {
+        if (std::fabs(player->GetPositionZ() - trap.Z) > trap.MaxZDifference || player->GetExactDist2d(trap.X, trap.Y) > trap.Radius)
+            continue;
+        if (roll_chance_i(int32(trap.ChancePercent)) == false)
+            continue;
+
+        // The re-arm time is shared with everyone in this copy of the map, and a map can update apart from a player leaving it
+        uint64 rearmKey = (uint64(player->GetInstanceId()) << 32) | trap.ID;
+        {
+            std::lock_guard<std::mutex> lock(TrapRearmTimesMutex);
+            time_t& rearmTime = TrapRearmTimesByMapInstanceAndTrapKey[rearmKey];
+            if (rearmTime > now)
+                continue;
+            rearmTime = now + trap.RespawnInSeconds + (trap.RespawnVarianceInSeconds != 0 ? urand(0, trap.RespawnVarianceInSeconds) : 0);
+        }
+
+        // Unseen, as EQ's is, and hostile so that the spell treats the player as its enemy
+        Creature* trigger = player->SummonTrigger(trap.X, trap.Y, trap.Z, 0.0f, EQ_TRAP_TRIGGER_LIFETIME_IN_MS);
+        if (trigger == nullptr)
+            continue;
+        trigger->SetFaction(EQ_TRAP_TRIGGER_FACTION);
+        trigger->CastSpell(player, trap.SpellID, true);
+        ChatHandler(player->GetSession()).PSendSysMessage("{} triggers a trap!", player->GetName());
+    }
+}
+
+void EverQuestMod::LoadDisciplineData()
+{
+    DisciplinesBySpellID.clear();
+    QueryResult queryResult = WorldDatabase.Query("SELECT SpellID, ReuseInSeconds, IsTimed, EQClassID, UseLevel FROM mod_everquest_discipline;");
+    if (queryResult)
+    {
+        do
+        {
+            Field* fields = queryResult->Fetch();
+            EverQuestDiscipline& discipline = DisciplinesBySpellID[fields[0].Get<uint32>()];
+            discipline.SpellID = fields[0].Get<uint32>();
+            discipline.ReuseInSeconds = fields[1].Get<uint32>();
+            discipline.IsTimed = fields[2].Get<uint8>() != 0;
+            discipline.UseLevelsByEQClassID[fields[3].Get<uint8>()] = fields[4].Get<uint8>();
+        } while (queryResult->NextRow());
+    }
+}
+
+bool EverQuestMod::IsDisciplineSpell(uint32 spellID)
+{
+    return DisciplinesBySpellID.find(spellID) != DisciplinesBySpellID.end();
+}
+
+bool EverQuestMod::HandleDisciplineOnCheckCast(Player* player, Spell* spell, SpellCastResult& res)
+{
+    uint32 spellID = spell->GetSpellInfo()->Id;
+    if (IsDisciplineSpell(spellID) == false)
+        return false;
+    if (ConfigSpellDisciplinesEnabled == false)
+    {
+        ChatHandler(player->GetSession()).PSendSysMessage("Disciplines are turned off on this server.");
+        res = SPELL_FAILED_DONT_REPORT;
+        return true;
+    }
+    for (auto const& disciplineEntry : DisciplinesBySpellID)
+    {
+        if (disciplineEntry.second.IsTimed == true && player->HasAura(disciplineEntry.first) == true)
+        {
+            ChatHandler(player->GetSession()).PSendSysMessage("You must wait before using this discipline.");
+            res = SPELL_FAILED_DONT_REPORT;
+            return true;
+        }
+    }
+    return false;
+}
+
+void EverQuestMod::HandleDisciplineCast(Player* player, SpellInfo const* spellInfo)
+{
+    auto disciplineIter = DisciplinesBySpellID.find(spellInfo->Id);
+    if (disciplineIter == DisciplinesBySpellID.end())
+        return;
+    EverQuestDiscipline const& discipline = disciplineIter->second;
+
+    // Only one runs at a time, so one waiting for its strike makes way
+    for (auto const& disciplineEntry : DisciplinesBySpellID)
+    {
+        if (disciplineEntry.first != spellInfo->Id)
+            player->RemoveAurasDueToSpell(disciplineEntry.first);
+    }
+
+    if (spellInfo->Id == EQ_DISCIPLINE_UNHOLY_AURA_SPELL_ID)
+        player->RemoveSpellCooldown(EQ_DISCIPLINE_HARM_TOUCH_SPELL_ID, true);
+
+    // Reuse shortens by 54 seconds for every level past the one the discipline comes at.  It's the lowest of the player's two classes
+    const EverQuestClassMap classMap = GetClassMapForWOWClassID(player->getClass());
+    uint8 useLevel = 0;
+    for (uint8 eqClassID : { classMap.EQClassIDBase, GetCurrentSecondEQClassForPlayer(player) })
+    {
+        auto useLevelIter = discipline.UseLevelsByEQClassID.find(eqClassID);
+        if (useLevelIter != discipline.UseLevelsByEQClassID.end() && (useLevel == 0 || useLevelIter->second < useLevel))
+            useLevel = useLevelIter->second;
+    }
+    if (useLevel == 0)
+        return;
+    uint32 level = player->GetLevel();
+    if (discipline.ReuseInSeconds < EQ_DISCIPLINE_REUSE_LEVEL_CAP_BELOW_SECONDS && level > EQ_DISCIPLINE_REUSE_LEVEL_CAP)
+        level = EQ_DISCIPLINE_REUSE_LEVEL_CAP;
+    int32 reduction = int32(level > useLevel ? level - useLevel : 0) * EQ_DISCIPLINE_REUSE_SECONDS_PER_LEVEL;
+    reduction = std::min(reduction, int32(discipline.ReuseInSeconds) - EQ_DISCIPLINE_MIN_REUSE_SECONDS);
+    if (reduction > 0)
+        player->ModifySpellCooldown(spellInfo->Id, -reduction * int32(IN_MILLISECONDS));
+}
+
+void EverQuestMod::RemoveActiveDisciplines(Player* player)
+{
+    for (auto const& disciplineEntry : DisciplinesBySpellID)
+        player->RemoveAurasDueToSpell(disciplineEntry.first);
 }
 
 void EverQuestMod::ApplyItemFocusToSpellAmount(Unit* caster, uint32 focusType, SpellInfo const* spellInfo, int32& amount)
@@ -9711,6 +9895,8 @@ void EverQuestMod::ApplyAutoLearnedClassSkillsAndSpells(Player* player)
             // Only learn once the player has reached the spell's required level
             if (autoLearnLevel < autoLearnSpell.Level)
                 continue;
+            if (ConfigSpellDisciplinesEnabled == false && IsDisciplineSpell(autoLearnSpell.SpellID) == true)
+                continue;
             if (player->HasSpell(autoLearnSpell.SpellID) == false)
             {
                 player->learnSpell(autoLearnSpell.SpellID);
@@ -13923,6 +14109,32 @@ void EverQuestMod::RemoveEQMountWhereNotAllowed(Player* player)
             return;
         }
     }
+}
+
+void EverQuestMod::UpdateEQMountRulesForPlayer(Player* player)
+{
+    if (player->IsMounted() == false || EQMount::IsRidingEQHorse(player) == false)
+    {
+        if (player->HasAura(EQ_MOUNT_SADDLE_REST_SPELL_ID) == true)
+            player->RemoveAurasDueToSpell(EQ_MOUNT_SADDLE_REST_SPELL_ID);
+        return;
+    }
+
+    // Feigning or going under drops the rider
+    if (player->HasAuraType(SPELL_AURA_FEIGN_DEATH) == true || player->IsUnderWater() == true)
+    {
+        player->RemoveAurasByType(SPELL_AURA_MOUNTED);
+        return;
+    }
+
+    player->RemoveAurasDueToSpell(EQ_SPELL_ID_YAULP_V);
+    player->RemoveAurasDueToSpell(EQ_SPELL_ID_YAULP_VI);
+
+    bool isResting = player->isMoving() == false && player->GetVictim() == nullptr;
+    if (isResting == true && player->HasAura(EQ_MOUNT_SADDLE_REST_SPELL_ID) == false)
+        player->AddAura(EQ_MOUNT_SADDLE_REST_SPELL_ID, player);
+    else if (isResting == false && player->HasAura(EQ_MOUNT_SADDLE_REST_SPELL_ID) == true)
+        player->RemoveAurasDueToSpell(EQ_MOUNT_SADDLE_REST_SPELL_ID);
 }
 
 void EverQuestMod::RemoveEQMountAtLogin(Player* player)

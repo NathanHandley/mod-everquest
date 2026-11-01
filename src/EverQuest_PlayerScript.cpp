@@ -515,6 +515,7 @@ public:
 
         // Armor type, shield and held instruments drive the Monk and Bard class auras
         EverQuest->RefreshClassAuraGearAurasForPlayer(player);
+        EverQuest->RefreshItemFocusRangeAuraForPlayer(player);
 
         // Prevent any left over buffs from other gear
         EverQuest->RemoveOrphanedItemEquipAurasForPlayer(player);
@@ -533,6 +534,7 @@ public:
 
         EverQuest->RefreshBearFormArmorShiftForPlayer(player);
         EverQuest->RefreshClassAuraGearAurasForPlayer(player);
+        EverQuest->RefreshItemFocusRangeAuraForPlayer(player);
         EverQuest->RemoveOrphanedItemEquipAurasForPlayer(player);
         EverQuest->QueueCarriedLightRefreshForPlayer(player);
     }
@@ -580,6 +582,8 @@ public:
         EverQuest->UpdateFactionGatedQuestsForPlayer(player, p_time);
         EverQuest->UpdatePlayerTracking(player, p_time);
         EverQuest->UpdateClassAurasForPlayer(player, p_time);
+        EverQuest->UpdateTrapsForPlayer(player, p_time);
+        EverQuest->UpdateEQMountRulesForPlayer(player);
         EverQuest->CancelMovementCastForMovingPlayer(player, player->isMoving());
         EverQuest->UpdateMovementCastSnareForPlayer(player);
         EverQuest->TeachPetOverflowTemplateSpells(player);
@@ -944,6 +948,8 @@ public:
         // Characters always log in standing
         EverQuest->RemoveCrouchAtLogin(player);
         EverQuest->RemoveEQMountAtLogin(player);
+        EverQuest->RemoveActiveDisciplines(player);
+        EverQuest->RefreshItemFocusRangeAuraForPlayer(player);
 
         // Handle odd edge cases where a player logs in but the server doesn't know where to put them
         EverQuest->EnforceWorldDomainAtLogin(player);
@@ -1273,6 +1279,9 @@ public:
 
         // A horse can't follow into an indoor zone, and fades on a map that doesn't take one
         EverQuest->RemoveEQMountWhereNotAllowed(player);
+
+        // A discipline ends at a zone line, as a camp does
+        EverQuest->RemoveActiveDisciplines(player);
 
         // Catch map switches that bypass TeleportTo
         EverQuest->ClearTempFactionBonusForPlayer(player);

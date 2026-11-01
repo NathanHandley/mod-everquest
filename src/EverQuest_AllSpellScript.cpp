@@ -127,6 +127,10 @@ public:
             return;
         }
 
+        // Disciplines have their own rules for when they can start
+        if (spell->GetCaster()->IsPlayer() == true && EverQuest->HandleDisciplineOnCheckCast(spell->GetCaster()->ToPlayer(), spell, res) == true)
+            return;
+
         // Some zones hold everyone to the ground
         Unit* levitationTarget = (target != nullptr) ? target : casterUnit;
         if (EverQuest->IsLevitationBlockedByZone(spell->GetSpellInfo(), levitationTarget) == true)
@@ -476,6 +480,10 @@ public:
         // This was added to fix a crash associated with consuming the last stack of a throwing weapon when a throwing skillup occurred. The actual issue is upstream in
         // the AzerothCore code specifically Player::UpdateWeaponSkill which was referencing an invalid pointer.
         spell->m_weaponItem = nullptr;
+
+        // A discipline sets its own reuse by level
+        if (caster != nullptr && caster->IsPlayer() == true)
+            EverQuest->HandleDisciplineCast(caster->ToPlayer(), spellInfo);
 
         // Class auras: settle the ammo for shots the Ranger's Endless Quiver spared, and for the channeled ranged spells whose ammo was handed to the mod at load.
         // Ahead of the enabled check, since those channeled spells no longer take ammo on their own

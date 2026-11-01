@@ -42,6 +42,9 @@ class EverQuest_HarmTouchSpellScript : public SpellScript
         uint32 damage = caster->GetMaxHealth();
         if (target->GetCharmerOrOwnerPlayerOrPlayerItself() != nullptr)
             damage = target->CountPctFromMaxHealth(int32(min<uint32>(EverQuest->ConfigSystemHarmTouchPlayerPvPDamagePercent, 100)));
+
+        // Unholy Aura readied this touch, so it's spent
+        caster->RemoveAurasDueToSpell(EQ_DISCIPLINE_UNHOLY_AURA_SPELL_ID);
         SetHitDamage(int32(min<uint32>(damage, uint32(numeric_limits<int32>::max()))));
     }
 

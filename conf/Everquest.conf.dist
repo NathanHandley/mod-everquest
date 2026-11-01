@@ -380,6 +380,15 @@ EverQuest.Spells.CreatureWoWStunImmunityEnabled = True
 
 EverQuest.Spells.ClassAurasEnabled = True
 
+#
+# 	EverQuest.Spells.DisciplinesEnabled
+#         Description: If true, EQ melee and hybrid classes learn and can use their disciplines (Luclin and later).  If false, they aren't
+#                      learned, and any already known refuse to start
+#         Default:     1 (Enabled)
+#
+
+EverQuest.Spells.DisciplinesEnabled = True
+
 ###################################################################################################
 #
 # 	EverQuest.Spells.MovementCastSnareEnabled
