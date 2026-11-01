@@ -55,7 +55,7 @@ class EQZoneMap;
 struct AreaTrigger;
 struct BuildValuesCachePosPointers;
 
-#define EQ_MOD_VERSION                              139
+#define EQ_MOD_VERSION                              140
 
 #define EQ_MOVEMENT_CAST_SNARE_DURATION_BUFFER_IN_MS 2000 // How much longer than the remaining cast time the casting slow is given, so a pushed-back cast keeps it
 
@@ -1604,6 +1604,7 @@ public:
     bool AllowBind = true;
     int32 ExpansionID = 0;
     float MaxAgroZDistance = -1.0f;
+    bool AllowEQMount = true;
     uint32 InstanceRaidLowMapID = 0;
     uint32 InstanceDungeonMapID = 0;
     uint32 RequiredKeyItemID = 0;
@@ -2723,6 +2724,11 @@ public:
     int32 GetLullAggroRangeAmountForNewEffect(Unit* unit, AuraEffect const* newLullEffect);
     void RefreshLullAggroRanges(Unit* unit, Aura const* excludedAura);
     float GetMaxAgroZDistanceForMap(uint32 mapID);
+
+    // EQ horses: they stay on EQ maps and off indoor zones, and fade where they can't go
+    bool HandleEQMountOnCheckCast(Player* player, Spell* spell, SpellCastResult& res);
+    void RemoveEQMountWhereNotAllowed(Player* player);
+    void RemoveEQMountAtLogin(Player* player);
     bool IsBlockedByAgroZDistance(WorldObject const* source, WorldObject const* target, float maxAgroZDistance);
     bool IsSocialAggroOverrideNeededForCreature(Creature* creature, float& scaleOut, float& maxAgroZDistanceOut);
     void MarkCreatureAgroZBlockOnEngage(Creature* creature, Unit* victim);

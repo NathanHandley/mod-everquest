@@ -943,6 +943,7 @@ public:
 
         // Characters always log in standing
         EverQuest->RemoveCrouchAtLogin(player);
+        EverQuest->RemoveEQMountAtLogin(player);
 
         // Handle odd edge cases where a player logs in but the server doesn't know where to put them
         EverQuest->EnforceWorldDomainAtLogin(player);
@@ -1262,6 +1263,9 @@ public:
     {
         if (EverQuest->IsEnabled == false)
             return;
+
+        // A horse can't follow into an indoor zone, and fades on a map that doesn't take one
+        EverQuest->RemoveEQMountWhereNotAllowed(player);
 
         // Catch map switches that bypass TeleportTo
         EverQuest->ClearTempFactionBonusForPlayer(player);

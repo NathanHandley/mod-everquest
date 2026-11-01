@@ -52,6 +52,7 @@
 #include "MovementGenerator.h"
 #include "PathGenerator.h"
 #include "EQPathBuilder.h"
+#include "EQMount.h"
 #include "EQZoneMap.h"
 #include "GridTerrainData.h"
 #include "CharacterCache.h"
@@ -13493,7 +13494,7 @@ void EverQuestMod::LoadZoneData()
     InstanceDungeonMapIDs.clear();
     OpenWorldMapIDByInstanceMapID.clear();
 
-    QueryResult queryResult = WorldDatabase.Query("SELECT MapID, AllowBind, ExpansionID, MaxAgroZDistance, InstanceRaidLowMapID, InstanceDungeonMapID, RequiredKeyItemID FROM mod_everquest_zone;");
+    QueryResult queryResult = WorldDatabase.Query("SELECT MapID, AllowBind, ExpansionID, MaxAgroZDistance, InstanceRaidLowMapID, InstanceDungeonMapID, RequiredKeyItemID, AllowEQMount FROM mod_everquest_zone;");
     if (queryResult)
     {
         do
@@ -13507,6 +13508,7 @@ void EverQuestMod::LoadZoneData()
             zone.InstanceRaidLowMapID = fields[4].Get<uint32>();
             zone.InstanceDungeonMapID = fields[5].Get<uint32>();
             zone.RequiredKeyItemID = fields[6].Get<uint32>();
+            zone.AllowEQMount = fields[7].Get<uint8>() != 0;
             ZoneByMapID[zone.MapID] = zone;
             if (zone.InstanceRaidLowMapID != 0)
             {
@@ -13729,6 +13731,50 @@ std::string EverQuestMod::GetZoneNameForMap(uint32 mapID)
     if (mapEntry == nullptr)
         return "that place";
     return mapEntry->name[sWorld->GetDefaultDbcLocale()];
+}
+
+static bool IsEQHorseSpell(SpellInfo const* spellInfo)
+{
+    for (uint8 effectIndex = 0; effectIndex < MAX_SPELL_EFFECTS; ++effectIndex)
+        if (spellInfo->Effects[effectIndex].ApplyAuraName == SPELL_AURA_DUMMY && spellInfo->Effects[effectIndex].MiscValue == EQMount::DUMMY_MISC_VALUE)
+            return true;
+    return false;
+}
+
+bool EverQuestMod::HandleEQMountOnCheckCast(Player* player, Spell* spell, SpellCastResult& res)
+{
+    if (IsEQHorseSpell(spell->GetSpellInfo()) == false)
+        return false;
+    auto zoneIter = ZoneByMapID.find(player->GetMapId());
+    if (zoneIter == ZoneByMapID.end() || zoneIter->second.AllowEQMount == false)
+    {
+        res = SPELL_FAILED_ONLY_OUTDOORS;
+        return true;
+    }
+    return false;
+}
+
+void EverQuestMod::RemoveEQMountWhereNotAllowed(Player* player)
+{
+    auto zoneIter = ZoneByMapID.find(player->GetMapId());
+    if (zoneIter != ZoneByMapID.end() && zoneIter->second.AllowEQMount == true)
+        return;
+
+    // Reads the marker itself, as a horse carried off an EQ map no longer counts as riding one
+    for (AuraEffect const* dummyEffect : player->GetAuraEffectsByType(SPELL_AURA_DUMMY))
+    {
+        if (dummyEffect->GetMiscValue() == EQMount::DUMMY_MISC_VALUE)
+        {
+            player->RemoveAurasByType(SPELL_AURA_MOUNTED);
+            return;
+        }
+    }
+}
+
+void EverQuestMod::RemoveEQMountAtLogin(Player* player)
+{
+    if (EQMount::IsRidingEQHorse(player) == true)
+        player->RemoveAurasByType(SPELL_AURA_MOUNTED);
 }
 
 float EverQuestMod::GetMaxAgroZDistanceForMap(uint32 mapID)

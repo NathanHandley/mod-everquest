@@ -78,6 +78,10 @@ public:
         if (spell->GetCaster()->IsPlayer() == true && EverQuest->HandleBardSongRangedSlotInstrumentOnCheckCast(spell->GetCaster()->ToPlayer(), spell, res) == true)
             return;
 
+        // EQ horses keep to outdoor EQ zones
+        if (spell->GetCaster()->IsPlayer() == true && EverQuest->HandleEQMountOnCheckCast(spell->GetCaster()->ToPlayer(), spell, res) == true)
+            return;
+
         // Crouch is a toggle, and nothing else can be cast while crouched
         if (spell->GetCaster()->IsPlayer() == true && EverQuest->HandleCrouchOnCheckCast(spell->GetCaster()->ToPlayer(), spell, res) == true)
             return;
