@@ -55,7 +55,7 @@ class EQZoneMap;
 struct AreaTrigger;
 struct BuildValuesCachePosPointers;
 
-#define EQ_MOD_VERSION                              136
+#define EQ_MOD_VERSION                              137
 
 #define EQ_MOVEMENT_CAST_SNARE_DURATION_BUFFER_IN_MS 2000 // How much longer than the remaining cast time the casting slow is given, so a pushed-back cast keeps it
 
@@ -931,13 +931,6 @@ public:
     float X = 0.0f;
     float Y = 0.0f;
     float Z = 0.0f;
-};
-
-class EverQuestPlayerClientVersionCheckState
-{
-public:
-    int32 MSUntilDeadline = 0;
-    bool FailedPendingKick = false;
 };
 
 class EverQuestCreatureEmote
@@ -1900,7 +1893,6 @@ public:
     uint32 ConfigSystemCrouchSpellID = 0;
     uint32 ConfigSystemCarriedLightSpellIDStart = 0;
     uint32 ConfigSystemClientDataVersion = 0;
-    string ConfigSystemClientDataVersionMismatchMessage;
     uint32 ConfigSystemFactionGoodClassMask;
     uint32 ConfigSystemFactionEvilClassMask;
     uint32 ConfigSystemFactionGoodRaceMask;
@@ -1914,8 +1906,6 @@ public:
     uint32 ConfigDeathFallbackGraveyardID = 0;
     bool ConfigLoginReturnCharactersToNorrath = true;
     bool ConfigClientVersionCheckEnabled = false;
-    uint32 ConfigClientVersionCheckGraceTimeInSeconds = 30;
-    uint32 ConfigClientVersionCheckKickDelayInSeconds = 10;
     bool ConfigSpellTalentAlignmentEnabled;
     bool ConfigQuestGrantExpOnRepeatCompletion;
     uint32 ConfigEventSpawnMaxLifetimeInSeconds = 1800;
@@ -2112,7 +2102,9 @@ public:
     std::mutex CycleSpawnCheckTimerMutex;
     unordered_map<uint64, int32> CycleSpawnCheckTimerInMSByMapInstanceKey;
     uint32 RestrictedMapCheckTimerInMS = 0;
-    unordered_map<ObjectGuid, EverQuestPlayerClientVersionCheckState> PendingClientVersionChecksByPlayerGUID;
+    // The client data version an account has to log in with, 0 when the check is off.  Logins read this on a network thread, while a live
+    // ".reload config" rewrites the config values it comes from on the world thread, so it is its own atomic copy
+    std::atomic<uint32> RequiredClientDataVersion{ 0 };
     unordered_map<ObjectGuid, deque<uint32>> PlayerCasterConcurrentBardSongs;
     unordered_set<ObjectGuid> PlayersWithAuctionUsableFilterActive;
     unordered_map<uint32, EverQuestAuctionRealmFilter> AuctionRealmFiltersByAccountID;
@@ -2750,11 +2742,8 @@ public:
     bool IsMapRestrictedForPlayers(uint32 mapID);
     bool RelocatePlayerOutOfRestrictedMap(Player* player);
     void UpdateRestrictedMapPlayerCheck(uint32 diff);
-    void BeginClientVersionCheckForPlayer(Player* player);
-    void HandleClientVersionReportForPlayer(Player* player, uint32 reportedVersion);
-    void FailClientVersionCheckForPlayer(Player* player, EverQuestPlayerClientVersionCheckState& checkState);
-    void UpdateClientVersionChecks(uint32 diff);
-    void ClearClientVersionCheckForPlayer(ObjectGuid playerGUID);
+    void UpdateRequiredClientDataVersion();
+    bool IsClientDataVersionAllowed(AccountTypes security, uint32 clientDataVersion, uint32& expectedClientDataVersion) const;
     void LoadFactionData();
     void ResolveDefendCombatFactionTemplates();
     void ResolveEQReputationFactions();

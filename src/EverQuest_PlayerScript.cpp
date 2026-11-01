@@ -930,9 +930,6 @@ public:
         if (EverQuest->IsEnabled == false)
             return;
 
-        // Start the grace timer for the client data version report (kicks stale clients that bypassed the update launcher)
-        EverQuest->BeginClientVersionCheckForPlayer(player);
-
         // Characters always log in standing
         EverQuest->RemoveCrouchAtLogin(player);
 
@@ -1142,8 +1139,6 @@ public:
     {
         if (EverQuest->IsEnabled == false)
             return;
-
-        EverQuest->ClearClientVersionCheckForPlayer(player->GetGUID());
 
         // The tether itself was already unwound in OnPlayerBeforeLogout, so only any unanswered offer is left to drop
         EverQuest->ClearMentorshipRequestsInvolvingPlayerGUID(player->GetGUID());

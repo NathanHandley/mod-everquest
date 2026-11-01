@@ -129,7 +129,6 @@ public:
         static ChatCommandTable commandTable =
         {
             { "eqgps",  HandleEQGPSCommand,                     SEC_PLAYER, Console::No },
-            { "eqver",  HandleEQVerCommand,                     SEC_PLAYER, Console::No },
             { "eqface", HandleEQFaceCommand,                    SEC_PLAYER, Console::No },
             { "eqmovecast", HandleEQMoveCastCommand,            SEC_PLAYER, Console::No },
             { "eqshowbardpulse", HandleEQShowBardPulseCommand,  SEC_PLAYER, Console::No },
@@ -1059,19 +1058,6 @@ public:
         }
 
         handler->PSendSysMessage("Auction results can be limited to Norrath (EverQuest) or Azeroth (World of Warcraft) items per auction house category, using the |cff4CFF00Realm Filter|r button on the auction house window.");
-        return true;
-    }
-
-    static bool HandleEQVerCommand(ChatHandler* handler, const char* args)
-    {
-        if (EverQuest->IsEnabled == false)
-            return true;
-
-        // Sent automatically by the client UI shortly after entering the world, so bad input drops silently
-        uint32 values[1];
-        if (ParseUnsignedArgs(args, values, 1) != 1)
-            return true;
-        EverQuest->HandleClientVersionReportForPlayer(handler->GetPlayer(), values[0]);
         return true;
     }
 
