@@ -1005,6 +1005,9 @@ public:
                     createInfo.PositionY, createInfo.PositionZ);
                 if (createInfo.ExtraStartItemID != 0)
                     player->AddItem(createInfo.ExtraStartItemID, 1);
+                uint32 vahShirInstinctsSpellID = EverQuest->GetClassAuraSpellID(EQ_CLASSAURA_SPELL_VAH_SHIR_INSTINCTS);
+                if (vahShirInstinctsSpellID != 0 && createInfo.StartOption == EQ_START_OPTION_SHAR_VAHL)
+                    player->learnSpell(vahShirInstinctsSpellID);
                 if (EverQuest->ConfigDeathKnightsStartLikeOtherClasses == true && player->getClass() == CLASS_DEATH_KNIGHT)
                 {
                     player->RemoveAura(48266); // Take off Blood Presence
@@ -1247,6 +1250,10 @@ public:
                 EverQuest->GetRequiredKeyItemName(EverQuest->GetRequiredKeyItemIDForMap(mapid)));
             return false;
         }
+
+        // Some zones hold everyone to the ground
+        if (player != nullptr && mapid != player->GetMapId())
+            EverQuest->RemoveEQLevitationBeforeEnteringMap(player, mapid);
 
         // Heading into a dungeon instance the character already has a copy of, so put back the bind the core dropped when their group went away
         EverQuest->TryRestoreInstanceDungeonBindForPlayer(player, mapid);

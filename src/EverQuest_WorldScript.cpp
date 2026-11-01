@@ -73,6 +73,7 @@ public:
         EverQuest->LoadTimedPortData();
         EverQuest->LoadPetData();
         EverQuest->LoadPetSilentDisplayData();
+        EverQuest->LoadWarderLookData();
         EverQuest->LoadDruidFormDisplayData();
         EverQuest->LoadCreatePlayerData();
         EverQuest->LoadCreatureLootData();

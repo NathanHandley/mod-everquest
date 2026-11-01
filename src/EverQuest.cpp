@@ -6101,6 +6101,24 @@ bool EverQuestMod::IsLevitationBlockedByIllusionObjectForm(SpellInfo const* spel
     return IsUnitInIllusionObjectForm(target);
 }
 
+bool EverQuestMod::IsLevitationBlockedByZone(SpellInfo const* spellInfo, Unit* target)
+{
+    if (target == nullptr || DoesSpellApplyLevitation(spellInfo) == false)
+        return false;
+    auto zoneIter = ZoneByMapID.find(target->GetMapId());
+    return zoneIter != ZoneByMapID.end() && zoneIter->second.AllowEQLevitate == false;
+}
+
+void EverQuestMod::RemoveEQLevitationBeforeEnteringMap(Player* player, uint32 mapID)
+{
+    // This has to run on the map being left: fading hover reads the ground under the player, and the new map's has no height data yet
+    auto zoneIter = ZoneByMapID.find(mapID);
+    if (zoneIter == ZoneByMapID.end() || zoneIter->second.AllowEQLevitate == true)
+        return;
+    player->RemoveAurasByType(SPELL_AURA_HOVER);
+    player->RemoveAurasByType(SPELL_AURA_FEATHER_FALL);
+}
+
 bool EverQuestMod::IsIllusionObjectFormBlockedByLevitation(uint32 spellID, Unit* target)
 {
     // The two can never overlap even for an instant, so a levitating target simply does not get the form.  Only the form is refused here
@@ -9153,6 +9171,47 @@ void EverQuestMod::LoadPetSilentDisplayData()
             SilentFidgetDisplayIDsByDisplayID[displayID] = silentDisplayID;
         } while (queryResult->NextRow());
     }
+}
+
+void EverQuestMod::LoadWarderLookData()
+{
+    WarderLookCreatureTemplateIDsByKey.clear();
+    QueryResult queryResult = WorldDatabase.Query("SELECT OwnerRaceID, StartOption, CreatureTemplateID FROM mod_everquest_warder_look;");
+    if (queryResult)
+    {
+        do
+        {
+            Field* fields = queryResult->Fetch();
+            uint32 key = (uint32(fields[0].Get<uint8>()) << 8) | fields[1].Get<uint8>();
+            WarderLookCreatureTemplateIDsByKey[key] = fields[2].Get<uint32>();
+        } while (queryResult->NextRow());
+    }
+}
+
+void EverQuestMod::ApplyWarderLookToPet(Pet* pet)
+{
+    // The table is empty before Luclin, which leaves every warder the wolf its creature row has
+    if (WarderLookCreatureTemplateIDsByKey.empty() == true)
+        return;
+    Player* owner = pet->GetOwner();
+    if (owner == nullptr)
+        return;
+
+    // A start option is a people, so it comes ahead of the owner's own race
+    auto lookIter = WarderLookCreatureTemplateIDsByKey.find(GetPlayerStartOption(owner));
+    if (lookIter == WarderLookCreatureTemplateIDsByKey.end())
+        lookIter = WarderLookCreatureTemplateIDsByKey.find(uint32(owner->getRace()) << 8);
+    if (lookIter == WarderLookCreatureTemplateIDsByKey.end())
+        return;
+
+    CreatureTemplate const* lookTemplate = sObjectMgr->GetCreatureTemplate(lookIter->second);
+    if (lookTemplate == nullptr)
+        return;
+    CreatureModel const* lookModel = lookTemplate->GetFirstValidModel();
+    if (lookModel == nullptr)
+        return;
+    pet->SetDisplayId(lookModel->CreatureDisplayID, lookModel->DisplayScale);
+    pet->SetNativeDisplayId(lookModel->CreatureDisplayID);
 }
 
 void EverQuestMod::RemoveInvalidPetSilentDisplays()
@@ -13588,7 +13647,7 @@ void EverQuestMod::LoadZoneData()
     InstanceDungeonMapIDs.clear();
     OpenWorldMapIDByInstanceMapID.clear();
 
-    QueryResult queryResult = WorldDatabase.Query("SELECT MapID, AllowBind, ExpansionID, MaxAgroZDistance, InstanceRaidLowMapID, InstanceDungeonMapID, RequiredKeyItemID, AllowEQMount FROM mod_everquest_zone;");
+    QueryResult queryResult = WorldDatabase.Query("SELECT MapID, AllowBind, ExpansionID, MaxAgroZDistance, InstanceRaidLowMapID, InstanceDungeonMapID, RequiredKeyItemID, AllowEQMount, AllowEQLevitate FROM mod_everquest_zone;");
     if (queryResult)
     {
         do
@@ -13603,6 +13662,7 @@ void EverQuestMod::LoadZoneData()
             zone.InstanceDungeonMapID = fields[5].Get<uint32>();
             zone.RequiredKeyItemID = fields[6].Get<uint32>();
             zone.AllowEQMount = fields[7].Get<uint8>() != 0;
+            zone.AllowEQLevitate = fields[8].Get<uint8>() != 0;
             ZoneByMapID[zone.MapID] = zone;
             if (zone.InstanceRaidLowMapID != 0)
             {

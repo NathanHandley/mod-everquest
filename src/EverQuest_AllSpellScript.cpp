@@ -127,8 +127,17 @@ public:
             return;
         }
 
-        // Levitation on top of an object illusion form crashes the client, so it is refused while the form is up
+        // Some zones hold everyone to the ground
         Unit* levitationTarget = (target != nullptr) ? target : casterUnit;
+        if (EverQuest->IsLevitationBlockedByZone(spell->GetSpellInfo(), levitationTarget) == true)
+        {
+            if (spell->GetCaster()->IsPlayer() == true)
+                ChatHandler(spell->GetCaster()->ToPlayer()->GetSession()).PSendSysMessage("You can't levitate in this zone.");
+            res = SPELL_FAILED_DONT_REPORT;
+            return;
+        }
+
+        // Levitation on top of an object illusion form crashes the client, so it is refused while the form is up
         if (EverQuest->IsLevitationBlockedByIllusionObjectForm(spell->GetSpellInfo(), levitationTarget) == true)
         {
             if (spell->GetCaster()->IsPlayer() == true)

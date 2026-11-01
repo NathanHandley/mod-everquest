@@ -73,11 +73,16 @@ public:
         if (EverQuest->IsEnabled == false)
             return;
 
+        // A warder takes the look of its owner's people.  This comes first, as the fidget silence swaps whichever display the pet ends up with
+        if (EverQuest->HasPetDataForCreatureTemplateID(pet->GetCreatureTemplate()->Entry) == true
+            && EverQuest->GetPetDataForCreatureTemplateID(pet->GetCreatureTemplate()->Entry).NamingType == EQ_PET_NAMING_TYPE_WARDER)
+            EverQuest->ApplyWarderLookToPet(pet);
+
         // Pets do not play idle (fidget) sounds while under player control
         EverQuest->UpdatePetFidgetSilence(pet);
 
-        // A Magician class aura holder's pet carries the pet side of the bond
-        EverQuest->ApplyMagicianPetAuraToPet(pet);
+        // A Magician or Beastlord class aura holder's pet carries the pet side of the bond
+        EverQuest->ApplyClassPetAurasToPet(pet);
 
         // Skip non-EQ pets
         if (EverQuest->HasPetDataForCreatureTemplateID(pet->GetCreatureTemplate()->Entry) == false)

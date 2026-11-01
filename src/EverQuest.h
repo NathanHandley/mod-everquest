@@ -284,6 +284,7 @@ struct BuildValuesCachePosPointers;
 #define EQ_WOW_FLAT_ATTACK_POWER_BUFF_SPELL_GROUP_ID    1004 // WOW's stock "Flat AP Buffs" group (Battle Shout, Blessing of Might)
 #define EQ_WOW_FLAT_ATTACK_POWER_DEBUFF_SPELL_GROUP_ID  1062 // WOW's stock "AP Debuffs" group (Demoralizing Shout/Roar, Vindication, Curse of Weakness)
 
+#define EQ_START_OPTION_SHAR_VAHL                   1
 #define EQ_PET_NAMING_TYPE_PET                      0
 #define EQ_PET_NAMING_TYPE_FAMILIAR                 1
 #define EQ_PET_NAMING_TYPE_WARDER                   2
@@ -1204,7 +1205,11 @@ enum EverQuestClassAuraSpellType : uint32
     EQ_CLASSAURA_SPELL_DRUID_NATURES_BALANCE_ARCANE = 72,
     EQ_CLASSAURA_SPELL_SHADOWKNIGHT_FOCUS = 73,
     EQ_CLASSAURA_SPELL_SHADOWKNIGHT_FOCUS_MANA = 74,
-    EQ_CLASSAURA_SPELL_TYPE_COUNT = 75
+    EQ_CLASSAURA_SPELL_BEASTLORD_PASSIVE = 75,
+    EQ_CLASSAURA_SPELL_BEASTLORD_AURA = 76,
+    EQ_CLASSAURA_SPELL_BEASTLORD_PET_PASSIVE = 77,
+    EQ_CLASSAURA_SPELL_VAH_SHIR_INSTINCTS = 78,
+    EQ_CLASSAURA_SPELL_TYPE_COUNT = 79
 };
 
 class EverQuestPlayerClientMoveState : public DataMap::Base
@@ -1625,6 +1630,7 @@ public:
     int32 ExpansionID = 0;
     float MaxAgroZDistance = -1.0f;
     bool AllowEQMount = true;
+    bool AllowEQLevitate = true;
     uint32 InstanceRaidLowMapID = 0;
     uint32 InstanceDungeonMapID = 0;
     uint32 RequiredKeyItemID = 0;
@@ -2137,6 +2143,7 @@ public:
     unordered_map<uint64, vector<EverQuestTriggeredQuestKillSpawn>> TriggeredQuestKillSpawnsByMapInstanceKey;
     unordered_map<uint32, EverQuestItemTemplate> ItemTemplatesByEntryID;
     unordered_map<uint32, EverQuestItemFocus> ItemFocusByItemTemplateID;
+    unordered_map<uint32, uint32> WarderLookCreatureTemplateIDsByKey; // (owner race, start option), filled at startup and only read after
     unordered_map<uint64, vector<EverQuestGearSwapCandidate>> GearSwapCandidatesByLookupKey;
     unordered_set<uint32> WornEffectSpellIDs;
     unordered_set<uint32> EQWeaponPoisonProcSpellIDs;
@@ -2400,6 +2407,8 @@ public:
     bool IsUnitLevitating(Unit* unit);
     bool DoesSpellApplyLevitation(SpellInfo const* spellInfo);
     bool IsLevitationBlockedByIllusionObjectForm(SpellInfo const* spellInfo, Unit* target);
+    bool IsLevitationBlockedByZone(SpellInfo const* spellInfo, Unit* target);
+    void RemoveEQLevitationBeforeEnteringMap(Player* player, uint32 mapID);
     bool IsIllusionObjectFormBlockedByLevitation(uint32 spellID, Unit* target);
     void ClearStaleMirrorImageFlagForPlayer(Player* player);
     bool IsSpellBlockedByMinTargetLevel(uint32 spellID, Unit* target, Unit* caster, bool isCastFromItem);
@@ -2519,8 +2528,8 @@ public:
     uint32 ConsumeClassAuraPaladinFullBlockAmount(Player* paladin, Unit* attacker);
     bool HandlePaladinFullBlockSwingLogPacketSend(WorldSession* session, WorldPacket const& packet);
     void UpdateWizardFocusMovementForPlayer(Player* player, uint32 diffInMS);
-    void RefreshMagicianPetAuraForPlayer(Player* player);
-    void ApplyMagicianPetAuraToPet(Pet* pet);
+    void RefreshClassPetAurasForPlayer(Player* player);
+    void ApplyClassPetAurasToPet(Pet* pet);
     void HandleClassAuraPetStrike(Unit* attacker, Unit* victim);
     void HandleClassAuraRangerDirectDamage(Unit* attacker, Unit* victim, SpellInfo const* spellInfo);
     void HandleClassAuraShamanStrike(Unit* attacker, Unit* victim);
@@ -2605,6 +2614,8 @@ public:
     string FormatGossipTextForPlayer(Player* player, const string& text);
     void LoadPetData();
     void LoadPetSilentDisplayData();
+    void LoadWarderLookData();
+    void ApplyWarderLookToPet(Pet* pet);
     void RemoveInvalidPetSilentDisplays();
     void LoadDruidFormDisplayData();
     void RemoveInvalidDruidFormDisplays();
