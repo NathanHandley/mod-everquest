@@ -568,9 +568,11 @@ public:
             return;
         ApplyTalentHealingMods(target, healer, heal, spellInfo);
 
-        // A worn focus adds to the healer's own spells
+        // A worn focus adds to the healer's own spells.  The core passes the caster as 'target' on a direct heal and as 'healer' on a periodic tick, and only a tick has
+        // an aura on 'target' from the other unit
+        bool isPeriodicTick = healer != nullptr && spellInfo != nullptr && target->HasAura(spellInfo->Id, healer->GetGUID()) == true;
         int32 focusedHeal = int32(heal);
-        EverQuest->ApplyItemFocusToSpellAmount(healer, EQ_ITEM_FOCUS_TYPE_HEALING, spellInfo, focusedHeal);
+        EverQuest->ApplyItemFocusToSpellAmount(isPeriodicTick == true ? healer : target, EQ_ITEM_FOCUS_TYPE_HEALING, spellInfo, focusedHeal);
         heal = uint32(focusedHeal);
 
         // A buff that raises maximum health never heals for more than it raised it, so this comes after everything that grows the heal.  The core hands over the

@@ -65,7 +65,11 @@ struct BuildValuesCachePosPointers;
 #define EQ_ITEM_FOCUS_TYPE_MANA_COST                5
 #define EQ_DISCIPLINE_REUSE_SECONDS_PER_LEVEL       54
 #define EQ_DISCIPLINE_UNHOLY_AURA_SPELL_ID          97687
-#define EQ_DISCIPLINE_HARM_TOUCH_SPELL_ID           86909
+#define EQ_DISCIPLINE_UNHOLY_AURA_DAMAGE_PERCENT    150
+#define EQ_DISCIPLINE_NIMBLE_SPELL_ID               97680
+#define EQ_DISCIPLINE_PURETONE_SPELL_ID             97690
+#define EQ_DISCIPLINE_PURETONE_BOOST_PERCENT        180
+#define EQ_INSTRUMENT_MAX_BOOST_PERCENT             260     // EQ stops instrument mods at 3.6 times
 #define EQ_DISCIPLINE_MIN_REUSE_SECONDS             234
 #define EQ_DISCIPLINE_REUSE_LEVEL_CAP               60      // Short reuses stop shortening at this level
 #define EQ_DISCIPLINE_REUSE_LEVEL_CAP_BELOW_SECONDS 1620
@@ -251,6 +255,8 @@ struct BuildValuesCachePosPointers;
 #define EQ_SPELLDUMMYTYPE_TRANSLOCATETOBIND         29
 #define EQ_SPELLDUMMYTYPE_DEATHSAVE                 30      // MiscValueB 1 is a partial heal, 2 a full one
 #define EQ_SPELLDUMMYTYPE_SHADOWSTEP                31
+#define EQ_SPELLDUMMYTYPE_RECLAIMPET                32
+#define EQ_RECLAIM_PET_MAX_MANA_RETURN_PERCENT      75
 #define EQ_SHADOW_STEP_DISTANCE_IN_YARDS            10.0f
 #define EQ_DEATH_SAVE_CHANCE_PERCENT                48      // TAKP's formula at 150 Charisma, which WoW has no stat for
 #define EQ_DEATH_SAVE_PARTIAL_HEAL_PERCENT          15      // Death Pact's 300 of a level 60's health in EQ
@@ -520,6 +526,7 @@ enum EverQuestLossOfControlCategory
 #define EQ_TRACKING_SCAN_MIN_INTERVAL_MS            2000    // Minimum time between track scans for one player (guards against command spam)
 
 #define EQ_PLAYER_CUSTOMDATA_CLASSAURA              "EQClassAura"
+#define EQ_PLAYER_CUSTOMDATA_STARTOPTION            "EQStartOption"
 #define EQ_PLAYER_CUSTOMDATA_QUESTFACTION           "EQQuestFaction"
 #define EQ_PLAYER_CUSTOMDATA_MOVEWHILECASTING       "EQMoveWhileCasting"
 #define EQ_PLAYER_CUSTOMDATA_ITEMENCHANTMEMORY      "EQItemEnchantMemory"
@@ -589,6 +596,9 @@ public:
     uint32 CasterVisualKitID = 0; // SpellVisualKit played on a creature caster when the spell goes off (instant dragon breaths, whose own visual leaves it out)
     bool CreatureLossOfControlGrantsImmunity = false; // When a creature lands this spell's stun, fear, charm or mesmerize on a player, the player gets a short immunity to it
     uint8 EQResistType = 0; // EQ resist type (1 Magic, 2 Fire, 3 Cold, 4 Poison, 5 Disease) whose resist the target rolls against, 0 = no EQ resist roll
+    uint32 LearnLevel = 0; // The level a player learns it at, which BaseLevel doesn't hold for a spell whose growth is anchored at level 60
+    uint32 EQSpellID = 0;
+    uint32 FocusTraits = 0; // What item focus limits ask about the EQ spell, set by the converter's SpellFocusTraits
     bool IsEQPartialResistCapable = false; // TAKP IsPartialCapableSpell, so only a deep resist roll fully resists it
 };
 
@@ -1063,6 +1073,9 @@ public:
     uint32 MinDurationInMS = 0;
     uint32 InstantType = 0;
     uint32 MinCastTimeInMS = 0;
+    uint32 RequiredTraits = 0;      // Every one of these has to be in the spell's FocusTraits
+    uint32 ExcludedTraits = 0;      // None of these can be
+    uint32 RequiredEQSpellID = 0;   // A focus for one spell
 };
 
 class EverQuestItemTemplate
@@ -1274,6 +1287,12 @@ struct EverQuestNaturesBalanceRainPayout
     uint32 Percent = 0;
     uint64 CastAtMS = 0;
     uint32 PayoutWindowInMS = 0;
+};
+
+class EverQuestPlayerStartOptionState : public DataMap::Base
+{
+public:
+    uint8 StartOption = 0;
 };
 
 class EverQuestPlayerClassAuraState : public DataMap::Base
@@ -1950,6 +1969,7 @@ public:
     uint32 ConfigSystemShipEntryTemplateIDMin;
     uint32 ConfigSystemShipEntryTemplateIDMax;
     uint32 ConfigSystemInvisVsUndeadDetectSpellID;
+    uint32 ConfigSystemInvisVsAnimalsDetectSpellID;
     uint32 ConfigSystemRangedAttackSpellID;
     uint32 ConfigSystemResistAdjustmentSpellID;
     uint32 ConfigSystemBlindWanderSpellID;
@@ -2620,6 +2640,7 @@ public:
     Pet* GetClassAuraMagicianDetonatePet(Player* player);
     void DoClassAuraMagicianDetonateSummoned(Player* player);
     void ApplyClassAuraCastAdjustmentsOnCheckCast(Player* player, Spell* spell, bool strict);
+    void ApplyCastSpeedHelperToPlayer(Player* player, uint32 helperSpellID, float castTimeMultiplier);
     void FinishClassAuraCastAdjustmentsOnPrepare(Player* player, Spell* spell);
     void HandleClassAuraSpellCastCancel(Player* player, Spell* spell);
     void ClearClassAuraCastAdjustmentsForPlayer(Player* player);
@@ -2835,6 +2856,7 @@ public:
     bool IsDestroySpellBlockedByLevel(SpellInfo const* spellInfo, Unit* target);
     void SendPlayerToBindPoint(Player* player);
     void ShadowStepPlayer(Player* player);
+    void ReclaimPetForPlayer(Player* player);
     void UpdateEQMountRulesForPlayer(Player* player);
     void LoadTrapData();
     void UpdateTrapsForPlayer(Player* player, uint32 diffInMS);

@@ -95,6 +95,7 @@ EverQuestMod::EverQuestMod() :
     ConfigSystemCreatureTemplateIDMax(0),
     ConfigDeathKnightsStartLikeOtherClasses(false),
     ConfigSystemInvisVsUndeadDetectSpellID(0),
+    ConfigSystemInvisVsAnimalsDetectSpellID(0),
     ConfigSystemResistAdjustmentSpellID(0),
     ConfigSystemBlindWanderSpellID(0),
     ConfigSystemRoguePoisonMarkerSpellID(0),
@@ -255,6 +256,8 @@ bool EverQuestMod::LoadConfigurationSystemDataFromDB()
                 ConfigSystemFactionEvilRaceMask = (uint32)atoi(value.c_str());
             else if (key == "InvisVsUndeadDetectSpellID")
                 ConfigSystemInvisVsUndeadDetectSpellID = (uint32)atoi(value.c_str());
+            else if (key == "InvisVsAnimalsDetectSpellID")
+                ConfigSystemInvisVsAnimalsDetectSpellID = (uint32)atoi(value.c_str());
             else if (key == "ItemTemplateIDMin")
                 ConfigSystemItemTemplateIDMin = (uint32)atoi(value.c_str());
             else if (key == "ItemTemplateIDMax")
@@ -3327,7 +3330,7 @@ void EverQuestMod::LoadItemTemplateData()
 void EverQuestMod::LoadItemFocusDataFromDB()
 {
     ItemFocusByItemTemplateID.clear();
-    QueryResult queryResult = WorldDatabase.Query("SELECT ItemTemplateID, FocusType, Percent, MaxSpellLevel, SpellType, ResistType, MinDurationInMS, InstantType, MinCastTimeInMS FROM mod_everquest_item_focus");
+    QueryResult queryResult = WorldDatabase.Query("SELECT ItemTemplateID, FocusType, Percent, MaxSpellLevel, SpellType, ResistType, MinDurationInMS, InstantType, MinCastTimeInMS, RequiredTraits, ExcludedTraits, RequiredEQSpellID FROM mod_everquest_item_focus");
     if (queryResult == nullptr)
         return;
     do
@@ -3342,6 +3345,9 @@ void EverQuestMod::LoadItemFocusDataFromDB()
         itemFocus.MinDurationInMS = fields[6].Get<uint32>();
         itemFocus.InstantType = fields[7].Get<uint32>();
         itemFocus.MinCastTimeInMS = fields[8].Get<uint32>();
+        itemFocus.RequiredTraits = fields[9].Get<uint32>();
+        itemFocus.ExcludedTraits = fields[10].Get<uint32>();
+        itemFocus.RequiredEQSpellID = fields[11].Get<uint32>();
         ItemFocusByItemTemplateID[fields[0].Get<uint32>()] = itemFocus;
     } while (queryResult->NextRow());
 }
@@ -3360,15 +3366,22 @@ static SpellSchoolMask GetSchoolMaskForEQResistType(uint32 resistType)
     }
 }
 
-static bool DoesItemFocusCoverSpell(EverQuestItemFocus const& itemFocus, SpellInfo const* spellInfo)
+static bool DoesItemFocusCoverSpell(EverQuestItemFocus const& itemFocus, SpellInfo const* spellInfo, EverQuestSpell const& spellData)
 {
-    if (std::max(spellInfo->SpellLevel, spellInfo->BaseLevel) > itemFocus.MaxSpellLevel)
+    uint32 spellLevel = spellData.LearnLevel != 0 ? spellData.LearnLevel : std::max(spellInfo->SpellLevel, spellInfo->BaseLevel);
+    if (spellLevel > itemFocus.MaxSpellLevel)
+        return false;
+    if ((spellData.FocusTraits & itemFocus.RequiredTraits) != itemFocus.RequiredTraits || (spellData.FocusTraits & itemFocus.ExcludedTraits) != 0)
+        return false;
+    if (itemFocus.RequiredEQSpellID != 0 && spellData.EQSpellID != itemFocus.RequiredEQSpellID)
         return false;
     if ((itemFocus.SpellType == 1 && spellInfo->IsPositive() == true) || (itemFocus.SpellType == 2 && spellInfo->IsPositive() == false))
         return false;
     if (itemFocus.ResistType != 0 && (spellInfo->GetSchoolMask() & GetSchoolMaskForEQResistType(itemFocus.ResistType)) == 0)
         return false;
-    int32 maxDuration = spellInfo->GetMaxDuration();
+
+    // A timed EQ spell holds an infinite placeholder in its SpellInfo, and its real duration in the EQ data
+    int32 maxDuration = spellData.AuraDurationMaxInMS != 0 ? int32(spellData.AuraDurationMaxInMS) : spellInfo->GetMaxDuration();
     if (itemFocus.MinDurationInMS != 0 && (maxDuration >= 0 && uint32(maxDuration) < itemFocus.MinDurationInMS))
         return false;
     if ((itemFocus.InstantType == 1 && maxDuration != 0) || (itemFocus.InstantType == 2 && maxDuration == 0))
@@ -3382,6 +3395,7 @@ uint32 EverQuestMod::GetItemFocusPercentForPlayer(Player* player, uint32 focusTy
 {
     if (ItemFocusByItemTemplateID.empty() == true || player == nullptr || spellInfo == nullptr || IsSpellAnEQSpell(spellInfo->Id) == false)
         return 0;
+    const EverQuestSpell& spellData = GetSpellDataForSpellID(spellInfo->Id);
     uint32 bestPercent = 0;
     for (uint8 equipSlot = EQUIPMENT_SLOT_START; equipSlot < EQUIPMENT_SLOT_END; ++equipSlot)
     {
@@ -3391,7 +3405,7 @@ uint32 EverQuestMod::GetItemFocusPercentForPlayer(Player* player, uint32 focusTy
         auto focusIter = ItemFocusByItemTemplateID.find(item->GetEntry());
         if (focusIter == ItemFocusByItemTemplateID.end() || focusIter->second.FocusType != focusType || focusIter->second.Percent <= bestPercent)
             continue;
-        if (DoesItemFocusCoverSpell(focusIter->second, spellInfo) == true)
+        if (DoesItemFocusCoverSpell(focusIter->second, spellInfo, spellData) == true)
             bestPercent = focusIter->second.Percent;
     }
     return bestPercent;
@@ -3543,9 +3557,33 @@ void EverQuestMod::ShadowStepPlayer(Player* player)
         player->NearTeleportTo(x, y, z, player->GetOrientation());
 }
 
+void EverQuestMod::ReclaimPetForPlayer(Player* player)
+{
+    Pet* pet = player->GetPet();
+    if (pet == nullptr || pet->IsAlive() == false || pet->getPetType() != SUMMON_PET)
+        return;
+
+    // TAKP: the summon's mana cost, scaled by the pet's health and never more than 75%
+    SpellInfo const* summonSpellInfo = sSpellMgr->GetSpellInfo(pet->GetUInt32Value(UNIT_CREATED_BY_SPELL));
+    if (summonSpellInfo != nullptr)
+    {
+        uint32 returnPercent = std::min<uint32>(uint32(pet->GetHealthPct()), EQ_RECLAIM_PET_MAX_MANA_RETURN_PERCENT);
+        player->ModifyPower(POWER_MANA, summonSpellInfo->CalcPowerCost(player, summonSpellInfo->GetSchoolMask()) * int32(returnPercent) / 100);
+    }
+    player->RemovePet(pet, PET_SAVE_AS_DELETED);
+}
+
 void EverQuestMod::SendPlayerToBindPoint(Player* player)
 {
-    player->TeleportTo(player->m_homebindMapId, player->m_homebindX, player->m_homebindY, player->m_homebindZ, player->GetOrientation());
+    // EQ binds are held apart from the core's, which is only the start town or an inn
+    uint32 mapID = 0;
+    float x = 0;
+    float y = 0;
+    float z = 0;
+    if (TryGetEQBindHomePosition(player, mapID, x, y, z) == true)
+        player->TeleportTo(mapID, x, y, z, player->GetOrientation());
+    else
+        player->TeleportTo(player->m_homebindMapId, player->m_homebindX, player->m_homebindY, player->m_homebindZ, player->GetOrientation());
 }
 
 void EverQuestMod::LoadDisciplineData()
@@ -3594,6 +3632,21 @@ bool EverQuestMod::HandleDisciplineOnCheckCast(Player* player, Spell* spell, Spe
     return false;
 }
 
+// The classes the core leaves no parry chance, whatever their auras say
+static bool CanPlayerParry(Player* player)
+{
+    switch (player->getClass())
+    {
+        case CLASS_PRIEST:
+        case CLASS_MAGE:
+        case CLASS_WARLOCK:
+        case CLASS_DRUID:
+            return false;
+        default:
+            return player->CanParry();
+    }
+}
+
 void EverQuestMod::HandleDisciplineCast(Player* player, SpellInfo const* spellInfo)
 {
     auto disciplineIter = DisciplinesBySpellID.find(spellInfo->Id);
@@ -3608,8 +3661,17 @@ void EverQuestMod::HandleDisciplineCast(Player* player, SpellInfo const* spellIn
             player->RemoveAurasDueToSpell(disciplineEntry.first);
     }
 
-    if (spellInfo->Id == EQ_DISCIPLINE_UNHOLY_AURA_SPELL_ID)
-        player->RemoveSpellCooldown(EQ_DISCIPLINE_HARM_TOUCH_SPELL_ID, true);
+    // A character who can't parry gets the same cover as a dodge from the front, from a second class's discipline
+    if (spellInfo->HasAura(SPELL_AURA_MOD_PARRY_PERCENT) == true && CanPlayerParry(player) == false)
+    {
+        Aura* dodgeAura = player->AddAura(EQ_DISCIPLINE_NIMBLE_SPELL_ID, player);
+        if (dodgeAura != nullptr)
+        {
+            int32 durationInMS = int32(GetSpellDataForSpellID(spellInfo->Id).AuraDurationMaxInMS);
+            dodgeAura->SetMaxDuration(durationInMS);
+            dodgeAura->SetDuration(durationInMS);
+        }
+    }
 
     // Reuse shortens by 54 seconds for every level past the one the discipline comes at.  It's the lowest of the player's two classes
     const EverQuestClassMap classMap = GetClassMapForWOWClassID(player->getClass());
@@ -3629,6 +3691,18 @@ void EverQuestMod::HandleDisciplineCast(Player* player, SpellInfo const* spellIn
     reduction = std::min(reduction, int32(discipline.ReuseInSeconds) - EQ_DISCIPLINE_MIN_REUSE_SECONDS);
     if (reduction > 0)
         player->ModifySpellCooldown(spellInfo->Id, -reduction * int32(IN_MILLISECONDS));
+
+    // EQ of this era has one reuse timer for every discipline
+    uint32 reuseInMS = uint32(int32(discipline.ReuseInSeconds) - std::max(reduction, 0)) * IN_MILLISECONDS;
+    for (auto const& disciplineEntry : DisciplinesBySpellID)
+    {
+        if (disciplineEntry.first == spellInfo->Id || player->HasSpell(disciplineEntry.first) == false)
+            continue;
+        player->AddSpellCooldown(disciplineEntry.first, 0, reuseInMS);
+        WorldPacket cooldownPacket;
+        player->BuildCooldownPacket(cooldownPacket, SPELL_COOLDOWN_FLAG_NONE, disciplineEntry.first, reuseInMS);
+        player->SendDirectMessage(&cooldownPacket);
+    }
 }
 
 void EverQuestMod::RemoveActiveDisciplines(Player* player)
@@ -5254,7 +5328,7 @@ void EverQuestMod::LoadSpellData()
 {
     SpellDataBySpellID.clear();
     BardSongTickSpellIDs.clear();
-    QueryResult queryResult = WorldDatabase.Query("SELECT SpellID, AuraDurationBaseInMS, AuraDurationAddPerLevelInMS, AuraDurationMaxInMS, AuraDurationCalcMinLevel, AuraDurationCalcMaxLevel, RecourseSpellID, SpellIDCastOnMeleeAttacker, FocusBoostType, PeriodicAuraSpellID, PeriodicAuraSpellRadius, MaleFormSpellID, FemaleFormSpellID, EffectFailChancePercent, EffectFailableType, StunUsesBashKickChance, SpellIDCastOnTargetWhenStunLands, AuraStaysOnSecondaryClassSwitch, MinTargetLevel, MaxCreatureTargetLevel, ResistDiff, HasteType, ModFactionRepValue, IllusionFormAlignment, IllusionFormEQRaceID, PersistOnClassChange, IllusionObjectClass, ManaGainSpellPowerCoefficient, DamageIsFixed, IntensifyingRampStartMultiplier1, IntensifyingRampStartMultiplier2, IntensifyingRampStartMultiplier3, IntensifyingRampStartMultiplier4, IntensifyingRampStartMultiplier5, IntensifyingRampStartMultiplier6, IntensifyingRampStartMultiplier7, IntensifyingRampStartMultiplier8, IntensifyingRampStartMultiplier9, IntensifyingRampStartMultiplier10, IntensifyingRampStartMultiplier11, IntensifyingRampStartMultiplier12, CasterVisualKitID, CreatureLossOfControlGrantsImmunity, EQResistType, IsEQPartialResistCapable FROM mod_everquest_spell ORDER BY SpellID;");
+    QueryResult queryResult = WorldDatabase.Query("SELECT SpellID, AuraDurationBaseInMS, AuraDurationAddPerLevelInMS, AuraDurationMaxInMS, AuraDurationCalcMinLevel, AuraDurationCalcMaxLevel, RecourseSpellID, SpellIDCastOnMeleeAttacker, FocusBoostType, PeriodicAuraSpellID, PeriodicAuraSpellRadius, MaleFormSpellID, FemaleFormSpellID, EffectFailChancePercent, EffectFailableType, StunUsesBashKickChance, SpellIDCastOnTargetWhenStunLands, AuraStaysOnSecondaryClassSwitch, MinTargetLevel, MaxCreatureTargetLevel, ResistDiff, HasteType, ModFactionRepValue, IllusionFormAlignment, IllusionFormEQRaceID, PersistOnClassChange, IllusionObjectClass, ManaGainSpellPowerCoefficient, DamageIsFixed, IntensifyingRampStartMultiplier1, IntensifyingRampStartMultiplier2, IntensifyingRampStartMultiplier3, IntensifyingRampStartMultiplier4, IntensifyingRampStartMultiplier5, IntensifyingRampStartMultiplier6, IntensifyingRampStartMultiplier7, IntensifyingRampStartMultiplier8, IntensifyingRampStartMultiplier9, IntensifyingRampStartMultiplier10, IntensifyingRampStartMultiplier11, IntensifyingRampStartMultiplier12, CasterVisualKitID, CreatureLossOfControlGrantsImmunity, EQResistType, IsEQPartialResistCapable, LearnLevel, EQSpellID, FocusTraits FROM mod_everquest_spell ORDER BY SpellID;");
     if (queryResult)
     {
         do
@@ -5297,6 +5371,9 @@ void EverQuestMod::LoadSpellData()
             everQuestSpell.CreatureLossOfControlGrantsImmunity = fields[30 + MAX_SPELL_EFFECTS].Get<uint8>() != 0;
             everQuestSpell.EQResistType = fields[31 + MAX_SPELL_EFFECTS].Get<uint8>();
             everQuestSpell.IsEQPartialResistCapable = fields[32 + MAX_SPELL_EFFECTS].Get<uint8>() != 0;
+            everQuestSpell.LearnLevel = fields[33 + MAX_SPELL_EFFECTS].Get<uint32>();
+            everQuestSpell.EQSpellID = fields[34 + MAX_SPELL_EFFECTS].Get<uint32>();
+            everQuestSpell.FocusTraits = fields[35 + MAX_SPELL_EFFECTS].Get<uint32>();
             SpellDataBySpellID[everQuestSpell.SpellID] = everQuestSpell;
             if (everQuestSpell.PeriodicAuraSpellID != 0)
                 BardSongTickSpellIDs.insert(everQuestSpell.PeriodicAuraSpellID);
@@ -11477,10 +11554,18 @@ uint8 EverQuestMod::GetPlayerStartOption(Player* player)
 {
     if (PlayerCreateInfoStartOptionsByKey.empty() == true)
         return 0;
+
+    // It can't change once the character is in the world, and this can run on a map thread every time a warder comes out
+    EverQuestPlayerStartOptionState* state = player->CustomData.Get<EverQuestPlayerStartOptionState>(EQ_PLAYER_CUSTOMDATA_STARTOPTION);
+    if (state != nullptr)
+        return state->StartOption;
     QueryResult queryResult = CharacterDatabase.Query("SELECT startOption FROM mod_everquest_character_settings WHERE guid = {}", player->GetGUID().GetCounter());
     if (!queryResult)
         return 0;
-    return queryResult->Fetch()[0].Get<uint8>();
+    uint8 startOption = queryResult->Fetch()[0].Get<uint8>();
+    if (player->IsInWorld() == true)
+        player->CustomData.GetDefault<EverQuestPlayerStartOptionState>(EQ_PLAYER_CUSTOMDATA_STARTOPTION)->StartOption = startOption;
+    return startOption;
 }
 
 // The town picked when the character was created, or the normal one
@@ -17159,6 +17244,21 @@ uint32 EverQuestMod::CalculateSpellFocusBoostValue(Unit* caster, uint32 spellID)
             if (focusMatchesSong && static_cast<uint32>(auraInfo->Effects[effIndex].MiscValueB) > boostValue)
                 boostValue = auraInfo->Effects[effIndex].MiscValueB;
         }
+    }
+
+    // Puretone adds to whatever is being played, or to no instrument at all
+    switch (curSpell.FocusBoostType)
+    {
+        case EQ_SPELLFOCUSBOOSTTYPE_BARDBRASS:
+        case EQ_SPELLFOCUSBOOSTTYPE_BARDSTRINGED:
+        case EQ_SPELLFOCUSBOOSTTYPE_BARDWIND:
+        case EQ_SPELLFOCUSBOOSTTYPE_BARDPERCUSSION:
+        case EQ_SPELLFOCUSBOOSTTYPE_BARDSINGING:
+            if (caster->HasAura(EQ_DISCIPLINE_PURETONE_SPELL_ID) == true)
+                boostValue = std::min<uint32>(boostValue + EQ_DISCIPLINE_PURETONE_BOOST_PERCENT, EQ_INSTRUMENT_MAX_BOOST_PERCENT);
+            break;
+        default:
+            break;
     }
     return boostValue;
 }

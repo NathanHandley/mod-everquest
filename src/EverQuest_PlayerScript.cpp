@@ -898,6 +898,10 @@ public:
             {
                 EverQuest->TurnPlayerToFaceNorth(player);
             }
+            else if (spell->m_spellInfo->Effects[EFFECT_0].MiscValue == EQ_SPELLDUMMYTYPE_RECLAIMPET) // Reclaim Energy
+            {
+                EverQuest->ReclaimPetForPlayer(player);
+            }
         }
     }
 
@@ -1039,6 +1043,8 @@ public:
         // Give players the ability to see invis vs undead
         if (EverQuest->ConfigSystemInvisVsUndeadDetectSpellID != 0 && player->HasAura(EverQuest->ConfigSystemInvisVsUndeadDetectSpellID) == false)
             player->CastSpell(player, EverQuest->ConfigSystemInvisVsUndeadDetectSpellID, true);
+        if (EverQuest->ConfigSystemInvisVsAnimalsDetectSpellID != 0 && player->HasAura(EverQuest->ConfigSystemInvisVsAnimalsDetectSpellID) == false)
+            player->CastSpell(player, EverQuest->ConfigSystemInvisVsAnimalsDetectSpellID, true);
 
         // Catch any level that was reached without Player::GiveLevel, which is the only thing that updates the criteria behind the "Level 10" through "Level 60" achievements
         player->UpdateAchievementCriteria(ACHIEVEMENT_CRITERIA_TYPE_REACH_LEVEL);

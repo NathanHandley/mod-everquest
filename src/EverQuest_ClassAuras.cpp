@@ -1824,7 +1824,16 @@ void EverQuestMod::ApplyClassAuraCastAdjustmentsOnCheckCast(Player* player, Spel
     if (helperSpellID != 0 && player->HasAura(helperSpellID) == true)
         player->RemoveAurasDueToSpell(helperSpellID);
     if (IsClassAuraSystemEnabled() == false)
+    {
+        // A worn focus isn't a class aura
+        if (IsSpellAnEQBardSong(spellInfo->Id) == false && spellInfo->CalcCastTime() > 0)
+        {
+            uint32 focusPercent = GetItemFocusPercentForPlayer(player, EQ_ITEM_FOCUS_TYPE_CAST_TIME, spellInfo);
+            if (focusPercent > 0)
+                ApplyCastSpeedHelperToPlayer(player, helperSpellID, (100.0f - (float)focusPercent) / 100.0f);
+        }
         return;
+    }
     EverQuestPlayerClassAuraState* state = GetClassAuraStateForPlayer(player);
     state->PendingCastAdjustSpellID = 0;
     state->PendingCadenceConsume = false;
@@ -1920,7 +1929,11 @@ void EverQuestMod::ApplyClassAuraCastAdjustmentsOnCheckCast(Player* player, Spel
         player->SetInstantCast(true);
     else if (castTimeReductionPercent > 0)
         castTimeMultiplier *= (100.0f - (float)castTimeReductionPercent) / 100.0f;
+    ApplyCastSpeedHelperToPlayer(player, helperSpellID, castTimeMultiplier);
+}
 
+void EverQuestMod::ApplyCastSpeedHelperToPlayer(Player* player, uint32 helperSpellID, float castTimeMultiplier)
+{
     if (helperSpellID == 0)
         return;
     if (castTimeMultiplier <= 0.0f || std::fabs(castTimeMultiplier - 1.0f) < 0.001f)
