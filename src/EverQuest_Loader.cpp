@@ -16,7 +16,18 @@
 
 #include "EQAreaTriggerHooks.h"
 #include "EQMovementHooks.h"
+#include "EverQuest.h"
 #include "EverQuest_MovementGenerator.h"
+#include "Spell.h"
+
+// A worn focus lowers what the wearer's spells cost
+static int32 ModifyEverQuestSpellPowerCost(Spell const* spell, int32 powerCost)
+{
+    if (powerCost <= 0 || EverQuest->IsEnabled == false || spell->GetCaster() == nullptr || spell->GetCaster()->IsPlayer() == false)
+        return powerCost;
+    uint32 focusPercent = EverQuest->GetItemFocusPercentForPlayer(spell->GetCaster()->ToPlayer(), EQ_ITEM_FOCUS_TYPE_MANA_COST, spell->GetSpellInfo());
+    return powerCost - int32(float(powerCost) * float(focusPercent) / 100.0f);
+}
 
 void AddEverQuestPlayerScripts();
 void AddEverQuestWorldScripts();
@@ -95,6 +106,7 @@ void Addmod_everquestScripts()
 
     // EverQuest grids and roam boxes are the idle movement of spawns on EverQuest maps (the core asks through this hook)
     EverQuestMovementHooks::IdleMovementSelector = &SelectEverQuestIdleMovementGenerator;
+    EverQuestMovementHooks::SpellPowerCostModifier = &ModifyEverQuestSpellPowerCost;
 
     // Game masters skip area trigger scripts, so the core hands their EverQuest zone lines over through this
     EverQuestAreaTriggerHooks::GameMasterZoneLineHandler = &HandleEverQuestZoneLineAreaTriggerForGameMaster;

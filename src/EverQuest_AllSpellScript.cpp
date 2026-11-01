@@ -357,6 +357,14 @@ public:
 
         CalculateEQSpellMaxDuration(aura, maxDuration);
 
+        // A worn focus lengthens the caster's spells
+        if (maxDuration > 0 && aura->GetCaster() != nullptr && aura->GetCaster()->IsPlayer() == true)
+        {
+            uint32 focusPercent = EverQuest->GetItemFocusPercentForPlayer(aura->GetCaster()->ToPlayer(), EQ_ITEM_FOCUS_TYPE_DURATION, aura->GetSpellInfo());
+            if (focusPercent != 0)
+                maxDuration += int32(float(maxDuration) * float(focusPercent) / 100.0f);
+        }
+
         // Crowd control between players is capped
         EverQuest->ApplyPvPCrowdControlRulesToAuraMaxDuration(aura, maxDuration);
     }

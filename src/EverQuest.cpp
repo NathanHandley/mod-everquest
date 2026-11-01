@@ -3323,6 +3323,88 @@ void EverQuestMod::LoadItemTemplateData()
     }
 }
 
+void EverQuestMod::LoadItemFocusDataFromDB()
+{
+    ItemFocusByItemTemplateID.clear();
+    QueryResult queryResult = WorldDatabase.Query("SELECT ItemTemplateID, FocusType, Percent, MaxSpellLevel, SpellType, ResistType, MinDurationInMS, InstantType, MinCastTimeInMS FROM mod_everquest_item_focus");
+    if (queryResult == nullptr)
+        return;
+    do
+    {
+        Field* fields = queryResult->Fetch();
+        EverQuestItemFocus itemFocus;
+        itemFocus.FocusType = fields[1].Get<uint32>();
+        itemFocus.Percent = fields[2].Get<uint32>();
+        itemFocus.MaxSpellLevel = fields[3].Get<uint32>();
+        itemFocus.SpellType = fields[4].Get<uint32>();
+        itemFocus.ResistType = fields[5].Get<uint32>();
+        itemFocus.MinDurationInMS = fields[6].Get<uint32>();
+        itemFocus.InstantType = fields[7].Get<uint32>();
+        itemFocus.MinCastTimeInMS = fields[8].Get<uint32>();
+        ItemFocusByItemTemplateID[fields[0].Get<uint32>()] = itemFocus;
+    } while (queryResult->NextRow());
+}
+
+// EQ's resist types, 1 through 5, as the schools the converter gives them
+static SpellSchoolMask GetSchoolMaskForEQResistType(uint32 resistType)
+{
+    switch (resistType)
+    {
+        case 1: return SPELL_SCHOOL_MASK_ARCANE;
+        case 2: return SPELL_SCHOOL_MASK_FIRE;
+        case 3: return SPELL_SCHOOL_MASK_FROST;
+        case 4: return SPELL_SCHOOL_MASK_NATURE;
+        case 5: return SPELL_SCHOOL_MASK_SHADOW;
+        default: return SPELL_SCHOOL_MASK_NONE;
+    }
+}
+
+static bool DoesItemFocusCoverSpell(EverQuestItemFocus const& itemFocus, SpellInfo const* spellInfo)
+{
+    if (std::max(spellInfo->SpellLevel, spellInfo->BaseLevel) > itemFocus.MaxSpellLevel)
+        return false;
+    if ((itemFocus.SpellType == 1 && spellInfo->IsPositive() == true) || (itemFocus.SpellType == 2 && spellInfo->IsPositive() == false))
+        return false;
+    if (itemFocus.ResistType != 0 && (spellInfo->GetSchoolMask() & GetSchoolMaskForEQResistType(itemFocus.ResistType)) == 0)
+        return false;
+    int32 maxDuration = spellInfo->GetMaxDuration();
+    if (itemFocus.MinDurationInMS != 0 && (maxDuration >= 0 && uint32(maxDuration) < itemFocus.MinDurationInMS))
+        return false;
+    if ((itemFocus.InstantType == 1 && maxDuration != 0) || (itemFocus.InstantType == 2 && maxDuration == 0))
+        return false;
+    if (itemFocus.MinCastTimeInMS != 0 && spellInfo->CalcCastTime() < itemFocus.MinCastTimeInMS)
+        return false;
+    return true;
+}
+
+uint32 EverQuestMod::GetItemFocusPercentForPlayer(Player* player, uint32 focusType, SpellInfo const* spellInfo)
+{
+    if (ItemFocusByItemTemplateID.empty() == true || player == nullptr || spellInfo == nullptr || IsSpellAnEQSpell(spellInfo->Id) == false)
+        return 0;
+    uint32 bestPercent = 0;
+    for (uint8 equipSlot = EQUIPMENT_SLOT_START; equipSlot < EQUIPMENT_SLOT_END; ++equipSlot)
+    {
+        Item* item = player->GetItemByPos(INVENTORY_SLOT_BAG_0, equipSlot);
+        if (item == nullptr)
+            continue;
+        auto focusIter = ItemFocusByItemTemplateID.find(item->GetEntry());
+        if (focusIter == ItemFocusByItemTemplateID.end() || focusIter->second.FocusType != focusType || focusIter->second.Percent <= bestPercent)
+            continue;
+        if (DoesItemFocusCoverSpell(focusIter->second, spellInfo) == true)
+            bestPercent = focusIter->second.Percent;
+    }
+    return bestPercent;
+}
+
+void EverQuestMod::ApplyItemFocusToSpellAmount(Unit* caster, uint32 focusType, SpellInfo const* spellInfo, int32& amount)
+{
+    if (caster == nullptr || caster->IsPlayer() == false || amount <= 0)
+        return;
+    uint32 percent = GetItemFocusPercentForPlayer(caster->ToPlayer(), focusType, spellInfo);
+    if (percent != 0)
+        amount += int32(std::ceil(float(amount) * float(percent) / 100.0f));
+}
+
 bool EverQuestMod::IsWornEffectSpell(uint32 spellID)
 {
     return WornEffectSpellIDs.find(spellID) != WornEffectSpellIDs.end();
@@ -8927,7 +9009,19 @@ bool EverQuestMod::HandleGossipSelect(Player* player, Creature* creature, uint32
         case EQ_QUEST_REACTION_CASTSPELL:
         {
             if (gossipReaction.SpellID != 0 && player->IsAlive() == true)
-                CastScriptedSpellAtUnit(creature, player, gossipReaction.SpellID);
+            {
+                // Binding is done on the player's own cast, so a Soulbinder's bind happens here instead
+                SpellInfo const* gossipSpellInfo = sSpellMgr->GetSpellInfo(gossipReaction.SpellID);
+                if (gossipSpellInfo != nullptr && gossipSpellInfo->Effects[EFFECT_0].MiscValue == EQ_SPELLDUMMYTYPE_BINDANY && gossipSpellInfo->Effects[EFFECT_0].Effect == SPELL_EFFECT_DUMMY)
+                {
+                    if (IsBindAllowedForMap(player->GetMapId()) == true)
+                        SetNewBindHome(player);
+                    else
+                        ChatHandler(player->GetSession()).PSendSysMessage("Binding to this area is not allowed.");
+                }
+                else
+                    CastScriptedSpellAtUnit(creature, player, gossipReaction.SpellID);
+            }
         } break;
         case EQ_QUEST_REACTION_GIVEITEM:
         {

@@ -58,6 +58,7 @@ public:
         EverQuest->LoadCreatureMovementSoundData();
         EverQuest->LoadCreatureOnkillReputations();
         EverQuest->LoadItemTemplateData();
+        EverQuest->LoadItemFocusDataFromDB();
         EverQuest->LoadItemWoWToEQSwapData();
         EverQuest->LoadSpellData();
         EverQuest->LoadSpellMovementCastSnareData();

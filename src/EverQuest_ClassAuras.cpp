@@ -1850,6 +1850,10 @@ void EverQuestMod::ApplyClassAuraCastAdjustmentsOnCheckCast(Player* player, Spel
     uint32 castTimeReductionPercent = 0;
     bool isBardSong = IsSpellAnEQBardSong(spellInfo->Id);
 
+    // A worn focus shortens the cast
+    if (isBardSong == false && baseCastTimeInMS > 0)
+        castTimeReductionPercent += GetItemFocusPercentForPlayer(player, EQ_ITEM_FOCUS_TYPE_CAST_TIME, spellInfo);
+
     // Bard, a song's cast time never changes
     if (isBardSong == true && baseCastTimeInMS > 0)
     {

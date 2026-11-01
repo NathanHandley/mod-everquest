@@ -464,6 +464,14 @@ public:
 
         uint32 spellID = spellInfo->Id;
 
+        // A worn focus adds to the caster's periodic damage.  The same hook carries periodic heals
+        if (EverQuestSpellTalentAlignment::DoesSpellInfoDealPeriodicDamage(spellInfo) == true && EverQuest->IsSpellDamageFixed(spellID) == false)
+        {
+            int32 focusedDamage = int32(damage);
+            EverQuest->ApplyItemFocusToSpellAmount(attacker, EQ_ITEM_FOCUS_TYPE_DAMAGE, spellInfo, focusedDamage);
+            damage = uint32(focusedDamage);
+        }
+
         // Per creature hand tuned spell damage (bosses mostly).  This hook also carries periodic heal ticks, which must not scale, so the spell has to be a periodic damage one landing on a non-friendly target
         if (target != nullptr && EverQuestSpellTalentAlignment::DoesSpellInfoDealPeriodicDamage(spellInfo) == true && attacker->IsFriendlyTo(target) == false)
         {
@@ -549,6 +557,11 @@ public:
         if (EverQuest->IsEnabled == false)
             return;
         ApplyTalentHealingMods(target, healer, heal, spellInfo);
+
+        // A worn focus adds to the healer's own spells
+        int32 focusedHeal = int32(heal);
+        EverQuest->ApplyItemFocusToSpellAmount(healer, EQ_ITEM_FOCUS_TYPE_HEALING, spellInfo, focusedHeal);
+        heal = uint32(focusedHeal);
 
         // A buff that raises maximum health never heals for more than it raised it, so this comes after everything that grows the heal.  The core hands over the
         // unit doing the healing as 'target'
@@ -687,6 +700,9 @@ public:
         // A life-for-mana spell takes exactly what its tooltip says off its caster, so none of the adds below may touch it
         if (EverQuest->IsSpellDamageFixed(spellInfo->Id) == true)
             return;
+
+        // A worn focus adds to the caster's own spells
+        EverQuest->ApplyItemFocusToSpellAmount(attacker, EQ_ITEM_FOCUS_TYPE_DAMAGE, spellInfo, damage);
 
         // Class auras: the Ranger's Compound Injury mark, the Paladin's double damage against undead and demons, the Necromancer's marks and the Druid's impaired target bonus (any spell, EQ or WoW)
         EverQuest->ApplyClassAuraDirectSpellDamageMods(target, attacker, damage, spellInfo);
