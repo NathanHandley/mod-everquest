@@ -95,6 +95,9 @@ public:
 
         // Class auras: a shadow knight stores a share of the damage they take for Blood Debt
         EverQuest->HandleClassAuraShadowKnightBloodDebtOnDamage(attacker, victim, damage);
+
+        // Divine Intervention and Death Pact
+        EverQuest->HandleDeathSaveOnDamage(victim, damage);
     }
 
     void OnUnitUpdate(Unit* unit, uint32 /*diff*/) override
@@ -413,6 +416,13 @@ public:
                 return;
             if (aurApp->GetBase()->GetEffect(0)->GetAuraType() != SPELL_AURA_DUMMY && aurApp->GetBase()->GetEffect(0)->GetAuraType() != SPELL_AURA_PERIODIC_DUMMY)
                 return;
+
+            // A translocate waits for its aura to run out
+            if (mode == AURA_REMOVE_BY_EXPIRE && aurApp->GetBase()->GetEffect(0)->GetMiscValue() == EQ_SPELLDUMMYTYPE_TRANSLOCATETOBIND)
+            {
+                EverQuest->SendPlayerToBindPoint(unit->ToPlayer());
+                return;
+            }
 
             // Handle gate and hearthstone recall
             if (mode == AURA_REMOVE_BY_CANCEL && aurApp->GetBase()->GetEffect(0)->GetMiscValue() == EQ_SPELLDUMMYTYPE_GATE)

@@ -793,6 +793,11 @@ public:
         for (uint8 effectIndex = EFFECT_0; effectIndex < MAX_SPELL_EFFECTS; effectIndex++)
         {
             auto const& succorEffect = spell->m_spellInfo->Effects[effectIndex];
+            if (succorEffect.Effect == SPELL_EFFECT_DUMMY && succorEffect.MiscValue == EQ_SPELLDUMMYTYPE_SHADOWSTEP)
+            {
+                EverQuest->ShadowStepPlayer(player);
+                return;
+            }
             if ((succorEffect.Effect == SPELL_EFFECT_DUMMY ||
                 (succorEffect.Effect == SPELL_EFFECT_APPLY_AURA && succorEffect.ApplyAuraName == SPELL_AURA_DUMMY)) &&
                 succorEffect.MiscValue == EQ_SPELLDUMMYTYPE_SUCCOR)

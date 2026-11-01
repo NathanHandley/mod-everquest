@@ -3491,6 +3491,63 @@ void EverQuestMod::UpdateTrapsForPlayer(Player* player, uint32 diffInMS)
     }
 }
 
+void EverQuestMod::HandleDeathSaveOnDamage(Unit* victim, uint32& damage)
+{
+    if (victim == nullptr || victim->IsPlayer() == false || damage < victim->GetHealth())
+        return;
+    for (AuraEffect const* dummyEffect : victim->GetAuraEffectsByType(SPELL_AURA_DUMMY))
+    {
+        if (dummyEffect->GetMiscValue() != EQ_SPELLDUMMYTYPE_DEATHSAVE || dummyEffect->GetId() < ConfigSystemSpellDBCIDMin || dummyEffect->GetId() > ConfigSystemSpellDBCIDMax)
+            continue;
+
+        // It goes either way, as EQ's does
+        uint32 spellID = dummyEffect->GetId();
+        uint32 healPercent = dummyEffect->GetMiscValueB() == 2 ? 100 : EQ_DEATH_SAVE_PARTIAL_HEAL_PERCENT;
+        bool isSaved = roll_chance_i(EQ_DEATH_SAVE_CHANCE_PERCENT);
+        victim->RemoveAurasDueToSpell(spellID);
+        if (isSaved == true)
+        {
+            damage = 0;
+            victim->SetHealth(victim->CountPctFromMaxHealth(int32(healPercent)));
+            ChatHandler(victim->ToPlayer()->GetSession()).PSendSysMessage("You feel the touch of your god, and are healed.");
+        }
+        return;
+    }
+}
+
+bool EverQuestMod::IsDestroySpellBlockedByLevel(SpellInfo const* spellInfo, Unit* target)
+{
+    if (target == nullptr)
+        return false;
+    if (spellInfo->Id != EQ_SPELL_ID_BANISHMENT_OF_SHADOWS && spellInfo->Id != EQ_SPELL_ID_BANISHMENT && spellInfo->Id != EQ_SPELL_ID_DISINTEGRATE)
+        return false;
+    return GetLevelForEQRules(target) > EQ_DESTROY_MAX_TARGET_LEVEL;
+}
+
+void EverQuestMod::ShadowStepPlayer(Player* player)
+{
+    float x = player->GetPositionX() + std::cos(player->GetOrientation()) * EQ_SHADOW_STEP_DISTANCE_IN_YARDS;
+    float y = player->GetPositionY() + std::sin(player->GetOrientation()) * EQ_SHADOW_STEP_DISTANCE_IN_YARDS;
+    float z = player->GetPositionZ();
+    EQZoneMap const* zoneMap = sEQZoneMapMgr->GetZoneMap(player->GetMapId());
+    if (zoneMap == nullptr)
+    {
+        Position destination = player->GetPosition();
+        player->MovePositionToFirstCollision(destination, EQ_SHADOW_STEP_DISTANCE_IN_YARDS, 0.0f);
+        player->NearTeleportTo(destination.GetPositionX(), destination.GetPositionY(), destination.GetPositionZ(), player->GetOrientation());
+        return;
+    }
+    if (zoneMap->IsInLineOfSight(player->GetPositionX(), player->GetPositionY(), z + EQ_ZONE_LINE_ARRIVAL_LOS_HEIGHT, x, y, z + EQ_ZONE_LINE_ARRIVAL_LOS_HEIGHT) == false)
+        return;
+    if (AlignZoneLineArrivalToGround(zoneMap, x, y, z) == true)
+        player->NearTeleportTo(x, y, z, player->GetOrientation());
+}
+
+void EverQuestMod::SendPlayerToBindPoint(Player* player)
+{
+    player->TeleportTo(player->m_homebindMapId, player->m_homebindX, player->m_homebindY, player->m_homebindZ, player->GetOrientation());
+}
+
 void EverQuestMod::LoadDisciplineData()
 {
     DisciplinesBySpellID.clear();

@@ -131,6 +131,13 @@ public:
         if (spell->GetCaster()->IsPlayer() == true && EverQuest->HandleDisciplineOnCheckCast(spell->GetCaster()->ToPlayer(), spell, res) == true)
             return;
 
+        // EQ's destroy spells stop working on anything past level 52
+        if (EverQuest->IsDestroySpellBlockedByLevel(spell->GetSpellInfo(), target) == true)
+        {
+            res = SPELL_FAILED_HIGHLEVEL;
+            return;
+        }
+
         // Some zones hold everyone to the ground
         Unit* levitationTarget = (target != nullptr) ? target : casterUnit;
         if (EverQuest->IsLevitationBlockedByZone(spell->GetSpellInfo(), levitationTarget) == true)

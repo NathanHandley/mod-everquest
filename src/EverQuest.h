@@ -248,6 +248,16 @@ struct BuildValuesCachePosPointers;
 #define EQ_SPELLDUMMYTYPE_WIPEHATELIST              24  // Amount is the percent chance, MiscValueB of 1 on an aura rolls again each tick
 #define EQ_SPELLDUMMYTYPE_HARMONY                   25  // Amount is the assist radius in hundredths of a yard
 #define EQ_SPELLDUMMYTYPE_TRUENORTH                 26
+#define EQ_SPELLDUMMYTYPE_TRANSLOCATETOBIND         29
+#define EQ_SPELLDUMMYTYPE_DEATHSAVE                 30      // MiscValueB 1 is a partial heal, 2 a full one
+#define EQ_SPELLDUMMYTYPE_SHADOWSTEP                31
+#define EQ_SHADOW_STEP_DISTANCE_IN_YARDS            10.0f
+#define EQ_DEATH_SAVE_CHANCE_PERCENT                48      // TAKP's formula at 150 Charisma, which WoW has no stat for
+#define EQ_DEATH_SAVE_PARTIAL_HEAL_PERCENT          15      // Death Pact's 300 of a level 60's health in EQ
+#define EQ_DESTROY_MAX_TARGET_LEVEL                 52
+#define EQ_SPELL_ID_BANISHMENT_OF_SHADOWS           93470
+#define EQ_SPELL_ID_BANISHMENT                      93471
+#define EQ_SPELL_ID_DISINTEGRATE                    93664
 #define EQ_SPELLDUMMYTYPE_EYEOFZOMM                 27  // The channeled aura that controls a possessed eye of zomm
 #define EQ_SPELLDUMMYTYPE_TELESCOPE                 28  // The channeled caster aura that carries a telescope far sight
 #define EQ_EYE_OF_ZOMM_LIFETIME_SLACK_IN_MS         2000
@@ -2821,6 +2831,10 @@ public:
     uint32 GetItemFocusPercentForPlayer(Player* player, uint32 focusType, SpellInfo const* spellInfo);
     void RefreshItemFocusRangeAuraForPlayer(Player* player);
     void LoadDisciplineData();
+    void HandleDeathSaveOnDamage(Unit* victim, uint32& damage);
+    bool IsDestroySpellBlockedByLevel(SpellInfo const* spellInfo, Unit* target);
+    void SendPlayerToBindPoint(Player* player);
+    void ShadowStepPlayer(Player* player);
     void UpdateEQMountRulesForPlayer(Player* player);
     void LoadTrapData();
     void UpdateTrapsForPlayer(Player* player, uint32 diffInMS);
