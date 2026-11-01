@@ -1089,11 +1089,16 @@ public:
     uint64 CharacterGearSignature = 0;
 };
 
+// The player picked no light at all: it stays that way until they pick one
+constexpr uint32 EQ_CARRIED_LIGHT_CHOICE_NONE = 0xFFFFFFFF;
+
 class EverQuestPlayerCarriedLightState
 {
 public:
     uint32 RefreshTimerMS = EQ_CARRIED_LIGHT_REFRESH_TIME_IN_MS; // Starts due, so the first update after tracking begins checks right away
     vector<ObjectGuid> PendingCorpseRefreshGUIDs; // Corpses whose light this player's next update re-checks, after loot left them some way other than a plain loot
+    uint32 ChosenLightItemTemplateID = 0; // The light the player picked from the character sheet, 0 for no choice, EQ_CARRIED_LIGHT_CHOICE_NONE for no light
+    bool ChosenLightLoaded = false; // The choice was read from the database (the interface asks for it as it starts)
 };
 
 class EverQuestCorpseIllusionRestoreData
@@ -2493,11 +2498,15 @@ public:
     bool IsCarriedLightSpell(uint32 spellID);
     void ValidateCarriedLightSpells();
     uint8 GetCarriedLightTypeForItemTemplateID(uint32 itemTemplateID);
+    bool CanItemGoIntoStorageSlot(ItemTemplate const* itemTemplate, uint8 equipSlot);
     uint8 GetCarriedLightLevelForLightType(uint8 lightType);
     uint8 CalculateCarriedLightTypeForPlayer(Player* player);
     uint8 CalculateCarriedLightTypeForItemTemplateIDs(const vector<uint32>& itemTemplateIDs);
     void ApplyCarriedLightAuraForUnit(Unit* unit, uint8 lightType);
     void RefreshCarriedLightForPlayer(Player* player);
+    bool IsCarriedLightItemInEffectForPlayer(Player* player, uint32 itemTemplateID);
+    bool ChooseCarriedLightForPlayer(Player* player, uint32 itemTemplateID);
+    void SendCarriedLightDataToPlayer(Player* player);
     void RefreshCarriedLightForCreatureFromPreloadedLoot(Creature* creature);
     void RefreshCarriedLightForCreatureCorpse(Creature* creature);
     void QueueCarriedLightRefreshForPlayer(Player* player);

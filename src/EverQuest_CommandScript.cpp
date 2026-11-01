@@ -139,6 +139,7 @@ public:
             { "eqdispelmessage", HandleEQDispelMessageCommand,  SEC_PLAYER, Console::No },
             { "eqmezbreakmessage", HandleEQMezBreakMessageCommand, SEC_PLAYER, Console::No },
             { "eqoptions", HandleEQOptionsCommand,              SEC_PLAYER, Console::No },
+            { "eqlightsource", HandleEQLightSourceCommand,      SEC_PLAYER, Console::No },
             { "eqdruidform", HandleEQDruidFormCommand,          SEC_PLAYER, Console::No },
             { "eqauctionfilter", HandleEQAuctionFilterCommand,  SEC_PLAYER, Console::No },
             { "eqmentorship", HandleEQMentorshipCommand,        SEC_PLAYER, Console::No },
@@ -848,6 +849,25 @@ public:
     }
 
     // Backs the in game options page.  "sync" pushes the current values to it, and no argument prints the same values as text
+    // Run by the interface: 'sync' asks for the light source data, a number picks the light that shines
+    static bool HandleEQLightSourceCommand(ChatHandler* handler, const char* args)
+    {
+        if (EverQuest->IsEnabled == false)
+            return true;
+
+        Player* player = handler->GetPlayer();
+        if (player == nullptr)
+            return true;
+
+        std::string valueString = GetFirstCommandArg(args);
+        boost::algorithm::to_lower(valueString);
+        if (valueString == "sync")
+            EverQuest->SendCarriedLightDataToPlayer(player);
+        else if (EverQuest->ChooseCarriedLightForPlayer(player, Acore::StringTo<uint32>(valueString).value_or(0)) == false)
+            EverQuest->SendCarriedLightDataToPlayer(player); // Refused: put the interface right
+        return true;
+    }
+
     static bool HandleEQOptionsCommand(ChatHandler* handler, const char* args)
     {
         if (EverQuest->IsEnabled == false)

@@ -14,6 +14,7 @@
 //  You should have received a copy of the GNU General Public License
 //  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+#include "Chat.h"
 #include "Creature.h"
 #include "Item.h"
 #include "Log.h"
@@ -106,14 +107,132 @@ uint8 EverQuestMod::GetCarriedLightLevelForLightType(uint8 lightType)
     }
 }
 
+// The interface's own hidden messages: the first word is the prefix it listens for
+static void SendCarriedLightAddonMessageToPlayer(Player* player, std::string const& message)
+{
+    WorldPacket data;
+    ChatHandler::BuildChatPacket(data, CHAT_MSG_SYSTEM, LANG_ADDON, nullptr, nullptr, message);
+    player->SendDirectMessage(&data);
+}
+
+// Worn (the light source slot included), or loose in the main backpack for the light types that work from there
+bool EverQuestMod::IsCarriedLightItemInEffectForPlayer(Player* player, uint32 itemTemplateID)
+{
+    uint8 lightType = GetCarriedLightTypeForItemTemplateID(itemTemplateID);
+    if (lightType == 0)
+        return false;
+
+    for (uint8 equipSlot = EQUIPMENT_SLOT_START; equipSlot <= EQUIPMENT_SLOT_END; ++equipSlot)
+    {
+        Item* item = player->GetItemByPos(INVENTORY_SLOT_BAG_0, equipSlot == EQUIPMENT_SLOT_END ? uint8(LIGHT_SOURCE_SLOT) : equipSlot);
+        if (item != nullptr && item->GetEntry() == itemTemplateID)
+            return true;
+    }
+
+    if (lightType < 9 || lightType > 13)
+        return false;
+    for (uint8 backpackSlot = INVENTORY_SLOT_ITEM_START; backpackSlot < INVENTORY_SLOT_ITEM_END; ++backpackSlot)
+    {
+        Item* item = player->GetItemByPos(INVENTORY_SLOT_BAG_0, backpackSlot);
+        if (item != nullptr && item->GetEntry() == itemTemplateID)
+            return true;
+    }
+    return false;
+}
+
+bool EverQuestMod::ChooseCarriedLightForPlayer(Player* player, uint32 itemTemplateID)
+{
+    if (itemTemplateID != EQ_CARRIED_LIGHT_CHOICE_NONE && IsCarriedLightItemInEffectForPlayer(player, itemTemplateID) == false)
+        return false;
+
+    {
+        std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+        PlayerCarriedLightStatesByPlayerGUID[player->GetGUID()].ChosenLightItemTemplateID = itemTemplateID;
+    }
+    CharacterDatabase.Execute("REPLACE INTO `mod_everquest_character_light_source` (`guid`, `itemEntry`) VALUES ({}, {})", player->GetGUID().GetCounter(), itemTemplateID);
+    RefreshCarriedLightForPlayer(player);
+    return true;
+}
+
+// What the interface needs to work out the player's light itself: every light source there is (read-only since startup),
+// in lines a chat message can carry, then the player's choice
+void EverQuestMod::SendCarriedLightDataToPlayer(Player* player)
+{
+    if (player == nullptr || player->GetSession() == nullptr)
+        return;
+
+    bool isLoaded;
+    {
+        std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+        isLoaded = PlayerCarriedLightStatesByPlayerGUID[player->GetGUID()].ChosenLightLoaded;
+    }
+    uint32 loadedChoice = 0;
+    if (isLoaded == false)
+    {
+        QueryResult queryResult = CharacterDatabase.Query("SELECT `itemEntry` FROM `mod_everquest_character_light_source` WHERE `guid` = {}", player->GetGUID().GetCounter());
+        if (queryResult)
+            loadedChoice = queryResult->Fetch()[0].Get<uint32>();
+    }
+
+    const size_t maxLineLength = 200;
+    std::ostringstream line;
+    for (auto const& lightItem : CarriedLightTypesByItemTemplateID)
+    {
+        line << lightItem.first << ':' << uint32(lightItem.second) << ',';
+        if (line.tellp() >= std::streamoff(maxLineLength))
+        {
+            SendCarriedLightAddonMessageToPlayer(player, "EQLIGHTITEMS\t" + line.str());
+            line.str("");
+        }
+    }
+    SendCarriedLightAddonMessageToPlayer(player, "EQLIGHTITEMS\t" + line.str());
+
+    uint32 chosenItemTemplateID;
+    {
+        std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+        EverQuestPlayerCarriedLightState& carriedLightState = PlayerCarriedLightStatesByPlayerGUID[player->GetGUID()];
+        if (carriedLightState.ChosenLightLoaded == false)
+        {
+            carriedLightState.ChosenLightLoaded = true;
+            carriedLightState.ChosenLightItemTemplateID = loadedChoice;
+        }
+        chosenItemTemplateID = carriedLightState.ChosenLightItemTemplateID;
+    }
+    SendCarriedLightAddonMessageToPlayer(player, "EQLIGHTSEL\t" + std::to_string(chosenItemTemplateID));
+    RefreshCarriedLightForPlayer(player);
+}
+
 uint8 EverQuestMod::CalculateCarriedLightTypeForPlayer(Player* player)
 {
+    // A light the player picked shines for as long as it is in effect at all, and the choice ends when it no longer is
+    uint32 chosenItemTemplateID = 0;
+    {
+        std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+        unordered_map<ObjectGuid, EverQuestPlayerCarriedLightState>::iterator carriedLightStateItr = PlayerCarriedLightStatesByPlayerGUID.find(player->GetGUID());
+        if (carriedLightStateItr != PlayerCarriedLightStatesByPlayerGUID.end())
+            chosenItemTemplateID = carriedLightStateItr->second.ChosenLightItemTemplateID;
+    }
+    if (chosenItemTemplateID == EQ_CARRIED_LIGHT_CHOICE_NONE)
+        return 0;
+    if (chosenItemTemplateID != 0)
+    {
+        if (IsCarriedLightItemInEffectForPlayer(player, chosenItemTemplateID) == true)
+            return GetCarriedLightTypeForItemTemplateID(chosenItemTemplateID);
+        {
+            std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+            PlayerCarriedLightStatesByPlayerGUID[player->GetGUID()].ChosenLightItemTemplateID = 0;
+        }
+        CharacterDatabase.Execute("DELETE FROM `mod_everquest_character_light_source` WHERE `guid` = {}", player->GetGUID().GetCounter());
+        SendCarriedLightAddonMessageToPlayer(player, "EQLIGHTSEL\t0");
+    }
+
     // Same choice the EQ client makes.  The brightest equipped light wins, and the first one found keeps a tie
     uint8 carriedLightType = 0;
     uint8 carriedLightLevel = 0;
-    for (uint8 equipSlot = EQUIPMENT_SLOT_START; equipSlot < EQUIPMENT_SLOT_END; ++equipSlot)
+    // The light source slot on the character sheet counts as one more equipped slot
+    for (uint8 equipSlot = EQUIPMENT_SLOT_START; equipSlot <= EQUIPMENT_SLOT_END; ++equipSlot)
     {
-        Item* item = player->GetItemByPos(INVENTORY_SLOT_BAG_0, equipSlot);
+        Item* item = player->GetItemByPos(INVENTORY_SLOT_BAG_0, equipSlot == EQUIPMENT_SLOT_END ? uint8(LIGHT_SOURCE_SLOT) : equipSlot);
         if (item == nullptr)
             continue;
         uint8 lightType = GetCarriedLightTypeForItemTemplateID(item->GetEntry());
