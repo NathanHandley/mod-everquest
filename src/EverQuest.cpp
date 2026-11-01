@@ -9506,6 +9506,31 @@ void EverQuestMod::LoadWarderLookData()
     }
 }
 
+// Left alone these correct themselves on their first two second tick, which raises the maximum without the health.  A pet being loaded takes its saved health after
+// this, so it's only a new pet that has to be kept full here
+void EverQuestMod::RefreshPetScalingFromOwner(Pet* pet)
+{
+    bool hadFullHealth = pet->IsFullHealth();
+    bool hadFullMana = pet->GetPower(POWER_MANA) >= pet->GetMaxPower(POWER_MANA);
+    for (uint32 spellID : { uint32(EQ_SPELL_ID_WARLOCK_PET_SCALING_01), uint32(EQ_SPELL_ID_WARLOCK_PET_SCALING_02), uint32(EQ_SPELL_ID_WARLOCK_PET_SCALING_03),
+        uint32(EQ_SPELL_ID_WARLOCK_PET_SCALING_04), uint32(EQ_SPELL_ID_WARLOCK_PET_SCALING_05) })
+    {
+        Aura* aura = pet->GetAura(spellID);
+        if (aura == nullptr)
+            continue;
+        for (uint8 effectIndex = 0; effectIndex < MAX_SPELL_EFFECTS; ++effectIndex)
+        {
+            AuraEffect* auraEffect = aura->GetEffect(effectIndex);
+            if (auraEffect != nullptr)
+                auraEffect->ChangeAmount(auraEffect->CalculateAmount(aura->GetCaster()), false);
+        }
+    }
+    if (hadFullHealth == true)
+        pet->SetFullHealth();
+    if (hadFullMana == true)
+        pet->SetPower(POWER_MANA, pet->GetMaxPower(POWER_MANA));
+}
+
 void EverQuestMod::ApplyWarderLookToPet(Pet* pet)
 {
     // The table is empty before Luclin, which leaves every warder the wolf its creature row has

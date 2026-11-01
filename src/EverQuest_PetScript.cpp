@@ -88,6 +88,9 @@ public:
         if (EverQuest->HasPetDataForCreatureTemplateID(pet->GetCreatureTemplate()->Entry) == false)
             return;
 
+        // The scaling auras went on before the pet could find its owner, so they hold nothing from the owner's stats yet
+        EverQuest->RefreshPetScalingFromOwner(pet);
+
         // Random pet names
         EverQuestPet petData = EverQuest->GetPetDataForCreatureTemplateID(pet->GetCreatureTemplate()->Entry);
 

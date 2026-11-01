@@ -2703,6 +2703,7 @@ public:
     void LoadPetSilentDisplayData();
     void LoadWarderLookData();
     void ApplyWarderLookToPet(Pet* pet);
+    void RefreshPetScalingFromOwner(Pet* pet);
     void RemoveInvalidPetSilentDisplays();
     void LoadDruidFormDisplayData();
     void RemoveInvalidDruidFormDisplays();
