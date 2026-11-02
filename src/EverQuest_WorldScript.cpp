@@ -63,7 +63,6 @@ public:
         EverQuest->LoadCreatureKillSpawnData();
         EverQuest->LoadCreaturePresenceGroupData();
         EverQuest->LoadCreatureEmoteData();
-        EverQuest->LoadCreatureMovementSoundData();
         EverQuest->LoadCreatureOnkillReputations();
         EverQuest->LoadItemTemplateData();
         EverQuest->LoadItemWoWToEQSwapData();
