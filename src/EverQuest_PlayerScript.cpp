@@ -922,6 +922,22 @@ public:
         EverQuest->SetInitialCreatePositionForPlayer(player);
     }
 
+    void OnPlayerCharFactionOrRaceChange(ObjectGuid guid, bool factionChange, std::vector<uint8> const& modData) override
+    {
+        if (EverQuest->IsEnabled == false)
+            return;
+
+        EverQuest->HandleCharacterFactionOrRaceChange(guid, factionChange, modData);
+    }
+
+    void OnPlayerCharEnum(std::vector<ObjectGuid> const& guids, WorldPacket& data) override
+    {
+        if (EverQuest->IsEnabled == false)
+            return;
+
+        EverQuest->AddCharacterOriginsToEnumPacket(guids, data);
+    }
+
     bool OnPlayerCheckItemInSlotAtLoadInventory(Player* player, Item* item, uint8 slot, uint8& err, uint16& dest) override
     {
         if (EverQuest->IsEnabled == false)
@@ -946,10 +962,21 @@ public:
         return true;
     }
 
+    // A quest combiner with more than one combine makes the one the player has the components for
+    bool OnPlayerCanCastItemUseSpell(Player* player, Item* item, SpellCastTargets const& targets, uint8 castCount, uint32 glyphIndex) override
+    {
+        if (EverQuest->IsEnabled == false)
+            return true;
+        return EverQuest->HandleCombinerItemUse(player, item, targets, castCount, glyphIndex) == false;
+    }
+
     void OnPlayerLogin(Player* player) override
     {
         if (EverQuest->IsEnabled == false)
             return;
+
+        // Faction.dbc starts a character by its WoW race, so an EQ race's alignment goes on now, and again after a race or faction change
+        EverQuest->ApplyEQOriginFactionStandingForPlayer(player);
 
         // Characters always log in standing
         EverQuest->RemoveCrouchAtLogin(player);
@@ -1017,9 +1044,6 @@ public:
                     createInfo.PositionY, createInfo.PositionZ);
                 if (createInfo.ExtraStartItemID != 0)
                     player->AddItem(createInfo.ExtraStartItemID, 1);
-                uint32 vahShirInstinctsSpellID = EverQuest->GetClassAuraSpellID(EQ_CLASSAURA_SPELL_VAH_SHIR_INSTINCTS);
-                if (vahShirInstinctsSpellID != 0 && createInfo.StartOption == EQ_START_OPTION_SHAR_VAHL)
-                    player->learnSpell(vahShirInstinctsSpellID);
                 if (EverQuest->ConfigDeathKnightsStartLikeOtherClasses == true && player->getClass() == CLASS_DEATH_KNIGHT)
                 {
                     player->RemoveAura(48266); // Take off Blood Presence
@@ -1035,6 +1059,17 @@ public:
             // Give start items for both of the EQ classes the character begins with
             EverQuest->GrantClassStartItemsForPlayer(player, EverQuest->GetClassMapForWOWClassID(player->getClass()).EQClassIDBase);
             EverQuest->GrantClassStartItemsForPlayer(player, EverQuest->GetCurrentSecondEQClassForPlayer(player));
+        }
+
+        // Vah Shir Instincts go with the people, which a race change can move a character into or out of
+        uint32 vahShirInstinctsSpellID = EverQuest->GetClassAuraSpellID(EQ_CLASSAURA_SPELL_VAH_SHIR_INSTINCTS);
+        if (vahShirInstinctsSpellID != 0 && EverQuest->HasCreatePlayerData(player->getRace(), player->getClass()) == true)
+        {
+            bool isVahShir = EverQuest->GetPlayerCreateInfoForPlayer(player).StartOption == EQ_START_OPTION_SHAR_VAHL;
+            if (isVahShir == true && player->HasSpell(vahShirInstinctsSpellID) == false)
+                player->learnSpell(vahShirInstinctsSpellID);
+            else if (isVahShir == false && player->HasSpell(vahShirInstinctsSpellID) == true)
+                player->removeSpell(vahShirInstinctsSpellID, SPEC_MASK_ALL, false);
         }
 
         // Give players the ability to see invis vs undead

@@ -6031,12 +6031,47 @@ uint64 EverQuestMod::CalculateIllusionCharacterGearSignature(Player* player, uin
     return signature;
 }
 
+// The tens are the head variant, which the client's face rows take for every value below 100, falling back to the plain head where a race has none
+bool EverQuestMod::IsIllusionFaceValid(EverQuestIllusionCharacter const* illusionCharacter, uint32 faceID) const
+{
+    return illusionCharacter != nullptr && faceID < EQ_ILLUSION_FACE_HEAD_VARIANT_STEP * EQ_ILLUSION_FACE_HEAD_VARIANT_STEP
+        && (faceID % EQ_ILLUSION_FACE_HEAD_VARIANT_STEP) < illusionCharacter->FaceCount;
+}
+
+// Hair style selects the head geoset: 0 = bare head, 1-3 = the EQ helmed heads, and a helm wins over the hair picked at creation.  What was picked is for the character's own EQ race.
+// The skin byte is the eye color, which the EQ races' skin rows carry for the Luclin models' eyes
+void EverQuestMod::GetIllusionLookBytesForPlayer(Player* player, uint8 chrRaceID, uint8& hairStyleOut, uint8& hairColorOut, uint8& facialHairOut, uint8& skinOut)
+{
+    hairStyleOut = GetIllusionHelmHairStyleForPlayer(player);
+    hairColorOut = 0;
+    facialHairOut = 0;
+    skinOut = 0;
+    EverQuestPlayerStartOptionState originState = GetPlayerOriginState(player);
+    if (originState.EQRaceID == 0)
+        return;
+    EverQuestIllusionCharacter const* illusionCharacter = GetIllusionCharacterForRaceAndGender(originState.EQRaceID, player->getGender());
+    if (illusionCharacter == nullptr || illusionCharacter->ChrRaceID != chrRaceID)
+        return;
+    // A helm hides the hair, but the beard and the eyes stay
+    facialHairOut = originState.EQFacialHair;
+    skinOut = originState.EQEyeColor;
+    if (hairStyleOut != 0)
+        return;
+    hairStyleOut = originState.EQHairStyle;
+    hairColorOut = originState.EQHairColor;
+}
+
 void EverQuestMod::BuildMirrorImageDataPacketForPlayer(Player* subject, uint8 chrRaceID, uint8 eqFaceByte, WorldPacket& dataOut)
 {
     // Field layout must match WorldSession::HandleMirrorImageDataRequest. The face byte carries the EQ face selection (the CharSections face rows blit the EQ head textures into the composite)
-    // Skin/hair/haircolor/facialhair bytes are pinned to zero since the converter points every EQ selection byte variation at the same generated section textures
+    // Skin, hair, hair color and facial hair are the character's own EQ look when the illusion is its own EQ race, and zero for any other
     uint32 itemDisplayIDs[EQ_MIRROR_IMAGE_ITEM_SLOT_COUNT];
     GetMirrorImageItemDisplayIDsForPlayer(subject, chrRaceID, itemDisplayIDs);
+    uint8 hairStyle = 0;
+    uint8 hairColor = 0;
+    uint8 facialHair = 0;
+    uint8 skin = 0;
+    GetIllusionLookBytesForPlayer(subject, chrRaceID, hairStyle, hairColor, facialHair, skin);
 
     dataOut.Initialize(SMSG_MIRRORIMAGE_DATA, 68);
     dataOut << subject->GetGUID();
@@ -6044,11 +6079,11 @@ void EverQuestMod::BuildMirrorImageDataPacketForPlayer(Player* subject, uint8 ch
     dataOut << uint8(chrRaceID);
     dataOut << uint8(subject->getGender());
     dataOut << uint8(subject->getClass());
-    dataOut << uint8(0);             // skin
+    dataOut << uint8(skin);          // skin (carries the EQ eye color)
     dataOut << uint8(eqFaceByte);    // face (carries the EQ face selection)
-    dataOut << uint8(GetIllusionHelmHairStyleForPlayer(subject)); // hair style selects the head geoset: 0 = bare head, 1-3 = the EQ helmed heads
-    dataOut << uint8(0);             // haircolor (helm textures untinted for players)
-    dataOut << uint8(0);             // facialhair
+    dataOut << uint8(hairStyle);
+    dataOut << uint8(hairColor);
+    dataOut << uint8(facialHair);
     dataOut << uint32(subject->GetGuildId());
     for (int slotIndex = 0; slotIndex < EQ_MIRROR_IMAGE_ITEM_SLOT_COUNT; ++slotIndex)
         dataOut << uint32(itemDisplayIDs[slotIndex]);
@@ -6084,8 +6119,11 @@ void EverQuestMod::ApplyIllusionCharacterDisplayIfChanged(Player* player, EverQu
 
     // The EQ face selection rides the hair style byte of the mirror packet (EQ heads bake the face into the head texture), and out-of-range selections fall back to the race's default face
     uint32 selectedFaceID = GetIllusionFaceIDForPlayer(player);
-    if (selectedFaceID >= illusionCharacter->FaceCount)
+    if (IsIllusionFaceValid(illusionCharacter, selectedFaceID) == false)
         selectedFaceID = 0;
+    // The head variant (the tens) was picked for the character's own EQ race, like the hair and eyes, so any other race shows its plain head
+    if (selectedFaceID >= EQ_ILLUSION_FACE_HEAD_VARIANT_STEP && GetPlayerOriginState(player).EQRaceID != illusionCharacter->EQRaceID)
+        selectedFaceID %= EQ_ILLUSION_FACE_HEAD_VARIANT_STEP;
     illusionState->CharacterFaceByte = (uint8)selectedFaceID;
 
     // The mirror flag must be on before any display change reaches the client, since the flag is what makes it request the packet
@@ -9502,6 +9540,35 @@ void EverQuestMod::LoadPetSilentDisplayData()
     }
 }
 
+void EverQuestMod::LoadEQRaceStartData()
+{
+    EQRaceStartsByKey.clear();
+    QueryResult queryResult = WorldDatabase.Query("SELECT eqrace, eqclass, startchoice, alignment, map, zone, position_x, position_y, position_z, orientation, illusionitem, startachievement, extrastartitem FROM mod_everquest_eqrace_start;");
+    if (!queryResult)
+        return;
+    do
+    {
+        Field* fields = queryResult->Fetch();
+        uint32 eqRaceID = fields[0].Get<uint16>();
+        uint8 eqClassID = fields[1].Get<uint8>();
+        uint8 startChoice = fields[2].Get<uint8>();
+        EverQuestPlayerCreateInfo eqRaceStart;
+        eqRaceStart.Alignment = fields[3].Get<uint8>();
+        eqRaceStart.MapID = fields[4].Get<uint16>();
+        eqRaceStart.ZoneID = fields[5].Get<uint32>();
+        eqRaceStart.PositionX = fields[6].Get<float>();
+        eqRaceStart.PositionY = fields[7].Get<float>();
+        eqRaceStart.PositionZ = fields[8].Get<float>();
+        eqRaceStart.Orientation = fields[9].Get<float>();
+        eqRaceStart.IllusionItemID = fields[10].Get<uint32>();
+        eqRaceStart.StartAchievementID = fields[11].Get<uint32>();
+        eqRaceStart.ExtraStartItemID = fields[12].Get<uint32>();
+        eqRaceStart.StartOption = (eqRaceID == EQ_RACE_VAH_SHIR) ? EQ_START_OPTION_SHAR_VAHL : 0;
+        EQRaceStartsByKey[GetEQRaceStartKey(eqRaceID, eqClassID, startChoice)] = eqRaceStart;
+        EQRaceIDsByGuiseItemID[eqRaceStart.IllusionItemID] = eqRaceID;
+    } while (queryResult->NextRow());
+}
+
 void EverQuestMod::LoadWarderLookData()
 {
     WarderLookCreatureTemplateIDsByKey.clear();
@@ -9551,9 +9618,14 @@ void EverQuestMod::ApplyWarderLookToPet(Pet* pet)
     if (owner == nullptr)
         return;
 
-    // A start option is a people, so it comes ahead of the owner's own race
-    auto lookIter = WarderLookCreatureTemplateIDsByKey.find(GetPlayerStartOption(owner));
-    if (lookIter == WarderLookCreatureTemplateIDsByKey.end())
+    // A start option is a people, so it comes ahead of the owner's own race.  An EQ race beats both, and the table's WoW races stand in for those it has a look for
+    EverQuestPlayerStartOptionState originState = GetPlayerOriginState(owner);
+    auto lookIter = WarderLookCreatureTemplateIDsByKey.find(originState.StartOption);
+    if (lookIter == WarderLookCreatureTemplateIDsByKey.end() && originState.EQRaceID == EQ_RACE_OGRE)
+        lookIter = WarderLookCreatureTemplateIDsByKey.find(uint32(RACE_ORC) << 8);
+    else if (lookIter == WarderLookCreatureTemplateIDsByKey.end() && originState.EQRaceID == EQ_RACE_TROLL)
+        lookIter = WarderLookCreatureTemplateIDsByKey.find(uint32(RACE_TROLL) << 8);
+    else if (lookIter == WarderLookCreatureTemplateIDsByKey.end() && originState.EQRaceID == 0)
         lookIter = WarderLookCreatureTemplateIDsByKey.find(uint32(owner->getRace()) << 8);
     if (lookIter == WarderLookCreatureTemplateIDsByKey.end())
         return;
@@ -10302,9 +10374,13 @@ void EverQuestMod::ApplyIllusionCharacterLookToNewCorpse(Corpse* corpse)
 
     corpse->SetUInt32Value(CORPSE_FIELD_DISPLAY_ID, illusionCharacter->CorpseDisplayID);
     corpse->SetByteValue(CORPSE_FIELD_BYTES_1, 1, illusionCharacter->ChrRaceID);
-    corpse->SetByteValue(CORPSE_FIELD_BYTES_1, 3, 0); // skin
-    uint8 hairStyle = GetIllusionHelmHairStyleForPlayer(owner); // selects the head geoset: bare head, or the worn helm's helmed head
-    corpse->SetUInt32Value(CORPSE_FIELD_BYTES_2, (uint32)faceByte | ((uint32)hairStyle << 8)); // face, hair style, hair color 0, facial hair 0
+    uint8 hairStyle = 0;
+    uint8 hairColor = 0;
+    uint8 facialHair = 0;
+    uint8 skin = 0;
+    GetIllusionLookBytesForPlayer(owner, illusionCharacter->ChrRaceID, hairStyle, hairColor, facialHair, skin);
+    corpse->SetByteValue(CORPSE_FIELD_BYTES_1, 3, skin); // skin (the EQ eye color)
+    corpse->SetUInt32Value(CORPSE_FIELD_BYTES_2, (uint32)faceByte | ((uint32)hairStyle << 8) | ((uint32)hairColor << 16) | ((uint32)facialHair << 24)); // face, hair style, hair color, facial hair
 
     // The mirror image item displays, at their equipment slots (a corpse item field is the display id with the inventory type in the top byte)
     static EquipmentSlots const mirrorImageItemSlots[EQ_MIRROR_IMAGE_ITEM_SLOT_COUNT] =
@@ -11590,25 +11666,52 @@ uint8 EverQuestMod::GetPlayerStartOption(Player* player)
 {
     if (PlayerCreateInfoStartOptionsByKey.empty() == true)
         return 0;
-
-    // It can't change once the character is in the world, and this can run on a map thread every time a warder comes out
-    EverQuestPlayerStartOptionState* state = player->CustomData.Get<EverQuestPlayerStartOptionState>(EQ_PLAYER_CUSTOMDATA_STARTOPTION);
-    if (state != nullptr)
-        return state->StartOption;
-    QueryResult queryResult = CharacterDatabase.Query("SELECT startOption FROM mod_everquest_character_settings WHERE guid = {}", player->GetGUID().GetCounter());
-    if (!queryResult)
-        return 0;
-    uint8 startOption = queryResult->Fetch()[0].Get<uint8>();
-    if (player->IsInWorld() == true)
-        player->CustomData.GetDefault<EverQuestPlayerStartOptionState>(EQ_PLAYER_CUSTOMDATA_STARTOPTION)->StartOption = startOption;
-    return startOption;
+    return GetPlayerOriginState(player).StartOption;
 }
 
-// The town picked when the character was created, or the normal one
+// None of this can change once the character is in the world, and it can run on a map thread every time a warder comes out or a mirror packet is built
+EverQuestPlayerStartOptionState EverQuestMod::GetPlayerOriginState(Player* player)
+{
+    if (PlayerCreateInfoStartOptionsByKey.empty() == true && EQRaceStartsByKey.empty() == true)
+        return EverQuestPlayerStartOptionState();
+    EverQuestPlayerStartOptionState* state = player->CustomData.Get<EverQuestPlayerStartOptionState>(EQ_PLAYER_CUSTOMDATA_STARTOPTION);
+    if (state != nullptr)
+        return *state;
+    EverQuestPlayerStartOptionState loadedState;
+    QueryResult queryResult = CharacterDatabase.Query("SELECT startOption, eqRace, eqStartChoice, eqStartSecondClass, eqHairStyle, eqHairColor, eqFacialHair, eqEyeColor FROM mod_everquest_character_settings WHERE guid = {}", player->GetGUID().GetCounter());
+    if (!queryResult)
+        return loadedState;
+    Field* fields = queryResult->Fetch();
+    loadedState.StartOption = fields[0].Get<uint8>();
+    loadedState.EQRaceID = fields[1].Get<uint16>();
+    loadedState.EQStartChoice = fields[2].Get<uint8>();
+    loadedState.EQStartSecondClass = fields[3].Get<uint8>();
+    loadedState.EQHairStyle = fields[4].Get<uint8>();
+    loadedState.EQHairColor = fields[5].Get<uint8>();
+    loadedState.EQFacialHair = fields[6].Get<uint8>();
+    loadedState.EQEyeColor = fields[7].Get<uint8>();
+    if (player->IsInWorld() == true)
+        *player->CustomData.GetDefault<EverQuestPlayerStartOptionState>(EQ_PLAYER_CUSTOMDATA_STARTOPTION) = loadedState;
+    return loadedState;
+}
+
+uint32 EverQuestMod::GetEQRaceStartKey(uint32 eqRaceID, uint8 eqClassID, uint8 startChoice) const
+{
+    return (eqRaceID << 16) | (uint32(eqClassID) << 8) | startChoice;
+}
+
+// The start from the EverQuest character creation page, the town picked when the character was created, or the normal one
 const EverQuestPlayerCreateInfo& EverQuestMod::GetPlayerCreateInfoForPlayer(Player* player)
 {
     uint8 raceID = player->getRace(true);
     uint8 classID = player->getClass();
+    EverQuestPlayerStartOptionState originState = GetPlayerOriginState(player);
+    if (originState.EQRaceID != 0)
+    {
+        auto eqRaceStartItr = EQRaceStartsByKey.find(GetEQRaceStartKey(originState.EQRaceID, GetClassMapForWOWClassID(classID).EQClassIDBase, originState.EQStartChoice));
+        if (eqRaceStartItr != EQRaceStartsByKey.end())
+            return eqRaceStartItr->second;
+    }
     auto startOptionItr = PlayerCreateInfoStartOptionsByKey.find(GetPlayerCreateInfoStartOptionKey(raceID, classID, GetPlayerStartOption(player)));
     if (startOptionItr != PlayerCreateInfoStartOptionsByKey.end())
         return startOptionItr->second;
@@ -15412,6 +15515,10 @@ uint8 EverQuestMod::GetPlayerBaselineFactionAlignment(Player* player)
 {
     // A player's baseline alignment starts with their class and, only if the class is neutral, falls back to their race
     // Example: a warrior is evil if undead, neutral if gnome, good if dwarf - but a paladin is always good regardless of race
+    // A character made on the EverQuest creation page has an EQ race, and that's the race that counts
+    const EverQuestPlayerCreateInfo& createInfo = GetPlayerCreateInfoForPlayer(player);
+    if (createInfo.Alignment != EQ_FACTION_ALIGNMENT_NONE)
+        return createInfo.Alignment;
     uint32 classMask = player->getClassMask();
     if ((classMask & ConfigSystemFactionGoodClassMask) != 0)
         return EQ_FACTION_ALIGNMENT_GOOD;
@@ -15423,6 +15530,74 @@ uint8 EverQuestMod::GetPlayerBaselineFactionAlignment(Player* player)
     if ((raceMask & ConfigSystemFactionEvilRaceMask) != 0)
         return EQ_FACTION_ALIGNMENT_EVIL;
     return EQ_FACTION_ALIGNMENT_NEUTRAL;
+}
+
+uint32 EverQuestMod::GetRaceMaskForAlignment(uint8 alignment) const
+{
+    switch (alignment)
+    {
+        case EQ_FACTION_ALIGNMENT_GOOD: return ConfigSystemFactionGoodRaceMask;
+        case EQ_FACTION_ALIGNMENT_EVIL: return ConfigSystemFactionEvilRaceMask;
+        default: return EQ_PLAYABLE_RACE_MASK & ~(ConfigSystemFactionGoodRaceMask | ConfigSystemFactionEvilRaceMask);
+    }
+}
+
+// ReputationMgr::GetBaseReputation, for a race and class other than the player's own
+int32 EverQuestMod::GetBaseReputationForMasks(FactionEntry const* factionEntry, uint32 raceMask, uint32 classMask) const
+{
+    for (uint8 i = 0; i < 4; ++i)
+    {
+        bool raceMatches = (factionEntry->BaseRepRaceMask[i] & raceMask) != 0 || (factionEntry->BaseRepRaceMask[i] == 0 && factionEntry->BaseRepClassMask[i] != 0);
+        bool classMatches = (factionEntry->BaseRepClassMask[i] & classMask) != 0 || factionEntry->BaseRepClassMask[i] == 0;
+        if (raceMatches == true && classMatches == true)
+            return factionEntry->BaseRepValue[i];
+    }
+    return 0;
+}
+
+// Faction.dbc can only start a character out by its WoW race, so a neutral class character's standing is moved to where its EQ race would have put it.
+// What was already applied is stored with the WoW race it was against, so a later race or faction change only moves the difference and keeps what was earned
+void EverQuestMod::ApplyEQOriginFactionStandingForPlayer(Player* player)
+{
+    EverQuestPlayerStartOptionState originState = GetPlayerOriginState(player);
+    if (originState.EQRaceID == 0)
+        return;
+    uint8 targetAlignment = GetPlayerCreateInfoForPlayer(player).Alignment;
+    if (targetAlignment == EQ_FACTION_ALIGNMENT_NONE)
+        return;
+    QueryResult queryResult = CharacterDatabase.Query("SELECT eqFactionAlignment, eqFactionWoWRace FROM mod_everquest_character_settings WHERE guid = {}", player->GetGUID().GetCounter());
+    if (!queryResult)
+        return;
+    uint8 appliedAlignment = queryResult->Fetch()[0].Get<uint8>();
+    uint8 appliedWoWRace = queryResult->Fetch()[1].Get<uint8>();
+    uint8 wowRace = player->getRace(true);
+    if (appliedAlignment == targetAlignment && appliedWoWRace == wowRace)
+        return;
+
+    uint32 wowRaceMask = 1 << (wowRace - 1);
+    uint32 classMask = player->getClassMask();
+    ReputationMgr& reputationMgr = player->GetReputationMgr();
+    for (auto const& factionInfoPair : EQReputationFactionInfoByFactionID)
+    {
+        FactionEntry const* factionEntry = sFactionStore.LookupEntry(factionInfoPair.first);
+        if (factionEntry == nullptr || factionEntry->CanHaveReputation() == false)
+            continue;
+        int32 wantedOffset = GetBaseReputationForMasks(factionEntry, GetRaceMaskForAlignment(targetAlignment), classMask) - GetBaseReputationForMasks(factionEntry, wowRaceMask, classMask);
+        int32 appliedOffset = 0;
+        if (appliedAlignment != EQ_FACTION_ALIGNMENT_NONE && appliedWoWRace != 0)
+            appliedOffset = GetBaseReputationForMasks(factionEntry, GetRaceMaskForAlignment(appliedAlignment), classMask) - GetBaseReputationForMasks(factionEntry, uint32(1) << (appliedWoWRace - 1), classMask);
+        if (wantedOffset != appliedOffset)
+            reputationMgr.OffsetStartingStanding(factionEntry, wantedOffset - appliedOffset);
+    }
+
+    // The whole list again, which the client takes as it is: one standing packet per faction would show each one and print its rank change in chat
+    reputationMgr.SendInitialReputations();
+
+    // The standing and the record of it are saved together, so a crash can't leave one without the other
+    CharacterDatabaseTransaction transaction = CharacterDatabase.BeginTransaction();
+    reputationMgr.SaveToDB(transaction);
+    transaction->Append("UPDATE `mod_everquest_character_settings` SET `eqFactionAlignment` = {}, `eqFactionWoWRace` = {} WHERE `guid` = {}", targetAlignment, wowRace, player->GetGUID().GetCounter());
+    CharacterDatabase.CommitTransaction(transaction);
 }
 
 void EverQuestMod::GetIllusionFactionBandSteps(uint8 playerAlignment, uint8 illusionAlignment, int32& stepsTowardGoodOut, int32& stepsTowardEvilOut)
@@ -17554,6 +17729,9 @@ void EverQuestMod::SetInitialEQClassesForPlayer(Player* player)
     uint8 defaultSecondClass = classMap.EQClassIDDefaultSecond;
     if (HasCreatePlayerData(player->getRace(), player->getClass()) == true && GetPlayerCreateInfoForPlayer(player).DefaultSecondClass != 0)
         defaultSecondClass = GetPlayerCreateInfoForPlayer(player).DefaultSecondClass;
+    uint8 pickedSecondClass = GetPlayerOriginState(player).EQStartSecondClass;
+    if (pickedSecondClass != 0)
+        defaultSecondClass = pickedSecondClass;
     EverQuestPlayerControllerData controllerData;
     controllerData.GUID = player->GetGUID().GetCounter();
     controllerData.CurrentSecondClass = defaultSecondClass;
@@ -17576,9 +17754,214 @@ void EverQuestMod::SetInitialEQClassesForPlayer(Player* player)
         controllerData.SecondaryExpPool);
 }
 
+// The data comes from the client, so nothing in it is trusted until it has been checked
+bool EverQuestMod::ReadPlayerCreateData(std::vector<uint8> const& modData, EverQuestPlayerCreateData& createDataOut) const
+{
+    if (modData.size() != EQ_PLAYER_CREATE_DATA_SIZE || modData[0] != EQ_PLAYER_CREATE_DATA_VERSION)
+        return false;
+    createDataOut.EQRaceID = modData[1];
+    createDataOut.StartChoice = modData[2];
+    createDataOut.SecondClass = modData[3];
+    createDataOut.Face = modData[4];
+    createDataOut.HairStyle = modData[5];
+    createDataOut.HairColor = modData[6];
+    createDataOut.FacialHair = modData[7];
+    createDataOut.EyeColor = modData[8];
+    return true;
+}
+
+void EverQuestMod::ValidatePlayerCreateLook(uint32 eqRaceID, uint8 gender, EverQuestPlayerCreateData& createData)
+{
+    EverQuestIllusionCharacter const* illusionCharacter = GetIllusionCharacterForRaceAndGender(eqRaceID, gender);
+    if (IsIllusionFaceValid(illusionCharacter, createData.Face) == false)
+        createData.Face = 0;
+    if (createData.HairStyle < EQ_ILLUSION_HAIR_STYLE_LUCLIN_FIRST || createData.HairStyle > EQ_ILLUSION_HAIR_STYLE_LUCLIN_LAST)
+        createData.HairStyle = 0;
+    if (createData.HairColor > EQ_ILLUSION_HAIR_COLOR_LAST)
+        createData.HairColor = 0;
+    if (createData.FacialHair < EQ_ILLUSION_FACIAL_HAIR_LUCLIN_FIRST || createData.FacialHair > EQ_ILLUSION_FACIAL_HAIR_LUCLIN_LAST)
+        createData.FacialHair = 0;
+    if (createData.EyeColor > EQ_ILLUSION_EYE_COLOR_LAST)
+        createData.EyeColor = 0;
+}
+
+// Returns false to leave the character to the normal start, when what the client sent isn't a pairing its class can start as
+bool EverQuestMod::SetEQRaceStartForNewPlayer(Player* player, EverQuestPlayerCreateData createData)
+{
+    const EverQuestClassMap classMap = GetClassMapForWOWClassID(player->getClass());
+    auto eqRaceStartItr = EQRaceStartsByKey.find(GetEQRaceStartKey(createData.EQRaceID, classMap.EQClassIDBase, createData.StartChoice));
+    if (eqRaceStartItr == EQRaceStartsByKey.end())
+    {
+        LOG_ERROR("module.EverQuest", "EverQuestMod::SetEQRaceStartForNewPlayer got EQ race {}, start choice {}, which isn't a start for player {}'s EQ class {}", createData.EQRaceID, createData.StartChoice, player->GetName(), classMap.EQClassIDBase);
+        return false;
+    }
+    const EverQuestPlayerCreateInfo& createInfo = eqRaceStartItr->second;
+
+    uint8 secondClass = createData.SecondClass;
+    if (secondClass == 0 || secondClass > 32 || (classMap.EQClassIDEligibleSecondMask & (uint32(1) << (secondClass - 1))) == 0)
+        secondClass = classMap.EQClassIDDefaultSecond;
+    ValidatePlayerCreateLook(createData.EQRaceID, player->getGender(), createData);
+
+    uint32 guid = player->GetGUID().GetCounter();
+    CharacterDatabase.Execute("INSERT INTO `mod_everquest_character_settings` (`guid`, `currentSecondaryClass`, `nextSecondaryClass`, `secondaryExpPool`, `startOption`, `illusionFaceId`, `eqRace`, `eqStartChoice`, `eqStartSecondClass`, `eqHairStyle`, `eqHairColor`, `eqFacialHair`, `eqEyeColor`) "
+        "VALUES ({0}, {1}, {1}, 0, {2}, {3}, {4}, {5}, {1}, {6}, {7}, {8}, {9}) ON DUPLICATE KEY UPDATE `currentSecondaryClass` = {1}, `nextSecondaryClass` = {1}, `startOption` = {2}, `illusionFaceId` = {3}, `eqRace` = {4}, `eqStartChoice` = {5}, "
+        "`eqStartSecondClass` = {1}, `eqHairStyle` = {6}, `eqHairColor` = {7}, `eqFacialHair` = {8}, `eqEyeColor` = {9}",
+        guid, secondClass, createInfo.StartOption, createData.Face, createData.EQRaceID, createData.StartChoice, createData.HairStyle, createData.HairColor, createData.FacialHair, createData.EyeColor);
+
+    // The bind is the hall, as it is for a town picked in the Origins box
+    CharacterDatabase.Execute("REPLACE INTO `character_homebind` (`guid`, `mapId`, `zoneId`, `posX`, `posY`, `posZ`) VALUES ({}, {}, {}, {}, {}, {})",
+        guid, createInfo.MapID, createInfo.ZoneID, createInfo.PositionX, createInfo.PositionY, createInfo.PositionZ);
+    CharacterDatabase.Execute("UPDATE `characters` SET `map` = {}, `zone` = {}, `position_x` = {}, `position_y` = {}, `position_z` = {}, `orientation` = {} WHERE `guid` = {}",
+        createInfo.MapID, createInfo.ZoneID, createInfo.PositionX, createInfo.PositionY, createInfo.PositionZ, createInfo.Orientation, guid);
+    return true;
+}
+
+// Runs for a character that isn't in the world.  Nothing but the race change can move the EQ race
+void EverQuestMod::HandleCharacterFactionOrRaceChange(ObjectGuid guid, bool factionChange, std::vector<uint8> const& modData)
+{
+    EverQuestPlayerCreateData createData;
+    if (ReadPlayerCreateData(modData, createData) == false)
+        return;
+
+    // The settings row is cached from the character's last time in the world, and these change it underneath
+    {
+        std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+        ActivePlayerClassControllerDataByGUID.erase(guid);
+    }
+    CharacterCacheEntry const* characterEntry = sCharacterCache->GetCharacterCacheByGuid(guid);
+    if (characterEntry == nullptr)
+        return;
+    const EverQuestClassMap classMap = GetClassMapForWOWClassID(characterEntry->Class);
+    uint32 lowGuid = guid.GetCounter();
+    if (factionChange == true)
+    {
+        QueryResult queryResult = CharacterDatabase.Query("SELECT eqRace FROM mod_everquest_character_settings WHERE guid = {}", lowGuid);
+        uint32 eqRaceID = queryResult ? queryResult->Fetch()[0].Get<uint16>() : 0;
+        if (eqRaceID == 0)
+            return;
+        ValidatePlayerCreateLook(eqRaceID, characterEntry->Sex, createData);
+        CharacterDatabase.Execute("UPDATE `mod_everquest_character_settings` SET `illusionFaceId` = {}, `eqHairStyle` = {}, `eqHairColor` = {}, `eqFacialHair` = {}, `eqEyeColor` = {} WHERE `guid` = {}",
+            createData.Face, createData.HairStyle, createData.HairColor, createData.FacialHair, createData.EyeColor, lowGuid);
+        return;
+    }
+
+    auto eqRaceStartItr = EQRaceStartsByKey.find(GetEQRaceStartKey(createData.EQRaceID, classMap.EQClassIDBase, createData.StartChoice));
+    if (eqRaceStartItr == EQRaceStartsByKey.end())
+    {
+        LOG_ERROR("module.EverQuest", "EverQuestMod::HandleCharacterFactionOrRaceChange got EQ race {}, start choice {}, which isn't a start for character {}'s EQ class {}", createData.EQRaceID, createData.StartChoice, lowGuid, classMap.EQClassIDBase);
+        return;
+    }
+    ValidatePlayerCreateLook(createData.EQRaceID, characterEntry->Sex, createData);
+
+    // A guise goes out for the new race the next time the character logs in, unless it's the one they were given, and the old one stays with them.  The row can be missing
+    // for a character that has never been in the world
+    CharacterDatabase.Execute("INSERT INTO `mod_everquest_character_settings` (`guid`, `currentSecondaryClass`, `nextSecondaryClass`, `secondaryExpPool`, `startOption`, `illusionFaceId`, `issuedIllusionItemId`, `eqRace`, `eqStartChoice`, `eqHairStyle`, `eqHairColor`, `eqFacialHair`, `eqEyeColor`) "
+        "VALUES ({0}, {1}, {1}, 0, {2}, {3}, 0, {4}, {5}, {6}, {7}, {8}, {10}) ON DUPLICATE KEY UPDATE `startOption` = {2}, `illusionFaceId` = {3}, "
+        "`issuedIllusionItemId` = IF(`issuedIllusionItemId` = {9}, `issuedIllusionItemId`, 0), `eqRace` = {4}, `eqStartChoice` = {5}, `eqHairStyle` = {6}, `eqHairColor` = {7}, `eqFacialHair` = {8}, `eqEyeColor` = {10}",
+        lowGuid, classMap.EQClassIDDefaultSecond, eqRaceStartItr->second.StartOption, createData.Face, createData.EQRaceID, createData.StartChoice, createData.HairStyle, createData.HairColor, createData.FacialHair,
+        eqRaceStartItr->second.IllusionItemID, createData.EyeColor);
+}
+
+// A quest combiner (the Long Wooden Box) carries each of its combines as a use spell with the components as reagents.  The core would cast every one
+// of them, so this casts the first the player has the components for (the client asks for the same one), or the first when none, which names what's
+// missing.  Returns true when it handled the use
+bool EverQuestMod::HandleCombinerItemUse(Player* player, Item* item, SpellCastTargets const& targets, uint8 castCount, uint32 glyphIndex)
+{
+    if (player == nullptr || item == nullptr || item->GetTemplate() == nullptr)
+        return false;
+    ItemTemplate const* proto = item->GetTemplate();
+    std::vector<SpellInfo const*> combineSpells;
+    for (uint8 i = 0; i < MAX_ITEM_PROTO_SPELLS; ++i)
+    {
+        _Spell const& spellData = proto->Spells[i];
+        if (spellData.SpellId == 0 || spellData.SpellTrigger != ITEM_SPELLTRIGGER_ON_USE)
+            continue;
+        SpellInfo const* spellInfo = sSpellMgr->GetSpellInfo(spellData.SpellId);
+        if (spellInfo == nullptr || spellInfo->Reagent[0] <= 0)
+            return false;
+        combineSpells.push_back(spellInfo);
+    }
+    if (combineSpells.size() < 2)
+        return false;
+
+    SpellInfo const* combineSpell = combineSpells.front();
+    for (SpellInfo const* spellInfo : combineSpells)
+    {
+        bool hasComponents = true;
+        for (uint8 reagentIndex = 0; reagentIndex < MAX_SPELL_REAGENTS; ++reagentIndex)
+            if (spellInfo->Reagent[reagentIndex] > 0 && player->HasItemCount(spellInfo->Reagent[reagentIndex], spellInfo->ReagentCount[reagentIndex]) == false)
+                hasComponents = false;
+        if (hasComponents == true)
+        {
+            combineSpell = spellInfo;
+            break;
+        }
+    }
+
+    if (player->HasSpellCooldown(combineSpell->Id) == true)
+    {
+        Spell::SendCastResult(player, combineSpell, castCount, SPELL_FAILED_NOT_READY);
+        return true;
+    }
+    Spell* spell = new Spell(player, combineSpell, TRIGGERED_NONE);
+    spell->m_CastItem = item;
+    spell->m_cast_count = castCount;
+    spell->m_glyphIndex = glyphIndex;
+    spell->prepare(&targets);
+    return true;
+}
+
+// The character screen needs each character's EQ race and look for the race and faction change pages.  One block per character, in the packet's order
+void EverQuestMod::AddCharacterOriginsToEnumPacket(std::vector<ObjectGuid> const& guids, WorldPacket& data)
+{
+    if (EQRaceStartsByKey.empty() == true || guids.empty() == true)
+        return;
+    std::string guidList;
+    for (ObjectGuid const& guid : guids)
+    {
+        if (guidList.empty() == false)
+            guidList += ',';
+        guidList += std::to_string(guid.GetCounter());
+    }
+    std::unordered_map<uint32, std::array<uint8, EQ_CHARACTER_ORIGIN_SIZE>> originsByGuid;
+    QueryResult queryResult = CharacterDatabase.Query("SELECT guid, eqRace, eqStartChoice, illusionFaceId, eqHairStyle, eqHairColor, eqFacialHair, issuedIllusionItemId, currentSecondaryClass, eqEyeColor FROM mod_everquest_character_settings WHERE guid IN ({})", guidList);
+    if (queryResult)
+    {
+        do
+        {
+            Field* fields = queryResult->Fetch();
+            uint32 eqRaceID = fields[1].Get<uint16>();
+            if (eqRaceID == 0) // A character from before the EverQuest page goes by the guise it was given
+                eqRaceID = GetEQRaceIDForGuiseItem(fields[7].Get<uint32>());
+            originsByGuid[fields[0].Get<uint32>()] = { uint8(eqRaceID), fields[2].Get<uint8>(), uint8(std::clamp(fields[3].Get<int32>(), 0, 255)), fields[4].Get<uint8>(), fields[5].Get<uint8>(), fields[6].Get<uint8>(), fields[8].Get<uint8>(), fields[9].Get<uint8>() };
+        } while (queryResult->NextRow());
+    }
+    data << uint8(EQ_PLAYER_CREATE_DATA_VERSION);
+    data << uint8(guids.size());
+    for (ObjectGuid const& guid : guids)
+    {
+        std::array<uint8, EQ_CHARACTER_ORIGIN_SIZE> origin = {};
+        auto originItr = originsByGuid.find(guid.GetCounter());
+        if (originItr != originsByGuid.end())
+            origin = originItr->second;
+        for (uint8 value : origin)
+            data << value;
+    }
+}
+
+uint32 EverQuestMod::GetEQRaceIDForGuiseItem(uint32 guiseItemID) const
+{
+    auto eqRaceItr = EQRaceIDsByGuiseItemID.find(guiseItemID);
+    return eqRaceItr != EQRaceIDsByGuiseItemID.end() ? eqRaceItr->second : 0;
+}
+
 void EverQuestMod::SetInitialCreatePositionForPlayer(Player* player)
 {
     if (HasCreatePlayerData(player->getRace(), player->getClass()) == false)
+        return;
+
+    EverQuestPlayerCreateData createData;
+    if (ReadPlayerCreateData(player->GetCreateModData(), createData) == true && SetEQRaceStartForNewPlayer(player, createData) == true)
         return;
 
     // An option that isn't in the table is the normal town, since the byte comes from the client

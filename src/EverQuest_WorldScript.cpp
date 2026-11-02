@@ -82,6 +82,7 @@ public:
         EverQuest->LoadPetData();
         EverQuest->LoadPetSilentDisplayData();
         EverQuest->LoadWarderLookData();
+        EverQuest->LoadEQRaceStartData();
         EverQuest->LoadDisciplineData();
         EverQuest->LoadTrapData();
         EverQuest->LoadDruidFormDisplayData();

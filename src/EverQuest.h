@@ -55,7 +55,7 @@ class EQZoneMap;
 struct AreaTrigger;
 struct BuildValuesCachePosPointers;
 
-#define EQ_MOD_VERSION                              141
+#define EQ_MOD_VERSION                              142
 
 // Worn item focus types.  Values must match ItemFocusEffect.cs in the converter
 #define EQ_ITEM_FOCUS_TYPE_DAMAGE                   1
@@ -282,6 +282,20 @@ struct BuildValuesCachePosPointers;
 #define EQ_FACTION_ALIGNMENT_NEUTRAL                1
 #define EQ_FACTION_ALIGNMENT_GOOD                   2
 #define EQ_FACTION_ALIGNMENT_EVIL                   3
+#define EQ_PLAYER_CREATE_DATA_VERSION               2
+#define EQ_PLAYER_CREATE_DATA_SIZE                  9
+#define EQ_CHARACTER_ORIGIN_SIZE                    8 // Per character in the character list's block
+#define EQ_PLAYABLE_RACE_MASK                       1791 // Every WoW race a player can be
+#define EQ_RACE_VAH_SHIR                            130
+#define EQ_RACE_TROLL                               9
+#define EQ_RACE_OGRE                                10
+#define EQ_ILLUSION_HAIR_STYLE_LUCLIN_FIRST         4 // Mirror data hair style: 0 is the bare head, 1-3 the helmed heads, these are a Luclin model's hair
+#define EQ_ILLUSION_HAIR_STYLE_LUCLIN_LAST          7
+#define EQ_ILLUSION_HAIR_COLOR_LAST                 24 // 0 is the default, then 1 + EQ hair color
+#define EQ_ILLUSION_FACIAL_HAIR_LUCLIN_FIRST        2 // Below this is no beard.  2 + beard (0-4) + 5 * the beard's color (0 the default, 1 + EQ hair color)
+#define EQ_ILLUSION_FACIAL_HAIR_LUCLIN_LAST         126
+#define EQ_ILLUSION_FACE_HEAD_VARIANT_STEP          10 // Face is head variant * 10 + face, as EQ keeps it (the Barbarian wode, the Erudite heads)
+#define EQ_ILLUSION_EYE_COLOR_LAST                  9 // Eye color rides the skin byte: EQ's eye color 1-10
 
 #define EQ_BARDSONGAURATARGET_ENEMYAREA             1
 #define EQ_BARDSONGAURATARGET_FRIENDLYPARTY         2
@@ -1291,6 +1305,27 @@ class EverQuestPlayerStartOptionState : public DataMap::Base
 {
 public:
     uint8 StartOption = 0;
+    uint16 EQRaceID = 0;
+    uint8 EQStartChoice = 0;
+    uint8 EQStartSecondClass = 0;
+    uint8 EQHairStyle = 0;
+    uint8 EQHairColor = 0;
+    uint8 EQFacialHair = 0;
+    uint8 EQEyeColor = 0;
+};
+
+// What the EverQuest character creation page adds to the end of the create, race change and faction change packets
+class EverQuestPlayerCreateData
+{
+public:
+    uint8 EQRaceID = 0;
+    uint8 StartChoice = 0;
+    uint8 SecondClass = 0;
+    uint8 Face = 0;
+    uint8 HairStyle = 0; // These four are the character bytes the illusion character's mirror data sends
+    uint8 HairColor = 0;
+    uint8 FacialHair = 0;
+    uint8 EyeColor = 0; // The skin byte
 };
 
 class EverQuestPlayerClassAuraState : public DataMap::Base
@@ -1370,6 +1405,7 @@ public:
     uint8 StartOption = 0;
     uint8 DefaultSecondClass = 0;
     uint32 ExtraStartItemID = 0;
+    uint8 Alignment = EQ_FACTION_ALIGNMENT_NONE; // Only for a start from the EverQuest character creation page, which goes by EQ race
 };
 
 class EverQuestQuestCompletionReputation
@@ -2252,6 +2288,8 @@ public:
     unordered_map<uint32, EverQuestPet> PetDataByCreatureTemplateID;
     unordered_map<uint8, unordered_map<uint8, EverQuestPlayerCreateInfo>> PlayerCreateInfoByRaceIDThenClassID;
     unordered_map<uint32, EverQuestPlayerCreateInfo> PlayerCreateInfoStartOptionsByKey;
+    unordered_map<uint32, EverQuestPlayerCreateInfo> EQRaceStartsByKey; // (EQ race, EQ class, start choice), filled at startup and only read after
+    unordered_map<uint32, uint32> EQRaceIDsByGuiseItemID; // Filled at startup and only read after
     unordered_map<uint8, list<uint32>> PlayerAutoLearnSkillsByEQClassID;
     unordered_map<uint8, list<EverQuestAutoLearnSpell>> PlayerAutoLearnSpellsByClassID;
     unordered_map<uint8, vector<uint32>> PlayerClassStartItemWOWIDsByEQClassID;
@@ -2703,6 +2741,7 @@ public:
     void LoadPetData();
     void LoadPetSilentDisplayData();
     void LoadWarderLookData();
+    void LoadEQRaceStartData();
     void ApplyWarderLookToPet(Pet* pet);
     void RefreshPetScalingFromOwner(Pet* pet);
     void RemoveInvalidPetSilentDisplays();
@@ -2725,6 +2764,20 @@ public:
     const EverQuestPlayerCreateInfo& GetPlayerCreateInfoForPlayer(Player* player);
     uint32 GetPlayerCreateInfoStartOptionKey(uint8 raceID, uint8 classID, uint8 startOption);
     uint8 GetPlayerStartOption(Player* player);
+    EverQuestPlayerStartOptionState GetPlayerOriginState(Player* player);
+    uint32 GetEQRaceStartKey(uint32 eqRaceID, uint8 eqClassID, uint8 startChoice) const;
+    bool ReadPlayerCreateData(std::vector<uint8> const& modData, EverQuestPlayerCreateData& createDataOut) const;
+    void ValidatePlayerCreateLook(uint32 eqRaceID, uint8 gender, EverQuestPlayerCreateData& createData);
+    bool SetEQRaceStartForNewPlayer(Player* player, EverQuestPlayerCreateData createData);
+    void HandleCharacterFactionOrRaceChange(ObjectGuid guid, bool factionChange, std::vector<uint8> const& modData);
+    bool HandleCombinerItemUse(Player* player, Item* item, SpellCastTargets const& targets, uint8 castCount, uint32 glyphIndex);
+    void AddCharacterOriginsToEnumPacket(std::vector<ObjectGuid> const& guids, WorldPacket& data);
+    uint32 GetEQRaceIDForGuiseItem(uint32 guiseItemID) const;
+    uint32 GetRaceMaskForAlignment(uint8 alignment) const;
+    int32 GetBaseReputationForMasks(FactionEntry const* factionEntry, uint32 raceMask, uint32 classMask) const;
+    void ApplyEQOriginFactionStandingForPlayer(Player* player);
+    void GetIllusionLookBytesForPlayer(Player* player, uint8 chrRaceID, uint8& hairStyleOut, uint8& hairColorOut, uint8& facialHairOut, uint8& skinOut);
+    bool IsIllusionFaceValid(EverQuestIllusionCharacter const* illusionCharacter, uint32 faceID) const;
     void LoadAutoLearnSkillsData();
     const list<uint32>& GetAutoLearnSkillsForClass(uint8 classID);
     void LoadAutoLearnSpellsData();
