@@ -390,8 +390,6 @@ bool EverQuestMod::LoadConfigurationSystemDataFromDB()
                 ConfigSystemCarriedLightSpellIDStart = (uint32)atoi(value.c_str());
             else if (key == "ClientDataVersion")
                 ConfigSystemClientDataVersion = (uint32)atoi(value.c_str());
-            else if (key == "ClientDataVersionMismatchMessage")
-                ConfigSystemClientDataVersionMismatchMessage = value;
             else if (key == "MapDBCIDMin")
                 ConfigSystemMapDBCIDMin = (uint32)atoi(value.c_str());
             else if (key == "MapDBCIDMax")
@@ -465,8 +463,6 @@ void EverQuestMod::LoadConfigurationFile()
 
     // Client Version Check
     ConfigClientVersionCheckEnabled = sConfigMgr->GetOption<bool>("EverQuest.ClientVersionCheck.Enabled", false);
-    ConfigClientVersionCheckGraceTimeInSeconds = sConfigMgr->GetOption<uint32>("EverQuest.ClientVersionCheck.GraceTimeInSeconds", 30);
-    ConfigClientVersionCheckKickDelayInSeconds = sConfigMgr->GetOption<uint32>("EverQuest.ClientVersionCheck.KickDelayInSeconds", 10);
 
     // Spell
     ConfigSpellTalentAlignmentEnabled = sConfigMgr->GetOption<bool>("EverQuest.Spell.TalentAlignmentEnabled", true);
@@ -3325,6 +3321,21 @@ void EverQuestMod::LoadItemTemplateData()
                 CarriedLightTypesByItemTemplateID[everQuestItemTemplate.ItemTemplateEntryID] = lightType;
         } while (queryResult->NextRow());
     }
+
+    // Warcraft's own torches and lanterns are light sources too (data/sql/db-world/updates), and they are nothing else to this module
+    QueryResult warcraftLightResult = WorldDatabase.Query("SELECT ItemTemplateID, LightType FROM mod_everquest_warcraft_light_item");
+    if (warcraftLightResult)
+    {
+        do
+        {
+            Field* fields = warcraftLightResult->Fetch();
+            uint8 lightType = fields[1].Get<uint8>();
+            if (lightType != 0 && lightType <= EQ_CARRIED_LIGHT_TYPE_COUNT)
+                CarriedLightTypesByItemTemplateID[fields[0].Get<uint32>()] = lightType;
+        } while (warcraftLightResult->NextRow());
+    }
+
+    Player::SetLightSourceItemCheck([](uint32 itemEntry) { return EverQuest->GetCarriedLightTypeForItemTemplateID(itemEntry) != 0; });
 }
 
 void EverQuestMod::LoadItemFocusDataFromDB()
@@ -15070,94 +15081,25 @@ void EverQuestMod::ApplyTimedPortToPlayer(Player* player, const EverQuestTimedPo
         player->DestroyItemCount(timedPort.RequiredItemTemplateID, 1, true);
 }
 
-void EverQuestMod::BeginClientVersionCheckForPlayer(Player* player)
+void EverQuestMod::UpdateRequiredClientDataVersion()
 {
-    if (ConfigClientVersionCheckEnabled == false || ConfigSystemClientDataVersion == 0)
-        return;
-    if (player == nullptr || player->GetSession() == nullptr)
-        return;
+    bool isCheckActive = IsEnabled == true && ConfigClientVersionCheckEnabled == true;
+    RequiredClientDataVersion.store(isCheckActive == true ? ConfigSystemClientDataVersion : 0);
+}
+
+// Called on a network thread, so it touches nothing but its arguments and the atomic
+bool EverQuestMod::IsClientDataVersionAllowed(AccountTypes security, uint32 clientDataVersion, uint32& expectedClientDataVersion) const
+{
+    uint32 requiredVersion = RequiredClientDataVersion.load();
+    if (requiredVersion == 0 || clientDataVersion == requiredVersion)
+        return true;
 
     // GM accounts are exempt so work-in-progress clients can still log in
-    if (player->GetSession()->GetSecurity() > SEC_PLAYER)
-        return;
+    if (security > SEC_PLAYER)
+        return true;
 
-    EverQuestPlayerClientVersionCheckState checkState;
-    checkState.MSUntilDeadline = (int32)(ConfigClientVersionCheckGraceTimeInSeconds * IN_MILLISECONDS);
-    checkState.FailedPendingKick = false;
-    PendingClientVersionChecksByPlayerGUID[player->GetGUID()] = checkState;
-}
-
-void EverQuestMod::HandleClientVersionReportForPlayer(Player* player, uint32 reportedVersion)
-{
-    if (ConfigClientVersionCheckEnabled == false || ConfigSystemClientDataVersion == 0)
-        return;
-    if (player == nullptr || player->GetSession() == nullptr)
-        return;
-
-    if (reportedVersion == ConfigSystemClientDataVersion)
-    {
-        PendingClientVersionChecksByPlayerGUID.erase(player->GetGUID());
-        return;
-    }
-
-    // No pending entry means the player is exempt or already resolved, and an already-failed check keeps its kick countdown
-    unordered_map<ObjectGuid, EverQuestPlayerClientVersionCheckState>::iterator checkIter = PendingClientVersionChecksByPlayerGUID.find(player->GetGUID());
-    if (checkIter == PendingClientVersionChecksByPlayerGUID.end())
-        return;
-    if (checkIter->second.FailedPendingKick == true)
-        return;
-    FailClientVersionCheckForPlayer(player, checkIter->second);
-}
-
-void EverQuestMod::FailClientVersionCheckForPlayer(Player* player, EverQuestPlayerClientVersionCheckState& checkState)
-{
-    checkState.FailedPendingKick = true;
-    checkState.MSUntilDeadline = (int32)(ConfigClientVersionCheckKickDelayInSeconds * IN_MILLISECONDS);
-    ChatHandler(player->GetSession()).PSendSysMessage("|cffFF0000{}|r", ConfigSystemClientDataVersionMismatchMessage);
-    ChatHandler(player->GetSession()).SendNotification(ConfigSystemClientDataVersionMismatchMessage);
-}
-
-void EverQuestMod::UpdateClientVersionChecks(uint32 diff)
-{
-    if (ConfigClientVersionCheckEnabled == false || ConfigSystemClientDataVersion == 0)
-        return;
-    if (PendingClientVersionChecksByPlayerGUID.empty() == true)
-        return;
-
-    vector<ObjectGuid> playerGUIDsToKick;
-    for (unordered_map<ObjectGuid, EverQuestPlayerClientVersionCheckState>::iterator checkIter = PendingClientVersionChecksByPlayerGUID.begin(); checkIter != PendingClientVersionChecksByPlayerGUID.end(); ++checkIter)
-    {
-        checkIter->second.MSUntilDeadline -= (int32)diff;
-        if (checkIter->second.MSUntilDeadline > 0)
-            continue;
-
-        if (checkIter->second.FailedPendingKick == false)
-        {
-            // Grace time ran out with no version report
-            Player* player = ObjectAccessor::FindConnectedPlayer(checkIter->first);
-            if (player == nullptr || player->GetSession() == nullptr)
-            {
-                playerGUIDsToKick.push_back(checkIter->first);
-                continue;
-            }
-            FailClientVersionCheckForPlayer(player, checkIter->second);
-        }
-        else
-            playerGUIDsToKick.push_back(checkIter->first);
-    }
-
-    for (ObjectGuid& playerGUID : playerGUIDsToKick)
-    {
-        PendingClientVersionChecksByPlayerGUID.erase(playerGUID);
-        Player* player = ObjectAccessor::FindConnectedPlayer(playerGUID);
-        if (player != nullptr && player->GetSession() != nullptr)
-            player->GetSession()->KickPlayer("EverQuest client data version mismatch");
-    }
-}
-
-void EverQuestMod::ClearClientVersionCheckForPlayer(ObjectGuid playerGUID)
-{
-    PendingClientVersionChecksByPlayerGUID.erase(playerGUID);
+    expectedClientDataVersion = requiredVersion;
+    return false;
 }
 
 void EverQuestMod::LoadFactionData()
@@ -21448,10 +21390,10 @@ void EverQuestMod::MoveEquipToModInventoryTable(Player* player, CharacterDatabas
 {
     uint8 curEQClass = GetCurrentSecondEQClassForPlayer(player);
 
-    transaction->Append("DELETE FROM `mod_everquest_character_class_inventory` WHERE guid = {} AND eqclass = {} AND `bag` = 0 AND `slot` <= 18;", player->GetGUID().GetCounter(), curEQClass);
+    transaction->Append("DELETE FROM `mod_everquest_character_class_inventory` WHERE guid = {} AND eqclass = {} AND `bag` = 0 AND (`slot` <= 18 OR `slot` = {});", player->GetGUID().GetCounter(), curEQClass, LIGHT_SOURCE_SLOT);
     transaction->Append("DELETE storage FROM `mod_everquest_character_class_inventory` storage INNER JOIN `character_inventory` live ON live.`item` = storage.`item` WHERE live.`guid` = {}", player->GetGUID().GetCounter());
-    transaction->Append("INSERT INTO `mod_everquest_character_class_inventory` (`guid`, `class`, `eqclass`, `bag`, `slot`, `item`) SELECT `guid`, {}, {}, `bag`, `slot`, `item` FROM character_inventory WHERE guid = {} AND `bag` = 0 AND `slot` <= 18", player->getClass(), curEQClass, player->GetGUID().GetCounter());
-    transaction->Append("DELETE FROM `character_inventory` WHERE guid = {} AND `bag` = 0 AND `slot` <= 18", player->GetGUID().GetCounter());
+    transaction->Append("INSERT INTO `mod_everquest_character_class_inventory` (`guid`, `class`, `eqclass`, `bag`, `slot`, `item`) SELECT `guid`, {}, {}, `bag`, `slot`, `item` FROM character_inventory WHERE guid = {} AND `bag` = 0 AND (`slot` <= 18 OR `slot` = {})", player->getClass(), curEQClass, player->GetGUID().GetCounter(), LIGHT_SOURCE_SLOT);
+    transaction->Append("DELETE FROM `character_inventory` WHERE guid = {} AND `bag` = 0 AND (`slot` <= 18 OR `slot` = {})", player->GetGUID().GetCounter(), LIGHT_SOURCE_SLOT);
 }
 
 void EverQuestMod::MoveQuestDataToModQuestTables(Player* player, CharacterDatabaseTransaction& transaction)
@@ -21798,6 +21740,7 @@ bool EverQuestMod::PerformPlayerDelete(ObjectGuid guid)
     transaction->Append("DELETE FROM mod_everquest_characters WHERE guid = {}", playerGUID);
     transaction->Append("DELETE FROM mod_everquest_character_class_talent WHERE guid = {}", playerGUID);
     transaction->Append("DELETE FROM mod_everquest_character_class_aura WHERE guid = {}", playerGUID);
+    transaction->Append("DELETE FROM mod_everquest_character_light_source WHERE guid = {}", playerGUID);
     transaction->Append("DELETE FROM mod_everquest_character_class_spell WHERE guid = {}", playerGUID);
     transaction->Append("DELETE FROM mod_everquest_character_class_skills WHERE guid = {}", playerGUID);
     transaction->Append("DELETE FROM mod_everquest_character_class_action WHERE guid = {}", playerGUID);
@@ -21936,6 +21879,12 @@ void EverQuestMod::SendExpPoolAddonMessageToPlayer(Player* player, uint32 gained
     WorldPacket data;
     ChatHandler::BuildChatPacket(data, CHAT_MSG_SYSTEM, LANG_ADDON, nullptr, nullptr, addonMessage);
     player->SendDirectMessage(&data);
+}
+
+// The slots of a class's stored equipment: its equipment and its light source slot
+static bool IsStorageEquipSlot(uint8 equipSlot)
+{
+    return equipSlot <= EQUIPMENT_SLOT_TABARD || equipSlot == LIGHT_SOURCE_SLOT;
 }
 
 static bool CanInventoryTypeGoIntoEquipSlot(uint32 inventoryType, uint8 equipSlot)
@@ -22174,6 +22123,14 @@ void EverQuestMod::WaitForPendingEquipmentStorageCommitForPlayer(ObjectGuid play
     LOG_ERROR("module.EverQuest", "EverQuestMod Timed out waiting on a pending equipment storage commit for player guid {}", playerGUID.GetCounter());
 }
 
+// Whether a stored item may sit in a slot: by what it is worn on, or, in the light source slot, by being a light source
+bool EverQuestMod::CanItemGoIntoStorageSlot(ItemTemplate const* itemTemplate, uint8 equipSlot)
+{
+    if (equipSlot == LIGHT_SOURCE_SLOT)
+        return GetCarriedLightTypeForItemTemplateID(itemTemplate->ItemId) != 0;
+    return CanInventoryTypeGoIntoEquipSlot(itemTemplate->InventoryType, equipSlot);
+}
+
 bool EverQuestMod::EquipItemIntoSecondaryClassStorage(Player* player, uint8 eqClassID, uint8 clientBagID, uint8 clientSlotID, uint8 equipSlot, uint32 expectedItemTemplateID, std::string& errorTextOut)
 {
     if (IsEQClassValidEquipmentStorageTargetForPlayer(player, eqClassID) == false)
@@ -22186,7 +22143,7 @@ bool EverQuestMod::EquipItemIntoSecondaryClassStorage(Player* player, uint8 eqCl
         errorTextOut = "Your previous equipment change is still processing, try again in a moment.";
         return false;
     }
-    if (equipSlot > EQUIPMENT_SLOT_TABARD)
+    if (IsStorageEquipSlot(equipSlot) == false)
     {
         errorTextOut = "That is not a valid equipment slot.";
         return false;
@@ -22213,18 +22170,19 @@ bool EverQuestMod::EquipItemIntoSecondaryClassStorage(Player* player, uint8 eqCl
         return false;
     }
     ItemTemplate const* itemTemplate = item->GetTemplate();
-    if (CanInventoryTypeGoIntoEquipSlot(itemTemplate->InventoryType, equipSlot) == false)
+    if (CanItemGoIntoStorageSlot(itemTemplate, equipSlot) == false)
     {
         errorTextOut = "That item cannot go into that equipment slot.";
         return false;
     }
-    if (IsItemEQClassAllowedForPlayerSecondaryClass(player, eqClassID, item->GetEntry()) == false)
+    // Anyone can carry a light: only worn gear answers to class and level
+    if (equipSlot != LIGHT_SOURCE_SLOT && IsItemEQClassAllowedForPlayerSecondaryClass(player, eqClassID, item->GetEntry()) == false)
     {
         errorTextOut = "That item cannot be used by a " + GetEQClassStringFromID(eqClassID) + ".";
         return false;
     }
     uint8 secondaryClassLevel = 0;
-    if (IsItemRequiredLevelMetByPlayerSecondaryClass(player, eqClassID, itemTemplate, secondaryClassLevel) == false)
+    if (equipSlot != LIGHT_SOURCE_SLOT && IsItemRequiredLevelMetByPlayerSecondaryClass(player, eqClassID, itemTemplate, secondaryClassLevel) == false)
     {
         errorTextOut = GetSecondaryClassRequiredLevelErrorText(eqClassID, secondaryClassLevel, itemTemplate->RequiredLevel, "That item");
         return false;
@@ -22343,7 +22301,7 @@ bool EverQuestMod::RemoveItemFromSecondaryClassStorage(Player* player, uint8 eqC
         errorTextOut = "Your previous equipment change is still processing, try again in a moment.";
         return false;
     }
-    if (equipSlot > EQUIPMENT_SLOT_TABARD)
+    if (IsStorageEquipSlot(equipSlot) == false)
     {
         errorTextOut = "That is not a valid equipment slot.";
         return false;
@@ -22423,7 +22381,7 @@ bool EverQuestMod::MoveItemWithinSecondaryClassStorage(Player* player, uint8 eqC
         errorTextOut = "Your previous equipment change is still processing, try again in a moment.";
         return false;
     }
-    if (fromEquipSlot > EQUIPMENT_SLOT_TABARD || toEquipSlot > EQUIPMENT_SLOT_TABARD || fromEquipSlot == toEquipSlot)
+    if (IsStorageEquipSlot(fromEquipSlot) == false || IsStorageEquipSlot(toEquipSlot) == false || fromEquipSlot == toEquipSlot)
     {
         errorTextOut = "That is not a valid equipment slot.";
         return false;
@@ -22459,12 +22417,12 @@ bool EverQuestMod::MoveItemWithinSecondaryClassStorage(Player* player, uint8 eqC
         errorTextOut = "There is no stored item in that slot.";
         return false;
     }
-    if (CanInventoryTypeGoIntoEquipSlot(fromItemTemplate->InventoryType, toEquipSlot) == false)
+    if (CanItemGoIntoStorageSlot(fromItemTemplate, toEquipSlot) == false)
     {
         errorTextOut = "That item cannot go into that equipment slot.";
         return false;
     }
-    if (toItemGUIDCounter != 0 && (toItemTemplate == nullptr || CanInventoryTypeGoIntoEquipSlot(toItemTemplate->InventoryType, fromEquipSlot) == false))
+    if (toItemGUIDCounter != 0 && (toItemTemplate == nullptr || CanItemGoIntoStorageSlot(toItemTemplate, fromEquipSlot) == false))
     {
         errorTextOut = "The stored items cannot swap slots.";
         return false;
@@ -22520,7 +22478,7 @@ bool EverQuestMod::SwapSecondaryClassStorageItemWithLiveEquipment(Player* player
         errorTextOut = "Your previous equipment change is still processing, try again in a moment.";
         return false;
     }
-    if (storageEquipSlot > EQUIPMENT_SLOT_TABARD || liveEquipSlot > EQUIPMENT_SLOT_TABARD)
+    if (IsStorageEquipSlot(storageEquipSlot) == false || IsStorageEquipSlot(liveEquipSlot) == false)
     {
         errorTextOut = "That is not a valid equipment slot.";
         return false;
@@ -22552,20 +22510,20 @@ bool EverQuestMod::SwapSecondaryClassStorageItemWithLiveEquipment(Player* player
     if (liveItem != nullptr)
     {
         ItemTemplate const* liveItemTemplate = liveItem->GetTemplate();
-        if (CanInventoryTypeGoIntoEquipSlot(liveItemTemplate->InventoryType, storageEquipSlot) == false)
+        if (CanItemGoIntoStorageSlot(liveItemTemplate, storageEquipSlot) == false)
         {
             delete storedItem;
             errorTextOut = "Your equipped item cannot be stored in that slot.";
             return false;
         }
-        if (IsItemEQClassAllowedForPlayerSecondaryClass(player, eqClassID, liveItem->GetEntry()) == false)
+        if (storageEquipSlot != LIGHT_SOURCE_SLOT && IsItemEQClassAllowedForPlayerSecondaryClass(player, eqClassID, liveItem->GetEntry()) == false)
         {
             delete storedItem;
             errorTextOut = "Your equipped item cannot be used by a " + GetEQClassStringFromID(eqClassID) + ".";
             return false;
         }
         uint8 secondaryClassLevel = 0;
-        if (IsItemRequiredLevelMetByPlayerSecondaryClass(player, eqClassID, liveItemTemplate, secondaryClassLevel) == false)
+        if (storageEquipSlot != LIGHT_SOURCE_SLOT && IsItemRequiredLevelMetByPlayerSecondaryClass(player, eqClassID, liveItemTemplate, secondaryClassLevel) == false)
         {
             delete storedItem;
             errorTextOut = GetSecondaryClassRequiredLevelErrorText(eqClassID, secondaryClassLevel, liveItemTemplate->RequiredLevel, "Your equipped item");
@@ -22600,9 +22558,13 @@ bool EverQuestMod::SwapSecondaryClassStorageItemWithLiveEquipment(Player* player
     }
 
     uint16 equipDestination = 0;
+    ItemPosCountVec lightSlotDestination;
     if (storedItem != nullptr)
     {
-        InventoryResult equipResult = player->CanEquipItem(liveEquipSlot, equipDestination, storedItem, liveItem != nullptr);
+        // The light source slot is storage: its item is stored there, not equipped
+        InventoryResult equipResult = liveEquipSlot == LIGHT_SOURCE_SLOT
+            ? player->CanStoreItem(INVENTORY_SLOT_BAG_0, LIGHT_SOURCE_SLOT, lightSlotDestination, storedItem, liveItem != nullptr)
+            : player->CanEquipItem(liveEquipSlot, equipDestination, storedItem, liveItem != nullptr);
         if (equipResult != EQUIP_ERR_OK)
         {
             player->SendEquipError(equipResult, storedItem, nullptr);
@@ -22636,7 +22598,10 @@ bool EverQuestMod::SwapSecondaryClassStorageItemWithLiveEquipment(Player* player
     if (storedItem != nullptr)
     {
         storedItem->SetState(ITEM_UNCHANGED);
-        player->EquipItem(equipDestination, storedItem, true);
+        if (liveEquipSlot == LIGHT_SOURCE_SLOT)
+            player->MoveItemToInventory(lightSlotDestination, storedItem, true);
+        else
+            player->EquipItem(equipDestination, storedItem, true);
     }
 
     player->SaveInventoryAndGoldToDB(transaction);
@@ -22658,7 +22623,7 @@ void EverQuestMod::SendClassEquipmentAddonMessageToPlayer(Player* player, uint8 
     std::ostringstream payload;
     payload << "H|" << uint32(eqClassID) << "|" << GetEQClassStringFromID(eqClassID);
 
-    QueryResult queryResult = CharacterDatabase.Query("SELECT CI.`slot`, II.`itemEntry`, II.`randomPropertyId`, II.`enchantments` FROM `mod_everquest_character_class_inventory` CI INNER JOIN `item_instance` II ON II.guid = CI.item WHERE CI.`guid` = {} AND CI.`eqclass` = {} AND CI.`bag` = 0 AND CI.`slot` <= 18 ORDER BY CI.`slot`", player->GetGUID().GetCounter(), eqClassID);
+    QueryResult queryResult = CharacterDatabase.Query("SELECT CI.`slot`, II.`itemEntry`, II.`randomPropertyId`, II.`enchantments` FROM `mod_everquest_character_class_inventory` CI INNER JOIN `item_instance` II ON II.guid = CI.item WHERE CI.`guid` = {} AND CI.`eqclass` = {} AND CI.`bag` = 0 AND (CI.`slot` <= 18 OR CI.`slot` = {}) ORDER BY CI.`slot`", player->GetGUID().GetCounter(), eqClassID, LIGHT_SOURCE_SLOT);
     if (queryResult)
     {
         do

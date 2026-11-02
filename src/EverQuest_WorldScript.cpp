@@ -29,6 +29,14 @@ public:
 
     void OnAfterConfigLoad(bool reload) override
     {
+        LoadConfigurationAndData(reload);
+
+        // Last, since it depends on whether the module came up
+        EverQuest->UpdateRequiredClientDataVersion();
+    }
+
+    void LoadConfigurationAndData(bool reload)
+    {
         EverQuest->LoadConfigurationFile();
         if (EverQuest->IsEnabled == false)
             return;
@@ -103,7 +111,6 @@ public:
 
         EverQuest->UpdateRestrictedMapPlayerCheck(diff);
         EverQuest->UpdateTimedPorts(diff);
-        EverQuest->UpdateClientVersionChecks(diff);
         EverQuest->ProcessPendingEquipmentStorageTransactions();
         EverQuest->ProcessPendingGateReturns();
         EverQuest->ProcessPendingReactionSpawnCreations();
