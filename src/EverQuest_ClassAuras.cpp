@@ -24,6 +24,7 @@
 #include "Pet.h"
 #include "Player.h"
 #include "Random.h"
+#include "ScriptMgr.h"
 #include "Spell.h"
 #include "SpellAuras.h"
 #include "SpellAuraEffects.h"
@@ -203,6 +204,10 @@ void EverQuestMod::RefreshClassAurasForPlayer(Player* player)
 {
     if (player == nullptr || IsClassAuraSystemEnabled() == false)
         return;
+
+    // A game identity form (MergedWorlds' Ragnarok Online form) puts the character's class away, auras included
+    if (sScriptMgr->OnPlayerCanUseClassAbilities(player) == false)
+        return;
     for (size_t i = 0; i < EQ_CLASSAURA_CLASS_COUNT; ++i)
     {
         uint32 passiveSpellID = GetClassAuraSpellID(EQ_CLASSAURA_CLASS_PASSIVE_TYPES[i]);
@@ -236,6 +241,8 @@ void EverQuestMod::UpdateClassAurasForPlayer(Player* player, uint32 diffInMS)
         return;
 
     if (IsClassAuraSystemEnabled() == false)
+        return;
+    if (sScriptMgr->OnPlayerCanUseClassAbilities(player) == false)
         return;
     EverQuestPlayerClassAuraState* state = GetClassAuraStateForPlayer(player);
     state->GearRefreshTimerMS += diffInMS;
@@ -1825,7 +1832,7 @@ void EverQuestMod::ApplyClassAuraCastAdjustmentsOnCheckCast(Player* player, Spel
     uint32 helperSpellID = GetClassAuraSpellID(EQ_CLASSAURA_SPELL_CAST_SPEED_HELPER);
     if (helperSpellID != 0 && player->HasAura(helperSpellID) == true)
         player->RemoveAurasDueToSpell(helperSpellID);
-    if (IsClassAuraSystemEnabled() == false)
+    if (IsClassAuraSystemEnabled() == false || sScriptMgr->OnPlayerCanUseClassAbilities(player) == false)
         return;
     EverQuestPlayerClassAuraState* state = GetClassAuraStateForPlayer(player);
     state->PendingCastAdjustSpellID = 0;
