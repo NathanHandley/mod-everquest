@@ -55,7 +55,7 @@ class EQZoneMap;
 struct AreaTrigger;
 struct BuildValuesCachePosPointers;
 
-#define EQ_MOD_VERSION                              136
+#define EQ_MOD_VERSION                              137
 
 #define EQ_MOVEMENT_CAST_SNARE_DURATION_BUFFER_IN_MS 2000 // How much longer than the remaining cast time the casting slow is given, so a pushed-back cast keeps it
 
@@ -933,13 +933,6 @@ public:
     float Z = 0.0f;
 };
 
-class EverQuestPlayerClientVersionCheckState
-{
-public:
-    int32 MSUntilDeadline = 0;
-    bool FailedPendingKick = false;
-};
-
 class EverQuestCreatureEmote
 {
 public:
@@ -1089,11 +1082,16 @@ public:
     uint64 CharacterGearSignature = 0;
 };
 
+// The player picked no light at all: it stays that way until they pick one
+constexpr uint32 EQ_CARRIED_LIGHT_CHOICE_NONE = 0xFFFFFFFF;
+
 class EverQuestPlayerCarriedLightState
 {
 public:
     uint32 RefreshTimerMS = EQ_CARRIED_LIGHT_REFRESH_TIME_IN_MS; // Starts due, so the first update after tracking begins checks right away
     vector<ObjectGuid> PendingCorpseRefreshGUIDs; // Corpses whose light this player's next update re-checks, after loot left them some way other than a plain loot
+    uint32 ChosenLightItemTemplateID = 0; // The light the player picked from the character sheet, 0 for no choice, EQ_CARRIED_LIGHT_CHOICE_NONE for no light
+    bool ChosenLightLoaded = false; // The choice was read from the database (the interface asks for it as it starts)
 };
 
 class EverQuestCorpseIllusionRestoreData
@@ -1895,7 +1893,6 @@ public:
     uint32 ConfigSystemCrouchSpellID = 0;
     uint32 ConfigSystemCarriedLightSpellIDStart = 0;
     uint32 ConfigSystemClientDataVersion = 0;
-    string ConfigSystemClientDataVersionMismatchMessage;
     uint32 ConfigSystemFactionGoodClassMask;
     uint32 ConfigSystemFactionEvilClassMask;
     uint32 ConfigSystemFactionGoodRaceMask;
@@ -1909,8 +1906,6 @@ public:
     uint32 ConfigDeathFallbackGraveyardID = 0;
     bool ConfigLoginReturnCharactersToNorrath = true;
     bool ConfigClientVersionCheckEnabled = false;
-    uint32 ConfigClientVersionCheckGraceTimeInSeconds = 30;
-    uint32 ConfigClientVersionCheckKickDelayInSeconds = 10;
     bool ConfigSpellTalentAlignmentEnabled;
     bool ConfigQuestGrantExpOnRepeatCompletion;
     uint32 ConfigEventSpawnMaxLifetimeInSeconds = 1800;
@@ -2107,7 +2102,9 @@ public:
     std::mutex CycleSpawnCheckTimerMutex;
     unordered_map<uint64, int32> CycleSpawnCheckTimerInMSByMapInstanceKey;
     uint32 RestrictedMapCheckTimerInMS = 0;
-    unordered_map<ObjectGuid, EverQuestPlayerClientVersionCheckState> PendingClientVersionChecksByPlayerGUID;
+    // The client data version an account has to log in with, 0 when the check is off.  Logins read this on a network thread, while a live
+    // ".reload config" rewrites the config values it comes from on the world thread, so it is its own atomic copy
+    std::atomic<uint32> RequiredClientDataVersion{ 0 };
     unordered_map<ObjectGuid, deque<uint32>> PlayerCasterConcurrentBardSongs;
     unordered_set<ObjectGuid> PlayersWithAuctionUsableFilterActive;
     unordered_map<uint32, EverQuestAuctionRealmFilter> AuctionRealmFiltersByAccountID;
@@ -2493,11 +2490,15 @@ public:
     bool IsCarriedLightSpell(uint32 spellID);
     void ValidateCarriedLightSpells();
     uint8 GetCarriedLightTypeForItemTemplateID(uint32 itemTemplateID);
+    bool CanItemGoIntoStorageSlot(ItemTemplate const* itemTemplate, uint8 equipSlot);
     uint8 GetCarriedLightLevelForLightType(uint8 lightType);
     uint8 CalculateCarriedLightTypeForPlayer(Player* player);
     uint8 CalculateCarriedLightTypeForItemTemplateIDs(const vector<uint32>& itemTemplateIDs);
     void ApplyCarriedLightAuraForUnit(Unit* unit, uint8 lightType);
     void RefreshCarriedLightForPlayer(Player* player);
+    bool IsCarriedLightItemInEffectForPlayer(Player* player, uint32 itemTemplateID);
+    bool ChooseCarriedLightForPlayer(Player* player, uint32 itemTemplateID);
+    void SendCarriedLightDataToPlayer(Player* player);
     void RefreshCarriedLightForCreatureFromPreloadedLoot(Creature* creature);
     void RefreshCarriedLightForCreatureCorpse(Creature* creature);
     void QueueCarriedLightRefreshForPlayer(Player* player);
@@ -2741,11 +2742,8 @@ public:
     bool IsMapRestrictedForPlayers(uint32 mapID);
     bool RelocatePlayerOutOfRestrictedMap(Player* player);
     void UpdateRestrictedMapPlayerCheck(uint32 diff);
-    void BeginClientVersionCheckForPlayer(Player* player);
-    void HandleClientVersionReportForPlayer(Player* player, uint32 reportedVersion);
-    void FailClientVersionCheckForPlayer(Player* player, EverQuestPlayerClientVersionCheckState& checkState);
-    void UpdateClientVersionChecks(uint32 diff);
-    void ClearClientVersionCheckForPlayer(ObjectGuid playerGUID);
+    void UpdateRequiredClientDataVersion();
+    bool IsClientDataVersionAllowed(AccountTypes security, uint32 clientDataVersion, uint32& expectedClientDataVersion) const;
     void LoadFactionData();
     void ResolveDefendCombatFactionTemplates();
     void ResolveEQReputationFactions();
