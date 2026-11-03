@@ -55,7 +55,7 @@ class EQZoneMap;
 struct AreaTrigger;
 struct BuildValuesCachePosPointers;
 
-#define EQ_MOD_VERSION                              142
+#define EQ_MOD_VERSION                              143
 
 // Worn item focus types.  Values must match ItemFocusEffect.cs in the converter
 #define EQ_ITEM_FOCUS_TYPE_DAMAGE                   1
@@ -516,7 +516,6 @@ enum EverQuestLossOfControlCategory
 #define EQ_CREATURE_CUSTOMDATA_UNSTICK              "EQUnstick"
 #define EQ_CREATURE_CUSTOMDATA_SOCIALAGGRO          "EQSocialAggro"
 #define EQ_CREATURE_CUSTOMDATA_EMOTE                "EQEmote"
-#define EQ_CREATURE_CUSTOMDATA_MOVEMENTSOUND        "EQMoveSound"
 #define EQ_CREATURE_CUSTOMDATA_KILLSPAWNWATCH       "EQKillSpawnWatch"
 #define EQ_CREATURE_CUSTOMDATA_VULAKLOCK            "EQVulakLock"
 #define EQ_CREATURE_CUSTOMDATA_DEFENDPLAYERWATCH    "EQDefendPlayerWatch"
@@ -558,12 +557,6 @@ enum EverQuestLossOfControlCategory
 // Vulak`Aerr (Temple of Veeshan) spawns perma-rooted and "locked" (unattackable, non-aggro) until every required dragon is dead, matching Velious-era EQ
 #define EQ_VULAK_CREATURE_TEMPLATE_ID               55045
 #define EQ_VULAK_LOCK_RECHECK_MS                    3000
-
-#define EQ_CREATURE_MOVEMENT_GAIT_NONE              0
-#define EQ_CREATURE_MOVEMENT_GAIT_WALK              1
-#define EQ_CREATURE_MOVEMENT_GAIT_RUN               2
-
-#define EQ_CREATURE_MOVEMENT_SOUND_LISTENER_SCAN_MS 250
 
 class EverQuestCreatureOnkillReputation
 {
@@ -1042,31 +1035,6 @@ public:
     bool WasAlive = false;
     bool Unlocked = false;
     uint32 RecheckRemainingMS = 0;
-};
-
-class EverQuestCreatureMovementSound
-{
-public:
-    vector<uint32> WalkPieceSoundEntryIDs;
-    vector<uint32> WalkPieceDurationsMS;
-    vector<uint32> RunPieceSoundEntryIDs;
-    vector<uint32> RunPieceDurationsMS;
-    float MaxHearingDistance = 20.0f;
-};
-
-class EverQuestCreatureMovementSoundListener
-{
-public:
-    uint32 PieceIndex = 0;
-    uint32 ReplayRemainingMS = 0;
-};
-
-class EverQuestCreatureMovementSoundState : public DataMap::Base
-{
-public:
-    uint8 CurGait = EQ_CREATURE_MOVEMENT_GAIT_NONE;
-    uint32 ListenerScanRemainingMS = 0;
-    unordered_map<ObjectGuid, EverQuestCreatureMovementSoundListener> ListenersByGUID;
 };
 
 class EverQuestItemFocus
@@ -2170,7 +2138,6 @@ public:
     bool ConfigPetDisableInitialCreatureAgro;
     bool ConfigCreatureEmotesEnabled;
     bool ConfigCreatureEmotesAmbientEnabled;
-    bool ConfigCreatureMovementSoundsEnabled;
     bool ConfigCreatureWornEffectsHideAuraIcons;
     float ConfigCreatureWorldBossHealthMultiplier;
     float ConfigCreatureWorldBossDamageMultiplier;
@@ -2231,7 +2198,6 @@ public:
     unordered_map<uint32, uint32> OocTimerKillSpawnDurationMSByCreatureTemplateID;
     unordered_map<uint32, vector<ObjectGuid::LowType>> VulakRequiredDragonSpawnIDsByMapID; // Keyed by map ID, since the raid instance copy of the zone has its own dragon spawn rows
     unordered_map<uint32, vector<EverQuestCreatureEmote>> CreatureEmotesByCreatureTemplateID;
-    unordered_map<uint32, EverQuestCreatureMovementSound> CreatureMovementSoundsByDisplayID;
     unordered_map<uint32, uint32> SilentFidgetDisplayIDsByDisplayID;
     unordered_map<uint32, EverQuestDruidFormDisplay> DruidFormDisplaysByFormTypeAndOptionKey; // Key is (formType << 8) | optionID
 
@@ -2392,9 +2358,6 @@ public:
     void SetupCreatureEmoteState(Creature* creature);
     void RemoveCreatureEmoteState(Creature* creature);
     void UpdateCreatureEmotes(Creature* creature, uint32 diff);
-    void LoadCreatureMovementSoundData();
-    void RemoveCreatureMovementSoundState(Creature* creature);
-    void UpdateCreatureMovementSound(Creature* creature, uint32 diff);
     void ProcessKillSpawnsForCreatureEvent(Creature* eventCreature, Unit* otherUnit, uint8 triggerTypeID, uint32 sequenceIndex = 0);
     void ProcessHailKillSpawnsForCreature(Creature* creature, Player* player);
     void UpdateCreatureKillSpawnProximity(Creature* creature, EverQuestCreatureKillSpawnWatchState* state, uint32 diff);
