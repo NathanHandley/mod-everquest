@@ -55,7 +55,9 @@ class EQZoneMap;
 struct AreaTrigger;
 struct BuildValuesCachePosPointers;
 
-#define EQ_MOD_VERSION                              143
+#define EQ_MOD_VERSION                              144
+
+#define EQ_VENDOR_PRICE_MOD_SCALE                   10000 // A greedy vendor's price changes are in ten-thousandths (converter EQMerchantPricing)
 
 // Worn item focus types.  Values must match ItemFocusEffect.cs in the converter
 #define EQ_ITEM_FOCUS_TYPE_DAMAGE                   1
@@ -654,6 +656,8 @@ public:
     uint32 GossipHelloAchievementID = 0;
     uint32 DefaultHeldMainhandItemID = 0; // Shown when the loot gives nothing to hold (EQ's d_melee_texture weapon models)
     uint32 DefaultHeldOffhandItemID = 0;
+    uint32 VendorBuyPriceMod = EQ_VENDOR_PRICE_MOD_SCALE; // A greedy vendor charges more (ten-thousandths of the item's buy price)
+    uint32 VendorSellPriceMod = EQ_VENDOR_PRICE_MOD_SCALE; // And pays less (ten-thousandths of the item's sell price)
 };
 
 class EverQuestCreatureSpawnPoint
@@ -2333,6 +2337,9 @@ public:
     void LoadConfigurationFile();
     void LoadCreatureData();
     bool HasCreatureDataForCreatureTemplateID(uint32 creatureTemplateID);
+    bool IsCreatureTemplateIDAnEQCreatureTemplateID(uint32 creatureTemplateID);
+    void UpdateVendorItemBuyPrice(Creature const* vendor, ItemTemplate const* itemTemplate, uint32 count, uint32& price);
+    void UpdateVendorItemSellPrice(Creature const* vendor, uint32& unitPrice);
     const EverQuestCreature& GetCreatureDataForCreatureTemplateID(uint32 creatureTemplateID);
     void LoadCreatureSpawnPoints();
     bool ShouldDespawnCreatureDueToSpawnRestrictions(Creature* creature);
