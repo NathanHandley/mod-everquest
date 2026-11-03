@@ -9842,6 +9842,22 @@ void EverQuestMod::ApplyAdventurerAuraStateOnLogin(Player* player)
         player->CastSpell(player, ConfigSystemAdventurerAuraSpellID, true);
 }
 
+bool EverQuestMod::IsInGameIdentityForm(Player* player)
+{
+    // A game identity form (MergedWorlds' Ragnarok Online form) is another game's character, which puts this one's class away
+    return sScriptMgr->OnPlayerCanUseClassAbilities(player) == false;
+}
+
+void EverQuestMod::UpdateAdventurerAuraAfterGameIdentityForm(Player* player)
+{
+    // Turning into a game identity form takes the character's buffs off, the adventurer aura with them, so it comes back once the form is off
+    EverQuestPlayerClassAuraState* state = GetClassAuraStateForPlayer(player);
+    bool isInForm = IsInGameIdentityForm(player);
+    if (state->WasInGameIdentityForm == true && isInForm == false)
+        ApplyAdventurerAuraStateOnLogin(player);
+    state->WasInGameIdentityForm = isInForm;
+}
+
 bool EverQuestMod::IsMapIDAnEverQuestMap(uint32 mapID)
 {
     if (ConfigSystemMapDBCIDMin == 0 || ConfigSystemMapDBCIDMax == 0)
@@ -10409,8 +10425,9 @@ bool EverQuestMod::IsCreatureKillDisqualifyingForAdventurer(Player* player, Unit
     if (ConfigSystemCreatureTemplateIDMin == 0 || ConfigSystemCreatureTemplateIDMax == 0)
         return false;
 
-    // Only a kill made outside of an EverQuest map can ever count against the player
-    if (IsMapIDAnEverQuestMap(player->GetMapId()) == true)
+    // Only a kill made outside of an EverQuest map can ever count against the player, and not one made in another game's identity form
+    // (the Ragnarok Online form's kills are that game's)
+    if (IsMapIDAnEverQuestMap(player->GetMapId()) == true || IsInGameIdentityForm(player) == true)
         return false;
 
     // Pets, guardians, totems, vehicles and other summons should be ignored since their parent is what matters
@@ -10473,8 +10490,8 @@ bool EverQuestMod::IsQuestDisqualifyingForAdventurer(Player* player, uint32 ques
     if (ConfigSystemQuestSQLIDMin == 0 || ConfigSystemQuestSQLIDMax == 0)
         return false;
 
-    // Only a quest completed outside of an EverQuest map can ever count against the player
-    if (IsMapIDAnEverQuestMap(player->GetMapId()) == true)
+    // Only a quest completed outside of an EverQuest map can ever count against the player, and not one done in another game's identity form
+    if (IsMapIDAnEverQuestMap(player->GetMapId()) == true || IsInGameIdentityForm(player) == true)
         return false;
     if (questID >= ConfigSystemQuestSQLIDMin && questID <= ConfigSystemQuestSQLIDMax)
         return false;
@@ -10929,7 +10946,8 @@ void EverQuestMod::ProcessAdventurerStateOnLevelChange(Player* player)
 {
     if (ConfigSystemAdventurerAchievementID == 0 || ConfigSystemAdventurerAuraSpellID == 0 || ConfigAchievementAdventurerLevel == 0)
         return;
-    if (player->GetLevel() < ConfigAchievementAdventurerLevel)
+    // A game identity form's level is that game's character's, not this one's
+    if (player->GetLevel() < ConfigAchievementAdventurerLevel || IsInGameIdentityForm(player) == true)
         return;
 
     // The tracked setting decides this, not the aura, since the aura can be missing for reasons the player did not cause
