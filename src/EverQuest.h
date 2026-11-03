@@ -55,7 +55,34 @@ class EQZoneMap;
 struct AreaTrigger;
 struct BuildValuesCachePosPointers;
 
-#define EQ_MOD_VERSION                              136
+#define EQ_MOD_VERSION                              144
+
+#define EQ_VENDOR_PRICE_MOD_SCALE                   10000 // A greedy vendor's price changes are in ten-thousandths (converter EQMerchantPricing)
+
+// Worn item focus types.  Values must match ItemFocusEffect.cs in the converter
+#define EQ_ITEM_FOCUS_TYPE_DAMAGE                   1
+#define EQ_ITEM_FOCUS_TYPE_HEALING                  2
+#define EQ_ITEM_FOCUS_TYPE_CAST_TIME                3
+#define EQ_ITEM_FOCUS_TYPE_DURATION                 4
+#define EQ_ITEM_FOCUS_TYPE_MANA_COST                5
+#define EQ_DISCIPLINE_REUSE_SECONDS_PER_LEVEL       54
+#define EQ_DISCIPLINE_UNHOLY_AURA_SPELL_ID          97687
+#define EQ_DISCIPLINE_UNHOLY_AURA_DAMAGE_PERCENT    150
+#define EQ_DISCIPLINE_NIMBLE_SPELL_ID               97680
+#define EQ_DISCIPLINE_PURETONE_SPELL_ID             97690
+#define EQ_DISCIPLINE_PURETONE_BOOST_PERCENT        180
+#define EQ_INSTRUMENT_MAX_BOOST_PERCENT             260     // EQ stops instrument mods at 3.6 times
+#define EQ_DISCIPLINE_MIN_REUSE_SECONDS             234
+#define EQ_DISCIPLINE_REUSE_LEVEL_CAP               60      // Short reuses stop shortening at this level
+#define EQ_DISCIPLINE_REUSE_LEVEL_CAP_BELOW_SECONDS 1620
+#define EQ_ITEM_FOCUS_TYPE_RANGE                    6
+#define EQ_ITEM_FOCUS_TYPE_REAGENT                  7
+#define EQ_ITEM_FOCUS_TYPE_HATE_INCREASE            8
+#define EQ_ITEM_FOCUS_TYPE_HATE_DECREASE            9
+#define EQ_ITEM_FOCUS_RANGE_SPELL_ID_SHORT          97693   // A worn range focus keeps one of these on the wearer: the client only reads range from a spell mod
+#define EQ_ITEM_FOCUS_RANGE_SPELL_ID_LONG           97694
+#define EQ_ITEM_FOCUS_RANGE_PERCENT_SHORT           8
+#define EQ_ITEM_FOCUS_RANGE_PERCENT_LONG            10
 
 #define EQ_MOVEMENT_CAST_SNARE_DURATION_BUFFER_IN_MS 2000 // How much longer than the remaining cast time the casting slow is given, so a pushed-back cast keeps it
 
@@ -227,6 +254,18 @@ struct BuildValuesCachePosPointers;
 #define EQ_SPELLDUMMYTYPE_WIPEHATELIST              24  // Amount is the percent chance, MiscValueB of 1 on an aura rolls again each tick
 #define EQ_SPELLDUMMYTYPE_HARMONY                   25  // Amount is the assist radius in hundredths of a yard
 #define EQ_SPELLDUMMYTYPE_TRUENORTH                 26
+#define EQ_SPELLDUMMYTYPE_TRANSLOCATETOBIND         29
+#define EQ_SPELLDUMMYTYPE_DEATHSAVE                 30      // MiscValueB 1 is a partial heal, 2 a full one
+#define EQ_SPELLDUMMYTYPE_SHADOWSTEP                31
+#define EQ_SPELLDUMMYTYPE_RECLAIMPET                32
+#define EQ_RECLAIM_PET_MAX_MANA_RETURN_PERCENT      75
+#define EQ_SHADOW_STEP_DISTANCE_IN_YARDS            10.0f
+#define EQ_DEATH_SAVE_CHANCE_PERCENT                48      // TAKP's formula at 150 Charisma, which WoW has no stat for
+#define EQ_DEATH_SAVE_PARTIAL_HEAL_PERCENT          15      // Death Pact's 300 of a level 60's health in EQ
+#define EQ_DESTROY_MAX_TARGET_LEVEL                 52
+#define EQ_SPELL_ID_BANISHMENT_OF_SHADOWS           93470
+#define EQ_SPELL_ID_BANISHMENT                      93471
+#define EQ_SPELL_ID_DISINTEGRATE                    93664
 #define EQ_SPELLDUMMYTYPE_EYEOFZOMM                 27  // The channeled aura that controls a possessed eye of zomm
 #define EQ_SPELLDUMMYTYPE_TELESCOPE                 28  // The channeled caster aura that carries a telescope far sight
 #define EQ_EYE_OF_ZOMM_LIFETIME_SLACK_IN_MS         2000
@@ -245,6 +284,20 @@ struct BuildValuesCachePosPointers;
 #define EQ_FACTION_ALIGNMENT_NEUTRAL                1
 #define EQ_FACTION_ALIGNMENT_GOOD                   2
 #define EQ_FACTION_ALIGNMENT_EVIL                   3
+#define EQ_PLAYER_CREATE_DATA_VERSION               2
+#define EQ_PLAYER_CREATE_DATA_SIZE                  9
+#define EQ_CHARACTER_ORIGIN_SIZE                    8 // Per character in the character list's block
+#define EQ_PLAYABLE_RACE_MASK                       1791 // Every WoW race a player can be
+#define EQ_RACE_VAH_SHIR                            130
+#define EQ_RACE_TROLL                               9
+#define EQ_RACE_OGRE                                10
+#define EQ_ILLUSION_HAIR_STYLE_LUCLIN_FIRST         4 // Mirror data hair style: 0 is the bare head, 1-3 the helmed heads, these are a Luclin model's hair
+#define EQ_ILLUSION_HAIR_STYLE_LUCLIN_LAST          7
+#define EQ_ILLUSION_HAIR_COLOR_LAST                 24 // 0 is the default, then 1 + EQ hair color
+#define EQ_ILLUSION_FACIAL_HAIR_LUCLIN_FIRST        2 // Below this is no beard.  2 + beard (0-4) + 5 * the beard's color (0 the default, 1 + EQ hair color)
+#define EQ_ILLUSION_FACIAL_HAIR_LUCLIN_LAST         126
+#define EQ_ILLUSION_FACE_HEAD_VARIANT_STEP          10 // Face is head variant * 10 + face, as EQ keeps it (the Barbarian wode, the Erudite heads)
+#define EQ_ILLUSION_EYE_COLOR_LAST                  9 // Eye color rides the skin byte: EQ's eye color 1-10
 
 #define EQ_BARDSONGAURATARGET_ENEMYAREA             1
 #define EQ_BARDSONGAURATARGET_FRIENDLYPARTY         2
@@ -272,10 +325,12 @@ struct BuildValuesCachePosPointers;
 #define EQ_HASTE_TYPE_WORNITEM                      1
 #define EQ_HASTE_TYPE_SPELL_V1                      2
 #define EQ_HASTE_TYPE_SPELL_V2                      3
+#define EQ_HASTE_TYPE_SPELL_V3                      4
 
 #define EQ_WOW_FLAT_ATTACK_POWER_BUFF_SPELL_GROUP_ID    1004 // WOW's stock "Flat AP Buffs" group (Battle Shout, Blessing of Might)
 #define EQ_WOW_FLAT_ATTACK_POWER_DEBUFF_SPELL_GROUP_ID  1062 // WOW's stock "AP Debuffs" group (Demoralizing Shout/Roar, Vindication, Curse of Weakness)
 
+#define EQ_START_OPTION_SHAR_VAHL                   1
 #define EQ_PET_NAMING_TYPE_PET                      0
 #define EQ_PET_NAMING_TYPE_FAMILIAR                 1
 #define EQ_PET_NAMING_TYPE_WARDER                   2
@@ -301,6 +356,7 @@ struct BuildValuesCachePosPointers;
 #define EQ_QUEST_REACTION_SPAWNOBJECT               12
 #define EQ_QUEST_REACTION_ATTACKNPC                 13
 #define EQ_QUEST_REACTION_NPCSAY                    14  // Another creature (by template) says the line instead of the one being talked to
+#define EQ_QUEST_REACTION_GIVEITEM                  15  // Gossip only, the player is handed an item
 
 #define EQ_GOSSIP_SENDER_VENDOR                     1001 // Marks the 'browse goods' line on a reaction menu, which shares its action numbers with the option IDs
 
@@ -462,7 +518,6 @@ enum EverQuestLossOfControlCategory
 #define EQ_CREATURE_CUSTOMDATA_UNSTICK              "EQUnstick"
 #define EQ_CREATURE_CUSTOMDATA_SOCIALAGGRO          "EQSocialAggro"
 #define EQ_CREATURE_CUSTOMDATA_EMOTE                "EQEmote"
-#define EQ_CREATURE_CUSTOMDATA_MOVEMENTSOUND        "EQMoveSound"
 #define EQ_CREATURE_CUSTOMDATA_KILLSPAWNWATCH       "EQKillSpawnWatch"
 #define EQ_CREATURE_CUSTOMDATA_VULAKLOCK            "EQVulakLock"
 #define EQ_CREATURE_CUSTOMDATA_DEFENDPLAYERWATCH    "EQDefendPlayerWatch"
@@ -486,6 +541,7 @@ enum EverQuestLossOfControlCategory
 #define EQ_TRACKING_SCAN_MIN_INTERVAL_MS            2000    // Minimum time between track scans for one player (guards against command spam)
 
 #define EQ_PLAYER_CUSTOMDATA_CLASSAURA              "EQClassAura"
+#define EQ_PLAYER_CUSTOMDATA_STARTOPTION            "EQStartOption"
 #define EQ_PLAYER_CUSTOMDATA_QUESTFACTION           "EQQuestFaction"
 #define EQ_PLAYER_CUSTOMDATA_MOVEWHILECASTING       "EQMoveWhileCasting"
 #define EQ_PLAYER_CUSTOMDATA_ITEMENCHANTMEMORY      "EQItemEnchantMemory"
@@ -503,12 +559,6 @@ enum EverQuestLossOfControlCategory
 // Vulak`Aerr (Temple of Veeshan) spawns perma-rooted and "locked" (unattackable, non-aggro) until every required dragon is dead, matching Velious-era EQ
 #define EQ_VULAK_CREATURE_TEMPLATE_ID               55045
 #define EQ_VULAK_LOCK_RECHECK_MS                    3000
-
-#define EQ_CREATURE_MOVEMENT_GAIT_NONE              0
-#define EQ_CREATURE_MOVEMENT_GAIT_WALK              1
-#define EQ_CREATURE_MOVEMENT_GAIT_RUN               2
-
-#define EQ_CREATURE_MOVEMENT_SOUND_LISTENER_SCAN_MS 250
 
 class EverQuestCreatureOnkillReputation
 {
@@ -555,6 +605,9 @@ public:
     uint32 CasterVisualKitID = 0; // SpellVisualKit played on a creature caster when the spell goes off (instant dragon breaths, whose own visual leaves it out)
     bool CreatureLossOfControlGrantsImmunity = false; // When a creature lands this spell's stun, fear, charm or mesmerize on a player, the player gets a short immunity to it
     uint8 EQResistType = 0; // EQ resist type (1 Magic, 2 Fire, 3 Cold, 4 Poison, 5 Disease) whose resist the target rolls against, 0 = no EQ resist roll
+    uint32 LearnLevel = 0; // The level a player learns it at, which BaseLevel doesn't hold for a spell whose growth is anchored at level 60
+    uint32 EQSpellID = 0;
+    uint32 FocusTraits = 0; // What item focus limits ask about the EQ spell, set by the converter's SpellFocusTraits
     bool IsEQPartialResistCapable = false; // TAKP IsPartialCapableSpell, so only a deep resist roll fully resists it
 };
 
@@ -598,9 +651,13 @@ public:
     uint32 DifficultyType = EQ_CREATURE_DIFFICULTY_NORMAL;
     bool GossipIsOnlyFromHailText = false;
     float SpellDamageMultiplier = 1.0f;
+    uint8 LevelEQ = 0;
+    uint8 MaxLevelEQ = 0;
     uint32 GossipHelloAchievementID = 0;
     uint32 DefaultHeldMainhandItemID = 0; // Shown when the loot gives nothing to hold (EQ's d_melee_texture weapon models)
     uint32 DefaultHeldOffhandItemID = 0;
+    uint32 VendorBuyPriceMod = EQ_VENDOR_PRICE_MOD_SCALE; // A greedy vendor charges more (ten-thousandths of the item's buy price)
+    uint32 VendorSellPriceMod = EQ_VENDOR_PRICE_MOD_SCALE; // And pays less (ten-thousandths of the item's sell price)
 };
 
 class EverQuestCreatureSpawnPoint
@@ -933,13 +990,6 @@ public:
     float Z = 0.0f;
 };
 
-class EverQuestPlayerClientVersionCheckState
-{
-public:
-    int32 MSUntilDeadline = 0;
-    bool FailedPendingKick = false;
-};
-
 class EverQuestCreatureEmote
 {
 public:
@@ -991,29 +1041,20 @@ public:
     uint32 RecheckRemainingMS = 0;
 };
 
-class EverQuestCreatureMovementSound
+class EverQuestItemFocus
 {
 public:
-    vector<uint32> WalkPieceSoundEntryIDs;
-    vector<uint32> WalkPieceDurationsMS;
-    vector<uint32> RunPieceSoundEntryIDs;
-    vector<uint32> RunPieceDurationsMS;
-    float MaxHearingDistance = 20.0f;
-};
-
-class EverQuestCreatureMovementSoundListener
-{
-public:
-    uint32 PieceIndex = 0;
-    uint32 ReplayRemainingMS = 0;
-};
-
-class EverQuestCreatureMovementSoundState : public DataMap::Base
-{
-public:
-    uint8 CurGait = EQ_CREATURE_MOVEMENT_GAIT_NONE;
-    uint32 ListenerScanRemainingMS = 0;
-    unordered_map<ObjectGuid, EverQuestCreatureMovementSoundListener> ListenersByGUID;
+    uint32 FocusType = 0;
+    uint32 Percent = 0;
+    uint32 MaxSpellLevel = 255;
+    uint32 SpellType = 0;
+    uint32 ResistType = 0;
+    uint32 MinDurationInMS = 0;
+    uint32 InstantType = 0;
+    uint32 MinCastTimeInMS = 0;
+    uint32 RequiredTraits = 0;      // Every one of these has to be in the spell's FocusTraits
+    uint32 ExcludedTraits = 0;      // None of these can be
+    uint32 RequiredEQSpellID = 0;   // A focus for one spell
 };
 
 class EverQuestItemTemplate
@@ -1089,11 +1130,16 @@ public:
     uint64 CharacterGearSignature = 0;
 };
 
+// The player picked no light at all: it stays that way until they pick one
+constexpr uint32 EQ_CARRIED_LIGHT_CHOICE_NONE = 0xFFFFFFFF;
+
 class EverQuestPlayerCarriedLightState
 {
 public:
     uint32 RefreshTimerMS = EQ_CARRIED_LIGHT_REFRESH_TIME_IN_MS; // Starts due, so the first update after tracking begins checks right away
     vector<ObjectGuid> PendingCorpseRefreshGUIDs; // Corpses whose light this player's next update re-checks, after loot left them some way other than a plain loot
+    uint32 ChosenLightItemTemplateID = 0; // The light the player picked from the character sheet, 0 for no choice, EQ_CARRIED_LIGHT_CHOICE_NONE for no light
+    bool ChosenLightLoaded = false; // The choice was read from the database (the interface asks for it as it starts)
 };
 
 class EverQuestCorpseIllusionRestoreData
@@ -1180,7 +1226,11 @@ enum EverQuestClassAuraSpellType : uint32
     EQ_CLASSAURA_SPELL_DRUID_NATURES_BALANCE_ARCANE = 72,
     EQ_CLASSAURA_SPELL_SHADOWKNIGHT_FOCUS = 73,
     EQ_CLASSAURA_SPELL_SHADOWKNIGHT_FOCUS_MANA = 74,
-    EQ_CLASSAURA_SPELL_TYPE_COUNT = 75
+    EQ_CLASSAURA_SPELL_BEASTLORD_PASSIVE = 75,
+    EQ_CLASSAURA_SPELL_BEASTLORD_AURA = 76,
+    EQ_CLASSAURA_SPELL_BEASTLORD_PET_PASSIVE = 77,
+    EQ_CLASSAURA_SPELL_VAH_SHIR_INSTINCTS = 78,
+    EQ_CLASSAURA_SPELL_TYPE_COUNT = 79
 };
 
 class EverQuestPlayerClientMoveState : public DataMap::Base
@@ -1221,6 +1271,33 @@ struct EverQuestNaturesBalanceRainPayout
     uint32 Percent = 0;
     uint64 CastAtMS = 0;
     uint32 PayoutWindowInMS = 0;
+};
+
+class EverQuestPlayerStartOptionState : public DataMap::Base
+{
+public:
+    uint8 StartOption = 0;
+    uint16 EQRaceID = 0;
+    uint8 EQStartChoice = 0;
+    uint8 EQStartSecondClass = 0;
+    uint8 EQHairStyle = 0;
+    uint8 EQHairColor = 0;
+    uint8 EQFacialHair = 0;
+    uint8 EQEyeColor = 0;
+};
+
+// What the EverQuest character creation page adds to the end of the create, race change and faction change packets
+class EverQuestPlayerCreateData
+{
+public:
+    uint8 EQRaceID = 0;
+    uint8 StartChoice = 0;
+    uint8 SecondClass = 0;
+    uint8 Face = 0;
+    uint8 HairStyle = 0; // These four are the character bytes the illusion character's mirror data sends
+    uint8 HairColor = 0;
+    uint8 FacialHair = 0;
+    uint8 EyeColor = 0; // The skin byte
 };
 
 class EverQuestPlayerClassAuraState : public DataMap::Base
@@ -1297,6 +1374,10 @@ public:
     float Orientation = 0;
     uint32 IllusionItemID = 0;
     uint32 StartAchievementID = 0;
+    uint8 StartOption = 0;
+    uint8 DefaultSecondClass = 0;
+    uint32 ExtraStartItemID = 0;
+    uint8 Alignment = EQ_FACTION_ALIGNMENT_NONE; // Only for a start from the EverQuest character creation page, which goes by EQ race
 };
 
 class EverQuestQuestCompletionReputation
@@ -1388,6 +1469,42 @@ public:
     bool MovementIsRun = false;
     bool FiresOnArrival = false;
     uint32 SpellID = 0;
+    uint32 ItemTemplateID = 0;
+};
+
+// A place that sends whoever is standing there to another zone on a fixed schedule, like the spires in Norrath and the Nexus
+class EverQuestTimedPort
+{
+public:
+    uint32 MapID = 0;
+    float X = 0;
+    float Y = 0;
+    float Z = 0;
+    float Radius = 0;
+    uint32 DestinationMapID = 0;
+    float DestinationX = 0;
+    float DestinationY = 0;
+    float DestinationZ = 0;
+    float DestinationOrientation = 0;
+    uint32 CycleInSeconds = 0;
+    uint32 OffsetInSeconds = 0;
+    uint32 RequiredItemTemplateID = 0; // Destroyed on use, and anyone without one is left behind
+    string MissingItemText;
+    uint64 LastCycleNumber = 0;
+};
+
+// A line shown ahead of a timed port.  With no radius, it reaches everyone on the map
+class EverQuestTimedPortWarning
+{
+public:
+    uint32 MapID = 0;
+    float X = 0;
+    float Y = 0;
+    float Radius = 0;
+    uint32 CycleInSeconds = 0;
+    uint32 OffsetInSeconds = 0;
+    string Text;
+    uint64 LastCycleNumber = 0;
 };
 
 class EverQuestTriggeredQuestKillSpawn
@@ -1469,6 +1586,43 @@ public:
     uint32 PauseInSec = 0;
     float Heading = -1.0f; // WoW orientation to face on arrival, or -1 to keep facing the way it walked
     bool IsCenterPoint = false;
+};
+
+#define EQ_MOUNT_SADDLE_REST_SPELL_ID               97695
+#define EQ_SPELL_ID_YAULP_V                         94243   // Yaulp V and VI have a mana regen part, and EQ doesn't let it run from a saddle
+#define EQ_SPELL_ID_YAULP_VI                        95021
+#define EQ_TRAP_CHECK_INTERVAL_IN_MS                1000
+#define EQ_TRAP_TRIGGER_LIFETIME_IN_MS              10000
+#define EQ_TRAP_TRIGGER_FACTION                     14      // Monster: it needs to count as an enemy of whoever walked in
+
+class EverQuestTrap
+{
+public:
+    uint32 ID = 0;
+    float X = 0;
+    float Y = 0;
+    float Z = 0;
+    float Radius = 0;
+    float MaxZDifference = 0;
+    uint32 ChancePercent = 0;
+    uint32 SpellID = 0;
+    uint32 RespawnInSeconds = 0;
+    uint32 RespawnVarianceInSeconds = 0;
+};
+
+class EverQuestPlayerTrapState : public DataMap::Base
+{
+public:
+    uint32 MSSinceCheck = 0;
+};
+
+class EverQuestDiscipline
+{
+public:
+    uint32 SpellID = 0;
+    uint32 ReuseInSeconds = 0;
+    bool IsTimed = true;                                    // One at a time: a running timed discipline holds the next one back, a waiting one is replaced
+    unordered_map<uint8, uint8> UseLevelsByEQClassID;
 };
 
 class EverQuestAutoLearnSpell
@@ -1561,6 +1715,8 @@ public:
     bool AllowBind = true;
     int32 ExpansionID = 0;
     float MaxAgroZDistance = -1.0f;
+    bool AllowEQMount = true;
+    bool AllowEQLevitate = true;
     uint32 InstanceRaidLowMapID = 0;
     uint32 InstanceDungeonMapID = 0;
     uint32 RequiredKeyItemID = 0;
@@ -1819,6 +1975,7 @@ public:
     uint32 ConfigSystemShipEntryTemplateIDMin;
     uint32 ConfigSystemShipEntryTemplateIDMax;
     uint32 ConfigSystemInvisVsUndeadDetectSpellID;
+    uint32 ConfigSystemInvisVsAnimalsDetectSpellID;
     uint32 ConfigSystemRangedAttackSpellID;
     uint32 ConfigSystemResistAdjustmentSpellID;
     uint32 ConfigSystemBlindWanderSpellID;
@@ -1895,7 +2052,6 @@ public:
     uint32 ConfigSystemCrouchSpellID = 0;
     uint32 ConfigSystemCarriedLightSpellIDStart = 0;
     uint32 ConfigSystemClientDataVersion = 0;
-    string ConfigSystemClientDataVersionMismatchMessage;
     uint32 ConfigSystemFactionGoodClassMask;
     uint32 ConfigSystemFactionEvilClassMask;
     uint32 ConfigSystemFactionGoodRaceMask;
@@ -1909,8 +2065,6 @@ public:
     uint32 ConfigDeathFallbackGraveyardID = 0;
     bool ConfigLoginReturnCharactersToNorrath = true;
     bool ConfigClientVersionCheckEnabled = false;
-    uint32 ConfigClientVersionCheckGraceTimeInSeconds = 30;
-    uint32 ConfigClientVersionCheckKickDelayInSeconds = 10;
     bool ConfigSpellTalentAlignmentEnabled;
     bool ConfigQuestGrantExpOnRepeatCompletion;
     uint32 ConfigEventSpawnMaxLifetimeInSeconds = 1800;
@@ -1952,6 +2106,7 @@ public:
     bool ConfigSpellMovementCastSnareEnabled;
     bool ConfigSpellMovementCastJumpCancelEnabled;
     bool ConfigSpellClassAurasEnabled = true;
+    bool ConfigSpellDisciplinesEnabled = true;
     bool ConfigCombatSkillsDisableBashKickStunOnPlayers;
     bool ConfigCombatSkillsDisabledBashKickStunInterruptsPlayerCast;
     bool ConfigCombatSkillsRangedAttackEnabled;
@@ -1987,7 +2142,6 @@ public:
     bool ConfigPetDisableInitialCreatureAgro;
     bool ConfigCreatureEmotesEnabled;
     bool ConfigCreatureEmotesAmbientEnabled;
-    bool ConfigCreatureMovementSoundsEnabled;
     bool ConfigCreatureWornEffectsHideAuraIcons;
     float ConfigCreatureWorldBossHealthMultiplier;
     float ConfigCreatureWorldBossDamageMultiplier;
@@ -1998,6 +2152,8 @@ public:
     float ConfigSecondaryExpPoolGainPercent;
     uint32 ConfigSecondaryExpPoolMaxPooled;
     uint32 ConfigPlayerLevelCap;
+    uint32 ConfigExperienceBurningCrusadeBaseCreatureLevel;
+    uint32 ConfigExperienceNorthrendBaseCreatureLevel;
     bool ConfigPlayerHeavyArmorIgnoresBearFormMultiplier;
     bool ConfigPlayerAddHearthstoneToNewCharacters;
     bool ConfigPlayerAddMasterTotemToShamans;
@@ -2046,7 +2202,6 @@ public:
     unordered_map<uint32, uint32> OocTimerKillSpawnDurationMSByCreatureTemplateID;
     unordered_map<uint32, vector<ObjectGuid::LowType>> VulakRequiredDragonSpawnIDsByMapID; // Keyed by map ID, since the raid instance copy of the zone has its own dragon spawn rows
     unordered_map<uint32, vector<EverQuestCreatureEmote>> CreatureEmotesByCreatureTemplateID;
-    unordered_map<uint32, EverQuestCreatureMovementSound> CreatureMovementSoundsByDisplayID;
     unordered_map<uint32, uint32> SilentFidgetDisplayIDsByDisplayID;
     unordered_map<uint32, EverQuestDruidFormDisplay> DruidFormDisplaysByFormTypeAndOptionKey; // Key is (formType << 8) | optionID
 
@@ -2070,6 +2225,12 @@ public:
     std::atomic<uint32> EventSpawnLifetimeCount{ 0 };
     unordered_map<uint64, vector<EverQuestTriggeredQuestKillSpawn>> TriggeredQuestKillSpawnsByMapInstanceKey;
     unordered_map<uint32, EverQuestItemTemplate> ItemTemplatesByEntryID;
+    unordered_map<uint32, EverQuestItemFocus> ItemFocusByItemTemplateID;
+    unordered_map<uint32, EverQuestDiscipline> DisciplinesBySpellID;    // Filled at startup, and only read after
+    unordered_map<uint32, vector<EverQuestTrap>> TrapsByMapID;          // Filled at startup, and only read after
+    std::mutex TrapRearmTimesMutex;
+    unordered_map<uint64, time_t> TrapRearmTimesByMapInstanceAndTrapKey;
+    unordered_map<uint32, uint32> WarderLookCreatureTemplateIDsByKey; // (owner race, start option), filled at startup and only read after
     unordered_map<uint64, vector<EverQuestGearSwapCandidate>> GearSwapCandidatesByLookupKey;
     unordered_set<uint32> WornEffectSpellIDs;
     unordered_set<uint32> EQWeaponPoisonProcSpellIDs;
@@ -2096,6 +2257,9 @@ public:
     unordered_map<uint32, vector<EverQuestGossipReaction>> GossipReactionsByGossipCreatureTemplateID;
     unordered_map<uint32, EverQuestPet> PetDataByCreatureTemplateID;
     unordered_map<uint8, unordered_map<uint8, EverQuestPlayerCreateInfo>> PlayerCreateInfoByRaceIDThenClassID;
+    unordered_map<uint32, EverQuestPlayerCreateInfo> PlayerCreateInfoStartOptionsByKey;
+    unordered_map<uint32, EverQuestPlayerCreateInfo> EQRaceStartsByKey; // (EQ race, EQ class, start choice), filled at startup and only read after
+    unordered_map<uint32, uint32> EQRaceIDsByGuiseItemID; // Filled at startup and only read after
     unordered_map<uint8, list<uint32>> PlayerAutoLearnSkillsByEQClassID;
     unordered_map<uint8, list<EverQuestAutoLearnSpell>> PlayerAutoLearnSpellsByClassID;
     unordered_map<uint8, vector<uint32>> PlayerClassStartItemWOWIDsByEQClassID;
@@ -2107,7 +2271,12 @@ public:
     std::mutex CycleSpawnCheckTimerMutex;
     unordered_map<uint64, int32> CycleSpawnCheckTimerInMSByMapInstanceKey;
     uint32 RestrictedMapCheckTimerInMS = 0;
-    unordered_map<ObjectGuid, EverQuestPlayerClientVersionCheckState> PendingClientVersionChecksByPlayerGUID;
+    vector<EverQuestTimedPort> TimedPorts;
+    vector<EverQuestTimedPortWarning> TimedPortWarnings;
+    uint32 TimedPortCheckTimerInMS = 0;
+    // The client data version an account has to log in with, 0 when the check is off.  Logins read this on a network thread, while a live
+    // ".reload config" rewrites the config values it comes from on the world thread, so it is its own atomic copy
+    std::atomic<uint32> RequiredClientDataVersion{ 0 };
     unordered_map<ObjectGuid, deque<uint32>> PlayerCasterConcurrentBardSongs;
     unordered_set<ObjectGuid> PlayersWithAuctionUsableFilterActive;
     unordered_map<uint32, EverQuestAuctionRealmFilter> AuctionRealmFiltersByAccountID;
@@ -2168,6 +2337,9 @@ public:
     void LoadConfigurationFile();
     void LoadCreatureData();
     bool HasCreatureDataForCreatureTemplateID(uint32 creatureTemplateID);
+    bool IsCreatureTemplateIDAnEQCreatureTemplateID(uint32 creatureTemplateID);
+    void UpdateVendorItemBuyPrice(Creature const* vendor, ItemTemplate const* itemTemplate, uint32 count, uint32& price);
+    void UpdateVendorItemSellPrice(Creature const* vendor, uint32& unitPrice);
     const EverQuestCreature& GetCreatureDataForCreatureTemplateID(uint32 creatureTemplateID);
     void LoadCreatureSpawnPoints();
     bool ShouldDespawnCreatureDueToSpawnRestrictions(Creature* creature);
@@ -2193,9 +2365,6 @@ public:
     void SetupCreatureEmoteState(Creature* creature);
     void RemoveCreatureEmoteState(Creature* creature);
     void UpdateCreatureEmotes(Creature* creature, uint32 diff);
-    void LoadCreatureMovementSoundData();
-    void RemoveCreatureMovementSoundState(Creature* creature);
-    void UpdateCreatureMovementSound(Creature* creature, uint32 diff);
     void ProcessKillSpawnsForCreatureEvent(Creature* eventCreature, Unit* otherUnit, uint8 triggerTypeID, uint32 sequenceIndex = 0);
     void ProcessHailKillSpawnsForCreature(Creature* creature, Player* player);
     void UpdateCreatureKillSpawnProximity(Creature* creature, EverQuestCreatureKillSpawnWatchState* state, uint32 diff);
@@ -2329,6 +2498,8 @@ public:
     bool IsUnitLevitating(Unit* unit);
     bool DoesSpellApplyLevitation(SpellInfo const* spellInfo);
     bool IsLevitationBlockedByIllusionObjectForm(SpellInfo const* spellInfo, Unit* target);
+    bool IsLevitationBlockedByZone(SpellInfo const* spellInfo, Unit* target);
+    void RemoveEQLevitationBeforeEnteringMap(Player* player, uint32 mapID);
     bool IsIllusionObjectFormBlockedByLevitation(uint32 spellID, Unit* target);
     void ClearStaleMirrorImageFlagForPlayer(Player* player);
     bool IsSpellBlockedByMinTargetLevel(uint32 spellID, Unit* target, Unit* caster, bool isCastFromItem);
@@ -2448,8 +2619,8 @@ public:
     uint32 ConsumeClassAuraPaladinFullBlockAmount(Player* paladin, Unit* attacker);
     bool HandlePaladinFullBlockSwingLogPacketSend(WorldSession* session, WorldPacket const& packet);
     void UpdateWizardFocusMovementForPlayer(Player* player, uint32 diffInMS);
-    void RefreshMagicianPetAuraForPlayer(Player* player);
-    void ApplyMagicianPetAuraToPet(Pet* pet);
+    void RefreshClassPetAurasForPlayer(Player* player);
+    void ApplyClassPetAurasToPet(Pet* pet);
     void HandleClassAuraPetStrike(Unit* attacker, Unit* victim);
     void HandleClassAuraRangerDirectDamage(Unit* attacker, Unit* victim, SpellInfo const* spellInfo);
     void HandleClassAuraShamanStrike(Unit* attacker, Unit* victim);
@@ -2474,6 +2645,7 @@ public:
     Pet* GetClassAuraMagicianDetonatePet(Player* player);
     void DoClassAuraMagicianDetonateSummoned(Player* player);
     void ApplyClassAuraCastAdjustmentsOnCheckCast(Player* player, Spell* spell, bool strict);
+    void ApplyCastSpeedHelperToPlayer(Player* player, uint32 helperSpellID, float castTimeMultiplier);
     void FinishClassAuraCastAdjustmentsOnPrepare(Player* player, Spell* spell);
     void HandleClassAuraSpellCastCancel(Player* player, Spell* spell);
     void ClearClassAuraCastAdjustmentsForPlayer(Player* player);
@@ -2493,11 +2665,15 @@ public:
     bool IsCarriedLightSpell(uint32 spellID);
     void ValidateCarriedLightSpells();
     uint8 GetCarriedLightTypeForItemTemplateID(uint32 itemTemplateID);
+    bool CanItemGoIntoStorageSlot(ItemTemplate const* itemTemplate, uint8 equipSlot);
     uint8 GetCarriedLightLevelForLightType(uint8 lightType);
     uint8 CalculateCarriedLightTypeForPlayer(Player* player);
     uint8 CalculateCarriedLightTypeForItemTemplateIDs(const vector<uint32>& itemTemplateIDs);
     void ApplyCarriedLightAuraForUnit(Unit* unit, uint8 lightType);
     void RefreshCarriedLightForPlayer(Player* player);
+    bool IsCarriedLightItemInEffectForPlayer(Player* player, uint32 itemTemplateID);
+    bool ChooseCarriedLightForPlayer(Player* player, uint32 itemTemplateID);
+    void SendCarriedLightDataToPlayer(Player* player);
     void RefreshCarriedLightForCreatureFromPreloadedLoot(Creature* creature);
     void RefreshCarriedLightForCreatureCorpse(Creature* creature);
     void QueueCarriedLightRefreshForPlayer(Player* player);
@@ -2528,11 +2704,16 @@ public:
     void RefreshFactionGatedQuestsForPlayer(Player* player);
     bool AreNonFactionQuestObjectivesMetForPlayer(Player* player, Quest const* quest, uint16 questLogSlot);
     void LoadGossipReactions();
+    void LoadTimedPortData();
     bool HandleGossipHello(Player* player, Creature* creature);
     bool HandleGossipSelect(Player* player, Creature* creature, uint32 sender, uint32 action);
     string FormatGossipTextForPlayer(Player* player, const string& text);
     void LoadPetData();
     void LoadPetSilentDisplayData();
+    void LoadWarderLookData();
+    void LoadEQRaceStartData();
+    void ApplyWarderLookToPet(Pet* pet);
+    void RefreshPetScalingFromOwner(Pet* pet);
     void RemoveInvalidPetSilentDisplays();
     void LoadDruidFormDisplayData();
     void RemoveInvalidDruidFormDisplays();
@@ -2550,6 +2731,23 @@ public:
     void LoadCreatePlayerData();
     bool HasCreatePlayerData(uint8 raceID, uint8 classID);
     const EverQuestPlayerCreateInfo& GetPlayerCreateInfo(uint8 raceID, uint8 classID);
+    const EverQuestPlayerCreateInfo& GetPlayerCreateInfoForPlayer(Player* player);
+    uint32 GetPlayerCreateInfoStartOptionKey(uint8 raceID, uint8 classID, uint8 startOption);
+    uint8 GetPlayerStartOption(Player* player);
+    EverQuestPlayerStartOptionState GetPlayerOriginState(Player* player);
+    uint32 GetEQRaceStartKey(uint32 eqRaceID, uint8 eqClassID, uint8 startChoice) const;
+    bool ReadPlayerCreateData(std::vector<uint8> const& modData, EverQuestPlayerCreateData& createDataOut) const;
+    void ValidatePlayerCreateLook(uint32 eqRaceID, uint8 gender, EverQuestPlayerCreateData& createData);
+    bool SetEQRaceStartForNewPlayer(Player* player, EverQuestPlayerCreateData createData);
+    void HandleCharacterFactionOrRaceChange(ObjectGuid guid, bool factionChange, std::vector<uint8> const& modData);
+    bool HandleCombinerItemUse(Player* player, Item* item, SpellCastTargets const& targets, uint8 castCount, uint32 glyphIndex);
+    void AddCharacterOriginsToEnumPacket(std::vector<ObjectGuid> const& guids, WorldPacket& data);
+    uint32 GetEQRaceIDForGuiseItem(uint32 guiseItemID) const;
+    uint32 GetRaceMaskForAlignment(uint8 alignment) const;
+    int32 GetBaseReputationForMasks(FactionEntry const* factionEntry, uint32 raceMask, uint32 classMask) const;
+    void ApplyEQOriginFactionStandingForPlayer(Player* player);
+    void GetIllusionLookBytesForPlayer(Player* player, uint8 chrRaceID, uint8& hairStyleOut, uint8& hairColorOut, uint8& facialHairOut, uint8& skinOut);
+    bool IsIllusionFaceValid(EverQuestIllusionCharacter const* illusionCharacter, uint32 faceID) const;
     void LoadAutoLearnSkillsData();
     const list<uint32>& GetAutoLearnSkillsForClass(uint8 classID);
     void LoadAutoLearnSpellsData();
@@ -2572,6 +2770,8 @@ public:
     void RestoreNativeDisplayAfterCorpseIllusion(Player* player);
     void GrantLegacyAchievementIfEligible(Player* player);
     void GrantStartAchievementIfMissing(Player* player);
+    uint8 GetLevelForEQRules(Unit const* unit);
+    uint8 GetContentLevelsForEQCreatureKill(Unit const* victim, uint8 contentLevels);
     void GrantCreatureGossipHelloAchievement(Player* player, Creature* creature);
     void ApplyAdventurerAuraStateOnLogin(Player* player);
     bool IsMapIDAnEverQuestMap(uint32 mapID);
@@ -2668,6 +2868,30 @@ public:
     int32 GetLullAggroRangeAmountForNewEffect(Unit* unit, AuraEffect const* newLullEffect);
     void RefreshLullAggroRanges(Unit* unit, Aura const* excludedAura);
     float GetMaxAgroZDistanceForMap(uint32 mapID);
+
+    // EQ horses: they stay on EQ maps and off indoor zones, and fade where they can't go
+    bool HandleEQMountOnCheckCast(Player* player, Spell* spell, SpellCastResult& res);
+
+    // Worn item focus effects: the best worn focus of a type that covers the spell, as a percent.  Only the strongest counts, as in EQ
+    void LoadItemFocusDataFromDB();
+    uint32 GetItemFocusPercentForPlayer(Player* player, uint32 focusType, SpellInfo const* spellInfo);
+    void RefreshItemFocusRangeAuraForPlayer(Player* player);
+    void LoadDisciplineData();
+    void HandleDeathSaveOnDamage(Unit* victim, uint32& damage);
+    bool IsDestroySpellBlockedByLevel(SpellInfo const* spellInfo, Unit* target);
+    void SendPlayerToBindPoint(Player* player);
+    void ShadowStepPlayer(Player* player);
+    void ReclaimPetForPlayer(Player* player);
+    void UpdateEQMountRulesForPlayer(Player* player);
+    void LoadTrapData();
+    void UpdateTrapsForPlayer(Player* player, uint32 diffInMS);
+    bool IsDisciplineSpell(uint32 spellID);
+    bool HandleDisciplineOnCheckCast(Player* player, Spell* spell, SpellCastResult& res);
+    void HandleDisciplineCast(Player* player, SpellInfo const* spellInfo);
+    void RemoveActiveDisciplines(Player* player);
+    void ApplyItemFocusToSpellAmount(Unit* caster, uint32 focusType, SpellInfo const* spellInfo, int32& amount);
+    void RemoveEQMountWhereNotAllowed(Player* player);
+    void RemoveEQMountAtLogin(Player* player);
     bool IsBlockedByAgroZDistance(WorldObject const* source, WorldObject const* target, float maxAgroZDistance);
     bool IsSocialAggroOverrideNeededForCreature(Creature* creature, float& scaleOut, float& maxAgroZDistanceOut);
     void MarkCreatureAgroZBlockOnEngage(Creature* creature, Unit* victim);
@@ -2741,11 +2965,10 @@ public:
     bool IsMapRestrictedForPlayers(uint32 mapID);
     bool RelocatePlayerOutOfRestrictedMap(Player* player);
     void UpdateRestrictedMapPlayerCheck(uint32 diff);
-    void BeginClientVersionCheckForPlayer(Player* player);
-    void HandleClientVersionReportForPlayer(Player* player, uint32 reportedVersion);
-    void FailClientVersionCheckForPlayer(Player* player, EverQuestPlayerClientVersionCheckState& checkState);
-    void UpdateClientVersionChecks(uint32 diff);
-    void ClearClientVersionCheckForPlayer(ObjectGuid playerGUID);
+    void UpdateTimedPorts(uint32 diff);
+    void ApplyTimedPortToPlayer(Player* player, const EverQuestTimedPort& timedPort);
+    void UpdateRequiredClientDataVersion();
+    bool IsClientDataVersionAllowed(AccountTypes security, uint32 clientDataVersion, uint32& expectedClientDataVersion) const;
     void LoadFactionData();
     void ResolveDefendCombatFactionTemplates();
     void ResolveEQReputationFactions();

@@ -467,6 +467,14 @@ public:
         EverQuest->HandleLevelCapOnBeforeExperienceGain(player, level);
     }
 
+    void OnPlayerBeforeGetContentLevelsForXPGain(Unit const* victim, uint8& contentLevels) override
+    {
+        if (EverQuest->IsEnabled == false)
+            return;
+
+        contentLevels = EverQuest->GetContentLevelsForEQCreatureKill(victim, contentLevels);
+    }
+
     bool OnPlayerCanGiveLevel(Player* player, uint8 newLevel) override
     {
         if (EverQuest->IsEnabled == false)
@@ -507,6 +515,7 @@ public:
 
         // Armor type, shield and held instruments drive the Monk and Bard class auras
         EverQuest->RefreshClassAuraGearAurasForPlayer(player);
+        EverQuest->RefreshItemFocusRangeAuraForPlayer(player);
 
         // Prevent any left over buffs from other gear
         EverQuest->RemoveOrphanedItemEquipAurasForPlayer(player);
@@ -525,6 +534,7 @@ public:
 
         EverQuest->RefreshBearFormArmorShiftForPlayer(player);
         EverQuest->RefreshClassAuraGearAurasForPlayer(player);
+        EverQuest->RefreshItemFocusRangeAuraForPlayer(player);
         EverQuest->RemoveOrphanedItemEquipAurasForPlayer(player);
         EverQuest->QueueCarriedLightRefreshForPlayer(player);
     }
@@ -572,6 +582,8 @@ public:
         EverQuest->UpdateFactionGatedQuestsForPlayer(player, p_time);
         EverQuest->UpdatePlayerTracking(player, p_time);
         EverQuest->UpdateClassAurasForPlayer(player, p_time);
+        EverQuest->UpdateTrapsForPlayer(player, p_time);
+        EverQuest->UpdateEQMountRulesForPlayer(player);
         EverQuest->CancelMovementCastForMovingPlayer(player, player->isMoving());
         EverQuest->UpdateMovementCastSnareForPlayer(player);
         EverQuest->TeachPetOverflowTemplateSpells(player);
@@ -781,6 +793,11 @@ public:
         for (uint8 effectIndex = EFFECT_0; effectIndex < MAX_SPELL_EFFECTS; effectIndex++)
         {
             auto const& succorEffect = spell->m_spellInfo->Effects[effectIndex];
+            if (succorEffect.Effect == SPELL_EFFECT_DUMMY && succorEffect.MiscValue == EQ_SPELLDUMMYTYPE_SHADOWSTEP)
+            {
+                EverQuest->ShadowStepPlayer(player);
+                return;
+            }
             if ((succorEffect.Effect == SPELL_EFFECT_DUMMY ||
                 (succorEffect.Effect == SPELL_EFFECT_APPLY_AURA && succorEffect.ApplyAuraName == SPELL_AURA_DUMMY)) &&
                 succorEffect.MiscValue == EQ_SPELLDUMMYTYPE_SUCCOR)
@@ -881,6 +898,10 @@ public:
             {
                 EverQuest->TurnPlayerToFaceNorth(player);
             }
+            else if (spell->m_spellInfo->Effects[EFFECT_0].MiscValue == EQ_SPELLDUMMYTYPE_RECLAIMPET) // Reclaim Energy
+            {
+                EverQuest->ReclaimPetForPlayer(player);
+            }
         }
     }
 
@@ -899,6 +920,22 @@ public:
             return;
 
         EverQuest->SetInitialCreatePositionForPlayer(player);
+    }
+
+    void OnPlayerCharFactionOrRaceChange(ObjectGuid guid, bool factionChange, std::vector<uint8> const& modData) override
+    {
+        if (EverQuest->IsEnabled == false)
+            return;
+
+        EverQuest->HandleCharacterFactionOrRaceChange(guid, factionChange, modData);
+    }
+
+    void OnPlayerCharEnum(std::vector<ObjectGuid> const& guids, WorldPacket& data) override
+    {
+        if (EverQuest->IsEnabled == false)
+            return;
+
+        EverQuest->AddCharacterOriginsToEnumPacket(guids, data);
     }
 
     bool OnPlayerCheckItemInSlotAtLoadInventory(Player* player, Item* item, uint8 slot, uint8& err, uint16& dest) override
@@ -925,16 +962,27 @@ public:
         return true;
     }
 
+    // A quest combiner with more than one combine makes the one the player has the components for
+    bool OnPlayerCanCastItemUseSpell(Player* player, Item* item, SpellCastTargets const& targets, uint8 castCount, uint32 glyphIndex) override
+    {
+        if (EverQuest->IsEnabled == false)
+            return true;
+        return EverQuest->HandleCombinerItemUse(player, item, targets, castCount, glyphIndex) == false;
+    }
+
     void OnPlayerLogin(Player* player) override
     {
         if (EverQuest->IsEnabled == false)
             return;
 
-        // Start the grace timer for the client data version report (kicks stale clients that bypassed the update launcher)
-        EverQuest->BeginClientVersionCheckForPlayer(player);
+        // Faction.dbc starts a character by its WoW race, so an EQ race's alignment goes on now, and again after a race or faction change
+        EverQuest->ApplyEQOriginFactionStandingForPlayer(player);
 
         // Characters always log in standing
         EverQuest->RemoveCrouchAtLogin(player);
+        EverQuest->RemoveEQMountAtLogin(player);
+        EverQuest->RemoveActiveDisciplines(player);
+        EverQuest->RefreshItemFocusRangeAuraForPlayer(player);
 
         // Handle odd edge cases where a player logs in but the server doesn't know where to put them
         EverQuest->EnforceWorldDomainAtLogin(player);
@@ -991,9 +1039,11 @@ public:
 
             if (EverQuest->HasCreatePlayerData(player->getRace(), player->getClass()) == true)
             {
-                EverQuestPlayerCreateInfo createInfo = EverQuest->GetPlayerCreateInfo(player->getRace(), player->getClass());
+                EverQuestPlayerCreateInfo createInfo = EverQuest->GetPlayerCreateInfoForPlayer(player);
                 EverQuest->SetNewBindHome(player, player->GetGUID().GetCounter(), createInfo.MapID, createInfo.ZoneID, createInfo.PositionX,
                     createInfo.PositionY, createInfo.PositionZ);
+                if (createInfo.ExtraStartItemID != 0)
+                    player->AddItem(createInfo.ExtraStartItemID, 1);
                 if (EverQuest->ConfigDeathKnightsStartLikeOtherClasses == true && player->getClass() == CLASS_DEATH_KNIGHT)
                 {
                     player->RemoveAura(48266); // Take off Blood Presence
@@ -1011,9 +1061,22 @@ public:
             EverQuest->GrantClassStartItemsForPlayer(player, EverQuest->GetCurrentSecondEQClassForPlayer(player));
         }
 
+        // Vah Shir Instincts go with the people, which a race change can move a character into or out of
+        uint32 vahShirInstinctsSpellID = EverQuest->GetClassAuraSpellID(EQ_CLASSAURA_SPELL_VAH_SHIR_INSTINCTS);
+        if (vahShirInstinctsSpellID != 0 && EverQuest->HasCreatePlayerData(player->getRace(), player->getClass()) == true)
+        {
+            bool isVahShir = EverQuest->GetPlayerCreateInfoForPlayer(player).StartOption == EQ_START_OPTION_SHAR_VAHL;
+            if (isVahShir == true && player->HasSpell(vahShirInstinctsSpellID) == false)
+                player->learnSpell(vahShirInstinctsSpellID);
+            else if (isVahShir == false && player->HasSpell(vahShirInstinctsSpellID) == true)
+                player->removeSpell(vahShirInstinctsSpellID, SPEC_MASK_ALL, false);
+        }
+
         // Give players the ability to see invis vs undead
         if (EverQuest->ConfigSystemInvisVsUndeadDetectSpellID != 0 && player->HasAura(EverQuest->ConfigSystemInvisVsUndeadDetectSpellID) == false)
             player->CastSpell(player, EverQuest->ConfigSystemInvisVsUndeadDetectSpellID, true);
+        if (EverQuest->ConfigSystemInvisVsAnimalsDetectSpellID != 0 && player->HasAura(EverQuest->ConfigSystemInvisVsAnimalsDetectSpellID) == false)
+            player->CastSpell(player, EverQuest->ConfigSystemInvisVsAnimalsDetectSpellID, true);
 
         // Catch any level that was reached without Player::GiveLevel, which is the only thing that updates the criteria behind the "Level 10" through "Level 60" achievements
         player->UpdateAchievementCriteria(ACHIEVEMENT_CRITERIA_TYPE_REACH_LEVEL);
@@ -1143,8 +1206,6 @@ public:
         if (EverQuest->IsEnabled == false)
             return;
 
-        EverQuest->ClearClientVersionCheckForPlayer(player->GetGUID());
-
         // The tether itself was already unwound in OnPlayerBeforeLogout, so only any unanswered offer is left to drop
         EverQuest->ClearMentorshipRequestsInvolvingPlayerGUID(player->GetGUID());
 
@@ -1237,6 +1298,10 @@ public:
             return false;
         }
 
+        // Some zones hold everyone to the ground
+        if (player != nullptr && mapid != player->GetMapId())
+            EverQuest->RemoveEQLevitationBeforeEnteringMap(player, mapid);
+
         // Heading into a dungeon instance the character already has a copy of, so put back the bind the core dropped when their group went away
         EverQuest->TryRestoreInstanceDungeonBindForPlayer(player, mapid);
 
@@ -1252,6 +1317,12 @@ public:
     {
         if (EverQuest->IsEnabled == false)
             return;
+
+        // A horse can't follow into an indoor zone, and fades on a map that doesn't take one
+        EverQuest->RemoveEQMountWhereNotAllowed(player);
+
+        // A discipline ends at a zone line, as a camp does
+        EverQuest->RemoveActiveDisciplines(player);
 
         // Catch map switches that bypass TeleportTo
         EverQuest->ClearTempFactionBonusForPlayer(player);
@@ -1386,6 +1457,21 @@ public:
         if (EverQuest->IsEnabled == false)
             return;
         EverQuest->ApplyZoneWideGroupMoneyShare(player, loot);
+    }
+
+    // EQ prices: no reputation discount on EQ items or at EQ vendors, and greedy EQ vendors charge more and pay less
+    void OnPlayerGetVendorItemBuyPrice(Player const* /*player*/, Creature const* vendor, ItemTemplate const* itemTemplate, uint32 count, uint32& price) override
+    {
+        if (EverQuest->IsEnabled == false)
+            return;
+        EverQuest->UpdateVendorItemBuyPrice(vendor, itemTemplate, count, price);
+    }
+
+    void OnPlayerGetVendorItemSellPrice(Player const* /*player*/, Creature const* vendor, Item const* /*item*/, uint32& unitPrice) override
+    {
+        if (EverQuest->IsEnabled == false)
+            return;
+        EverQuest->UpdateVendorItemSellPrice(vendor, unitPrice);
     }
 
     void OnPlayerBeforeLogout(Player* player) override

@@ -78,6 +78,10 @@ public:
         if (spell->GetCaster()->IsPlayer() == true && EverQuest->HandleBardSongRangedSlotInstrumentOnCheckCast(spell->GetCaster()->ToPlayer(), spell, res) == true)
             return;
 
+        // EQ horses keep to outdoor EQ zones
+        if (spell->GetCaster()->IsPlayer() == true && EverQuest->HandleEQMountOnCheckCast(spell->GetCaster()->ToPlayer(), spell, res) == true)
+            return;
+
         // Crouch is a toggle, and nothing else can be cast while crouched
         if (spell->GetCaster()->IsPlayer() == true && EverQuest->HandleCrouchOnCheckCast(spell->GetCaster()->ToPlayer(), spell, res) == true)
             return;
@@ -123,8 +127,28 @@ public:
             return;
         }
 
-        // Levitation on top of an object illusion form crashes the client, so it is refused while the form is up
+        // Disciplines have their own rules for when they can start
+        if (spell->GetCaster()->IsPlayer() == true && EverQuest->HandleDisciplineOnCheckCast(spell->GetCaster()->ToPlayer(), spell, res) == true)
+            return;
+
+        // EQ's destroy spells stop working on anything past level 52
+        if (EverQuest->IsDestroySpellBlockedByLevel(spell->GetSpellInfo(), target) == true)
+        {
+            res = SPELL_FAILED_HIGHLEVEL;
+            return;
+        }
+
+        // Some zones hold everyone to the ground
         Unit* levitationTarget = (target != nullptr) ? target : casterUnit;
+        if (EverQuest->IsLevitationBlockedByZone(spell->GetSpellInfo(), levitationTarget) == true)
+        {
+            if (spell->GetCaster()->IsPlayer() == true)
+                ChatHandler(spell->GetCaster()->ToPlayer()->GetSession()).PSendSysMessage("You can't levitate in this zone.");
+            res = SPELL_FAILED_DONT_REPORT;
+            return;
+        }
+
+        // Levitation on top of an object illusion form crashes the client, so it is refused while the form is up
         if (EverQuest->IsLevitationBlockedByIllusionObjectForm(spell->GetSpellInfo(), levitationTarget) == true)
         {
             if (spell->GetCaster()->IsPlayer() == true)
@@ -353,6 +377,14 @@ public:
 
         CalculateEQSpellMaxDuration(aura, maxDuration);
 
+        // A worn focus lengthens the caster's spells
+        if (maxDuration > 0 && aura->GetCaster() != nullptr && aura->GetCaster()->IsPlayer() == true)
+        {
+            uint32 focusPercent = EverQuest->GetItemFocusPercentForPlayer(aura->GetCaster()->ToPlayer(), EQ_ITEM_FOCUS_TYPE_DURATION, aura->GetSpellInfo());
+            if (focusPercent != 0)
+                maxDuration += int32(float(maxDuration) * float(focusPercent) / 100.0f);
+        }
+
         // Crowd control between players is capped
         EverQuest->ApplyPvPCrowdControlRulesToAuraMaxDuration(aura, maxDuration);
     }
@@ -382,7 +414,7 @@ public:
             maxDuration = curSpell.AuraDurationMaxInMS;
             return;
         }
-        uint8 casterLevel = caster->GetLevel();
+        uint8 casterLevel = EverQuest->GetLevelForEQRules(caster);
         if (casterLevel < curSpell.AuraDurationCalcMinLevel)
         {
             maxDuration = curSpell.AuraDurationBaseInMS;
@@ -455,6 +487,10 @@ public:
         // This was added to fix a crash associated with consuming the last stack of a throwing weapon when a throwing skillup occurred. The actual issue is upstream in
         // the AzerothCore code specifically Player::UpdateWeaponSkill which was referencing an invalid pointer.
         spell->m_weaponItem = nullptr;
+
+        // A discipline sets its own reuse by level
+        if (caster != nullptr && caster->IsPlayer() == true)
+            EverQuest->HandleDisciplineCast(caster->ToPlayer(), spellInfo);
 
         // Class auras: settle the ammo for shots the Ranger's Endless Quiver spared, and for the channeled ranged spells whose ammo was handed to the mod at load.
         // Ahead of the enabled check, since those channeled spells no longer take ammo on their own

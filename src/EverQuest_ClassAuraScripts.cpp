@@ -106,6 +106,44 @@ class EverQuest_ClassAuraRogueAuraScript : public AuraScript
 static const uint32 EQ_CLASSAURA_PALADIN_TAKEN_ATTACK_PROC_MASK = PROC_FLAG_TAKEN_MELEE_AUTO_ATTACK | PROC_FLAG_TAKEN_SPELL_MELEE_DMG_CLASS
     | PROC_FLAG_TAKEN_RANGED_AUTO_ATTACK | PROC_FLAG_TAKEN_SPELL_RANGED_DMG_CLASS;
 
+// A discipline waiting on the next melee strike: the strike has its bonus by the time this fires, so it can go
+class EverQuest_DisciplineNextStrikeAuraScript : public AuraScript
+{
+    PrepareAuraScript(EverQuest_DisciplineNextStrikeAuraScript);
+
+    void HandleProc(ProcEventInfo& /*eventInfo*/)
+    {
+        PreventDefaultAction();
+        Remove();
+    }
+
+    void Register() override
+    {
+        OnProc += AuraProcFn(EverQuest_DisciplineNextStrikeAuraScript::HandleProc);
+    }
+};
+
+// Leechcurse heals for all the melee damage its holder deals
+class EverQuest_DisciplineLeechAuraScript : public AuraScript
+{
+    PrepareAuraScript(EverQuest_DisciplineLeechAuraScript);
+
+    void HandleProc(ProcEventInfo& eventInfo)
+    {
+        PreventDefaultAction();
+        DamageInfo* damageInfo = eventInfo.GetDamageInfo();
+        if (damageInfo == nullptr || damageInfo->GetDamage() == 0)
+            return;
+        HealInfo healInfo(GetTarget(), GetTarget(), damageInfo->GetDamage(), GetSpellInfo(), GetSpellInfo()->GetSchoolMask());
+        GetTarget()->HealBySpell(healInfo);
+    }
+
+    void Register() override
+    {
+        OnProc += AuraProcFn(EverQuest_DisciplineLeechAuraScript::HandleProc);
+    }
+};
+
 class EverQuest_ClassAuraPaladinAuraScript : public AuraScript
 {
     PrepareAuraScript(EverQuest_ClassAuraPaladinAuraScript);
@@ -725,6 +763,8 @@ void AddEverQuestClassAuraScripts()
     RegisterSpellScript(EverQuest_ClassAuraRogueAuraScript);
     RegisterSpellScript(EverQuest_ClassAuraRangerCompoundInjuryMovingAuraScript);
     RegisterSpellScript(EverQuest_ClassAuraPaladinAuraScript);
+    RegisterSpellScript(EverQuest_DisciplineNextStrikeAuraScript);
+    RegisterSpellScript(EverQuest_DisciplineLeechAuraScript);
     RegisterSpellScript(EverQuest_ClassAuraWarriorAuraScript);
     RegisterSpellScript(EverQuest_ClassAuraShadowKnightAuraScript);
     RegisterSpellScript(EverQuest_ClassAuraShadowKnightFocusAuraScript);

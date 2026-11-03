@@ -65,7 +65,8 @@ static const char* EQ_CLASSAURA_SPELL_TYPE_NAMES[EQ_CLASSAURA_SPELL_TYPE_COUNT] 
     "WizardIntensifiedSkyfall",
     "ShadowKnightBloodDebtVitality",
     "DruidNaturesBalanceShadow", "DruidNaturesBalanceArcane",
-    "ShadowKnightFocus", "ShadowKnightFocusMana"
+    "ShadowKnightFocus", "ShadowKnightFocusMana",
+    "BeastlordPassive", "BeastlordAura", "BeastlordPetPassive", "VahShirInstincts"
 };
 
 struct EverQuestClassAuraToggle
@@ -89,14 +90,14 @@ static const EverQuestClassAuraSpellType EQ_CLASSAURA_CLASS_PASSIVE_TYPES[] =
     EQ_CLASSAURA_SPELL_ENCHANTER_PASSIVE, EQ_CLASSAURA_SPELL_BARD_PASSIVE, EQ_CLASSAURA_SPELL_MONK_PASSIVE, EQ_CLASSAURA_SPELL_RANGER_PASSIVE,
     EQ_CLASSAURA_SPELL_ROGUE_PASSIVE, EQ_CLASSAURA_SPELL_PALADIN_PASSIVE, EQ_CLASSAURA_SPELL_SHADOWKNIGHT_PASSIVE, EQ_CLASSAURA_SPELL_WARRIOR_PASSIVE,
     EQ_CLASSAURA_SPELL_WIZARD_PASSIVE, EQ_CLASSAURA_SPELL_MAGICIAN_PASSIVE, EQ_CLASSAURA_SPELL_NECROMANCER_PASSIVE, EQ_CLASSAURA_SPELL_CLERIC_PASSIVE,
-    EQ_CLASSAURA_SPELL_DRUID_PASSIVE, EQ_CLASSAURA_SPELL_SHAMAN_PASSIVE
+    EQ_CLASSAURA_SPELL_DRUID_PASSIVE, EQ_CLASSAURA_SPELL_SHAMAN_PASSIVE, EQ_CLASSAURA_SPELL_BEASTLORD_PASSIVE
 };
 static const EverQuestClassAuraSpellType EQ_CLASSAURA_CLASS_AURA_TYPES[] =
 {
     EQ_CLASSAURA_SPELL_ENCHANTER_AURA, EQ_CLASSAURA_SPELL_BARD_AURA, EQ_CLASSAURA_SPELL_MONK_AURA, EQ_CLASSAURA_SPELL_RANGER_AURA,
     EQ_CLASSAURA_SPELL_ROGUE_AURA, EQ_CLASSAURA_SPELL_PALADIN_AURA, EQ_CLASSAURA_SPELL_SHADOWKNIGHT_AURA, EQ_CLASSAURA_SPELL_WARRIOR_AURA,
     EQ_CLASSAURA_SPELL_WIZARD_AURA, EQ_CLASSAURA_SPELL_MAGICIAN_AURA, EQ_CLASSAURA_SPELL_NECROMANCER_AURA, EQ_CLASSAURA_SPELL_CLERIC_AURA,
-    EQ_CLASSAURA_SPELL_DRUID_AURA, EQ_CLASSAURA_SPELL_SHAMAN_AURA
+    EQ_CLASSAURA_SPELL_DRUID_AURA, EQ_CLASSAURA_SPELL_SHAMAN_AURA, EQ_CLASSAURA_SPELL_BEASTLORD_AURA
 };
 static const size_t EQ_CLASSAURA_CLASS_COUNT = sizeof(EQ_CLASSAURA_CLASS_PASSIVE_TYPES) / sizeof(EQ_CLASSAURA_CLASS_PASSIVE_TYPES[0]);
 
@@ -107,7 +108,7 @@ static const EverQuestClassAuraSpellType EQ_CLASSAURA_MOD_OWNED_TYPES[] =
     EQ_CLASSAURA_SPELL_MONK_AURA, EQ_CLASSAURA_SPELL_MONK_LIGHT_ARMOR, EQ_CLASSAURA_SPELL_MONK_HEAVY_ARMOR, EQ_CLASSAURA_SPELL_RANGER_AURA,
     EQ_CLASSAURA_SPELL_ROGUE_AURA, EQ_CLASSAURA_SPELL_PALADIN_AURA, EQ_CLASSAURA_SPELL_SHADOWKNIGHT_AURA, EQ_CLASSAURA_SPELL_WARRIOR_AURA,
     EQ_CLASSAURA_SPELL_WIZARD_AURA, EQ_CLASSAURA_SPELL_MAGICIAN_AURA, EQ_CLASSAURA_SPELL_NECROMANCER_AURA, EQ_CLASSAURA_SPELL_CLERIC_AURA,
-    EQ_CLASSAURA_SPELL_DRUID_AURA, EQ_CLASSAURA_SPELL_SHAMAN_AURA, EQ_CLASSAURA_SPELL_CAST_SPEED_HELPER, EQ_CLASSAURA_SPELL_WARRIOR_UNRELENTING_ASSAULT,
+    EQ_CLASSAURA_SPELL_DRUID_AURA, EQ_CLASSAURA_SPELL_SHAMAN_AURA, EQ_CLASSAURA_SPELL_BEASTLORD_AURA, EQ_CLASSAURA_SPELL_CAST_SPEED_HELPER, EQ_CLASSAURA_SPELL_WARRIOR_UNRELENTING_ASSAULT,
     EQ_CLASSAURA_SPELL_MONK_CHI_SURGE, EQ_CLASSAURA_SPELL_ROGUE_LUCKY_STRIKE, EQ_CLASSAURA_SPELL_ROGUE_LUCKY_STRIKE_HELPER, EQ_CLASSAURA_SPELL_SHADOWKNIGHT_BLOOD_DEBT_CHARGE
 };
 static const size_t EQ_CLASSAURA_MOD_OWNED_COUNT = sizeof(EQ_CLASSAURA_MOD_OWNED_TYPES) / sizeof(EQ_CLASSAURA_MOD_OWNED_TYPES[0]);
@@ -218,7 +219,7 @@ void EverQuestMod::RefreshClassAurasForPlayer(Player* player)
     }
     RefreshClassAuraGearAurasForPlayer(player);
     UpdateEnchanterFocusForPlayer(player);
-    RefreshMagicianPetAuraForPlayer(player);
+    RefreshClassPetAurasForPlayer(player);
     RefreshClassAuraTogglesForPlayer(player);
 }
 
@@ -949,34 +950,31 @@ void EverQuestMod::UpdateWizardFocusMovementForPlayer(Player* player, uint32 dif
     }
 }
 
-void EverQuestMod::RefreshMagicianPetAuraForPlayer(Player* player)
+void EverQuestMod::RefreshClassPetAurasForPlayer(Player* player)
 {
-    uint32 petPassiveSpellID = GetClassAuraSpellID(EQ_CLASSAURA_SPELL_MAGICIAN_PET_PASSIVE);
-    if (petPassiveSpellID == 0)
-        return;
-    if (PlayerHasClassAura(player, EQ_CLASSAURA_SPELL_MAGICIAN_AURA) == false)
-        return;
     Pet* pet = player->GetPet();
     if (pet == nullptr || pet->IsInWorld() == false || pet->IsAlive() == false)
         return;
-    if (pet->HasAura(petPassiveSpellID) == false)
-        pet->AddAura(petPassiveSpellID, pet);
+    ApplyClassPetAurasToPet(pet);
 }
 
-void EverQuestMod::ApplyMagicianPetAuraToPet(Pet* pet)
+void EverQuestMod::ApplyClassPetAurasToPet(Pet* pet)
 {
     if (pet == nullptr || IsClassAuraSystemEnabled() == false)
-        return;
-    uint32 petPassiveSpellID = GetClassAuraSpellID(EQ_CLASSAURA_SPELL_MAGICIAN_PET_PASSIVE);
-    if (petPassiveSpellID == 0)
         return;
     Player* owner = pet->GetOwner();
     if (owner == nullptr)
         return;
-    if (PlayerHasClassAura(owner, EQ_CLASSAURA_SPELL_MAGICIAN_AURA) == false)
-        return;
-    if (pet->HasAura(petPassiveSpellID) == false)
-        pet->AddAura(petPassiveSpellID, pet);
+    static const EverQuestClassAuraSpellType ownerAuraTypes[] = { EQ_CLASSAURA_SPELL_MAGICIAN_AURA, EQ_CLASSAURA_SPELL_BEASTLORD_AURA };
+    static const EverQuestClassAuraSpellType petPassiveTypes[] = { EQ_CLASSAURA_SPELL_MAGICIAN_PET_PASSIVE, EQ_CLASSAURA_SPELL_BEASTLORD_PET_PASSIVE };
+    for (size_t i = 0; i < sizeof(ownerAuraTypes) / sizeof(ownerAuraTypes[0]); ++i)
+    {
+        uint32 petPassiveSpellID = GetClassAuraSpellID(petPassiveTypes[i]);
+        if (petPassiveSpellID == 0 || PlayerHasClassAura(owner, ownerAuraTypes[i]) == false)
+            continue;
+        if (pet->HasAura(petPassiveSpellID) == false)
+            pet->AddAura(petPassiveSpellID, pet);
+    }
 }
 
 void EverQuestMod::HandleClassAuraPetStrike(Unit* attacker, Unit* victim)
@@ -1826,7 +1824,16 @@ void EverQuestMod::ApplyClassAuraCastAdjustmentsOnCheckCast(Player* player, Spel
     if (helperSpellID != 0 && player->HasAura(helperSpellID) == true)
         player->RemoveAurasDueToSpell(helperSpellID);
     if (IsClassAuraSystemEnabled() == false)
+    {
+        // A worn focus isn't a class aura
+        if (IsSpellAnEQBardSong(spellInfo->Id) == false && spellInfo->CalcCastTime() > 0)
+        {
+            uint32 focusPercent = GetItemFocusPercentForPlayer(player, EQ_ITEM_FOCUS_TYPE_CAST_TIME, spellInfo);
+            if (focusPercent > 0)
+                ApplyCastSpeedHelperToPlayer(player, helperSpellID, (100.0f - (float)focusPercent) / 100.0f);
+        }
         return;
+    }
     EverQuestPlayerClassAuraState* state = GetClassAuraStateForPlayer(player);
     state->PendingCastAdjustSpellID = 0;
     state->PendingCadenceConsume = false;
@@ -1849,6 +1856,10 @@ void EverQuestMod::ApplyClassAuraCastAdjustmentsOnCheckCast(Player* player, Spel
     float castTimeMultiplier = 1.0f;
     uint32 castTimeReductionPercent = 0;
     bool isBardSong = IsSpellAnEQBardSong(spellInfo->Id);
+
+    // A worn focus shortens the cast
+    if (isBardSong == false && baseCastTimeInMS > 0)
+        castTimeReductionPercent += GetItemFocusPercentForPlayer(player, EQ_ITEM_FOCUS_TYPE_CAST_TIME, spellInfo);
 
     // Bard, a song's cast time never changes
     if (isBardSong == true && baseCastTimeInMS > 0)
@@ -1918,7 +1929,11 @@ void EverQuestMod::ApplyClassAuraCastAdjustmentsOnCheckCast(Player* player, Spel
         player->SetInstantCast(true);
     else if (castTimeReductionPercent > 0)
         castTimeMultiplier *= (100.0f - (float)castTimeReductionPercent) / 100.0f;
+    ApplyCastSpeedHelperToPlayer(player, helperSpellID, castTimeMultiplier);
+}
 
+void EverQuestMod::ApplyCastSpeedHelperToPlayer(Player* player, uint32 helperSpellID, float castTimeMultiplier)
+{
     if (helperSpellID == 0)
         return;
     if (castTimeMultiplier <= 0.0f || std::fabs(castTimeMultiplier - 1.0f) < 0.001f)

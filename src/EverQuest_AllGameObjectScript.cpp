@@ -42,6 +42,9 @@
 #define LIFT_PAINEEL_ENTRY                          279911
 #define LIFT_PAINEEL_TOP_TRIGGER_ENTRY              279912
 #define LIFT_PAINEEL_BOTTOM_TRIGGER_ENTRY           279913
+#define LIFT_ECHO_ENTRY                             279916
+#define LIFT_ECHO_TOP_TRIGGER_ENTRY                 279917
+#define LIFT_ECHO_BOTTOM_TRIGGER_ENTRY              279918
 
 using namespace std;
 
@@ -62,6 +65,7 @@ public:
         case LIFT_KELETHIN_CENTER_ENTRY:
         case LIFT_KELETHIN_EAST_ENTRY:
         case LIFT_PAINEEL_ENTRY:
+        case LIFT_ECHO_ENTRY:
             return true;
         default:
             return false;
@@ -191,6 +195,11 @@ public:
             case LIFT_PAINEEL_TOP_TRIGGER_ENTRY:
             {
                 ProcessLiftTrigger(go->GetMap()->GetGameObject(GetLiftGUID(go->GetMap(), LIFT_PAINEEL_ENTRY)));
+            } break;
+            case LIFT_ECHO_BOTTOM_TRIGGER_ENTRY:
+            case LIFT_ECHO_TOP_TRIGGER_ENTRY:
+            {
+                ProcessLiftTrigger(go->GetMap()->GetGameObject(GetLiftGUID(go->GetMap(), LIFT_ECHO_ENTRY)));
             } break;
             default: break;
             }

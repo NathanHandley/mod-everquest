@@ -203,6 +203,23 @@ EverQuest.AlternateGroupExperienceFormula.AddPercentPerMember = 20
 
 ###################################################################################################
 #
+# 	EverQuest.Experience.BurningCrusadeBaseCreatureLevel
+#		EverQuest creatures this level or higher pay the Burning Crusade base kill experience
+#       instead of the classic one that every Norrath map has.  0 turns this off
+#	Default: 0 (the Shadows of Luclin expansion and later use 58)
+#
+# 	EverQuest.Experience.NorthrendBaseCreatureLevel
+#		EverQuest creatures this level or higher pay the Northrend base kill experience instead,
+#       which wins over the setting above.  0 turns this off
+#	Default: 0 (the Shadows of Luclin expansion and later use 68)
+#
+###################################################################################################
+
+EverQuest.Experience.BurningCrusadeBaseCreatureLevel = 0
+EverQuest.Experience.NorthrendBaseCreatureLevel = 0
+
+###################################################################################################
+#
 # 	EverQuest.Mentorship.Enabled
 #		If true, two grouped characters can tether themselves together so that they are semi-near in
 #        level and can tackle content together.  Started from the right click menu on a targeted group
@@ -362,6 +379,15 @@ EverQuest.Spells.CreatureWoWStunImmunityEnabled = True
 ###################################################################################################
 
 EverQuest.Spells.ClassAurasEnabled = True
+
+#
+# 	EverQuest.Spells.DisciplinesEnabled
+#         Description: If true, EQ melee and hybrid classes learn and can use their disciplines (Luclin and later).  If false, they aren't
+#                      learned, and any already known refuse to start
+#         Default:     1 (Enabled)
+#
+
+EverQuest.Spells.DisciplinesEnabled = True
 
 ###################################################################################################
 #
@@ -799,20 +825,6 @@ EverQuest.CreatureEmotes.Enabled = True
 EverQuest.CreatureEmotes.AmbientEnabled = True
 
 ###################################################################################################
-# Creature Movement Sound Settings (EQ-like walk/run sound loops)
-#
-# 	EverQuest.CreatureMovementSounds.Enabled
-#		If true, creatures play their EQ walk sound as a continuous loop while walking and their
-#		EQ run sound while running, like the EQ client did.  The loop is driven by the server
-#		(replayed back-to-back at the sound file length) because the WoW client cannot loop a
-#		sound linked on unit movement by itself in full loops
-#	Default: True
-#
-###################################################################################################
-
-EverQuest.CreatureMovementSounds.Enabled = True
-
-###################################################################################################
 # Creature Worn Effect Settings
 #
 # 	EverQuest.CreatureWornEffects.HideAuraIcons
@@ -1024,25 +1036,14 @@ EverQuest.CrossClass.IncludeSkillIDs = 129, 164, 165, 171, 182, 185, 186, 197, 2
 # Client Version Check Settings
 #
 # 	EverQuest.ClientVersionCheck.Enabled
-#		If true, players must be running a client patch MPQ matching the deployed content or they
-#		are kicked shortly after entering the world.
+#		If true, players must be running a client patch MPQ matching the deployed content.  A client
+#		that doesn't match is refused when it logs in, before the character list, and told its
+#		version and the expected one.  GM accounts are exempt.
 #	Default: False
-#
-# 	EverQuest.ClientVersionCheck.GraceTimeInSeconds
-#		How long after entering the world the server waits for the client's version report before
-#		treating the client as out of date
-#	Default: 30
-#
-# 	EverQuest.ClientVersionCheck.KickDelayInSeconds
-#		How long after showing the out-of-date message the player is kicked, so the message can
-#		be read
-#	Default: 10
 #
 ###################################################################################################
 
 EverQuest.ClientVersionCheck.Enabled = False
-EverQuest.ClientVersionCheck.GraceTimeInSeconds = 30
-EverQuest.ClientVersionCheck.KickDelayInSeconds = 10
 
 ###################################################################################################
 # Tracking Settings

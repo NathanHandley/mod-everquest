@@ -29,6 +29,14 @@ public:
 
     void OnAfterConfigLoad(bool reload) override
     {
+        LoadConfigurationAndData(reload);
+
+        // Last, since it depends on whether the module came up
+        EverQuest->UpdateRequiredClientDataVersion();
+    }
+
+    void LoadConfigurationAndData(bool reload)
+    {
         EverQuest->LoadConfigurationFile();
         if (EverQuest->IsEnabled == false)
             return;
@@ -55,9 +63,9 @@ public:
         EverQuest->LoadCreatureKillSpawnData();
         EverQuest->LoadCreaturePresenceGroupData();
         EverQuest->LoadCreatureEmoteData();
-        EverQuest->LoadCreatureMovementSoundData();
         EverQuest->LoadCreatureOnkillReputations();
         EverQuest->LoadItemTemplateData();
+        EverQuest->LoadItemFocusDataFromDB();
         EverQuest->LoadItemWoWToEQSwapData();
         EverQuest->LoadSpellData();
         EverQuest->LoadSpellMovementCastSnareData();
@@ -69,8 +77,13 @@ public:
         EverQuest->LoadQuestReactions();
         EverQuest->LoadQuestFactionRequirements();
         EverQuest->LoadGossipReactions();
+        EverQuest->LoadTimedPortData();
         EverQuest->LoadPetData();
         EverQuest->LoadPetSilentDisplayData();
+        EverQuest->LoadWarderLookData();
+        EverQuest->LoadEQRaceStartData();
+        EverQuest->LoadDisciplineData();
+        EverQuest->LoadTrapData();
         EverQuest->LoadDruidFormDisplayData();
         EverQuest->LoadCreatePlayerData();
         EverQuest->LoadCreatureLootData();
@@ -97,7 +110,7 @@ public:
             return;
 
         EverQuest->UpdateRestrictedMapPlayerCheck(diff);
-        EverQuest->UpdateClientVersionChecks(diff);
+        EverQuest->UpdateTimedPorts(diff);
         EverQuest->ProcessPendingEquipmentStorageTransactions();
         EverQuest->ProcessPendingGateReturns();
         EverQuest->ProcessPendingReactionSpawnCreations();

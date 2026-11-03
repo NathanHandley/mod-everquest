@@ -52,6 +52,7 @@
 #include "MovementGenerator.h"
 #include "PathGenerator.h"
 #include "EQPathBuilder.h"
+#include "EQMount.h"
 #include "EQZoneMap.h"
 #include "GridTerrainData.h"
 #include "CharacterCache.h"
@@ -94,6 +95,7 @@ EverQuestMod::EverQuestMod() :
     ConfigSystemCreatureTemplateIDMax(0),
     ConfigDeathKnightsStartLikeOtherClasses(false),
     ConfigSystemInvisVsUndeadDetectSpellID(0),
+    ConfigSystemInvisVsAnimalsDetectSpellID(0),
     ConfigSystemResistAdjustmentSpellID(0),
     ConfigSystemBlindWanderSpellID(0),
     ConfigSystemRoguePoisonMarkerSpellID(0),
@@ -175,6 +177,8 @@ EverQuestMod::EverQuestMod() :
     ConfigSecondaryExpPoolGainPercent(25.0f),
     ConfigSecondaryExpPoolMaxPooled(1000000),
     ConfigPlayerLevelCap(0),
+    ConfigExperienceBurningCrusadeBaseCreatureLevel(0),
+    ConfigExperienceNorthrendBaseCreatureLevel(0),
     ConfigPlayerAddHearthstoneToNewCharacters(true),
     ConfigPlayerAddMasterTotemToShamans(true),
     ConfigPlayerAddRacialGuiseItemOnLogin(true),
@@ -252,6 +256,8 @@ bool EverQuestMod::LoadConfigurationSystemDataFromDB()
                 ConfigSystemFactionEvilRaceMask = (uint32)atoi(value.c_str());
             else if (key == "InvisVsUndeadDetectSpellID")
                 ConfigSystemInvisVsUndeadDetectSpellID = (uint32)atoi(value.c_str());
+            else if (key == "InvisVsAnimalsDetectSpellID")
+                ConfigSystemInvisVsAnimalsDetectSpellID = (uint32)atoi(value.c_str());
             else if (key == "ItemTemplateIDMin")
                 ConfigSystemItemTemplateIDMin = (uint32)atoi(value.c_str());
             else if (key == "ItemTemplateIDMax")
@@ -384,8 +390,6 @@ bool EverQuestMod::LoadConfigurationSystemDataFromDB()
                 ConfigSystemCarriedLightSpellIDStart = (uint32)atoi(value.c_str());
             else if (key == "ClientDataVersion")
                 ConfigSystemClientDataVersion = (uint32)atoi(value.c_str());
-            else if (key == "ClientDataVersionMismatchMessage")
-                ConfigSystemClientDataVersionMismatchMessage = value;
             else if (key == "MapDBCIDMin")
                 ConfigSystemMapDBCIDMin = (uint32)atoi(value.c_str());
             else if (key == "MapDBCIDMax")
@@ -459,8 +463,6 @@ void EverQuestMod::LoadConfigurationFile()
 
     // Client Version Check
     ConfigClientVersionCheckEnabled = sConfigMgr->GetOption<bool>("EverQuest.ClientVersionCheck.Enabled", false);
-    ConfigClientVersionCheckGraceTimeInSeconds = sConfigMgr->GetOption<uint32>("EverQuest.ClientVersionCheck.GraceTimeInSeconds", 30);
-    ConfigClientVersionCheckKickDelayInSeconds = sConfigMgr->GetOption<uint32>("EverQuest.ClientVersionCheck.KickDelayInSeconds", 10);
 
     // Spell
     ConfigSpellTalentAlignmentEnabled = sConfigMgr->GetOption<bool>("EverQuest.Spell.TalentAlignmentEnabled", true);
@@ -490,6 +492,7 @@ void EverQuestMod::LoadConfigurationFile()
     ConfigSpellMovementCastSnareEnabled = sConfigMgr->GetOption<bool>("EverQuest.Spells.MovementCastSnareEnabled", true);
     ConfigSpellMovementCastJumpCancelEnabled = sConfigMgr->GetOption<bool>("EverQuest.Spells.MovementCastJumpCancelEnabled", true);
     ConfigSpellClassAurasEnabled = sConfigMgr->GetOption<bool>("EverQuest.Spells.ClassAurasEnabled", true);
+    ConfigSpellDisciplinesEnabled = sConfigMgr->GetOption<bool>("EverQuest.Spells.DisciplinesEnabled", true);
     ConfigSpellHasteCapPercent = sConfigMgr->GetOption<float>("EverQuest.Spells.HasteCapPercent", 50.0f);
     ConfigSpellHasteCapMod = sConfigMgr->GetOption<float>("EverQuest.Spells.HasteCapMod", 0.5f);
     ConfigSpellAttackPowerHighestOnlyEnabled = sConfigMgr->GetOption<bool>("EverQuest.Spells.AttackPowerHighestOnlyEnabled", true);
@@ -564,7 +567,6 @@ void EverQuestMod::LoadConfigurationFile()
     ConfigCreatureEmotesAmbientEnabled = sConfigMgr->GetOption<bool>("EverQuest.CreatureEmotes.AmbientEnabled", true);
 
     // Creature movement sounds
-    ConfigCreatureMovementSoundsEnabled = sConfigMgr->GetOption<bool>("EverQuest.CreatureMovementSounds.Enabled", true);
 
     // Creature worn effects
     ConfigCreatureWornEffectsHideAuraIcons = sConfigMgr->GetOption<bool>("EverQuest.CreatureWornEffects.HideAuraIcons", true);
@@ -587,6 +589,10 @@ void EverQuestMod::LoadConfigurationFile()
 
     // Player Level Cap
     ConfigPlayerLevelCap = sConfigMgr->GetOption<uint32>("EverQuest.Player.LevelCap", 0);
+
+    // Kill experience
+    ConfigExperienceBurningCrusadeBaseCreatureLevel = sConfigMgr->GetOption<uint32>("EverQuest.Experience.BurningCrusadeBaseCreatureLevel", 0);
+    ConfigExperienceNorthrendBaseCreatureLevel = sConfigMgr->GetOption<uint32>("EverQuest.Experience.NorthrendBaseCreatureLevel", 0);
 
     // Mentorship
     ConfigMentorshipEnabled = sConfigMgr->GetOption<bool>("EverQuest.Mentorship.Enabled", true);
@@ -645,7 +651,7 @@ void EverQuestMod::LoadConfigurationFile()
 void EverQuestMod::LoadCreatureData()
 {
     CreaturesByTemplateID.clear();
-    QueryResult queryResult = WorldDatabase.Query("SELECT CreatureTemplateID, CanShowHeldLootItems, CanShowHeldLootShields, SpawnLimit, RangedAttackEnabled, RangedAttackMinRange, RangedAttackMaxRange, RangedAttackDamageModPct, AgroSocialDistanceMod, EnrageEnabled, EnrageHPPct, EnrageDurationInMS, EnrageCooldownInMS, FlurryEnabled, FlurryChancePct, RampageEnabled, RampageChancePct, RampageRange, RampageDamagePct, WildRampageEnabled, WildRampageChancePct, WildRampageMaxTargets, WildRampageDamagePct, AttackRoundTimeInMS, DifficultyType, GossipIsOnlyFromHailText, SpellDamageMultiplier, GossipHelloAchievementID, DefaultHeldMainhandItemID, DefaultHeldOffhandItemID FROM mod_everquest_creature ORDER BY CreatureTemplateID;");
+    QueryResult queryResult = WorldDatabase.Query("SELECT CreatureTemplateID, CanShowHeldLootItems, CanShowHeldLootShields, SpawnLimit, RangedAttackEnabled, RangedAttackMinRange, RangedAttackMaxRange, RangedAttackDamageModPct, AgroSocialDistanceMod, EnrageEnabled, EnrageHPPct, EnrageDurationInMS, EnrageCooldownInMS, FlurryEnabled, FlurryChancePct, RampageEnabled, RampageChancePct, RampageRange, RampageDamagePct, WildRampageEnabled, WildRampageChancePct, WildRampageMaxTargets, WildRampageDamagePct, AttackRoundTimeInMS, DifficultyType, GossipIsOnlyFromHailText, SpellDamageMultiplier, GossipHelloAchievementID, DefaultHeldMainhandItemID, DefaultHeldOffhandItemID, LevelEQ, MaxLevelEQ, VendorBuyPriceMod, VendorSellPriceMod FROM mod_everquest_creature ORDER BY CreatureTemplateID;");
     if (queryResult)
     {
         do
@@ -683,6 +689,10 @@ void EverQuestMod::LoadCreatureData()
             everQuestCreature.GossipHelloAchievementID = fields[27].Get<uint32>();
             everQuestCreature.DefaultHeldMainhandItemID = fields[28].Get<uint32>();
             everQuestCreature.DefaultHeldOffhandItemID = fields[29].Get<uint32>();
+            everQuestCreature.LevelEQ = uint8(fields[30].Get<uint32>());
+            everQuestCreature.MaxLevelEQ = uint8(fields[31].Get<uint32>());
+            everQuestCreature.VendorBuyPriceMod = fields[32].Get<uint32>();
+            everQuestCreature.VendorSellPriceMod = fields[33].Get<uint32>();
             CreaturesByTemplateID[everQuestCreature.CreatureTemplateID] = everQuestCreature;
         } while (queryResult->NextRow());
     }
@@ -1042,6 +1052,52 @@ bool EverQuestMod::HasCreatureDataForCreatureTemplateID(uint32 creatureTemplateI
         return true;
     else
         return false;
+}
+
+bool EverQuestMod::IsCreatureTemplateIDAnEQCreatureTemplateID(uint32 creatureTemplateID)
+{
+    if (ConfigSystemCreatureTemplateIDMin == 0 || ConfigSystemCreatureTemplateIDMax == 0)
+        return false;
+    return creatureTemplateID >= ConfigSystemCreatureTemplateIDMin && creatureTemplateID <= ConfigSystemCreatureTemplateIDMax;
+}
+
+// EQ prices (converter EQMerchantPricing): an EQ item's buy price is already EverQuest's, for a player at indifferent faction with the
+// CHA where EQ's prices stop improving, so neither an EQ vendor nor any vendor selling an EQ item gives a reputation discount on top.
+// That keeps an item's price above what a vendor pays for it, which is close to it (price x 1.05 against price / 1.05).  A greedy EQ
+// vendor charges more, by its VendorBuyPriceMod.  The price comes in after the core's discount, and is worked out again from the item
+void EverQuestMod::UpdateVendorItemBuyPrice(Creature const* vendor, ItemTemplate const* itemTemplate, uint32 count, uint32& price)
+{
+    if (itemTemplate == nullptr || itemTemplate->BuyPrice == 0)
+        return;
+    bool isEQVendor = vendor != nullptr && IsCreatureTemplateIDAnEQCreatureTemplateID(vendor->GetEntry());
+    if (isEQVendor == false && IsItemTemplateIDAnEQItemTemplateID(itemTemplate->ItemId) == false)
+        return;
+
+    uint64 buyPriceMod = EQ_VENDOR_PRICE_MOD_SCALE;
+    if (isEQVendor == true)
+    {
+        unordered_map<uint32, EverQuestCreature>::const_iterator creatureIterator = CreaturesByTemplateID.find(vendor->GetEntry());
+        if (creatureIterator != CreaturesByTemplateID.end() && creatureIterator->second.VendorBuyPriceMod > EQ_VENDOR_PRICE_MOD_SCALE)
+            buyPriceMod = creatureIterator->second.VendorBuyPriceMod;
+    }
+
+    // Per buy stack, rounded, as the vendor's list shows it
+    uint64 stackPrice = ((uint64)itemTemplate->BuyPrice * buyPriceMod + EQ_VENDOR_PRICE_MOD_SCALE / 2) / EQ_VENDOR_PRICE_MOD_SCALE;
+    price = (uint32)std::min<uint64>(stackPrice * std::max<uint32>(count, 1), uint64(MAX_MONEY_AMOUNT));
+}
+
+// A greedy EQ vendor pays less for anything, by its VendorSellPriceMod (the client's tooltip shows the same, from VendorSellPriceMod.dbc)
+void EverQuestMod::UpdateVendorItemSellPrice(Creature const* vendor, uint32& unitPrice)
+{
+    if (vendor == nullptr || unitPrice == 0)
+        return;
+    unordered_map<uint32, EverQuestCreature>::const_iterator creatureIterator = CreaturesByTemplateID.find(vendor->GetEntry());
+    if (creatureIterator == CreaturesByTemplateID.end() || creatureIterator->second.VendorSellPriceMod >= EQ_VENDOR_PRICE_MOD_SCALE)
+        return;
+
+    // Rounded, but a sellable item stays worth at least a copper
+    uint64 sellPrice = ((uint64)unitPrice * creatureIterator->second.VendorSellPriceMod + EQ_VENDOR_PRICE_MOD_SCALE / 2) / EQ_VENDOR_PRICE_MOD_SCALE;
+    unitPrice = (uint32)std::max<uint64>(sellPrice, 1);
 }
 
 const EverQuestCreature& EverQuestMod::GetCreatureDataForCreatureTemplateID(uint32 creatureTemplateID)
@@ -1476,42 +1532,6 @@ void EverQuestMod::LoadCreatureEmoteData()
     }
 }
 
-void EverQuestMod::LoadCreatureMovementSoundData()
-{
-    CreatureMovementSoundsByDisplayID.clear();
-
-    QueryResult queryResult = WorldDatabase.Query("SELECT DisplayID, WalkSoundEntryIDs, WalkSoundDurationsMS, RunSoundEntryIDs, RunSoundDurationsMS, MaxHearingDistance FROM mod_everquest_creature_movement_sound;");
-    if (queryResult)
-    {
-        do
-        {
-            Field* fields = queryResult->Fetch();
-            uint32 displayID = fields[0].Get<uint32>();
-            EverQuestCreatureMovementSound movementSound;
-            string walkSoundEntryIDsString = fields[1].Get<string>();
-            for (std::string_view idToken : Acore::Tokenize(walkSoundEntryIDsString, ';', false))
-                movementSound.WalkPieceSoundEntryIDs.push_back(Acore::StringTo<uint32>(idToken).value_or(0));
-            string walkSoundDurationsString = fields[2].Get<string>();
-            for (std::string_view durationToken : Acore::Tokenize(walkSoundDurationsString, ';', false))
-                movementSound.WalkPieceDurationsMS.push_back(Acore::StringTo<uint32>(durationToken).value_or(0));
-            string runSoundEntryIDsString = fields[3].Get<string>();
-            for (std::string_view idToken : Acore::Tokenize(runSoundEntryIDsString, ';', false))
-                movementSound.RunPieceSoundEntryIDs.push_back(Acore::StringTo<uint32>(idToken).value_or(0));
-            string runSoundDurationsString = fields[4].Get<string>();
-            for (std::string_view durationToken : Acore::Tokenize(runSoundDurationsString, ';', false))
-                movementSound.RunPieceDurationsMS.push_back(Acore::StringTo<uint32>(durationToken).value_or(0));
-            movementSound.MaxHearingDistance = fields[5].Get<float>();
-            if (movementSound.WalkPieceSoundEntryIDs.size() != movementSound.WalkPieceDurationsMS.size() ||
-                movementSound.RunPieceSoundEntryIDs.size() != movementSound.RunPieceDurationsMS.size())
-            {
-                LOG_ERROR("module.EverQuest", "EverQuestMod::LoadCreatureMovementSoundData skipped display ID {} as the piece sound and duration list lengths do not match", displayID);
-                continue;
-            }
-            CreatureMovementSoundsByDisplayID[displayID] = movementSound;
-        } while (queryResult->NextRow());
-    }
-}
-
 static void ReplaceAllInString(string& subject, const string& token, const string& replacement)
 {
     size_t tokenPosition = subject.find(token);
@@ -1800,125 +1820,6 @@ void EverQuestMod::UpdateCreatureEmotes(Creature* creature, uint32 diff)
                 }
             }
         }
-    }
-}
-
-void EverQuestMod::RemoveCreatureMovementSoundState(Creature* creature)
-{
-    creature->CustomData.Erase(EQ_CREATURE_CUSTOMDATA_MOVEMENTSOUND);
-}
-
-void EverQuestMod::UpdateCreatureMovementSound(Creature* creature, uint32 diff)
-{
-    // In EQ, movement sounds are repeating loops which isn't how WoW works.  So this is a 'hack' to make sounds
-    // play in parts emitted from the server instead of relying on EQ creature event attachments
-    if (creature == nullptr)
-        return;
-    if (ConfigCreatureMovementSoundsEnabled == false)
-        return;
-
-    // Pets (summoned, charmed, or otherwise player controlled) don't make movement sounds since they follow their owner constantly
-    if (creature->IsPet() == true || creature->IsGuardian() == true || creature->IsControlledByPlayer() == true)
-    {
-        EverQuestCreatureMovementSoundState* petState = creature->CustomData.Get<EverQuestCreatureMovementSoundState>(EQ_CREATURE_CUSTOMDATA_MOVEMENTSOUND);
-        if (petState != nullptr)
-        {
-            petState->CurGait = EQ_CREATURE_MOVEMENT_GAIT_NONE;
-            petState->ListenersByGUID.clear();
-        }
-        return;
-    }
-
-    // Walk vs Run sound picking
-    uint8 curGait = EQ_CREATURE_MOVEMENT_GAIT_NONE;
-    if (creature->IsAlive() == true && creature->isMoving() == true && creature->IsUnderWater() == false && creature->IsFlying() == false)
-        curGait = creature->IsWalking() == true ? EQ_CREATURE_MOVEMENT_GAIT_WALK : EQ_CREATURE_MOVEMENT_GAIT_RUN;
-
-    // Drop from idle creatures
-    EverQuestCreatureMovementSoundState* state = creature->CustomData.Get<EverQuestCreatureMovementSoundState>(EQ_CREATURE_CUSTOMDATA_MOVEMENTSOUND);
-    if (curGait == EQ_CREATURE_MOVEMENT_GAIT_NONE || creature->GetMap()->GetPlayers().IsEmpty() == true)
-    {
-        if (state != nullptr)
-        {
-            state->CurGait = EQ_CREATURE_MOVEMENT_GAIT_NONE;
-            state->ListenersByGUID.clear();
-        }
-        return;
-    }
-
-    unordered_map<uint32, EverQuestCreatureMovementSound>::const_iterator soundIter = CreatureMovementSoundsByDisplayID.find(creature->GetDisplayId());
-    if (soundIter == CreatureMovementSoundsByDisplayID.end())
-        return;
-    const vector<uint32>& pieceSoundEntryIDs = curGait == EQ_CREATURE_MOVEMENT_GAIT_WALK ? soundIter->second.WalkPieceSoundEntryIDs : soundIter->second.RunPieceSoundEntryIDs;
-    const vector<uint32>& pieceDurationsMS = curGait == EQ_CREATURE_MOVEMENT_GAIT_WALK ? soundIter->second.WalkPieceDurationsMS : soundIter->second.RunPieceDurationsMS;
-    if (pieceSoundEntryIDs.empty() == true)
-    {
-        if (state != nullptr)
-        {
-            state->CurGait = EQ_CREATURE_MOVEMENT_GAIT_NONE;
-            state->ListenersByGUID.clear();
-        }
-        return;
-    }
-    if (state == nullptr)
-        state = creature->CustomData.GetDefault<EverQuestCreatureMovementSoundState>(EQ_CREATURE_CUSTOMDATA_MOVEMENTSOUND);
-
-    // Changing gait will restart the loop new for everyone
-    bool gaitChanged = (state->CurGait != curGait);
-    state->CurGait = curGait;
-    if (gaitChanged == true)
-        state->ListenerScanRemainingMS = 0;
-
-    // Rescan who can hear this
-    if (state->ListenerScanRemainingMS > diff)
-        state->ListenerScanRemainingMS -= diff;
-    else
-    {
-        state->ListenerScanRemainingMS = EQ_CREATURE_MOVEMENT_SOUND_LISTENER_SCAN_MS;
-        unordered_map<ObjectGuid, EverQuestCreatureMovementSoundListener> refreshedListeners;
-        Map::PlayerList const& mapPlayers = creature->GetMap()->GetPlayers();
-        for (Map::PlayerList::const_iterator playerIter = mapPlayers.begin(); playerIter != mapPlayers.end(); ++playerIter)
-        {
-            Player* mapPlayer = playerIter->GetSource();
-            if (mapPlayer == nullptr || mapPlayer->IsInWorld() == false)
-                continue;
-            if (creature->IsWithinDistInMap(mapPlayer, soundIter->second.MaxHearingDistance) == false)
-                continue;
-            unordered_map<ObjectGuid, EverQuestCreatureMovementSoundListener>::const_iterator listenerIter = state->ListenersByGUID.find(mapPlayer->GetGUID());
-            if (listenerIter == state->ListenersByGUID.end() || gaitChanged == true)
-            {
-                creature->PlayDistanceSound(pieceSoundEntryIDs[0], mapPlayer);
-                EverQuestCreatureMovementSoundListener newListener;
-                newListener.PieceIndex = 0;
-                newListener.ReplayRemainingMS = pieceDurationsMS[0];
-                refreshedListeners[mapPlayer->GetGUID()] = newListener;
-            }
-            else
-                refreshedListeners[mapPlayer->GetGUID()] = listenerIter->second;
-        }
-        state->ListenersByGUID.swap(refreshedListeners);
-    }
-
-    // Chain parts so a finished part moves to the next
-    for (unordered_map<ObjectGuid, EverQuestCreatureMovementSoundListener>::iterator listenerIter = state->ListenersByGUID.begin(); listenerIter != state->ListenersByGUID.end(); ++listenerIter)
-    {
-        EverQuestCreatureMovementSoundListener& listener = listenerIter->second;
-        if (listener.ReplayRemainingMS > diff)
-        {
-            listener.ReplayRemainingMS -= diff;
-            continue;
-        }
-        uint32 overshootMS = diff - listener.ReplayRemainingMS;
-        listener.PieceIndex = (listener.PieceIndex + 1) % pieceSoundEntryIDs.size();
-        uint32 nextPieceDurationMS = pieceDurationsMS[listener.PieceIndex];
-        if (nextPieceDurationMS == 0)
-            nextPieceDurationMS = 1;
-        if (overshootMS >= nextPieceDurationMS)
-            overshootMS = nextPieceDurationMS - 1;
-        listener.ReplayRemainingMS = nextPieceDurationMS - overshootMS;
-        Player* listenerPlayer = ObjectAccessor::GetPlayer(*creature, listenerIter->first);
-        if (listenerPlayer != nullptr)
-            creature->PlayDistanceSound(pieceSoundEntryIDs[listener.PieceIndex], listenerPlayer);
     }
 }
 
@@ -3312,6 +3213,414 @@ void EverQuestMod::LoadItemTemplateData()
                 CarriedLightTypesByItemTemplateID[everQuestItemTemplate.ItemTemplateEntryID] = lightType;
         } while (queryResult->NextRow());
     }
+
+    // Warcraft's own torches and lanterns are light sources too (data/sql/db-world/updates), and they are nothing else to this module
+    QueryResult warcraftLightResult = WorldDatabase.Query("SELECT ItemTemplateID, LightType FROM mod_everquest_warcraft_light_item");
+    if (warcraftLightResult)
+    {
+        do
+        {
+            Field* fields = warcraftLightResult->Fetch();
+            uint8 lightType = fields[1].Get<uint8>();
+            if (lightType != 0 && lightType <= EQ_CARRIED_LIGHT_TYPE_COUNT)
+                CarriedLightTypesByItemTemplateID[fields[0].Get<uint32>()] = lightType;
+        } while (warcraftLightResult->NextRow());
+    }
+
+    Player::SetLightSourceItemCheck([](uint32 itemEntry) { return EverQuest->GetCarriedLightTypeForItemTemplateID(itemEntry) != 0; });
+}
+
+void EverQuestMod::LoadItemFocusDataFromDB()
+{
+    ItemFocusByItemTemplateID.clear();
+    QueryResult queryResult = WorldDatabase.Query("SELECT ItemTemplateID, FocusType, Percent, MaxSpellLevel, SpellType, ResistType, MinDurationInMS, InstantType, MinCastTimeInMS, RequiredTraits, ExcludedTraits, RequiredEQSpellID FROM mod_everquest_item_focus");
+    if (queryResult == nullptr)
+        return;
+    do
+    {
+        Field* fields = queryResult->Fetch();
+        EverQuestItemFocus itemFocus;
+        itemFocus.FocusType = fields[1].Get<uint32>();
+        itemFocus.Percent = fields[2].Get<uint32>();
+        itemFocus.MaxSpellLevel = fields[3].Get<uint32>();
+        itemFocus.SpellType = fields[4].Get<uint32>();
+        itemFocus.ResistType = fields[5].Get<uint32>();
+        itemFocus.MinDurationInMS = fields[6].Get<uint32>();
+        itemFocus.InstantType = fields[7].Get<uint32>();
+        itemFocus.MinCastTimeInMS = fields[8].Get<uint32>();
+        itemFocus.RequiredTraits = fields[9].Get<uint32>();
+        itemFocus.ExcludedTraits = fields[10].Get<uint32>();
+        itemFocus.RequiredEQSpellID = fields[11].Get<uint32>();
+        ItemFocusByItemTemplateID[fields[0].Get<uint32>()] = itemFocus;
+    } while (queryResult->NextRow());
+}
+
+// EQ's resist types, 1 through 5, as the schools the converter gives them
+static SpellSchoolMask GetSchoolMaskForEQResistType(uint32 resistType)
+{
+    switch (resistType)
+    {
+        case 1: return SPELL_SCHOOL_MASK_ARCANE;
+        case 2: return SPELL_SCHOOL_MASK_FIRE;
+        case 3: return SPELL_SCHOOL_MASK_FROST;
+        case 4: return SPELL_SCHOOL_MASK_NATURE;
+        case 5: return SPELL_SCHOOL_MASK_SHADOW;
+        default: return SPELL_SCHOOL_MASK_NONE;
+    }
+}
+
+static bool DoesItemFocusCoverSpell(EverQuestItemFocus const& itemFocus, SpellInfo const* spellInfo, EverQuestSpell const& spellData)
+{
+    uint32 spellLevel = spellData.LearnLevel != 0 ? spellData.LearnLevel : std::max(spellInfo->SpellLevel, spellInfo->BaseLevel);
+    if (spellLevel > itemFocus.MaxSpellLevel)
+        return false;
+    if ((spellData.FocusTraits & itemFocus.RequiredTraits) != itemFocus.RequiredTraits || (spellData.FocusTraits & itemFocus.ExcludedTraits) != 0)
+        return false;
+    if (itemFocus.RequiredEQSpellID != 0 && spellData.EQSpellID != itemFocus.RequiredEQSpellID)
+        return false;
+    if ((itemFocus.SpellType == 1 && spellInfo->IsPositive() == true) || (itemFocus.SpellType == 2 && spellInfo->IsPositive() == false))
+        return false;
+    if (itemFocus.ResistType != 0 && (spellInfo->GetSchoolMask() & GetSchoolMaskForEQResistType(itemFocus.ResistType)) == 0)
+        return false;
+
+    // A timed EQ spell holds an infinite placeholder in its SpellInfo, and its real duration in the EQ data
+    int32 maxDuration = spellData.AuraDurationMaxInMS != 0 ? int32(spellData.AuraDurationMaxInMS) : spellInfo->GetMaxDuration();
+    if (itemFocus.MinDurationInMS != 0 && (maxDuration >= 0 && uint32(maxDuration) < itemFocus.MinDurationInMS))
+        return false;
+    if ((itemFocus.InstantType == 1 && maxDuration != 0) || (itemFocus.InstantType == 2 && maxDuration == 0))
+        return false;
+    if (itemFocus.MinCastTimeInMS != 0 && spellInfo->CalcCastTime() < itemFocus.MinCastTimeInMS)
+        return false;
+    return true;
+}
+
+uint32 EverQuestMod::GetItemFocusPercentForPlayer(Player* player, uint32 focusType, SpellInfo const* spellInfo)
+{
+    if (ItemFocusByItemTemplateID.empty() == true || player == nullptr || spellInfo == nullptr || IsSpellAnEQSpell(spellInfo->Id) == false)
+        return 0;
+    const EverQuestSpell& spellData = GetSpellDataForSpellID(spellInfo->Id);
+    uint32 bestPercent = 0;
+    for (uint8 equipSlot = EQUIPMENT_SLOT_START; equipSlot < EQUIPMENT_SLOT_END; ++equipSlot)
+    {
+        Item* item = player->GetItemByPos(INVENTORY_SLOT_BAG_0, equipSlot);
+        if (item == nullptr)
+            continue;
+        auto focusIter = ItemFocusByItemTemplateID.find(item->GetEntry());
+        if (focusIter == ItemFocusByItemTemplateID.end() || focusIter->second.FocusType != focusType || focusIter->second.Percent <= bestPercent)
+            continue;
+        if (DoesItemFocusCoverSpell(focusIter->second, spellInfo, spellData) == true)
+            bestPercent = focusIter->second.Percent;
+    }
+    return bestPercent;
+}
+
+void EverQuestMod::RefreshItemFocusRangeAuraForPlayer(Player* player)
+{
+    if (ItemFocusByItemTemplateID.empty() == true)
+        return;
+    uint32 bestPercent = 0;
+    for (uint8 equipSlot = EQUIPMENT_SLOT_START; equipSlot < EQUIPMENT_SLOT_END; ++equipSlot)
+    {
+        Item* item = player->GetItemByPos(INVENTORY_SLOT_BAG_0, equipSlot);
+        if (item == nullptr)
+            continue;
+        auto focusIter = ItemFocusByItemTemplateID.find(item->GetEntry());
+        if (focusIter != ItemFocusByItemTemplateID.end() && focusIter->second.FocusType == EQ_ITEM_FOCUS_TYPE_RANGE && focusIter->second.Percent > bestPercent)
+            bestPercent = focusIter->second.Percent;
+    }
+    uint32 wantedSpellID = 0;
+    if (bestPercent >= EQ_ITEM_FOCUS_RANGE_PERCENT_LONG)
+        wantedSpellID = EQ_ITEM_FOCUS_RANGE_SPELL_ID_LONG;
+    else if (bestPercent != 0)
+        wantedSpellID = EQ_ITEM_FOCUS_RANGE_SPELL_ID_SHORT;
+    for (uint32 spellID : { uint32(EQ_ITEM_FOCUS_RANGE_SPELL_ID_SHORT), uint32(EQ_ITEM_FOCUS_RANGE_SPELL_ID_LONG) })
+    {
+        if (spellID != wantedSpellID)
+            player->RemoveAurasDueToSpell(spellID);
+    }
+    if (wantedSpellID != 0 && player->HasAura(wantedSpellID) == false)
+        player->AddAura(wantedSpellID, player);
+}
+
+void EverQuestMod::LoadTrapData()
+{
+    TrapsByMapID.clear();
+    QueryResult queryResult = WorldDatabase.Query("SELECT ID, MapID, X, Y, Z, Radius, MaxZDifference, ChancePercent, SpellID, RespawnInSeconds, RespawnVarianceInSeconds FROM mod_everquest_trap;");
+    if (queryResult)
+    {
+        do
+        {
+            Field* fields = queryResult->Fetch();
+            EverQuestTrap trap;
+            trap.ID = fields[0].Get<uint32>();
+            trap.X = fields[2].Get<float>();
+            trap.Y = fields[3].Get<float>();
+            trap.Z = fields[4].Get<float>();
+            trap.Radius = fields[5].Get<float>();
+            trap.MaxZDifference = fields[6].Get<float>();
+            trap.ChancePercent = fields[7].Get<uint32>();
+            trap.SpellID = fields[8].Get<uint32>();
+            trap.RespawnInSeconds = fields[9].Get<uint32>();
+            trap.RespawnVarianceInSeconds = fields[10].Get<uint32>();
+            TrapsByMapID[fields[1].Get<uint32>()].push_back(trap);
+        } while (queryResult->NextRow());
+    }
+}
+
+void EverQuestMod::UpdateTrapsForPlayer(Player* player, uint32 diffInMS)
+{
+    if (TrapsByMapID.empty() == true)
+        return;
+    auto trapsIter = TrapsByMapID.find(player->GetMapId());
+    if (trapsIter == TrapsByMapID.end() || player->IsAlive() == false || player->IsGameMaster() == true || player->IsInFlight() == true)
+        return;
+    EverQuestPlayerTrapState* trapState = player->CustomData.GetDefault<EverQuestPlayerTrapState>("EQTrap");
+    trapState->MSSinceCheck += diffInMS;
+    if (trapState->MSSinceCheck < EQ_TRAP_CHECK_INTERVAL_IN_MS)
+        return;
+    trapState->MSSinceCheck = 0;
+
+    time_t now = GameTime::GetGameTime().count();
+    for (EverQuestTrap const& trap : trapsIter->second)
+    {
+        if (std::fabs(player->GetPositionZ() - trap.Z) > trap.MaxZDifference || player->GetExactDist2d(trap.X, trap.Y) > trap.Radius)
+            continue;
+        if (roll_chance_i(int32(trap.ChancePercent)) == false)
+            continue;
+
+        // The re-arm time is shared with everyone in this copy of the map, and a map can update apart from a player leaving it
+        uint64 rearmKey = (uint64(player->GetInstanceId()) << 32) | trap.ID;
+        {
+            std::lock_guard<std::mutex> lock(TrapRearmTimesMutex);
+            time_t& rearmTime = TrapRearmTimesByMapInstanceAndTrapKey[rearmKey];
+            if (rearmTime > now)
+                continue;
+            rearmTime = now + trap.RespawnInSeconds + (trap.RespawnVarianceInSeconds != 0 ? urand(0, trap.RespawnVarianceInSeconds) : 0);
+        }
+
+        // Unseen, as EQ's is, and hostile so that the spell treats the player as its enemy
+        Creature* trigger = player->SummonTrigger(trap.X, trap.Y, trap.Z, 0.0f, EQ_TRAP_TRIGGER_LIFETIME_IN_MS);
+        if (trigger == nullptr)
+            continue;
+        trigger->SetFaction(EQ_TRAP_TRIGGER_FACTION);
+        trigger->CastSpell(player, trap.SpellID, true);
+        ChatHandler(player->GetSession()).PSendSysMessage("{} triggers a trap!", player->GetName());
+    }
+}
+
+void EverQuestMod::HandleDeathSaveOnDamage(Unit* victim, uint32& damage)
+{
+    if (victim == nullptr || victim->IsPlayer() == false || damage < victim->GetHealth())
+        return;
+    for (AuraEffect const* dummyEffect : victim->GetAuraEffectsByType(SPELL_AURA_DUMMY))
+    {
+        if (dummyEffect->GetMiscValue() != EQ_SPELLDUMMYTYPE_DEATHSAVE || dummyEffect->GetId() < ConfigSystemSpellDBCIDMin || dummyEffect->GetId() > ConfigSystemSpellDBCIDMax)
+            continue;
+
+        // It goes either way, as EQ's does
+        uint32 spellID = dummyEffect->GetId();
+        uint32 healPercent = dummyEffect->GetMiscValueB() == 2 ? 100 : EQ_DEATH_SAVE_PARTIAL_HEAL_PERCENT;
+        bool isSaved = roll_chance_i(EQ_DEATH_SAVE_CHANCE_PERCENT);
+        victim->RemoveAurasDueToSpell(spellID);
+        if (isSaved == true)
+        {
+            damage = 0;
+            victim->SetHealth(victim->CountPctFromMaxHealth(int32(healPercent)));
+            ChatHandler(victim->ToPlayer()->GetSession()).PSendSysMessage("You feel the touch of your god, and are healed.");
+        }
+        return;
+    }
+}
+
+bool EverQuestMod::IsDestroySpellBlockedByLevel(SpellInfo const* spellInfo, Unit* target)
+{
+    if (target == nullptr)
+        return false;
+    if (spellInfo->Id != EQ_SPELL_ID_BANISHMENT_OF_SHADOWS && spellInfo->Id != EQ_SPELL_ID_BANISHMENT && spellInfo->Id != EQ_SPELL_ID_DISINTEGRATE)
+        return false;
+    return GetLevelForEQRules(target) > EQ_DESTROY_MAX_TARGET_LEVEL;
+}
+
+void EverQuestMod::ShadowStepPlayer(Player* player)
+{
+    float x = player->GetPositionX() + std::cos(player->GetOrientation()) * EQ_SHADOW_STEP_DISTANCE_IN_YARDS;
+    float y = player->GetPositionY() + std::sin(player->GetOrientation()) * EQ_SHADOW_STEP_DISTANCE_IN_YARDS;
+    float z = player->GetPositionZ();
+    EQZoneMap const* zoneMap = sEQZoneMapMgr->GetZoneMap(player->GetMapId());
+    if (zoneMap == nullptr)
+    {
+        Position destination = player->GetPosition();
+        player->MovePositionToFirstCollision(destination, EQ_SHADOW_STEP_DISTANCE_IN_YARDS, 0.0f);
+        player->NearTeleportTo(destination.GetPositionX(), destination.GetPositionY(), destination.GetPositionZ(), player->GetOrientation());
+        return;
+    }
+    if (zoneMap->IsInLineOfSight(player->GetPositionX(), player->GetPositionY(), z + EQ_ZONE_LINE_ARRIVAL_LOS_HEIGHT, x, y, z + EQ_ZONE_LINE_ARRIVAL_LOS_HEIGHT) == false)
+        return;
+    if (AlignZoneLineArrivalToGround(zoneMap, x, y, z) == true)
+        player->NearTeleportTo(x, y, z, player->GetOrientation());
+}
+
+void EverQuestMod::ReclaimPetForPlayer(Player* player)
+{
+    Pet* pet = player->GetPet();
+    if (pet == nullptr || pet->IsAlive() == false || pet->getPetType() != SUMMON_PET)
+        return;
+
+    // TAKP: the summon's mana cost, scaled by the pet's health and never more than 75%
+    SpellInfo const* summonSpellInfo = sSpellMgr->GetSpellInfo(pet->GetUInt32Value(UNIT_CREATED_BY_SPELL));
+    if (summonSpellInfo != nullptr)
+    {
+        uint32 returnPercent = std::min<uint32>(uint32(pet->GetHealthPct()), EQ_RECLAIM_PET_MAX_MANA_RETURN_PERCENT);
+        player->ModifyPower(POWER_MANA, summonSpellInfo->CalcPowerCost(player, summonSpellInfo->GetSchoolMask()) * int32(returnPercent) / 100);
+    }
+    player->RemovePet(pet, PET_SAVE_AS_DELETED);
+}
+
+void EverQuestMod::SendPlayerToBindPoint(Player* player)
+{
+    // EQ binds are held apart from the core's, which is only the start town or an inn
+    uint32 mapID = 0;
+    float x = 0;
+    float y = 0;
+    float z = 0;
+    if (TryGetEQBindHomePosition(player, mapID, x, y, z) == true)
+        player->TeleportTo(mapID, x, y, z, player->GetOrientation());
+    else
+        player->TeleportTo(player->m_homebindMapId, player->m_homebindX, player->m_homebindY, player->m_homebindZ, player->GetOrientation());
+}
+
+void EverQuestMod::LoadDisciplineData()
+{
+    DisciplinesBySpellID.clear();
+    QueryResult queryResult = WorldDatabase.Query("SELECT SpellID, ReuseInSeconds, IsTimed, EQClassID, UseLevel FROM mod_everquest_discipline;");
+    if (queryResult)
+    {
+        do
+        {
+            Field* fields = queryResult->Fetch();
+            EverQuestDiscipline& discipline = DisciplinesBySpellID[fields[0].Get<uint32>()];
+            discipline.SpellID = fields[0].Get<uint32>();
+            discipline.ReuseInSeconds = fields[1].Get<uint32>();
+            discipline.IsTimed = fields[2].Get<uint8>() != 0;
+            discipline.UseLevelsByEQClassID[fields[3].Get<uint8>()] = fields[4].Get<uint8>();
+        } while (queryResult->NextRow());
+    }
+}
+
+bool EverQuestMod::IsDisciplineSpell(uint32 spellID)
+{
+    return DisciplinesBySpellID.find(spellID) != DisciplinesBySpellID.end();
+}
+
+bool EverQuestMod::HandleDisciplineOnCheckCast(Player* player, Spell* spell, SpellCastResult& res)
+{
+    uint32 spellID = spell->GetSpellInfo()->Id;
+    if (IsDisciplineSpell(spellID) == false)
+        return false;
+    if (ConfigSpellDisciplinesEnabled == false)
+    {
+        ChatHandler(player->GetSession()).PSendSysMessage("Disciplines are turned off on this server.");
+        res = SPELL_FAILED_DONT_REPORT;
+        return true;
+    }
+    for (auto const& disciplineEntry : DisciplinesBySpellID)
+    {
+        if (disciplineEntry.second.IsTimed == true && player->HasAura(disciplineEntry.first) == true)
+        {
+            ChatHandler(player->GetSession()).PSendSysMessage("You must wait before using this discipline.");
+            res = SPELL_FAILED_DONT_REPORT;
+            return true;
+        }
+    }
+    return false;
+}
+
+// The classes the core leaves no parry chance, whatever their auras say
+static bool CanPlayerParry(Player* player)
+{
+    switch (player->getClass())
+    {
+        case CLASS_PRIEST:
+        case CLASS_MAGE:
+        case CLASS_WARLOCK:
+        case CLASS_DRUID:
+            return false;
+        default:
+            return player->CanParry();
+    }
+}
+
+void EverQuestMod::HandleDisciplineCast(Player* player, SpellInfo const* spellInfo)
+{
+    auto disciplineIter = DisciplinesBySpellID.find(spellInfo->Id);
+    if (disciplineIter == DisciplinesBySpellID.end())
+        return;
+    EverQuestDiscipline const& discipline = disciplineIter->second;
+
+    // Only one runs at a time, so one waiting for its strike makes way
+    for (auto const& disciplineEntry : DisciplinesBySpellID)
+    {
+        if (disciplineEntry.first != spellInfo->Id)
+            player->RemoveAurasDueToSpell(disciplineEntry.first);
+    }
+
+    // A character who can't parry gets the same cover as a dodge from the front, from a second class's discipline
+    if (spellInfo->HasAura(SPELL_AURA_MOD_PARRY_PERCENT) == true && CanPlayerParry(player) == false)
+    {
+        Aura* dodgeAura = player->AddAura(EQ_DISCIPLINE_NIMBLE_SPELL_ID, player);
+        if (dodgeAura != nullptr)
+        {
+            int32 durationInMS = int32(GetSpellDataForSpellID(spellInfo->Id).AuraDurationMaxInMS);
+            dodgeAura->SetMaxDuration(durationInMS);
+            dodgeAura->SetDuration(durationInMS);
+        }
+    }
+
+    // Reuse shortens by 54 seconds for every level past the one the discipline comes at.  It's the lowest of the player's two classes
+    const EverQuestClassMap classMap = GetClassMapForWOWClassID(player->getClass());
+    uint8 useLevel = 0;
+    for (uint8 eqClassID : { classMap.EQClassIDBase, GetCurrentSecondEQClassForPlayer(player) })
+    {
+        auto useLevelIter = discipline.UseLevelsByEQClassID.find(eqClassID);
+        if (useLevelIter != discipline.UseLevelsByEQClassID.end() && (useLevel == 0 || useLevelIter->second < useLevel))
+            useLevel = useLevelIter->second;
+    }
+    if (useLevel == 0)
+        return;
+    uint32 level = player->GetLevel();
+    if (discipline.ReuseInSeconds < EQ_DISCIPLINE_REUSE_LEVEL_CAP_BELOW_SECONDS && level > EQ_DISCIPLINE_REUSE_LEVEL_CAP)
+        level = EQ_DISCIPLINE_REUSE_LEVEL_CAP;
+    int32 reduction = int32(level > useLevel ? level - useLevel : 0) * EQ_DISCIPLINE_REUSE_SECONDS_PER_LEVEL;
+    reduction = std::min(reduction, int32(discipline.ReuseInSeconds) - EQ_DISCIPLINE_MIN_REUSE_SECONDS);
+    if (reduction > 0)
+        player->ModifySpellCooldown(spellInfo->Id, -reduction * int32(IN_MILLISECONDS));
+
+    // EQ of this era has one reuse timer for every discipline
+    uint32 reuseInMS = uint32(int32(discipline.ReuseInSeconds) - std::max(reduction, 0)) * IN_MILLISECONDS;
+    for (auto const& disciplineEntry : DisciplinesBySpellID)
+    {
+        if (disciplineEntry.first == spellInfo->Id || player->HasSpell(disciplineEntry.first) == false)
+            continue;
+        player->AddSpellCooldown(disciplineEntry.first, 0, reuseInMS);
+        WorldPacket cooldownPacket;
+        player->BuildCooldownPacket(cooldownPacket, SPELL_COOLDOWN_FLAG_NONE, disciplineEntry.first, reuseInMS);
+        player->SendDirectMessage(&cooldownPacket);
+    }
+}
+
+void EverQuestMod::RemoveActiveDisciplines(Player* player)
+{
+    for (auto const& disciplineEntry : DisciplinesBySpellID)
+        player->RemoveAurasDueToSpell(disciplineEntry.first);
+}
+
+void EverQuestMod::ApplyItemFocusToSpellAmount(Unit* caster, uint32 focusType, SpellInfo const* spellInfo, int32& amount)
+{
+    if (caster == nullptr || caster->IsPlayer() == false || amount <= 0)
+        return;
+    uint32 percent = GetItemFocusPercentForPlayer(caster->ToPlayer(), focusType, spellInfo);
+    if (percent != 0)
+        amount += int32(std::ceil(float(amount) * float(percent) / 100.0f));
 }
 
 bool EverQuestMod::IsWornEffectSpell(uint32 spellID)
@@ -4922,7 +5231,7 @@ void EverQuestMod::LoadSpellData()
 {
     SpellDataBySpellID.clear();
     BardSongTickSpellIDs.clear();
-    QueryResult queryResult = WorldDatabase.Query("SELECT SpellID, AuraDurationBaseInMS, AuraDurationAddPerLevelInMS, AuraDurationMaxInMS, AuraDurationCalcMinLevel, AuraDurationCalcMaxLevel, RecourseSpellID, SpellIDCastOnMeleeAttacker, FocusBoostType, PeriodicAuraSpellID, PeriodicAuraSpellRadius, MaleFormSpellID, FemaleFormSpellID, EffectFailChancePercent, EffectFailableType, StunUsesBashKickChance, SpellIDCastOnTargetWhenStunLands, AuraStaysOnSecondaryClassSwitch, MinTargetLevel, MaxCreatureTargetLevel, ResistDiff, HasteType, ModFactionRepValue, IllusionFormAlignment, IllusionFormEQRaceID, PersistOnClassChange, IllusionObjectClass, ManaGainSpellPowerCoefficient, DamageIsFixed, IntensifyingRampStartMultiplier1, IntensifyingRampStartMultiplier2, IntensifyingRampStartMultiplier3, IntensifyingRampStartMultiplier4, IntensifyingRampStartMultiplier5, IntensifyingRampStartMultiplier6, IntensifyingRampStartMultiplier7, IntensifyingRampStartMultiplier8, IntensifyingRampStartMultiplier9, IntensifyingRampStartMultiplier10, IntensifyingRampStartMultiplier11, IntensifyingRampStartMultiplier12, CasterVisualKitID, CreatureLossOfControlGrantsImmunity, EQResistType, IsEQPartialResistCapable FROM mod_everquest_spell ORDER BY SpellID;");
+    QueryResult queryResult = WorldDatabase.Query("SELECT SpellID, AuraDurationBaseInMS, AuraDurationAddPerLevelInMS, AuraDurationMaxInMS, AuraDurationCalcMinLevel, AuraDurationCalcMaxLevel, RecourseSpellID, SpellIDCastOnMeleeAttacker, FocusBoostType, PeriodicAuraSpellID, PeriodicAuraSpellRadius, MaleFormSpellID, FemaleFormSpellID, EffectFailChancePercent, EffectFailableType, StunUsesBashKickChance, SpellIDCastOnTargetWhenStunLands, AuraStaysOnSecondaryClassSwitch, MinTargetLevel, MaxCreatureTargetLevel, ResistDiff, HasteType, ModFactionRepValue, IllusionFormAlignment, IllusionFormEQRaceID, PersistOnClassChange, IllusionObjectClass, ManaGainSpellPowerCoefficient, DamageIsFixed, IntensifyingRampStartMultiplier1, IntensifyingRampStartMultiplier2, IntensifyingRampStartMultiplier3, IntensifyingRampStartMultiplier4, IntensifyingRampStartMultiplier5, IntensifyingRampStartMultiplier6, IntensifyingRampStartMultiplier7, IntensifyingRampStartMultiplier8, IntensifyingRampStartMultiplier9, IntensifyingRampStartMultiplier10, IntensifyingRampStartMultiplier11, IntensifyingRampStartMultiplier12, CasterVisualKitID, CreatureLossOfControlGrantsImmunity, EQResistType, IsEQPartialResistCapable, LearnLevel, EQSpellID, FocusTraits FROM mod_everquest_spell ORDER BY SpellID;");
     if (queryResult)
     {
         do
@@ -4965,6 +5274,9 @@ void EverQuestMod::LoadSpellData()
             everQuestSpell.CreatureLossOfControlGrantsImmunity = fields[30 + MAX_SPELL_EFFECTS].Get<uint8>() != 0;
             everQuestSpell.EQResistType = fields[31 + MAX_SPELL_EFFECTS].Get<uint8>();
             everQuestSpell.IsEQPartialResistCapable = fields[32 + MAX_SPELL_EFFECTS].Get<uint8>() != 0;
+            everQuestSpell.LearnLevel = fields[33 + MAX_SPELL_EFFECTS].Get<uint32>();
+            everQuestSpell.EQSpellID = fields[34 + MAX_SPELL_EFFECTS].Get<uint32>();
+            everQuestSpell.FocusTraits = fields[35 + MAX_SPELL_EFFECTS].Get<uint32>();
             SpellDataBySpellID[everQuestSpell.SpellID] = everQuestSpell;
             if (everQuestSpell.PeriodicAuraSpellID != 0)
                 BardSongTickSpellIDs.insert(everQuestSpell.PeriodicAuraSpellID);
@@ -5611,12 +5923,47 @@ uint64 EverQuestMod::CalculateIllusionCharacterGearSignature(Player* player, uin
     return signature;
 }
 
+// The tens are the head variant, which the client's face rows take for every value below 100, falling back to the plain head where a race has none
+bool EverQuestMod::IsIllusionFaceValid(EverQuestIllusionCharacter const* illusionCharacter, uint32 faceID) const
+{
+    return illusionCharacter != nullptr && faceID < EQ_ILLUSION_FACE_HEAD_VARIANT_STEP * EQ_ILLUSION_FACE_HEAD_VARIANT_STEP
+        && (faceID % EQ_ILLUSION_FACE_HEAD_VARIANT_STEP) < illusionCharacter->FaceCount;
+}
+
+// Hair style selects the head geoset: 0 = bare head, 1-3 = the EQ helmed heads, and a helm wins over the hair picked at creation.  What was picked is for the character's own EQ race.
+// The skin byte is the eye color, which the EQ races' skin rows carry for the Luclin models' eyes
+void EverQuestMod::GetIllusionLookBytesForPlayer(Player* player, uint8 chrRaceID, uint8& hairStyleOut, uint8& hairColorOut, uint8& facialHairOut, uint8& skinOut)
+{
+    hairStyleOut = GetIllusionHelmHairStyleForPlayer(player);
+    hairColorOut = 0;
+    facialHairOut = 0;
+    skinOut = 0;
+    EverQuestPlayerStartOptionState originState = GetPlayerOriginState(player);
+    if (originState.EQRaceID == 0)
+        return;
+    EverQuestIllusionCharacter const* illusionCharacter = GetIllusionCharacterForRaceAndGender(originState.EQRaceID, player->getGender());
+    if (illusionCharacter == nullptr || illusionCharacter->ChrRaceID != chrRaceID)
+        return;
+    // A helm hides the hair, but the beard and the eyes stay
+    facialHairOut = originState.EQFacialHair;
+    skinOut = originState.EQEyeColor;
+    if (hairStyleOut != 0)
+        return;
+    hairStyleOut = originState.EQHairStyle;
+    hairColorOut = originState.EQHairColor;
+}
+
 void EverQuestMod::BuildMirrorImageDataPacketForPlayer(Player* subject, uint8 chrRaceID, uint8 eqFaceByte, WorldPacket& dataOut)
 {
     // Field layout must match WorldSession::HandleMirrorImageDataRequest. The face byte carries the EQ face selection (the CharSections face rows blit the EQ head textures into the composite)
-    // Skin/hair/haircolor/facialhair bytes are pinned to zero since the converter points every EQ selection byte variation at the same generated section textures
+    // Skin, hair, hair color and facial hair are the character's own EQ look when the illusion is its own EQ race, and zero for any other
     uint32 itemDisplayIDs[EQ_MIRROR_IMAGE_ITEM_SLOT_COUNT];
     GetMirrorImageItemDisplayIDsForPlayer(subject, chrRaceID, itemDisplayIDs);
+    uint8 hairStyle = 0;
+    uint8 hairColor = 0;
+    uint8 facialHair = 0;
+    uint8 skin = 0;
+    GetIllusionLookBytesForPlayer(subject, chrRaceID, hairStyle, hairColor, facialHair, skin);
 
     dataOut.Initialize(SMSG_MIRRORIMAGE_DATA, 68);
     dataOut << subject->GetGUID();
@@ -5624,11 +5971,11 @@ void EverQuestMod::BuildMirrorImageDataPacketForPlayer(Player* subject, uint8 ch
     dataOut << uint8(chrRaceID);
     dataOut << uint8(subject->getGender());
     dataOut << uint8(subject->getClass());
-    dataOut << uint8(0);             // skin
+    dataOut << uint8(skin);          // skin (carries the EQ eye color)
     dataOut << uint8(eqFaceByte);    // face (carries the EQ face selection)
-    dataOut << uint8(GetIllusionHelmHairStyleForPlayer(subject)); // hair style selects the head geoset: 0 = bare head, 1-3 = the EQ helmed heads
-    dataOut << uint8(0);             // haircolor (helm textures untinted for players)
-    dataOut << uint8(0);             // facialhair
+    dataOut << uint8(hairStyle);
+    dataOut << uint8(hairColor);
+    dataOut << uint8(facialHair);
     dataOut << uint32(subject->GetGuildId());
     for (int slotIndex = 0; slotIndex < EQ_MIRROR_IMAGE_ITEM_SLOT_COUNT; ++slotIndex)
         dataOut << uint32(itemDisplayIDs[slotIndex]);
@@ -5664,8 +6011,11 @@ void EverQuestMod::ApplyIllusionCharacterDisplayIfChanged(Player* player, EverQu
 
     // The EQ face selection rides the hair style byte of the mirror packet (EQ heads bake the face into the head texture), and out-of-range selections fall back to the race's default face
     uint32 selectedFaceID = GetIllusionFaceIDForPlayer(player);
-    if (selectedFaceID >= illusionCharacter->FaceCount)
+    if (IsIllusionFaceValid(illusionCharacter, selectedFaceID) == false)
         selectedFaceID = 0;
+    // The head variant (the tens) was picked for the character's own EQ race, like the hair and eyes, so any other race shows its plain head
+    if (selectedFaceID >= EQ_ILLUSION_FACE_HEAD_VARIANT_STEP && GetPlayerOriginState(player).EQRaceID != illusionCharacter->EQRaceID)
+        selectedFaceID %= EQ_ILLUSION_FACE_HEAD_VARIANT_STEP;
     illusionState->CharacterFaceByte = (uint8)selectedFaceID;
 
     // The mirror flag must be on before any display change reaches the client, since the flag is what makes it request the packet
@@ -6010,6 +6360,24 @@ bool EverQuestMod::IsLevitationBlockedByIllusionObjectForm(SpellInfo const* spel
     return IsUnitInIllusionObjectForm(target);
 }
 
+bool EverQuestMod::IsLevitationBlockedByZone(SpellInfo const* spellInfo, Unit* target)
+{
+    if (target == nullptr || DoesSpellApplyLevitation(spellInfo) == false)
+        return false;
+    auto zoneIter = ZoneByMapID.find(target->GetMapId());
+    return zoneIter != ZoneByMapID.end() && zoneIter->second.AllowEQLevitate == false;
+}
+
+void EverQuestMod::RemoveEQLevitationBeforeEnteringMap(Player* player, uint32 mapID)
+{
+    // This has to run on the map being left: fading hover reads the ground under the player, and the new map's has no height data yet
+    auto zoneIter = ZoneByMapID.find(mapID);
+    if (zoneIter == ZoneByMapID.end() || zoneIter->second.AllowEQLevitate == true)
+        return;
+    player->RemoveAurasByType(SPELL_AURA_HOVER);
+    player->RemoveAurasByType(SPELL_AURA_FEATHER_FALL);
+}
+
 bool EverQuestMod::IsIllusionObjectFormBlockedByLevitation(uint32 spellID, Unit* target)
 {
     // The two can never overlap even for an instant, so a levitating target simply does not get the form.  Only the form is refused here
@@ -6048,7 +6416,7 @@ bool EverQuestMod::IsSpellBlockedByMinTargetLevel(uint32 spellID, Unit* target, 
     const EverQuestSpell& spellData = GetSpellDataForSpellID(spellID);
     if (spellData.MinTargetLevel == 0)
         return false;
-    if (target->GetLevel() >= spellData.MinTargetLevel)
+    if (GetLevelForEQRules(target) >= spellData.MinTargetLevel)
         return false;
     return true;
 }
@@ -6067,7 +6435,7 @@ bool EverQuestMod::IsSpellBlockedByMaxCreatureTargetLevel(uint32 spellID, Unit* 
     const EverQuestSpell& spellData = GetSpellDataForSpellID(spellID);
     if (spellData.MaxCreatureTargetLevel == 0)
         return false;
-    if (target->GetLevel() <= spellData.MaxCreatureTargetLevel)
+    if (GetLevelForEQRules(target) <= spellData.MaxCreatureTargetLevel)
         return false;
     return true;
 }
@@ -6389,7 +6757,7 @@ uint32 EverQuestMod::GetCreatureStunProtectedEffectMaskForTarget(SpellInfo const
     if (spellInfo->Id >= ConfigSystemSpellDBCIDMin && spellInfo->Id <= ConfigSystemSpellDBCIDMax && IsSpellAnEQSpell(spellInfo->Id) == true)
         return 0;
 
-    if (target->GetLevel() <= EQ_STUN_NPC_IMMUNE_ABOVE_LEVEL)
+    if (GetLevelForEQRules(target) <= EQ_STUN_NPC_IMMUNE_ABOVE_LEVEL)
         return 0;
 
     uint32 stunEffectMask = 0;
@@ -6816,7 +7184,7 @@ bool EverQuestMod::RollEQResist(Unit* caster, Unit* target, SpellInfo const* spe
     int32 partialModifier = (150 * (resistChance - roll)) / resistChance;
     if (caster->IsPlayer() == false)
     {
-        int32 levelDiff = int32(target->GetLevel()) - int32(caster->GetLevel());
+        int32 levelDiff = int32(GetLevelForEQRules(target)) - int32(GetLevelForEQRules(caster));
         if (levelDiff >= 20)
             partialModifier += int32(float(levelDiff) * 1.5f);
     }
@@ -6936,7 +7304,7 @@ int32 EverQuestMod::GetWipeHateListChanceOnLanding(Unit* target, int32 baseChanc
 {
     if (target == nullptr || baseChance <= 0)
         return 0;
-    uint8 targetLevel = target->GetLevel();
+    uint8 targetLevel = GetLevelForEQRules(target);
     if (targetLevel < EQ_WIPE_HATE_LIST_FULL_CHANCE_BELOW_LEVEL)
         return 100;
     float chance = float(baseChance);
@@ -7600,8 +7968,8 @@ void EverQuestMod::EnforceEQHastePercentCapOnUnit(Unit* unit, vector<EverQuestUn
     uint32 auraTypesToProcess[2] = { SPELL_AURA_MOD_MELEE_HASTE, SPELL_AURA_MOD_RANGED_HASTE };
     for (uint32 auraType : auraTypesToProcess)
     {
-        // Find the strongest active effect per category (haste types 1 = worn, 2 = spell/song/clicky, 3 = v2)
-        int winnerIndexByHasteType[4] = { -1, -1, -1, -1 };
+        // Find the strongest active effect per category (haste types 1 = worn, 2 = spell/song/clicky, 3 = v2, 4 = v3)
+        int winnerIndexByHasteType[5] = { -1, -1, -1, -1, -1 };
         for (size_t i = 0; i < trackedHasteAuraEffects.size(); ++i)
         {
             EverQuestUnitHasteAuraEffect& trackedHasteAuraEffect = trackedHasteAuraEffects[i];
@@ -7610,7 +7978,7 @@ void EverQuestMod::EnforceEQHastePercentCapOnUnit(Unit* unit, vector<EverQuestUn
             if (GetTrackedAuraEffectOnUnit(unit, trackedHasteAuraEffect.SpellID, trackedHasteAuraEffect.EffectIndex, trackedHasteAuraEffect.CasterGUID) == nullptr)
                 continue;
             uint32 hasteType = trackedHasteAuraEffect.HasteType;
-            if (hasteType < EQ_HASTE_TYPE_WORNITEM || hasteType > EQ_HASTE_TYPE_SPELL_V2)
+            if (hasteType < EQ_HASTE_TYPE_WORNITEM || hasteType > EQ_HASTE_TYPE_SPELL_V3)
                 hasteType = EQ_HASTE_TYPE_SPELL_V1;
             int winnerIndex = winnerIndexByHasteType[hasteType];
             if (winnerIndex == -1 || trackedHasteAuraEffect.NaturalAmount > trackedHasteAuraEffects[winnerIndex].NaturalAmount)
@@ -7622,8 +7990,9 @@ void EverQuestMod::EnforceEQHastePercentCapOnUnit(Unit* unit, vector<EverQuestUn
         float categoryCapMod = ConfigSpellHasteCapMod < 0.0f ? 0.0f : ConfigSpellHasteCapMod;
         float wornBelowLevel26CapPercent = 10.0f * categoryCapMod;
         float spellV2MaxContributionPercent = 10.0f * categoryCapMod;
+        float spellV3MaxContributionPercent = (unitLevel > 50 ? 25.0f : 10.0f) * categoryCapMod;
 
-        float contributionsByHasteType[4] = { 0, 0, 0, 0 };
+        float contributionsByHasteType[5] = { 0, 0, 0, 0, 0 };
         if (winnerIndexByHasteType[1] >= 0)
         {
             float wornAmount = (float)trackedHasteAuraEffects[winnerIndexByHasteType[1]].NaturalAmount;
@@ -7642,6 +8011,10 @@ void EverQuestMod::EnforceEQHastePercentCapOnUnit(Unit* unit, vector<EverQuestUn
         if ((float)cappedTotalAmount > capPercent)
             cappedTotalAmount = (int32)std::floor(capPercent);
 
+        // v3 is the one category that goes on top of the cap
+        if (winnerIndexByHasteType[EQ_HASTE_TYPE_SPELL_V3] >= 0)
+            cappedTotalAmount += (int32)std::lround(std::min((float)trackedHasteAuraEffects[winnerIndexByHasteType[EQ_HASTE_TYPE_SPELL_V3]].NaturalAmount, spellV3MaxContributionPercent));
+
         // The whole total rides on the strongest category winner and everything else is zeroed, because the unit multiplies its haste effects together and each
         // applied amount is a whole percent.  Splitting the total across the effects has to round every factor, and the rounded factors multiply out short of the
         // target (15% and 30% give 1.495, not the 1.50 a 50% cap calls for), so the ceiling could never actually be reached.  One carrier makes the applied total
@@ -7657,7 +8030,7 @@ void EverQuestMod::EnforceEQHastePercentCapOnUnit(Unit* unit, vector<EverQuestUn
             if (auraEffect == nullptr)
                 continue;
             uint32 hasteType = trackedHasteAuraEffect.HasteType;
-            if (hasteType < EQ_HASTE_TYPE_WORNITEM || hasteType > EQ_HASTE_TYPE_SPELL_V2)
+            if (hasteType < EQ_HASTE_TYPE_WORNITEM || hasteType > EQ_HASTE_TYPE_SPELL_V3)
                 hasteType = EQ_HASTE_TYPE_SPELL_V1;
 
             int32 newAmount = 0;
@@ -8591,7 +8964,7 @@ bool EverQuestMod::AreNonFactionQuestObjectivesMetForPlayer(Player* player, Ques
 void EverQuestMod::LoadGossipReactions()
 {
     GossipReactionsByGossipCreatureTemplateID.clear();
-    QueryResult queryResult = WorldDatabase.Query("SELECT GossipCreatureTemplateID, NpcTextID, OptionID, OptionText, ReactionType, SayText, TargetCreatureTemplateID, UsePlayerX, UsePlayerY, UsePlayerZ, AddedPlayerX, AddedPlayerY, UsePlayerOrientation, UseNpcX, UseNpcY, UseNpcZ, UseNpcOrientation, PositionX, PositionY, PositionZ, Orientation, DelayInMS, MovementIsRun, FiresOnArrival, PathListID, GameObjectEntryID, GameObjectLifetimeSec, RequiredQuestID, RequiredNearX, RequiredNearY, RequiredNearZ, RequiredNearDistance, SpellID FROM mod_everquest_gossip_reaction ORDER BY GossipCreatureTemplateID, ID;");
+    QueryResult queryResult = WorldDatabase.Query("SELECT GossipCreatureTemplateID, NpcTextID, OptionID, OptionText, ReactionType, SayText, TargetCreatureTemplateID, UsePlayerX, UsePlayerY, UsePlayerZ, AddedPlayerX, AddedPlayerY, UsePlayerOrientation, UseNpcX, UseNpcY, UseNpcZ, UseNpcOrientation, PositionX, PositionY, PositionZ, Orientation, DelayInMS, MovementIsRun, FiresOnArrival, PathListID, GameObjectEntryID, GameObjectLifetimeSec, RequiredQuestID, RequiredNearX, RequiredNearY, RequiredNearZ, RequiredNearDistance, SpellID, ItemTemplateID FROM mod_everquest_gossip_reaction ORDER BY GossipCreatureTemplateID, ID;");
     if (queryResult)
     {
         do
@@ -8632,7 +9005,67 @@ void EverQuestMod::LoadGossipReactions()
             gossipReaction.RequiredNearZ = fields[30].Get<float>();
             gossipReaction.RequiredNearDistance = fields[31].Get<float>();
             gossipReaction.SpellID = fields[32].Get<uint32>();
+            gossipReaction.ItemTemplateID = fields[33].Get<uint32>();
             GossipReactionsByGossipCreatureTemplateID[gossipReaction.GossipCreatureTemplateID].push_back(gossipReaction);
+        } while (queryResult->NextRow());
+    }
+}
+
+void EverQuestMod::LoadTimedPortData()
+{
+    TimedPorts.clear();
+    TimedPortWarnings.clear();
+
+    QueryResult queryResult = WorldDatabase.Query("SELECT MapID, X, Y, Z, Radius, DestinationMapID, DestinationX, DestinationY, DestinationZ, DestinationOrientation, CycleInSeconds, OffsetInSeconds, RequiredItemTemplateID, MissingItemText FROM mod_everquest_timed_port ORDER BY ID;");
+    if (queryResult)
+    {
+        do
+        {
+            Field* fields = queryResult->Fetch();
+            EverQuestTimedPort timedPort;
+            timedPort.MapID = fields[0].Get<uint32>();
+            timedPort.X = fields[1].Get<float>();
+            timedPort.Y = fields[2].Get<float>();
+            timedPort.Z = fields[3].Get<float>();
+            timedPort.Radius = fields[4].Get<float>();
+            timedPort.DestinationMapID = fields[5].Get<uint32>();
+            timedPort.DestinationX = fields[6].Get<float>();
+            timedPort.DestinationY = fields[7].Get<float>();
+            timedPort.DestinationZ = fields[8].Get<float>();
+            timedPort.DestinationOrientation = fields[9].Get<float>();
+            timedPort.CycleInSeconds = fields[10].Get<uint32>();
+            timedPort.OffsetInSeconds = fields[11].Get<uint32>();
+            timedPort.RequiredItemTemplateID = fields[12].Get<uint32>();
+            timedPort.MissingItemText = fields[13].Get<std::string>();
+            if (timedPort.CycleInSeconds == 0)
+            {
+                LOG_ERROR("module.EverQuest", "EverQuestMod::LoadTimedPortData skipped a timed port on map {}, as it has no cycle", timedPort.MapID);
+                continue;
+            }
+            TimedPorts.push_back(timedPort);
+        } while (queryResult->NextRow());
+    }
+
+    queryResult = WorldDatabase.Query("SELECT MapID, X, Y, Radius, CycleInSeconds, OffsetInSeconds, Text FROM mod_everquest_timed_port_warning ORDER BY ID;");
+    if (queryResult)
+    {
+        do
+        {
+            Field* fields = queryResult->Fetch();
+            EverQuestTimedPortWarning timedPortWarning;
+            timedPortWarning.MapID = fields[0].Get<uint32>();
+            timedPortWarning.X = fields[1].Get<float>();
+            timedPortWarning.Y = fields[2].Get<float>();
+            timedPortWarning.Radius = fields[3].Get<float>();
+            timedPortWarning.CycleInSeconds = fields[4].Get<uint32>();
+            timedPortWarning.OffsetInSeconds = fields[5].Get<uint32>();
+            timedPortWarning.Text = fields[6].Get<std::string>();
+            if (timedPortWarning.CycleInSeconds == 0)
+            {
+                LOG_ERROR("module.EverQuest", "EverQuestMod::LoadTimedPortData skipped a timed port warning on map {}, as it has no cycle", timedPortWarning.MapID);
+                continue;
+            }
+            TimedPortWarnings.push_back(timedPortWarning);
         } while (queryResult->NextRow());
     }
 }
@@ -8853,7 +9286,24 @@ bool EverQuestMod::HandleGossipSelect(Player* player, Creature* creature, uint32
         case EQ_QUEST_REACTION_CASTSPELL:
         {
             if (gossipReaction.SpellID != 0 && player->IsAlive() == true)
-                CastScriptedSpellAtUnit(creature, player, gossipReaction.SpellID);
+            {
+                // Binding is done on the player's own cast, so a Soulbinder's bind happens here instead
+                SpellInfo const* gossipSpellInfo = sSpellMgr->GetSpellInfo(gossipReaction.SpellID);
+                if (gossipSpellInfo != nullptr && gossipSpellInfo->Effects[EFFECT_0].MiscValue == EQ_SPELLDUMMYTYPE_BINDANY && gossipSpellInfo->Effects[EFFECT_0].Effect == SPELL_EFFECT_DUMMY)
+                {
+                    if (IsBindAllowedForMap(player->GetMapId()) == true)
+                        SetNewBindHome(player);
+                    else
+                        ChatHandler(player->GetSession()).PSendSysMessage("Binding to this area is not allowed.");
+                }
+                else
+                    CastScriptedSpellAtUnit(creature, player, gossipReaction.SpellID);
+            }
+        } break;
+        case EQ_QUEST_REACTION_GIVEITEM:
+        {
+            if (gossipReaction.ItemTemplateID != 0)
+                player->AddItem(gossipReaction.ItemTemplateID, 1);
         } break;
         case EQ_QUEST_REACTION_ATTACKPLAYER:
         {
@@ -8980,6 +9430,106 @@ void EverQuestMod::LoadPetSilentDisplayData()
             SilentFidgetDisplayIDsByDisplayID[displayID] = silentDisplayID;
         } while (queryResult->NextRow());
     }
+}
+
+void EverQuestMod::LoadEQRaceStartData()
+{
+    EQRaceStartsByKey.clear();
+    QueryResult queryResult = WorldDatabase.Query("SELECT eqrace, eqclass, startchoice, alignment, map, zone, position_x, position_y, position_z, orientation, illusionitem, startachievement, extrastartitem FROM mod_everquest_eqrace_start;");
+    if (!queryResult)
+        return;
+    do
+    {
+        Field* fields = queryResult->Fetch();
+        uint32 eqRaceID = fields[0].Get<uint16>();
+        uint8 eqClassID = fields[1].Get<uint8>();
+        uint8 startChoice = fields[2].Get<uint8>();
+        EverQuestPlayerCreateInfo eqRaceStart;
+        eqRaceStart.Alignment = fields[3].Get<uint8>();
+        eqRaceStart.MapID = fields[4].Get<uint16>();
+        eqRaceStart.ZoneID = fields[5].Get<uint32>();
+        eqRaceStart.PositionX = fields[6].Get<float>();
+        eqRaceStart.PositionY = fields[7].Get<float>();
+        eqRaceStart.PositionZ = fields[8].Get<float>();
+        eqRaceStart.Orientation = fields[9].Get<float>();
+        eqRaceStart.IllusionItemID = fields[10].Get<uint32>();
+        eqRaceStart.StartAchievementID = fields[11].Get<uint32>();
+        eqRaceStart.ExtraStartItemID = fields[12].Get<uint32>();
+        eqRaceStart.StartOption = (eqRaceID == EQ_RACE_VAH_SHIR) ? EQ_START_OPTION_SHAR_VAHL : 0;
+        EQRaceStartsByKey[GetEQRaceStartKey(eqRaceID, eqClassID, startChoice)] = eqRaceStart;
+        EQRaceIDsByGuiseItemID[eqRaceStart.IllusionItemID] = eqRaceID;
+    } while (queryResult->NextRow());
+}
+
+void EverQuestMod::LoadWarderLookData()
+{
+    WarderLookCreatureTemplateIDsByKey.clear();
+    QueryResult queryResult = WorldDatabase.Query("SELECT OwnerRaceID, StartOption, CreatureTemplateID FROM mod_everquest_warder_look;");
+    if (queryResult)
+    {
+        do
+        {
+            Field* fields = queryResult->Fetch();
+            uint32 key = (uint32(fields[0].Get<uint8>()) << 8) | fields[1].Get<uint8>();
+            WarderLookCreatureTemplateIDsByKey[key] = fields[2].Get<uint32>();
+        } while (queryResult->NextRow());
+    }
+}
+
+// Left alone these correct themselves on their first two second tick, which raises the maximum without the health.  A pet being loaded takes its saved health after
+// this, so it's only a new pet that has to be kept full here
+void EverQuestMod::RefreshPetScalingFromOwner(Pet* pet)
+{
+    bool hadFullHealth = pet->IsFullHealth();
+    bool hadFullMana = pet->GetPower(POWER_MANA) >= pet->GetMaxPower(POWER_MANA);
+    for (uint32 spellID : { uint32(EQ_SPELL_ID_WARLOCK_PET_SCALING_01), uint32(EQ_SPELL_ID_WARLOCK_PET_SCALING_02), uint32(EQ_SPELL_ID_WARLOCK_PET_SCALING_03),
+        uint32(EQ_SPELL_ID_WARLOCK_PET_SCALING_04), uint32(EQ_SPELL_ID_WARLOCK_PET_SCALING_05) })
+    {
+        Aura* aura = pet->GetAura(spellID);
+        if (aura == nullptr)
+            continue;
+        for (uint8 effectIndex = 0; effectIndex < MAX_SPELL_EFFECTS; ++effectIndex)
+        {
+            AuraEffect* auraEffect = aura->GetEffect(effectIndex);
+            if (auraEffect != nullptr)
+                auraEffect->ChangeAmount(auraEffect->CalculateAmount(aura->GetCaster()), false);
+        }
+    }
+    if (hadFullHealth == true)
+        pet->SetFullHealth();
+    if (hadFullMana == true)
+        pet->SetPower(POWER_MANA, pet->GetMaxPower(POWER_MANA));
+}
+
+void EverQuestMod::ApplyWarderLookToPet(Pet* pet)
+{
+    // The table is empty before Luclin, which leaves every warder the wolf its creature row has
+    if (WarderLookCreatureTemplateIDsByKey.empty() == true)
+        return;
+    Player* owner = pet->GetOwner();
+    if (owner == nullptr)
+        return;
+
+    // A start option is a people, so it comes ahead of the owner's own race.  An EQ race beats both, and the table's WoW races stand in for those it has a look for
+    EverQuestPlayerStartOptionState originState = GetPlayerOriginState(owner);
+    auto lookIter = WarderLookCreatureTemplateIDsByKey.find(originState.StartOption);
+    if (lookIter == WarderLookCreatureTemplateIDsByKey.end() && originState.EQRaceID == EQ_RACE_OGRE)
+        lookIter = WarderLookCreatureTemplateIDsByKey.find(uint32(RACE_ORC) << 8);
+    else if (lookIter == WarderLookCreatureTemplateIDsByKey.end() && originState.EQRaceID == EQ_RACE_TROLL)
+        lookIter = WarderLookCreatureTemplateIDsByKey.find(uint32(RACE_TROLL) << 8);
+    else if (lookIter == WarderLookCreatureTemplateIDsByKey.end() && originState.EQRaceID == 0)
+        lookIter = WarderLookCreatureTemplateIDsByKey.find(uint32(owner->getRace()) << 8);
+    if (lookIter == WarderLookCreatureTemplateIDsByKey.end())
+        return;
+
+    CreatureTemplate const* lookTemplate = sObjectMgr->GetCreatureTemplate(lookIter->second);
+    if (lookTemplate == nullptr)
+        return;
+    CreatureModel const* lookModel = lookTemplate->GetFirstValidModel();
+    if (lookModel == nullptr)
+        return;
+    pet->SetDisplayId(lookModel->CreatureDisplayID, lookModel->DisplayScale);
+    pet->SetNativeDisplayId(lookModel->CreatureDisplayID);
 }
 
 void EverQuestMod::RemoveInvalidPetSilentDisplays()
@@ -9283,7 +9833,8 @@ void EverQuestMod::TryResummonTemporaryUnsummonedEQPet(Player* player)
 void EverQuestMod::LoadCreatePlayerData()
 {
     PlayerCreateInfoByRaceIDThenClassID.clear();
-    QueryResult queryResult = WorldDatabase.Query("SELECT race, class, map, zone, position_x, position_y, position_z, orientation, illusionitem, startachievement FROM mod_everquest_playercreateinfo;");
+    PlayerCreateInfoStartOptionsByKey.clear();
+    QueryResult queryResult = WorldDatabase.Query("SELECT race, class, map, zone, position_x, position_y, position_z, orientation, illusionitem, startachievement, StartOption, defaultsecondclass, extrastartitem FROM mod_everquest_playercreateinfo;");
     if (queryResult)
     {
         do
@@ -9301,7 +9852,13 @@ void EverQuestMod::LoadCreatePlayerData()
             everQuestPlayerCreateInfo.Orientation = fields[7].Get<float>();
             everQuestPlayerCreateInfo.IllusionItemID = fields[8].Get<uint32>();
             everQuestPlayerCreateInfo.StartAchievementID = fields[9].Get<uint32>();
-            PlayerCreateInfoByRaceIDThenClassID[everQuestPlayerCreateInfo.RaceID][everQuestPlayerCreateInfo.ClassID] = everQuestPlayerCreateInfo;
+            everQuestPlayerCreateInfo.StartOption = fields[10].Get<uint8>();
+            everQuestPlayerCreateInfo.DefaultSecondClass = fields[11].Get<uint8>();
+            everQuestPlayerCreateInfo.ExtraStartItemID = fields[12].Get<uint32>();
+            if (everQuestPlayerCreateInfo.StartOption == 0)
+                PlayerCreateInfoByRaceIDThenClassID[everQuestPlayerCreateInfo.RaceID][everQuestPlayerCreateInfo.ClassID] = everQuestPlayerCreateInfo;
+            else
+                PlayerCreateInfoStartOptionsByKey[GetPlayerCreateInfoStartOptionKey(everQuestPlayerCreateInfo.RaceID, everQuestPlayerCreateInfo.ClassID, everQuestPlayerCreateInfo.StartOption)] = everQuestPlayerCreateInfo;
         } while (queryResult->NextRow());
     }
 }
@@ -9471,6 +10028,8 @@ void EverQuestMod::ApplyAutoLearnedClassSkillsAndSpells(Player* player)
                 continue;
             // Only learn once the player has reached the spell's required level
             if (autoLearnLevel < autoLearnSpell.Level)
+                continue;
+            if (ConfigSpellDisciplinesEnabled == false && IsDisciplineSpell(autoLearnSpell.SpellID) == true)
                 continue;
             if (player->HasSpell(autoLearnSpell.SpellID) == false)
             {
@@ -9644,7 +10203,7 @@ void EverQuestMod::AddRacialGuiseItemForPlayer(Player* player)
         return;
     if (HasCreatePlayerData(player->getRace(), player->getClass()) == false)
         return;
-    uint32 guiseItemID = GetPlayerCreateInfo(player->getRace(), player->getClass()).IllusionItemID;
+    uint32 guiseItemID = GetPlayerCreateInfoForPlayer(player).IllusionItemID;
     if (guiseItemID == 0)
         return;
     if (GetIssuedIllusionItemIDForPlayer(player) != 0)
@@ -9707,9 +10266,13 @@ void EverQuestMod::ApplyIllusionCharacterLookToNewCorpse(Corpse* corpse)
 
     corpse->SetUInt32Value(CORPSE_FIELD_DISPLAY_ID, illusionCharacter->CorpseDisplayID);
     corpse->SetByteValue(CORPSE_FIELD_BYTES_1, 1, illusionCharacter->ChrRaceID);
-    corpse->SetByteValue(CORPSE_FIELD_BYTES_1, 3, 0); // skin
-    uint8 hairStyle = GetIllusionHelmHairStyleForPlayer(owner); // selects the head geoset: bare head, or the worn helm's helmed head
-    corpse->SetUInt32Value(CORPSE_FIELD_BYTES_2, (uint32)faceByte | ((uint32)hairStyle << 8)); // face, hair style, hair color 0, facial hair 0
+    uint8 hairStyle = 0;
+    uint8 hairColor = 0;
+    uint8 facialHair = 0;
+    uint8 skin = 0;
+    GetIllusionLookBytesForPlayer(owner, illusionCharacter->ChrRaceID, hairStyle, hairColor, facialHair, skin);
+    corpse->SetByteValue(CORPSE_FIELD_BYTES_1, 3, skin); // skin (the EQ eye color)
+    corpse->SetUInt32Value(CORPSE_FIELD_BYTES_2, (uint32)faceByte | ((uint32)hairStyle << 8) | ((uint32)hairColor << 16) | ((uint32)facialHair << 24)); // face, hair style, hair color, facial hair
 
     // The mirror image item displays, at their equipment slots (a corpse item field is the display id with the inventory type in the top byte)
     static EquipmentSlots const mirrorImageItemSlots[EQ_MIRROR_IMAGE_ITEM_SLOT_COUNT] =
@@ -9768,13 +10331,48 @@ void EverQuestMod::GrantLegacyAchievementIfEligible(Player* player)
     player->CompletedAchievement(achievementEntry);
 }
 
+// A Luclin creature keeps its EverQuest level for EverQuest's level rules, as its WOW level was stretched to fill out 60-70.  Anything else just goes by its level
+uint8 EverQuestMod::GetLevelForEQRules(Unit const* unit)
+{
+    Creature const* creature = unit->ToCreature();
+    if (creature == nullptr)
+        return unit->GetLevel();
+    unordered_map<uint32, EverQuestCreature>::const_iterator creatureIterator = CreaturesByTemplateID.find(creature->GetEntry());
+    if (creatureIterator == CreaturesByTemplateID.end() || creatureIterator->second.LevelEQ == 0)
+        return unit->GetLevel();
+
+    // Where this one sits in its level range carries over to the EverQuest range
+    uint8 levelEQ = creatureIterator->second.LevelEQ;
+    uint8 maxLevelEQ = creatureIterator->second.MaxLevelEQ;
+    CreatureTemplate const* creatureTemplate = creature->GetCreatureTemplate();
+    if (maxLevelEQ <= levelEQ || creatureTemplate->maxlevel <= creatureTemplate->minlevel || unit->GetLevel() <= creatureTemplate->minlevel)
+        return levelEQ;
+    if (unit->GetLevel() >= creatureTemplate->maxlevel)
+        return maxLevelEQ;
+    return uint8(levelEQ + ((uint32(unit->GetLevel()) - creatureTemplate->minlevel) * (maxLevelEQ - levelEQ)) / (creatureTemplate->maxlevel - creatureTemplate->minlevel));
+}
+
+// Every EverQuest map counts as classic content, so high level EverQuest creatures need to be moved up to the base experience that WOW pays at those levels
+uint8 EverQuestMod::GetContentLevelsForEQCreatureKill(Unit const* victim, uint8 contentLevels)
+{
+    Creature const* creature = victim->ToCreature();
+    if (creature == nullptr || HasCreatureDataForCreatureTemplateID(creature->GetEntry()) == false)
+        return contentLevels;
+    uint32 creatureLevel = victim->GetLevel();
+    if (ConfigExperienceNorthrendBaseCreatureLevel > 0 && creatureLevel >= ConfigExperienceNorthrendBaseCreatureLevel)
+        return CONTENT_71_80;
+    if (ConfigExperienceBurningCrusadeBaseCreatureLevel > 0 && creatureLevel >= ConfigExperienceBurningCrusadeBaseCreatureLevel)
+        return CONTENT_61_70;
+    return contentLevels;
+}
+
 void EverQuestMod::GrantStartAchievementIfMissing(Player* player)
 {
     uint8 raceID = player->getRace(true);
     uint8 classID = player->getClass();
     if (HasCreatePlayerData(raceID, classID) == false)
         return;
-    uint32 startAchievementID = GetPlayerCreateInfo(raceID, classID).StartAchievementID;
+    uint32 startAchievementID = GetPlayerCreateInfoForPlayer(player).StartAchievementID;
     if (startAchievementID == 0 || player->HasAchieved(startAchievementID) == true)
         return;
 
@@ -10114,7 +10712,7 @@ float EverQuestMod::GetGroupExperienceCorrectionForKill(Player* killer, Unit* vi
         return 1.0f;
 
     // Acore::XP::Gain is deliberately not used here.  Only the ratio of the two bases matters, and the creature multipliers Gain adds cancel out of it
-    ContentLevels victimContentLevels = GetContentLevelsForMapAndZone(victim->GetMapId(), victim->GetZoneId());
+    ContentLevels victimContentLevels = Acore::XP::GetContentLevelsForKill(victim);
     uint32 coreBaseExperience = Acore::XP::BaseGain(levels.CoreReferenceLevel, victim->GetLevel(), victimContentLevels);
     if (coreBaseExperience == 0)
         return 1.0f;
@@ -10950,6 +11548,68 @@ bool EverQuestMod::HasCreatePlayerData(uint8 raceID, uint8 classID)
         return true;
 }
 
+uint32 EverQuestMod::GetPlayerCreateInfoStartOptionKey(uint8 raceID, uint8 classID, uint8 startOption)
+{
+    return (uint32(raceID) << 16) | (uint32(classID) << 8) | startOption;
+}
+
+// With no other towns to pick from, which is the case before Luclin, nothing is stored for any character
+uint8 EverQuestMod::GetPlayerStartOption(Player* player)
+{
+    if (PlayerCreateInfoStartOptionsByKey.empty() == true)
+        return 0;
+    return GetPlayerOriginState(player).StartOption;
+}
+
+// None of this can change once the character is in the world, and it can run on a map thread every time a warder comes out or a mirror packet is built
+EverQuestPlayerStartOptionState EverQuestMod::GetPlayerOriginState(Player* player)
+{
+    if (PlayerCreateInfoStartOptionsByKey.empty() == true && EQRaceStartsByKey.empty() == true)
+        return EverQuestPlayerStartOptionState();
+    EverQuestPlayerStartOptionState* state = player->CustomData.Get<EverQuestPlayerStartOptionState>(EQ_PLAYER_CUSTOMDATA_STARTOPTION);
+    if (state != nullptr)
+        return *state;
+    EverQuestPlayerStartOptionState loadedState;
+    QueryResult queryResult = CharacterDatabase.Query("SELECT startOption, eqRace, eqStartChoice, eqStartSecondClass, eqHairStyle, eqHairColor, eqFacialHair, eqEyeColor FROM mod_everquest_character_settings WHERE guid = {}", player->GetGUID().GetCounter());
+    if (!queryResult)
+        return loadedState;
+    Field* fields = queryResult->Fetch();
+    loadedState.StartOption = fields[0].Get<uint8>();
+    loadedState.EQRaceID = fields[1].Get<uint16>();
+    loadedState.EQStartChoice = fields[2].Get<uint8>();
+    loadedState.EQStartSecondClass = fields[3].Get<uint8>();
+    loadedState.EQHairStyle = fields[4].Get<uint8>();
+    loadedState.EQHairColor = fields[5].Get<uint8>();
+    loadedState.EQFacialHair = fields[6].Get<uint8>();
+    loadedState.EQEyeColor = fields[7].Get<uint8>();
+    if (player->IsInWorld() == true)
+        *player->CustomData.GetDefault<EverQuestPlayerStartOptionState>(EQ_PLAYER_CUSTOMDATA_STARTOPTION) = loadedState;
+    return loadedState;
+}
+
+uint32 EverQuestMod::GetEQRaceStartKey(uint32 eqRaceID, uint8 eqClassID, uint8 startChoice) const
+{
+    return (eqRaceID << 16) | (uint32(eqClassID) << 8) | startChoice;
+}
+
+// The start from the EverQuest character creation page, the town picked when the character was created, or the normal one
+const EverQuestPlayerCreateInfo& EverQuestMod::GetPlayerCreateInfoForPlayer(Player* player)
+{
+    uint8 raceID = player->getRace(true);
+    uint8 classID = player->getClass();
+    EverQuestPlayerStartOptionState originState = GetPlayerOriginState(player);
+    if (originState.EQRaceID != 0)
+    {
+        auto eqRaceStartItr = EQRaceStartsByKey.find(GetEQRaceStartKey(originState.EQRaceID, GetClassMapForWOWClassID(classID).EQClassIDBase, originState.EQStartChoice));
+        if (eqRaceStartItr != EQRaceStartsByKey.end())
+            return eqRaceStartItr->second;
+    }
+    auto startOptionItr = PlayerCreateInfoStartOptionsByKey.find(GetPlayerCreateInfoStartOptionKey(raceID, classID, GetPlayerStartOption(player)));
+    if (startOptionItr != PlayerCreateInfoStartOptionsByKey.end())
+        return startOptionItr->second;
+    return GetPlayerCreateInfo(raceID, classID);
+}
+
 const EverQuestPlayerCreateInfo& EverQuestMod::GetPlayerCreateInfo(uint8 raceID, uint8 classID)
 {
     if (PlayerCreateInfoByRaceIDThenClassID.find(raceID) != PlayerCreateInfoByRaceIDThenClassID.end())
@@ -11145,7 +11805,7 @@ void EverQuestMod::TryDoCreatureEQMeleeExtraAttacks(Unit* attacker, Unit* victim
             return;
     }
 
-    uint32 level = creature->GetLevel();
+    uint32 level = GetLevelForEQRules(creature);
     uint32 weaponSkill = GetEQNPCMeleeWeaponSkillForLevel(level);
     if (weaponSkill == 0)
         return;
@@ -12670,8 +13330,8 @@ bool EverQuestMod::RollBashKickStunLands(Unit* attacker, Unit* defender)
     if (attacker == nullptr || defender == nullptr)
         return false;
 
-    int attackerLevel = (int)attacker->GetLevel();
-    int defenderLevel = (int)defender->GetLevel();
+    int attackerLevel = (int)GetLevelForEQRules(attacker);
+    int defenderLevel = (int)GetLevelForEQRules(defender);
 
     // NPC defenders above the base immunity level can never be stunned by bash/kick (raid-tier mobs)
     // TODO: Make this a config in case the world gets scaled to 80
@@ -13311,7 +13971,7 @@ bool EverQuestMod::TryReturnCharacterToNorrathAtLogin(Player* player, uint32 arr
     // And where this race and class starts out in Norrath behind that, matching what RelocatePlayerOutOfRestrictedMap falls back on
     if (destinationMapID == 0 && HasCreatePlayerData(player->getRace(), player->getClass()) == true)
     {
-        const EverQuestPlayerCreateInfo& createInfo = GetPlayerCreateInfo(player->getRace(), player->getClass());
+        const EverQuestPlayerCreateInfo& createInfo = GetPlayerCreateInfoForPlayer(player);
         if (IsMapIDAnEverQuestMap(createInfo.MapID) == true)
         {
             destinationMapID = createInfo.MapID;
@@ -13346,7 +14006,7 @@ void EverQuestMod::LoadZoneData()
     InstanceDungeonMapIDs.clear();
     OpenWorldMapIDByInstanceMapID.clear();
 
-    QueryResult queryResult = WorldDatabase.Query("SELECT MapID, AllowBind, ExpansionID, MaxAgroZDistance, InstanceRaidLowMapID, InstanceDungeonMapID, RequiredKeyItemID FROM mod_everquest_zone;");
+    QueryResult queryResult = WorldDatabase.Query("SELECT MapID, AllowBind, ExpansionID, MaxAgroZDistance, InstanceRaidLowMapID, InstanceDungeonMapID, RequiredKeyItemID, AllowEQMount, AllowEQLevitate FROM mod_everquest_zone;");
     if (queryResult)
     {
         do
@@ -13360,6 +14020,8 @@ void EverQuestMod::LoadZoneData()
             zone.InstanceRaidLowMapID = fields[4].Get<uint32>();
             zone.InstanceDungeonMapID = fields[5].Get<uint32>();
             zone.RequiredKeyItemID = fields[6].Get<uint32>();
+            zone.AllowEQMount = fields[7].Get<uint8>() != 0;
+            zone.AllowEQLevitate = fields[8].Get<uint8>() != 0;
             ZoneByMapID[zone.MapID] = zone;
             if (zone.InstanceRaidLowMapID != 0)
             {
@@ -13582,6 +14244,76 @@ std::string EverQuestMod::GetZoneNameForMap(uint32 mapID)
     if (mapEntry == nullptr)
         return "that place";
     return mapEntry->name[sWorld->GetDefaultDbcLocale()];
+}
+
+static bool IsEQHorseSpell(SpellInfo const* spellInfo)
+{
+    for (uint8 effectIndex = 0; effectIndex < MAX_SPELL_EFFECTS; ++effectIndex)
+        if (spellInfo->Effects[effectIndex].ApplyAuraName == SPELL_AURA_DUMMY && spellInfo->Effects[effectIndex].MiscValue == EQMount::DUMMY_MISC_VALUE)
+            return true;
+    return false;
+}
+
+bool EverQuestMod::HandleEQMountOnCheckCast(Player* player, Spell* spell, SpellCastResult& res)
+{
+    if (IsEQHorseSpell(spell->GetSpellInfo()) == false)
+        return false;
+    auto zoneIter = ZoneByMapID.find(player->GetMapId());
+    if (zoneIter == ZoneByMapID.end() || zoneIter->second.AllowEQMount == false)
+    {
+        res = SPELL_FAILED_ONLY_OUTDOORS;
+        return true;
+    }
+    return false;
+}
+
+void EverQuestMod::RemoveEQMountWhereNotAllowed(Player* player)
+{
+    auto zoneIter = ZoneByMapID.find(player->GetMapId());
+    if (zoneIter != ZoneByMapID.end() && zoneIter->second.AllowEQMount == true)
+        return;
+
+    // Reads the marker itself, as a horse carried off an EQ map no longer counts as riding one
+    for (AuraEffect const* dummyEffect : player->GetAuraEffectsByType(SPELL_AURA_DUMMY))
+    {
+        if (dummyEffect->GetMiscValue() == EQMount::DUMMY_MISC_VALUE)
+        {
+            player->RemoveAurasByType(SPELL_AURA_MOUNTED);
+            return;
+        }
+    }
+}
+
+void EverQuestMod::UpdateEQMountRulesForPlayer(Player* player)
+{
+    if (player->IsMounted() == false || EQMount::IsRidingEQHorse(player) == false)
+    {
+        if (player->HasAura(EQ_MOUNT_SADDLE_REST_SPELL_ID) == true)
+            player->RemoveAurasDueToSpell(EQ_MOUNT_SADDLE_REST_SPELL_ID);
+        return;
+    }
+
+    // Feigning or going under drops the rider
+    if (player->HasAuraType(SPELL_AURA_FEIGN_DEATH) == true || player->IsUnderWater() == true)
+    {
+        player->RemoveAurasByType(SPELL_AURA_MOUNTED);
+        return;
+    }
+
+    player->RemoveAurasDueToSpell(EQ_SPELL_ID_YAULP_V);
+    player->RemoveAurasDueToSpell(EQ_SPELL_ID_YAULP_VI);
+
+    bool isResting = player->isMoving() == false && player->GetVictim() == nullptr;
+    if (isResting == true && player->HasAura(EQ_MOUNT_SADDLE_REST_SPELL_ID) == false)
+        player->AddAura(EQ_MOUNT_SADDLE_REST_SPELL_ID, player);
+    else if (isResting == false && player->HasAura(EQ_MOUNT_SADDLE_REST_SPELL_ID) == true)
+        player->RemoveAurasDueToSpell(EQ_MOUNT_SADDLE_REST_SPELL_ID);
+}
+
+void EverQuestMod::RemoveEQMountAtLogin(Player* player)
+{
+    if (EQMount::IsRidingEQHorse(player) == true)
+        player->RemoveAurasByType(SPELL_AURA_MOUNTED);
 }
 
 float EverQuestMod::GetMaxAgroZDistanceForMap(uint32 mapID)
@@ -14210,15 +14942,18 @@ bool EverQuestMod::RelocatePlayerOutOfRestrictedMap(Player* player)
         return false;
     }
 
-    const EverQuestPlayerCreateInfo& createInfo = GetPlayerCreateInfo(player->getRace(), player->getClass());
-    if (IsMapRestrictedForPlayers(createInfo.MapID) == true)
+    // A town picked at creation can be on a restricted map when the normal one isn't
+    const EverQuestPlayerCreateInfo* createInfo = &GetPlayerCreateInfoForPlayer(player);
+    if (IsMapRestrictedForPlayers(createInfo->MapID) == true)
+        createInfo = &GetPlayerCreateInfo(player->getRace(), player->getClass());
+    if (IsMapRestrictedForPlayers(createInfo->MapID) == true)
     {
         LOG_ERROR("module.EverQuest", "EverQuestMod could not relocate player {} with GUID {} off of restricted map {}, as their EverQuest start map {} is restricted as well. Check EverQuest.Map.MaxExpansionID and EverQuest.Map.RestrictPlayersToNorrath",
-            player->GetName(), player->GetGUID().GetCounter(), player->GetMapId(), createInfo.MapID);
+            player->GetName(), player->GetGUID().GetCounter(), player->GetMapId(), createInfo->MapID);
         return false;
     }
 
-    player->TeleportTo({ createInfo.MapID, {createInfo.PositionX, createInfo.PositionY, createInfo.PositionZ, createInfo.Orientation} });
+    player->TeleportTo({ createInfo->MapID, {createInfo->PositionX, createInfo->PositionY, createInfo->PositionZ, createInfo->Orientation} });
     return true;
 }
 
@@ -14258,94 +14993,108 @@ void EverQuestMod::UpdateRestrictedMapPlayerCheck(uint32 diff)
     }
 }
 
-void EverQuestMod::BeginClientVersionCheckForPlayer(Player* player)
+// Like the restricted map sweep this runs from the world update, after the map updates have been waited on, so it can look at every
+// online player and move them.  The schedule comes from the wall clock, so a restart keeps the same times and nothing has to be saved
+void EverQuestMod::UpdateTimedPorts(uint32 diff)
 {
-    if (ConfigClientVersionCheckEnabled == false || ConfigSystemClientDataVersion == 0)
-        return;
-    if (player == nullptr || player->GetSession() == nullptr)
+    if (TimedPorts.empty() == true && TimedPortWarnings.empty() == true)
         return;
 
-    // GM accounts are exempt so work-in-progress clients can still log in
-    if (player->GetSession()->GetSecurity() > SEC_PLAYER)
+    TimedPortCheckTimerInMS += diff;
+    if (TimedPortCheckTimerInMS < IN_MILLISECONDS)
         return;
+    TimedPortCheckTimerInMS = 0;
 
-    EverQuestPlayerClientVersionCheckState checkState;
-    checkState.MSUntilDeadline = (int32)(ConfigClientVersionCheckGraceTimeInSeconds * IN_MILLISECONDS);
-    checkState.FailedPendingKick = false;
-    PendingClientVersionChecksByPlayerGUID[player->GetGUID()] = checkState;
-}
-
-void EverQuestMod::HandleClientVersionReportForPlayer(Player* player, uint32 reportedVersion)
-{
-    if (ConfigClientVersionCheckEnabled == false || ConfigSystemClientDataVersion == 0)
-        return;
-    if (player == nullptr || player->GetSession() == nullptr)
-        return;
-
-    if (reportedVersion == ConfigSystemClientDataVersion)
+    uint64 currentTimeInSeconds = (uint64)GameTime::GetGameTime().count();
+    vector<const EverQuestTimedPort*> duePorts;
+    for (EverQuestTimedPort& timedPort : TimedPorts)
     {
-        PendingClientVersionChecksByPlayerGUID.erase(player->GetGUID());
-        return;
+        uint64 cycleNumber = (currentTimeInSeconds - timedPort.OffsetInSeconds) / timedPort.CycleInSeconds;
+        if (cycleNumber == timedPort.LastCycleNumber)
+            continue;
+        if (timedPort.LastCycleNumber != 0)
+            duePorts.push_back(&timedPort);
+        timedPort.LastCycleNumber = cycleNumber;
     }
-
-    // No pending entry means the player is exempt or already resolved, and an already-failed check keeps its kick countdown
-    unordered_map<ObjectGuid, EverQuestPlayerClientVersionCheckState>::iterator checkIter = PendingClientVersionChecksByPlayerGUID.find(player->GetGUID());
-    if (checkIter == PendingClientVersionChecksByPlayerGUID.end())
-        return;
-    if (checkIter->second.FailedPendingKick == true)
-        return;
-    FailClientVersionCheckForPlayer(player, checkIter->second);
-}
-
-void EverQuestMod::FailClientVersionCheckForPlayer(Player* player, EverQuestPlayerClientVersionCheckState& checkState)
-{
-    checkState.FailedPendingKick = true;
-    checkState.MSUntilDeadline = (int32)(ConfigClientVersionCheckKickDelayInSeconds * IN_MILLISECONDS);
-    ChatHandler(player->GetSession()).PSendSysMessage("|cffFF0000{}|r", ConfigSystemClientDataVersionMismatchMessage);
-    ChatHandler(player->GetSession()).SendNotification(ConfigSystemClientDataVersionMismatchMessage);
-}
-
-void EverQuestMod::UpdateClientVersionChecks(uint32 diff)
-{
-    if (ConfigClientVersionCheckEnabled == false || ConfigSystemClientDataVersion == 0)
-        return;
-    if (PendingClientVersionChecksByPlayerGUID.empty() == true)
-        return;
-
-    vector<ObjectGuid> playerGUIDsToKick;
-    for (unordered_map<ObjectGuid, EverQuestPlayerClientVersionCheckState>::iterator checkIter = PendingClientVersionChecksByPlayerGUID.begin(); checkIter != PendingClientVersionChecksByPlayerGUID.end(); ++checkIter)
+    vector<const EverQuestTimedPortWarning*> dueWarnings;
+    for (EverQuestTimedPortWarning& timedPortWarning : TimedPortWarnings)
     {
-        checkIter->second.MSUntilDeadline -= (int32)diff;
-        if (checkIter->second.MSUntilDeadline > 0)
+        uint64 cycleNumber = (currentTimeInSeconds - timedPortWarning.OffsetInSeconds) / timedPortWarning.CycleInSeconds;
+        if (cycleNumber == timedPortWarning.LastCycleNumber)
+            continue;
+        if (timedPortWarning.LastCycleNumber != 0)
+            dueWarnings.push_back(&timedPortWarning);
+        timedPortWarning.LastCycleNumber = cycleNumber;
+    }
+    if (duePorts.empty() == true && dueWarnings.empty() == true)
+        return;
+
+    WorldSessionMgr::SessionMap const& sessions = sWorldSessionMgr->GetAllSessions();
+    for (WorldSessionMgr::SessionMap::const_iterator sessionIter = sessions.begin(); sessionIter != sessions.end(); ++sessionIter)
+    {
+        if (sessionIter->second == nullptr)
+            continue;
+        Player* player = sessionIter->second->GetPlayer();
+        if (player == nullptr || player->IsInWorld() == false || player->IsBeingTeleported() == true)
             continue;
 
-        if (checkIter->second.FailedPendingKick == false)
+        for (const EverQuestTimedPortWarning* timedPortWarning : dueWarnings)
         {
-            // Grace time ran out with no version report
-            Player* player = ObjectAccessor::FindConnectedPlayer(checkIter->first);
-            if (player == nullptr || player->GetSession() == nullptr)
-            {
-                playerGUIDsToKick.push_back(checkIter->first);
+            if (player->GetMapId() != timedPortWarning->MapID)
                 continue;
-            }
-            FailClientVersionCheckForPlayer(player, checkIter->second);
+            if (timedPortWarning->Radius > 0 && player->GetExactDist2d(timedPortWarning->X, timedPortWarning->Y) > timedPortWarning->Radius)
+                continue;
+            ChatHandler(player->GetSession()).SendSysMessage(timedPortWarning->Text);
         }
-        else
-            playerGUIDsToKick.push_back(checkIter->first);
-    }
 
-    for (ObjectGuid& playerGUID : playerGUIDsToKick)
-    {
-        PendingClientVersionChecksByPlayerGUID.erase(playerGUID);
-        Player* player = ObjectAccessor::FindConnectedPlayer(playerGUID);
-        if (player != nullptr && player->GetSession() != nullptr)
-            player->GetSession()->KickPlayer("EverQuest client data version mismatch");
+        for (const EverQuestTimedPort* timedPort : duePorts)
+        {
+            if (player->GetMapId() != timedPort->MapID || player->GetExactDist(timedPort->X, timedPort->Y, timedPort->Z) > timedPort->Radius)
+                continue;
+            ApplyTimedPortToPlayer(player, *timedPort);
+            break;
+        }
     }
 }
 
-void EverQuestMod::ClearClientVersionCheckForPlayer(ObjectGuid playerGUID)
+void EverQuestMod::ApplyTimedPortToPlayer(Player* player, const EverQuestTimedPort& timedPort)
 {
-    PendingClientVersionChecksByPlayerGUID.erase(playerGUID);
+    if (player->IsAlive() == false || player->IsInFlight() == true)
+        return;
+
+    if (timedPort.RequiredItemTemplateID != 0 && player->HasItemCount(timedPort.RequiredItemTemplateID, 1) == false)
+    {
+        if (timedPort.MissingItemText.empty() == false)
+            ChatHandler(player->GetSession()).SendSysMessage(timedPort.MissingItemText);
+        return;
+    }
+
+    if (player->TeleportTo({ timedPort.DestinationMapID, {timedPort.DestinationX, timedPort.DestinationY, timedPort.DestinationZ, timedPort.DestinationOrientation} }) == false)
+        return;
+
+    if (timedPort.RequiredItemTemplateID != 0)
+        player->DestroyItemCount(timedPort.RequiredItemTemplateID, 1, true);
+}
+
+void EverQuestMod::UpdateRequiredClientDataVersion()
+{
+    bool isCheckActive = IsEnabled == true && ConfigClientVersionCheckEnabled == true;
+    RequiredClientDataVersion.store(isCheckActive == true ? ConfigSystemClientDataVersion : 0);
+}
+
+// Called on a network thread, so it touches nothing but its arguments and the atomic
+bool EverQuestMod::IsClientDataVersionAllowed(AccountTypes security, uint32 clientDataVersion, uint32& expectedClientDataVersion) const
+{
+    uint32 requiredVersion = RequiredClientDataVersion.load();
+    if (requiredVersion == 0 || clientDataVersion == requiredVersion)
+        return true;
+
+    // GM accounts are exempt so work-in-progress clients can still log in
+    if (security > SEC_PLAYER)
+        return true;
+
+    expectedClientDataVersion = requiredVersion;
+    return false;
 }
 
 void EverQuestMod::LoadFactionData()
@@ -14658,6 +15407,10 @@ uint8 EverQuestMod::GetPlayerBaselineFactionAlignment(Player* player)
 {
     // A player's baseline alignment starts with their class and, only if the class is neutral, falls back to their race
     // Example: a warrior is evil if undead, neutral if gnome, good if dwarf - but a paladin is always good regardless of race
+    // A character made on the EverQuest creation page has an EQ race, and that's the race that counts
+    const EverQuestPlayerCreateInfo& createInfo = GetPlayerCreateInfoForPlayer(player);
+    if (createInfo.Alignment != EQ_FACTION_ALIGNMENT_NONE)
+        return createInfo.Alignment;
     uint32 classMask = player->getClassMask();
     if ((classMask & ConfigSystemFactionGoodClassMask) != 0)
         return EQ_FACTION_ALIGNMENT_GOOD;
@@ -14669,6 +15422,74 @@ uint8 EverQuestMod::GetPlayerBaselineFactionAlignment(Player* player)
     if ((raceMask & ConfigSystemFactionEvilRaceMask) != 0)
         return EQ_FACTION_ALIGNMENT_EVIL;
     return EQ_FACTION_ALIGNMENT_NEUTRAL;
+}
+
+uint32 EverQuestMod::GetRaceMaskForAlignment(uint8 alignment) const
+{
+    switch (alignment)
+    {
+        case EQ_FACTION_ALIGNMENT_GOOD: return ConfigSystemFactionGoodRaceMask;
+        case EQ_FACTION_ALIGNMENT_EVIL: return ConfigSystemFactionEvilRaceMask;
+        default: return EQ_PLAYABLE_RACE_MASK & ~(ConfigSystemFactionGoodRaceMask | ConfigSystemFactionEvilRaceMask);
+    }
+}
+
+// ReputationMgr::GetBaseReputation, for a race and class other than the player's own
+int32 EverQuestMod::GetBaseReputationForMasks(FactionEntry const* factionEntry, uint32 raceMask, uint32 classMask) const
+{
+    for (uint8 i = 0; i < 4; ++i)
+    {
+        bool raceMatches = (factionEntry->BaseRepRaceMask[i] & raceMask) != 0 || (factionEntry->BaseRepRaceMask[i] == 0 && factionEntry->BaseRepClassMask[i] != 0);
+        bool classMatches = (factionEntry->BaseRepClassMask[i] & classMask) != 0 || factionEntry->BaseRepClassMask[i] == 0;
+        if (raceMatches == true && classMatches == true)
+            return factionEntry->BaseRepValue[i];
+    }
+    return 0;
+}
+
+// Faction.dbc can only start a character out by its WoW race, so a neutral class character's standing is moved to where its EQ race would have put it.
+// What was already applied is stored with the WoW race it was against, so a later race or faction change only moves the difference and keeps what was earned
+void EverQuestMod::ApplyEQOriginFactionStandingForPlayer(Player* player)
+{
+    EverQuestPlayerStartOptionState originState = GetPlayerOriginState(player);
+    if (originState.EQRaceID == 0)
+        return;
+    uint8 targetAlignment = GetPlayerCreateInfoForPlayer(player).Alignment;
+    if (targetAlignment == EQ_FACTION_ALIGNMENT_NONE)
+        return;
+    QueryResult queryResult = CharacterDatabase.Query("SELECT eqFactionAlignment, eqFactionWoWRace FROM mod_everquest_character_settings WHERE guid = {}", player->GetGUID().GetCounter());
+    if (!queryResult)
+        return;
+    uint8 appliedAlignment = queryResult->Fetch()[0].Get<uint8>();
+    uint8 appliedWoWRace = queryResult->Fetch()[1].Get<uint8>();
+    uint8 wowRace = player->getRace(true);
+    if (appliedAlignment == targetAlignment && appliedWoWRace == wowRace)
+        return;
+
+    uint32 wowRaceMask = 1 << (wowRace - 1);
+    uint32 classMask = player->getClassMask();
+    ReputationMgr& reputationMgr = player->GetReputationMgr();
+    for (auto const& factionInfoPair : EQReputationFactionInfoByFactionID)
+    {
+        FactionEntry const* factionEntry = sFactionStore.LookupEntry(factionInfoPair.first);
+        if (factionEntry == nullptr || factionEntry->CanHaveReputation() == false)
+            continue;
+        int32 wantedOffset = GetBaseReputationForMasks(factionEntry, GetRaceMaskForAlignment(targetAlignment), classMask) - GetBaseReputationForMasks(factionEntry, wowRaceMask, classMask);
+        int32 appliedOffset = 0;
+        if (appliedAlignment != EQ_FACTION_ALIGNMENT_NONE && appliedWoWRace != 0)
+            appliedOffset = GetBaseReputationForMasks(factionEntry, GetRaceMaskForAlignment(appliedAlignment), classMask) - GetBaseReputationForMasks(factionEntry, uint32(1) << (appliedWoWRace - 1), classMask);
+        if (wantedOffset != appliedOffset)
+            reputationMgr.OffsetStartingStanding(factionEntry, wantedOffset - appliedOffset);
+    }
+
+    // The whole list again, which the client takes as it is: one standing packet per faction would show each one and print its rank change in chat
+    reputationMgr.SendInitialReputations();
+
+    // The standing and the record of it are saved together, so a crash can't leave one without the other
+    CharacterDatabaseTransaction transaction = CharacterDatabase.BeginTransaction();
+    reputationMgr.SaveToDB(transaction);
+    transaction->Append("UPDATE `mod_everquest_character_settings` SET `eqFactionAlignment` = {}, `eqFactionWoWRace` = {} WHERE `guid` = {}", targetAlignment, wowRace, player->GetGUID().GetCounter());
+    CharacterDatabase.CommitTransaction(transaction);
 }
 
 void EverQuestMod::GetIllusionFactionBandSteps(uint8 playerAlignment, uint8 illusionAlignment, int32& stepsTowardGoodOut, int32& stepsTowardEvilOut)
@@ -16458,6 +17279,21 @@ uint32 EverQuestMod::CalculateSpellFocusBoostValue(Unit* caster, uint32 spellID)
                 boostValue = auraInfo->Effects[effIndex].MiscValueB;
         }
     }
+
+    // Puretone adds to whatever is being played, or to no instrument at all
+    switch (curSpell.FocusBoostType)
+    {
+        case EQ_SPELLFOCUSBOOSTTYPE_BARDBRASS:
+        case EQ_SPELLFOCUSBOOSTTYPE_BARDSTRINGED:
+        case EQ_SPELLFOCUSBOOSTTYPE_BARDWIND:
+        case EQ_SPELLFOCUSBOOSTTYPE_BARDPERCUSSION:
+        case EQ_SPELLFOCUSBOOSTTYPE_BARDSINGING:
+            if (caster->HasAura(EQ_DISCIPLINE_PURETONE_SPELL_ID) == true)
+                boostValue = std::min<uint32>(boostValue + EQ_DISCIPLINE_PURETONE_BOOST_PERCENT, EQ_INSTRUMENT_MAX_BOOST_PERCENT);
+            break;
+        default:
+            break;
+    }
     return boostValue;
 }
 
@@ -16782,10 +17618,16 @@ void EverQuestMod::SetNextSecondEQClassForPlayer(Player* player, uint8 nextEQCla
 void EverQuestMod::SetInitialEQClassesForPlayer(Player* player)
 {
     const EverQuestClassMap classMap = GetClassMapForWOWClassID(player->getClass());
+    uint8 defaultSecondClass = classMap.EQClassIDDefaultSecond;
+    if (HasCreatePlayerData(player->getRace(), player->getClass()) == true && GetPlayerCreateInfoForPlayer(player).DefaultSecondClass != 0)
+        defaultSecondClass = GetPlayerCreateInfoForPlayer(player).DefaultSecondClass;
+    uint8 pickedSecondClass = GetPlayerOriginState(player).EQStartSecondClass;
+    if (pickedSecondClass != 0)
+        defaultSecondClass = pickedSecondClass;
     EverQuestPlayerControllerData controllerData;
     controllerData.GUID = player->GetGUID().GetCounter();
-    controllerData.CurrentSecondClass = classMap.EQClassIDDefaultSecond;
-    controllerData.NextSecondClass = classMap.EQClassIDDefaultSecond;
+    controllerData.CurrentSecondClass = defaultSecondClass;
+    controllerData.NextSecondClass = defaultSecondClass;
     controllerData.SecondaryExpPool = 0;
     {
         std::lock_guard<std::mutex> lock(RuntimeStateMutex);
@@ -16804,14 +17646,233 @@ void EverQuestMod::SetInitialEQClassesForPlayer(Player* player)
         controllerData.SecondaryExpPool);
 }
 
+// The data comes from the client, so nothing in it is trusted until it has been checked
+bool EverQuestMod::ReadPlayerCreateData(std::vector<uint8> const& modData, EverQuestPlayerCreateData& createDataOut) const
+{
+    if (modData.size() != EQ_PLAYER_CREATE_DATA_SIZE || modData[0] != EQ_PLAYER_CREATE_DATA_VERSION)
+        return false;
+    createDataOut.EQRaceID = modData[1];
+    createDataOut.StartChoice = modData[2];
+    createDataOut.SecondClass = modData[3];
+    createDataOut.Face = modData[4];
+    createDataOut.HairStyle = modData[5];
+    createDataOut.HairColor = modData[6];
+    createDataOut.FacialHair = modData[7];
+    createDataOut.EyeColor = modData[8];
+    return true;
+}
+
+void EverQuestMod::ValidatePlayerCreateLook(uint32 eqRaceID, uint8 gender, EverQuestPlayerCreateData& createData)
+{
+    EverQuestIllusionCharacter const* illusionCharacter = GetIllusionCharacterForRaceAndGender(eqRaceID, gender);
+    if (IsIllusionFaceValid(illusionCharacter, createData.Face) == false)
+        createData.Face = 0;
+    if (createData.HairStyle < EQ_ILLUSION_HAIR_STYLE_LUCLIN_FIRST || createData.HairStyle > EQ_ILLUSION_HAIR_STYLE_LUCLIN_LAST)
+        createData.HairStyle = 0;
+    if (createData.HairColor > EQ_ILLUSION_HAIR_COLOR_LAST)
+        createData.HairColor = 0;
+    if (createData.FacialHair < EQ_ILLUSION_FACIAL_HAIR_LUCLIN_FIRST || createData.FacialHair > EQ_ILLUSION_FACIAL_HAIR_LUCLIN_LAST)
+        createData.FacialHair = 0;
+    if (createData.EyeColor > EQ_ILLUSION_EYE_COLOR_LAST)
+        createData.EyeColor = 0;
+}
+
+// Returns false to leave the character to the normal start, when what the client sent isn't a pairing its class can start as
+bool EverQuestMod::SetEQRaceStartForNewPlayer(Player* player, EverQuestPlayerCreateData createData)
+{
+    const EverQuestClassMap classMap = GetClassMapForWOWClassID(player->getClass());
+    auto eqRaceStartItr = EQRaceStartsByKey.find(GetEQRaceStartKey(createData.EQRaceID, classMap.EQClassIDBase, createData.StartChoice));
+    if (eqRaceStartItr == EQRaceStartsByKey.end())
+    {
+        LOG_ERROR("module.EverQuest", "EverQuestMod::SetEQRaceStartForNewPlayer got EQ race {}, start choice {}, which isn't a start for player {}'s EQ class {}", createData.EQRaceID, createData.StartChoice, player->GetName(), classMap.EQClassIDBase);
+        return false;
+    }
+    const EverQuestPlayerCreateInfo& createInfo = eqRaceStartItr->second;
+
+    uint8 secondClass = createData.SecondClass;
+    if (secondClass == 0 || secondClass > 32 || (classMap.EQClassIDEligibleSecondMask & (uint32(1) << (secondClass - 1))) == 0)
+        secondClass = classMap.EQClassIDDefaultSecond;
+    ValidatePlayerCreateLook(createData.EQRaceID, player->getGender(), createData);
+
+    uint32 guid = player->GetGUID().GetCounter();
+    CharacterDatabase.Execute("INSERT INTO `mod_everquest_character_settings` (`guid`, `currentSecondaryClass`, `nextSecondaryClass`, `secondaryExpPool`, `startOption`, `illusionFaceId`, `eqRace`, `eqStartChoice`, `eqStartSecondClass`, `eqHairStyle`, `eqHairColor`, `eqFacialHair`, `eqEyeColor`) "
+        "VALUES ({0}, {1}, {1}, 0, {2}, {3}, {4}, {5}, {1}, {6}, {7}, {8}, {9}) ON DUPLICATE KEY UPDATE `currentSecondaryClass` = {1}, `nextSecondaryClass` = {1}, `startOption` = {2}, `illusionFaceId` = {3}, `eqRace` = {4}, `eqStartChoice` = {5}, "
+        "`eqStartSecondClass` = {1}, `eqHairStyle` = {6}, `eqHairColor` = {7}, `eqFacialHair` = {8}, `eqEyeColor` = {9}",
+        guid, secondClass, createInfo.StartOption, createData.Face, createData.EQRaceID, createData.StartChoice, createData.HairStyle, createData.HairColor, createData.FacialHair, createData.EyeColor);
+
+    // The bind is the hall, as it is for a town picked in the Origins box
+    CharacterDatabase.Execute("REPLACE INTO `character_homebind` (`guid`, `mapId`, `zoneId`, `posX`, `posY`, `posZ`) VALUES ({}, {}, {}, {}, {}, {})",
+        guid, createInfo.MapID, createInfo.ZoneID, createInfo.PositionX, createInfo.PositionY, createInfo.PositionZ);
+    CharacterDatabase.Execute("UPDATE `characters` SET `map` = {}, `zone` = {}, `position_x` = {}, `position_y` = {}, `position_z` = {}, `orientation` = {} WHERE `guid` = {}",
+        createInfo.MapID, createInfo.ZoneID, createInfo.PositionX, createInfo.PositionY, createInfo.PositionZ, createInfo.Orientation, guid);
+    return true;
+}
+
+// Runs for a character that isn't in the world.  Nothing but the race change can move the EQ race
+void EverQuestMod::HandleCharacterFactionOrRaceChange(ObjectGuid guid, bool factionChange, std::vector<uint8> const& modData)
+{
+    EverQuestPlayerCreateData createData;
+    if (ReadPlayerCreateData(modData, createData) == false)
+        return;
+
+    // The settings row is cached from the character's last time in the world, and these change it underneath
+    {
+        std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+        ActivePlayerClassControllerDataByGUID.erase(guid);
+    }
+    CharacterCacheEntry const* characterEntry = sCharacterCache->GetCharacterCacheByGuid(guid);
+    if (characterEntry == nullptr)
+        return;
+    const EverQuestClassMap classMap = GetClassMapForWOWClassID(characterEntry->Class);
+    uint32 lowGuid = guid.GetCounter();
+    if (factionChange == true)
+    {
+        QueryResult queryResult = CharacterDatabase.Query("SELECT eqRace FROM mod_everquest_character_settings WHERE guid = {}", lowGuid);
+        uint32 eqRaceID = queryResult ? queryResult->Fetch()[0].Get<uint16>() : 0;
+        if (eqRaceID == 0)
+            return;
+        ValidatePlayerCreateLook(eqRaceID, characterEntry->Sex, createData);
+        CharacterDatabase.Execute("UPDATE `mod_everquest_character_settings` SET `illusionFaceId` = {}, `eqHairStyle` = {}, `eqHairColor` = {}, `eqFacialHair` = {}, `eqEyeColor` = {} WHERE `guid` = {}",
+            createData.Face, createData.HairStyle, createData.HairColor, createData.FacialHair, createData.EyeColor, lowGuid);
+        return;
+    }
+
+    auto eqRaceStartItr = EQRaceStartsByKey.find(GetEQRaceStartKey(createData.EQRaceID, classMap.EQClassIDBase, createData.StartChoice));
+    if (eqRaceStartItr == EQRaceStartsByKey.end())
+    {
+        LOG_ERROR("module.EverQuest", "EverQuestMod::HandleCharacterFactionOrRaceChange got EQ race {}, start choice {}, which isn't a start for character {}'s EQ class {}", createData.EQRaceID, createData.StartChoice, lowGuid, classMap.EQClassIDBase);
+        return;
+    }
+    ValidatePlayerCreateLook(createData.EQRaceID, characterEntry->Sex, createData);
+
+    // A guise goes out for the new race the next time the character logs in, unless it's the one they were given, and the old one stays with them.  The row can be missing
+    // for a character that has never been in the world
+    CharacterDatabase.Execute("INSERT INTO `mod_everquest_character_settings` (`guid`, `currentSecondaryClass`, `nextSecondaryClass`, `secondaryExpPool`, `startOption`, `illusionFaceId`, `issuedIllusionItemId`, `eqRace`, `eqStartChoice`, `eqHairStyle`, `eqHairColor`, `eqFacialHair`, `eqEyeColor`) "
+        "VALUES ({0}, {1}, {1}, 0, {2}, {3}, 0, {4}, {5}, {6}, {7}, {8}, {10}) ON DUPLICATE KEY UPDATE `startOption` = {2}, `illusionFaceId` = {3}, "
+        "`issuedIllusionItemId` = IF(`issuedIllusionItemId` = {9}, `issuedIllusionItemId`, 0), `eqRace` = {4}, `eqStartChoice` = {5}, `eqHairStyle` = {6}, `eqHairColor` = {7}, `eqFacialHair` = {8}, `eqEyeColor` = {10}",
+        lowGuid, classMap.EQClassIDDefaultSecond, eqRaceStartItr->second.StartOption, createData.Face, createData.EQRaceID, createData.StartChoice, createData.HairStyle, createData.HairColor, createData.FacialHair,
+        eqRaceStartItr->second.IllusionItemID, createData.EyeColor);
+}
+
+// A quest combiner (the Long Wooden Box) carries each of its combines as a use spell with the components as reagents.  The core would cast every one
+// of them, so this casts the first the player has the components for (the client asks for the same one), or the first when none, which names what's
+// missing.  Returns true when it handled the use
+bool EverQuestMod::HandleCombinerItemUse(Player* player, Item* item, SpellCastTargets const& targets, uint8 castCount, uint32 glyphIndex)
+{
+    if (player == nullptr || item == nullptr || item->GetTemplate() == nullptr)
+        return false;
+    ItemTemplate const* proto = item->GetTemplate();
+    std::vector<SpellInfo const*> combineSpells;
+    for (uint8 i = 0; i < MAX_ITEM_PROTO_SPELLS; ++i)
+    {
+        _Spell const& spellData = proto->Spells[i];
+        if (spellData.SpellId == 0 || spellData.SpellTrigger != ITEM_SPELLTRIGGER_ON_USE)
+            continue;
+        SpellInfo const* spellInfo = sSpellMgr->GetSpellInfo(spellData.SpellId);
+        if (spellInfo == nullptr || spellInfo->Reagent[0] <= 0)
+            return false;
+        combineSpells.push_back(spellInfo);
+    }
+    if (combineSpells.size() < 2)
+        return false;
+
+    SpellInfo const* combineSpell = combineSpells.front();
+    for (SpellInfo const* spellInfo : combineSpells)
+    {
+        bool hasComponents = true;
+        for (uint8 reagentIndex = 0; reagentIndex < MAX_SPELL_REAGENTS; ++reagentIndex)
+            if (spellInfo->Reagent[reagentIndex] > 0 && player->HasItemCount(spellInfo->Reagent[reagentIndex], spellInfo->ReagentCount[reagentIndex]) == false)
+                hasComponents = false;
+        if (hasComponents == true)
+        {
+            combineSpell = spellInfo;
+            break;
+        }
+    }
+
+    if (player->HasSpellCooldown(combineSpell->Id) == true)
+    {
+        Spell::SendCastResult(player, combineSpell, castCount, SPELL_FAILED_NOT_READY);
+        return true;
+    }
+    Spell* spell = new Spell(player, combineSpell, TRIGGERED_NONE);
+    spell->m_CastItem = item;
+    spell->m_cast_count = castCount;
+    spell->m_glyphIndex = glyphIndex;
+    spell->prepare(&targets);
+    return true;
+}
+
+// The character screen needs each character's EQ race and look for the race and faction change pages.  One block per character, in the packet's order
+void EverQuestMod::AddCharacterOriginsToEnumPacket(std::vector<ObjectGuid> const& guids, WorldPacket& data)
+{
+    if (EQRaceStartsByKey.empty() == true || guids.empty() == true)
+        return;
+    std::string guidList;
+    for (ObjectGuid const& guid : guids)
+    {
+        if (guidList.empty() == false)
+            guidList += ',';
+        guidList += std::to_string(guid.GetCounter());
+    }
+    std::unordered_map<uint32, std::array<uint8, EQ_CHARACTER_ORIGIN_SIZE>> originsByGuid;
+    QueryResult queryResult = CharacterDatabase.Query("SELECT guid, eqRace, eqStartChoice, illusionFaceId, eqHairStyle, eqHairColor, eqFacialHair, issuedIllusionItemId, currentSecondaryClass, eqEyeColor FROM mod_everquest_character_settings WHERE guid IN ({})", guidList);
+    if (queryResult)
+    {
+        do
+        {
+            Field* fields = queryResult->Fetch();
+            uint32 eqRaceID = fields[1].Get<uint16>();
+            if (eqRaceID == 0) // A character from before the EverQuest page goes by the guise it was given
+                eqRaceID = GetEQRaceIDForGuiseItem(fields[7].Get<uint32>());
+            originsByGuid[fields[0].Get<uint32>()] = { uint8(eqRaceID), fields[2].Get<uint8>(), uint8(std::clamp(fields[3].Get<int32>(), 0, 255)), fields[4].Get<uint8>(), fields[5].Get<uint8>(), fields[6].Get<uint8>(), fields[8].Get<uint8>(), fields[9].Get<uint8>() };
+        } while (queryResult->NextRow());
+    }
+    data << uint8(EQ_PLAYER_CREATE_DATA_VERSION);
+    data << uint8(guids.size());
+    for (ObjectGuid const& guid : guids)
+    {
+        std::array<uint8, EQ_CHARACTER_ORIGIN_SIZE> origin = {};
+        auto originItr = originsByGuid.find(guid.GetCounter());
+        if (originItr != originsByGuid.end())
+            origin = originItr->second;
+        for (uint8 value : origin)
+            data << value;
+    }
+}
+
+uint32 EverQuestMod::GetEQRaceIDForGuiseItem(uint32 guiseItemID) const
+{
+    auto eqRaceItr = EQRaceIDsByGuiseItemID.find(guiseItemID);
+    return eqRaceItr != EQRaceIDsByGuiseItemID.end() ? eqRaceItr->second : 0;
+}
+
 void EverQuestMod::SetInitialCreatePositionForPlayer(Player* player)
 {
     if (HasCreatePlayerData(player->getRace(), player->getClass()) == false)
         return;
 
-    const EverQuestPlayerCreateInfo& createInfo = GetPlayerCreateInfo(player->getRace(), player->getClass());
+    EverQuestPlayerCreateData createData;
+    if (ReadPlayerCreateData(player->GetCreateModData(), createData) == true && SetEQRaceStartForNewPlayer(player, createData) == true)
+        return;
+
+    // An option that isn't in the table is the normal town, since the byte comes from the client
+    const EverQuestPlayerCreateInfo* createInfo = &GetPlayerCreateInfo(player->getRace(), player->getClass());
+    auto startOptionItr = PlayerCreateInfoStartOptionsByKey.find(GetPlayerCreateInfoStartOptionKey(player->getRace(), player->getClass(), player->GetCreateOutfitId()));
+    if (startOptionItr != PlayerCreateInfoStartOptionsByKey.end())
+    {
+        createInfo = &startOptionItr->second;
+        const EverQuestClassMap classMap = GetClassMapForWOWClassID(player->getClass());
+        CharacterDatabase.Execute("INSERT INTO `mod_everquest_character_settings` (`guid`, `currentSecondaryClass`, `nextSecondaryClass`, `secondaryExpPool`, `startOption`) VALUES ({}, {}, {}, 0, {}) ON DUPLICATE KEY UPDATE `startOption` = {}",
+            player->GetGUID().GetCounter(), classMap.EQClassIDDefaultSecond, classMap.EQClassIDDefaultSecond, createInfo->StartOption, createInfo->StartOption);
+
+        // The Hearthstone goes by the core's bind, which would otherwise come from the normal town's playercreateinfo row at first login
+        CharacterDatabase.Execute("REPLACE INTO `character_homebind` (`guid`, `mapId`, `zoneId`, `posX`, `posY`, `posZ`) VALUES ({}, {}, {}, {}, {}, {})",
+            player->GetGUID().GetCounter(), createInfo->MapID, createInfo->ZoneID, createInfo->PositionX, createInfo->PositionY, createInfo->PositionZ);
+    }
+
     CharacterDatabase.Execute("UPDATE `characters` SET `map` = {}, `zone` = {}, `position_x` = {}, `position_y` = {}, `position_z` = {}, `orientation` = {} WHERE `guid` = {}",
-        createInfo.MapID, createInfo.ZoneID, createInfo.PositionX, createInfo.PositionY, createInfo.PositionZ, createInfo.Orientation, player->GetGUID().GetCounter());
+        createInfo->MapID, createInfo->ZoneID, createInfo->PositionX, createInfo->PositionY, createInfo->PositionZ, createInfo->Orientation, player->GetGUID().GetCounter());
 }
 
 EverQuestPlayerControllerData EverQuestMod::GetPlayerControllerData(Player* player)
@@ -20604,10 +21665,10 @@ void EverQuestMod::MoveEquipToModInventoryTable(Player* player, CharacterDatabas
 {
     uint8 curEQClass = GetCurrentSecondEQClassForPlayer(player);
 
-    transaction->Append("DELETE FROM `mod_everquest_character_class_inventory` WHERE guid = {} AND eqclass = {} AND `bag` = 0 AND `slot` <= 18;", player->GetGUID().GetCounter(), curEQClass);
+    transaction->Append("DELETE FROM `mod_everquest_character_class_inventory` WHERE guid = {} AND eqclass = {} AND `bag` = 0 AND (`slot` <= 18 OR `slot` = {});", player->GetGUID().GetCounter(), curEQClass, LIGHT_SOURCE_SLOT);
     transaction->Append("DELETE storage FROM `mod_everquest_character_class_inventory` storage INNER JOIN `character_inventory` live ON live.`item` = storage.`item` WHERE live.`guid` = {}", player->GetGUID().GetCounter());
-    transaction->Append("INSERT INTO `mod_everquest_character_class_inventory` (`guid`, `class`, `eqclass`, `bag`, `slot`, `item`) SELECT `guid`, {}, {}, `bag`, `slot`, `item` FROM character_inventory WHERE guid = {} AND `bag` = 0 AND `slot` <= 18", player->getClass(), curEQClass, player->GetGUID().GetCounter());
-    transaction->Append("DELETE FROM `character_inventory` WHERE guid = {} AND `bag` = 0 AND `slot` <= 18", player->GetGUID().GetCounter());
+    transaction->Append("INSERT INTO `mod_everquest_character_class_inventory` (`guid`, `class`, `eqclass`, `bag`, `slot`, `item`) SELECT `guid`, {}, {}, `bag`, `slot`, `item` FROM character_inventory WHERE guid = {} AND `bag` = 0 AND (`slot` <= 18 OR `slot` = {})", player->getClass(), curEQClass, player->GetGUID().GetCounter(), LIGHT_SOURCE_SLOT);
+    transaction->Append("DELETE FROM `character_inventory` WHERE guid = {} AND `bag` = 0 AND (`slot` <= 18 OR `slot` = {})", player->GetGUID().GetCounter(), LIGHT_SOURCE_SLOT);
 }
 
 void EverQuestMod::MoveQuestDataToModQuestTables(Player* player, CharacterDatabaseTransaction& transaction)
@@ -20954,6 +22015,7 @@ bool EverQuestMod::PerformPlayerDelete(ObjectGuid guid)
     transaction->Append("DELETE FROM mod_everquest_characters WHERE guid = {}", playerGUID);
     transaction->Append("DELETE FROM mod_everquest_character_class_talent WHERE guid = {}", playerGUID);
     transaction->Append("DELETE FROM mod_everquest_character_class_aura WHERE guid = {}", playerGUID);
+    transaction->Append("DELETE FROM mod_everquest_character_light_source WHERE guid = {}", playerGUID);
     transaction->Append("DELETE FROM mod_everquest_character_class_spell WHERE guid = {}", playerGUID);
     transaction->Append("DELETE FROM mod_everquest_character_class_skills WHERE guid = {}", playerGUID);
     transaction->Append("DELETE FROM mod_everquest_character_class_action WHERE guid = {}", playerGUID);
@@ -21092,6 +22154,12 @@ void EverQuestMod::SendExpPoolAddonMessageToPlayer(Player* player, uint32 gained
     WorldPacket data;
     ChatHandler::BuildChatPacket(data, CHAT_MSG_SYSTEM, LANG_ADDON, nullptr, nullptr, addonMessage);
     player->SendDirectMessage(&data);
+}
+
+// The slots of a class's stored equipment: its equipment and its light source slot
+static bool IsStorageEquipSlot(uint8 equipSlot)
+{
+    return equipSlot <= EQUIPMENT_SLOT_TABARD || equipSlot == LIGHT_SOURCE_SLOT;
 }
 
 static bool CanInventoryTypeGoIntoEquipSlot(uint32 inventoryType, uint8 equipSlot)
@@ -21330,6 +22398,14 @@ void EverQuestMod::WaitForPendingEquipmentStorageCommitForPlayer(ObjectGuid play
     LOG_ERROR("module.EverQuest", "EverQuestMod Timed out waiting on a pending equipment storage commit for player guid {}", playerGUID.GetCounter());
 }
 
+// Whether a stored item may sit in a slot: by what it is worn on, or, in the light source slot, by being a light source
+bool EverQuestMod::CanItemGoIntoStorageSlot(ItemTemplate const* itemTemplate, uint8 equipSlot)
+{
+    if (equipSlot == LIGHT_SOURCE_SLOT)
+        return GetCarriedLightTypeForItemTemplateID(itemTemplate->ItemId) != 0;
+    return CanInventoryTypeGoIntoEquipSlot(itemTemplate->InventoryType, equipSlot);
+}
+
 bool EverQuestMod::EquipItemIntoSecondaryClassStorage(Player* player, uint8 eqClassID, uint8 clientBagID, uint8 clientSlotID, uint8 equipSlot, uint32 expectedItemTemplateID, std::string& errorTextOut)
 {
     if (IsEQClassValidEquipmentStorageTargetForPlayer(player, eqClassID) == false)
@@ -21342,7 +22418,7 @@ bool EverQuestMod::EquipItemIntoSecondaryClassStorage(Player* player, uint8 eqCl
         errorTextOut = "Your previous equipment change is still processing, try again in a moment.";
         return false;
     }
-    if (equipSlot > EQUIPMENT_SLOT_TABARD)
+    if (IsStorageEquipSlot(equipSlot) == false)
     {
         errorTextOut = "That is not a valid equipment slot.";
         return false;
@@ -21369,18 +22445,19 @@ bool EverQuestMod::EquipItemIntoSecondaryClassStorage(Player* player, uint8 eqCl
         return false;
     }
     ItemTemplate const* itemTemplate = item->GetTemplate();
-    if (CanInventoryTypeGoIntoEquipSlot(itemTemplate->InventoryType, equipSlot) == false)
+    if (CanItemGoIntoStorageSlot(itemTemplate, equipSlot) == false)
     {
         errorTextOut = "That item cannot go into that equipment slot.";
         return false;
     }
-    if (IsItemEQClassAllowedForPlayerSecondaryClass(player, eqClassID, item->GetEntry()) == false)
+    // Anyone can carry a light: only worn gear answers to class and level
+    if (equipSlot != LIGHT_SOURCE_SLOT && IsItemEQClassAllowedForPlayerSecondaryClass(player, eqClassID, item->GetEntry()) == false)
     {
         errorTextOut = "That item cannot be used by a " + GetEQClassStringFromID(eqClassID) + ".";
         return false;
     }
     uint8 secondaryClassLevel = 0;
-    if (IsItemRequiredLevelMetByPlayerSecondaryClass(player, eqClassID, itemTemplate, secondaryClassLevel) == false)
+    if (equipSlot != LIGHT_SOURCE_SLOT && IsItemRequiredLevelMetByPlayerSecondaryClass(player, eqClassID, itemTemplate, secondaryClassLevel) == false)
     {
         errorTextOut = GetSecondaryClassRequiredLevelErrorText(eqClassID, secondaryClassLevel, itemTemplate->RequiredLevel, "That item");
         return false;
@@ -21499,7 +22576,7 @@ bool EverQuestMod::RemoveItemFromSecondaryClassStorage(Player* player, uint8 eqC
         errorTextOut = "Your previous equipment change is still processing, try again in a moment.";
         return false;
     }
-    if (equipSlot > EQUIPMENT_SLOT_TABARD)
+    if (IsStorageEquipSlot(equipSlot) == false)
     {
         errorTextOut = "That is not a valid equipment slot.";
         return false;
@@ -21579,7 +22656,7 @@ bool EverQuestMod::MoveItemWithinSecondaryClassStorage(Player* player, uint8 eqC
         errorTextOut = "Your previous equipment change is still processing, try again in a moment.";
         return false;
     }
-    if (fromEquipSlot > EQUIPMENT_SLOT_TABARD || toEquipSlot > EQUIPMENT_SLOT_TABARD || fromEquipSlot == toEquipSlot)
+    if (IsStorageEquipSlot(fromEquipSlot) == false || IsStorageEquipSlot(toEquipSlot) == false || fromEquipSlot == toEquipSlot)
     {
         errorTextOut = "That is not a valid equipment slot.";
         return false;
@@ -21615,12 +22692,12 @@ bool EverQuestMod::MoveItemWithinSecondaryClassStorage(Player* player, uint8 eqC
         errorTextOut = "There is no stored item in that slot.";
         return false;
     }
-    if (CanInventoryTypeGoIntoEquipSlot(fromItemTemplate->InventoryType, toEquipSlot) == false)
+    if (CanItemGoIntoStorageSlot(fromItemTemplate, toEquipSlot) == false)
     {
         errorTextOut = "That item cannot go into that equipment slot.";
         return false;
     }
-    if (toItemGUIDCounter != 0 && (toItemTemplate == nullptr || CanInventoryTypeGoIntoEquipSlot(toItemTemplate->InventoryType, fromEquipSlot) == false))
+    if (toItemGUIDCounter != 0 && (toItemTemplate == nullptr || CanItemGoIntoStorageSlot(toItemTemplate, fromEquipSlot) == false))
     {
         errorTextOut = "The stored items cannot swap slots.";
         return false;
@@ -21676,7 +22753,7 @@ bool EverQuestMod::SwapSecondaryClassStorageItemWithLiveEquipment(Player* player
         errorTextOut = "Your previous equipment change is still processing, try again in a moment.";
         return false;
     }
-    if (storageEquipSlot > EQUIPMENT_SLOT_TABARD || liveEquipSlot > EQUIPMENT_SLOT_TABARD)
+    if (IsStorageEquipSlot(storageEquipSlot) == false || IsStorageEquipSlot(liveEquipSlot) == false)
     {
         errorTextOut = "That is not a valid equipment slot.";
         return false;
@@ -21708,20 +22785,20 @@ bool EverQuestMod::SwapSecondaryClassStorageItemWithLiveEquipment(Player* player
     if (liveItem != nullptr)
     {
         ItemTemplate const* liveItemTemplate = liveItem->GetTemplate();
-        if (CanInventoryTypeGoIntoEquipSlot(liveItemTemplate->InventoryType, storageEquipSlot) == false)
+        if (CanItemGoIntoStorageSlot(liveItemTemplate, storageEquipSlot) == false)
         {
             delete storedItem;
             errorTextOut = "Your equipped item cannot be stored in that slot.";
             return false;
         }
-        if (IsItemEQClassAllowedForPlayerSecondaryClass(player, eqClassID, liveItem->GetEntry()) == false)
+        if (storageEquipSlot != LIGHT_SOURCE_SLOT && IsItemEQClassAllowedForPlayerSecondaryClass(player, eqClassID, liveItem->GetEntry()) == false)
         {
             delete storedItem;
             errorTextOut = "Your equipped item cannot be used by a " + GetEQClassStringFromID(eqClassID) + ".";
             return false;
         }
         uint8 secondaryClassLevel = 0;
-        if (IsItemRequiredLevelMetByPlayerSecondaryClass(player, eqClassID, liveItemTemplate, secondaryClassLevel) == false)
+        if (storageEquipSlot != LIGHT_SOURCE_SLOT && IsItemRequiredLevelMetByPlayerSecondaryClass(player, eqClassID, liveItemTemplate, secondaryClassLevel) == false)
         {
             delete storedItem;
             errorTextOut = GetSecondaryClassRequiredLevelErrorText(eqClassID, secondaryClassLevel, liveItemTemplate->RequiredLevel, "Your equipped item");
@@ -21756,9 +22833,13 @@ bool EverQuestMod::SwapSecondaryClassStorageItemWithLiveEquipment(Player* player
     }
 
     uint16 equipDestination = 0;
+    ItemPosCountVec lightSlotDestination;
     if (storedItem != nullptr)
     {
-        InventoryResult equipResult = player->CanEquipItem(liveEquipSlot, equipDestination, storedItem, liveItem != nullptr);
+        // The light source slot is storage: its item is stored there, not equipped
+        InventoryResult equipResult = liveEquipSlot == LIGHT_SOURCE_SLOT
+            ? player->CanStoreItem(INVENTORY_SLOT_BAG_0, LIGHT_SOURCE_SLOT, lightSlotDestination, storedItem, liveItem != nullptr)
+            : player->CanEquipItem(liveEquipSlot, equipDestination, storedItem, liveItem != nullptr);
         if (equipResult != EQUIP_ERR_OK)
         {
             player->SendEquipError(equipResult, storedItem, nullptr);
@@ -21792,7 +22873,10 @@ bool EverQuestMod::SwapSecondaryClassStorageItemWithLiveEquipment(Player* player
     if (storedItem != nullptr)
     {
         storedItem->SetState(ITEM_UNCHANGED);
-        player->EquipItem(equipDestination, storedItem, true);
+        if (liveEquipSlot == LIGHT_SOURCE_SLOT)
+            player->MoveItemToInventory(lightSlotDestination, storedItem, true);
+        else
+            player->EquipItem(equipDestination, storedItem, true);
     }
 
     player->SaveInventoryAndGoldToDB(transaction);
@@ -21814,7 +22898,7 @@ void EverQuestMod::SendClassEquipmentAddonMessageToPlayer(Player* player, uint8 
     std::ostringstream payload;
     payload << "H|" << uint32(eqClassID) << "|" << GetEQClassStringFromID(eqClassID);
 
-    QueryResult queryResult = CharacterDatabase.Query("SELECT CI.`slot`, II.`itemEntry`, II.`randomPropertyId`, II.`enchantments` FROM `mod_everquest_character_class_inventory` CI INNER JOIN `item_instance` II ON II.guid = CI.item WHERE CI.`guid` = {} AND CI.`eqclass` = {} AND CI.`bag` = 0 AND CI.`slot` <= 18 ORDER BY CI.`slot`", player->GetGUID().GetCounter(), eqClassID);
+    QueryResult queryResult = CharacterDatabase.Query("SELECT CI.`slot`, II.`itemEntry`, II.`randomPropertyId`, II.`enchantments` FROM `mod_everquest_character_class_inventory` CI INNER JOIN `item_instance` II ON II.guid = CI.item WHERE CI.`guid` = {} AND CI.`eqclass` = {} AND CI.`bag` = 0 AND (CI.`slot` <= 18 OR CI.`slot` = {}) ORDER BY CI.`slot`", player->GetGUID().GetCounter(), eqClassID, LIGHT_SOURCE_SLOT);
     if (queryResult)
     {
         do
