@@ -578,9 +578,13 @@ public:
         if (EverQuest->ConfigSpellSummonPlayerAcrossZones == true)
             EverQuest->ConsumePendingSummonRequest(player);
 
-        // Bring back an EQ pet the core declined to resummon after a zone change, dismount or vehicle exit
-        if (player->GetTemporaryUnsummonedPetNumber() != 0)
+        // Bring back an EQ pet the core declined to resummon after a zone change, dismount or vehicle exit (not to a game identity form, which
+        // has none of the character's pets)
+        if (player->GetTemporaryUnsummonedPetNumber() != 0 && EverQuest->IsInGameIdentityForm(player) == false)
             EverQuest->TryResummonTemporaryUnsummonedEQPet(player);
+
+        // The adventurer aura back after a game identity form took it off with the character's buffs
+        EverQuest->UpdateAdventurerAuraAfterGameIdentityForm(player);
 
         // Some ways an item leaves a slot have no unequip hook (auto-unequip when a two-hander goes on, item destruction),
         // so revalidate while the form that cares about it is held

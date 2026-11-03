@@ -1226,6 +1226,7 @@ class EverQuestPlayerClassAuraState : public DataMap::Base
 public:
     uint32 GearRefreshTimerMS = 0;
     uint32 ManaCheckTimerMS = 0;
+    bool WasInGameIdentityForm = false;         // In a game identity form (MergedWorlds' Ragnarok Online form) at the last update
     bool WasMoving = false;
     uint32 MovingAccumulatedMS = 0;
     uint32 StillAccumulatedMS = 0;
@@ -2575,6 +2576,8 @@ public:
     void GrantStartAchievementIfMissing(Player* player);
     void GrantCreatureGossipHelloAchievement(Player* player, Creature* creature);
     void ApplyAdventurerAuraStateOnLogin(Player* player);
+    void UpdateAdventurerAuraAfterGameIdentityForm(Player* player);
+    bool IsInGameIdentityForm(Player* player);
     bool IsMapIDAnEverQuestMap(uint32 mapID);
     bool IsZoneWideGroupRewardEnabledForMap(uint32 mapID);
     bool IsInZoneWideGroupRewardRange(Player* member, WorldObject* rewardSource);
