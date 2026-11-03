@@ -55,7 +55,9 @@ class EQZoneMap;
 struct AreaTrigger;
 struct BuildValuesCachePosPointers;
 
-#define EQ_MOD_VERSION                              138
+#define EQ_MOD_VERSION                              139
+
+#define EQ_VENDOR_PRICE_MOD_SCALE                   10000 // A greedy vendor's price changes are in ten-thousandths (converter EQMerchantPricing)
 
 #define EQ_MOVEMENT_CAST_SNARE_DURATION_BUFFER_IN_MS 2000 // How much longer than the remaining cast time the casting slow is given, so a pushed-back cast keeps it
 
@@ -594,6 +596,8 @@ public:
     uint32 GossipHelloAchievementID = 0;
     uint32 DefaultHeldMainhandItemID = 0; // Shown when the loot gives nothing to hold (EQ's d_melee_texture weapon models)
     uint32 DefaultHeldOffhandItemID = 0;
+    uint32 VendorBuyPriceMod = EQ_VENDOR_PRICE_MOD_SCALE; // A greedy vendor charges more (ten-thousandths of the item's buy price)
+    uint32 VendorSellPriceMod = EQ_VENDOR_PRICE_MOD_SCALE; // And pays less (ten-thousandths of the item's sell price)
 };
 
 class EverQuestCreatureSpawnPoint
@@ -2131,6 +2135,9 @@ public:
     void LoadConfigurationFile();
     void LoadCreatureData();
     bool HasCreatureDataForCreatureTemplateID(uint32 creatureTemplateID);
+    bool IsCreatureTemplateIDAnEQCreatureTemplateID(uint32 creatureTemplateID);
+    void UpdateVendorItemBuyPrice(Creature const* vendor, ItemTemplate const* itemTemplate, uint32 count, uint32& price);
+    void UpdateVendorItemSellPrice(Creature const* vendor, uint32& unitPrice);
     const EverQuestCreature& GetCreatureDataForCreatureTemplateID(uint32 creatureTemplateID);
     void LoadCreatureSpawnPoints();
     bool ShouldDespawnCreatureDueToSpawnRestrictions(Creature* creature);

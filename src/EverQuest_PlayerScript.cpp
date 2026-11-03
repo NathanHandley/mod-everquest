@@ -1383,6 +1383,21 @@ public:
         EverQuest->ApplyZoneWideGroupMoneyShare(player, loot);
     }
 
+    // EQ prices: no reputation discount on EQ items or at EQ vendors, and greedy EQ vendors charge more and pay less
+    void OnPlayerGetVendorItemBuyPrice(Player const* /*player*/, Creature const* vendor, ItemTemplate const* itemTemplate, uint32 count, uint32& price) override
+    {
+        if (EverQuest->IsEnabled == false)
+            return;
+        EverQuest->UpdateVendorItemBuyPrice(vendor, itemTemplate, count, price);
+    }
+
+    void OnPlayerGetVendorItemSellPrice(Player const* /*player*/, Creature const* vendor, Item const* /*item*/, uint32& unitPrice) override
+    {
+        if (EverQuest->IsEnabled == false)
+            return;
+        EverQuest->UpdateVendorItemSellPrice(vendor, unitPrice);
+    }
+
     void OnPlayerBeforeLogout(Player* player) override
     {
         if (EverQuest->IsEnabled == false)

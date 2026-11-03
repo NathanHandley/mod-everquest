@@ -640,7 +640,7 @@ void EverQuestMod::LoadConfigurationFile()
 void EverQuestMod::LoadCreatureData()
 {
     CreaturesByTemplateID.clear();
-    QueryResult queryResult = WorldDatabase.Query("SELECT CreatureTemplateID, CanShowHeldLootItems, CanShowHeldLootShields, SpawnLimit, RangedAttackEnabled, RangedAttackMinRange, RangedAttackMaxRange, RangedAttackDamageModPct, AgroSocialDistanceMod, EnrageEnabled, EnrageHPPct, EnrageDurationInMS, EnrageCooldownInMS, FlurryEnabled, FlurryChancePct, RampageEnabled, RampageChancePct, RampageRange, RampageDamagePct, WildRampageEnabled, WildRampageChancePct, WildRampageMaxTargets, WildRampageDamagePct, AttackRoundTimeInMS, DifficultyType, GossipIsOnlyFromHailText, SpellDamageMultiplier, GossipHelloAchievementID, DefaultHeldMainhandItemID, DefaultHeldOffhandItemID FROM mod_everquest_creature ORDER BY CreatureTemplateID;");
+    QueryResult queryResult = WorldDatabase.Query("SELECT CreatureTemplateID, CanShowHeldLootItems, CanShowHeldLootShields, SpawnLimit, RangedAttackEnabled, RangedAttackMinRange, RangedAttackMaxRange, RangedAttackDamageModPct, AgroSocialDistanceMod, EnrageEnabled, EnrageHPPct, EnrageDurationInMS, EnrageCooldownInMS, FlurryEnabled, FlurryChancePct, RampageEnabled, RampageChancePct, RampageRange, RampageDamagePct, WildRampageEnabled, WildRampageChancePct, WildRampageMaxTargets, WildRampageDamagePct, AttackRoundTimeInMS, DifficultyType, GossipIsOnlyFromHailText, SpellDamageMultiplier, GossipHelloAchievementID, DefaultHeldMainhandItemID, DefaultHeldOffhandItemID, VendorBuyPriceMod, VendorSellPriceMod FROM mod_everquest_creature ORDER BY CreatureTemplateID;");
     if (queryResult)
     {
         do
@@ -678,6 +678,8 @@ void EverQuestMod::LoadCreatureData()
             everQuestCreature.GossipHelloAchievementID = fields[27].Get<uint32>();
             everQuestCreature.DefaultHeldMainhandItemID = fields[28].Get<uint32>();
             everQuestCreature.DefaultHeldOffhandItemID = fields[29].Get<uint32>();
+            everQuestCreature.VendorBuyPriceMod = fields[30].Get<uint32>();
+            everQuestCreature.VendorSellPriceMod = fields[31].Get<uint32>();
             CreaturesByTemplateID[everQuestCreature.CreatureTemplateID] = everQuestCreature;
         } while (queryResult->NextRow());
     }
@@ -1037,6 +1039,52 @@ bool EverQuestMod::HasCreatureDataForCreatureTemplateID(uint32 creatureTemplateI
         return true;
     else
         return false;
+}
+
+bool EverQuestMod::IsCreatureTemplateIDAnEQCreatureTemplateID(uint32 creatureTemplateID)
+{
+    if (ConfigSystemCreatureTemplateIDMin == 0 || ConfigSystemCreatureTemplateIDMax == 0)
+        return false;
+    return creatureTemplateID >= ConfigSystemCreatureTemplateIDMin && creatureTemplateID <= ConfigSystemCreatureTemplateIDMax;
+}
+
+// EQ prices (converter EQMerchantPricing): an EQ item's buy price is already EverQuest's, for a player at indifferent faction with the
+// CHA where EQ's prices stop improving, so neither an EQ vendor nor any vendor selling an EQ item gives a reputation discount on top.
+// That keeps an item's price above what a vendor pays for it, which is close to it (price x 1.05 against price / 1.05).  A greedy EQ
+// vendor charges more, by its VendorBuyPriceMod.  The price comes in after the core's discount, and is worked out again from the item
+void EverQuestMod::UpdateVendorItemBuyPrice(Creature const* vendor, ItemTemplate const* itemTemplate, uint32 count, uint32& price)
+{
+    if (itemTemplate == nullptr || itemTemplate->BuyPrice == 0)
+        return;
+    bool isEQVendor = vendor != nullptr && IsCreatureTemplateIDAnEQCreatureTemplateID(vendor->GetEntry());
+    if (isEQVendor == false && IsItemTemplateIDAnEQItemTemplateID(itemTemplate->ItemId) == false)
+        return;
+
+    uint64 buyPriceMod = EQ_VENDOR_PRICE_MOD_SCALE;
+    if (isEQVendor == true)
+    {
+        unordered_map<uint32, EverQuestCreature>::const_iterator creatureIterator = CreaturesByTemplateID.find(vendor->GetEntry());
+        if (creatureIterator != CreaturesByTemplateID.end() && creatureIterator->second.VendorBuyPriceMod > EQ_VENDOR_PRICE_MOD_SCALE)
+            buyPriceMod = creatureIterator->second.VendorBuyPriceMod;
+    }
+
+    // Per buy stack, rounded, as the vendor's list shows it
+    uint64 stackPrice = ((uint64)itemTemplate->BuyPrice * buyPriceMod + EQ_VENDOR_PRICE_MOD_SCALE / 2) / EQ_VENDOR_PRICE_MOD_SCALE;
+    price = (uint32)std::min<uint64>(stackPrice * std::max<uint32>(count, 1), uint64(MAX_MONEY_AMOUNT));
+}
+
+// A greedy EQ vendor pays less for anything, by its VendorSellPriceMod (the client's tooltip shows the same, from VendorSellPriceMod.dbc)
+void EverQuestMod::UpdateVendorItemSellPrice(Creature const* vendor, uint32& unitPrice)
+{
+    if (vendor == nullptr || unitPrice == 0)
+        return;
+    unordered_map<uint32, EverQuestCreature>::const_iterator creatureIterator = CreaturesByTemplateID.find(vendor->GetEntry());
+    if (creatureIterator == CreaturesByTemplateID.end() || creatureIterator->second.VendorSellPriceMod >= EQ_VENDOR_PRICE_MOD_SCALE)
+        return;
+
+    // Rounded, but a sellable item stays worth at least a copper
+    uint64 sellPrice = ((uint64)unitPrice * creatureIterator->second.VendorSellPriceMod + EQ_VENDOR_PRICE_MOD_SCALE / 2) / EQ_VENDOR_PRICE_MOD_SCALE;
+    unitPrice = (uint32)std::max<uint64>(sellPrice, 1);
 }
 
 const EverQuestCreature& EverQuestMod::GetCreatureDataForCreatureTemplateID(uint32 creatureTemplateID)
