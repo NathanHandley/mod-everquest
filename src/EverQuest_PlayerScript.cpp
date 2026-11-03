@@ -454,6 +454,10 @@ public:
         if (EverQuest->IsPlayerMentorshipLevelAdjusted(player) == true)
             return;
 
+        // Nor does another game's character (the Ragnarok Online form), whose kills aren't the EQ classes'
+        if (EverQuest->IsInGameIdentityForm(player) == true)
+            return;
+
         uint32 added = EverQuest->AddToSecondaryExpPoolForPlayer(player, amount);
         if (added > 0)
             EverQuest->SendExpPoolAddonMessageToPlayer(player, added);
@@ -1198,8 +1202,9 @@ public:
         EverQuest->ClearAuctionRealmFilterForPlayer(player);
         EverQuest->ClearAuctionSearchScanForPlayer(player);
 
-        // Class switch
-        if (EverQuest->GetCurrentSecondEQClassForPlayer(player) != EverQuest->GetNextSecondEQClassForPlayer(player))
+        // Class switch.  In a game identity form (the Ragnarok Online form) the gear worn is the other game's, so the switch waits for a
+        // logout out of the form
+        if (EverQuest->GetCurrentSecondEQClassForPlayer(player) != EverQuest->GetNextSecondEQClassForPlayer(player) && EverQuest->IsInGameIdentityForm(player) == false)
         {
             if (!EverQuest->PerformClassSwitch(player))
             {
@@ -1398,8 +1403,8 @@ public:
         // Any pending equipment storage commit must have executed before the logout save and class switch are queued
         EverQuest->WaitForPendingEquipmentStorageCommitForPlayer(player->GetGUID());
 
-        // If a class change is in progress, update the item visuals
-        if (EverQuest->GetCurrentSecondEQClassForPlayer(player) != EverQuest->GetNextSecondEQClassForPlayer(player))
+        // If a class change is in progress, update the item visuals (not in a game identity form, where the switch waits)
+        if (EverQuest->GetCurrentSecondEQClassForPlayer(player) != EverQuest->GetNextSecondEQClassForPlayer(player) && EverQuest->IsInGameIdentityForm(player) == false)
         {
             map<uint8, EverQuestPlayerEquipedItemData> visibleItemsBySlot = EverQuest->GetVisibleItemsBySlotForPlayerClass(player, EverQuest->GetNextSecondEQClassForPlayer(player));
             for (uint8 i = 0; i < 18; ++i)

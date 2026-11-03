@@ -1067,6 +1067,11 @@ public:
             return true;
 
         Player* player = handler->GetPlayer();
+        if (EverQuest->IsInGameIdentityForm(player) == true)
+        {
+            handler->PSendSysMessage("Your secondary EverQuest class can't be changed while you are in another world's form.");
+            return true;
+        }
         std::string eligibleClassList = GetEligibleSecondClassListForPlayer(player);
 
         if (!*args)
@@ -1333,6 +1338,11 @@ public:
             return true;
 
         Player* player = handler->GetPlayer();
+        if (EverQuest->IsInGameIdentityForm(player) == true)
+        {
+            handler->PSendSysMessage("Your secondary bonus experience pool can't be used while you are in another world's form.");
+            return true;
+        }
         uint32 spent = EverQuest->SpendSecondaryExpPoolForPlayer(player);
         if (spent > 0)
             handler->PSendSysMessage("Applied |cff4CFF00{}|r experience from your secondary bonus experience pool.", spent);
