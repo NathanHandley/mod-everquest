@@ -3253,6 +3253,31 @@ void EverQuestMod::LoadItemFocusDataFromDB()
         itemFocus.RequiredEQSpellID = fields[11].Get<uint32>();
         ItemFocusByItemTemplateID[fields[0].Get<uint32>()] = itemFocus;
     } while (queryResult->NextRow());
+
+    // A focus's level limit asks for the level the caster's class gets the spell at, as TAKP's does.  The converter writes one scroll per class that learns
+    // a spell, each limited to that class and needing that class's level, which teaches the spell from its second item spell (trigger 6, learn).  This runs
+    // before the core loads its item templates, so it reads the tables
+    ScrollLearnLevelByEQClassIDBySpellID.clear();
+    QueryResult scrollResult = WorldDatabase.Query("SELECT m.AllowedEQClassMask, i.RequiredLevel, i.spellid_2 FROM mod_everquest_item_template m JOIN item_template i ON i.entry = m.ItemTemplateID "
+        "WHERE m.AllowedEQClassMask <> 0 AND i.spelltrigger_2 = 6 AND i.spellid_2 > 0");
+    if (scrollResult == nullptr)
+        return;
+    do
+    {
+        Field* fields = scrollResult->Fetch();
+        uint32 allowedEQClassMask = fields[0].Get<uint32>();
+        uint32 requiredLevel = fields[1].Get<uint8>();
+        uint32 spellID = uint32(fields[2].Get<int32>());
+        for (uint8 eqClassID = 1; eqClassID <= 32; ++eqClassID)
+        {
+            if ((allowedEQClassMask & (uint32(1) << (eqClassID - 1))) == 0)
+                continue;
+            unordered_map<uint8, uint32>& learnLevelByEQClassID = ScrollLearnLevelByEQClassIDBySpellID[spellID];
+            auto learnLevelIter = learnLevelByEQClassID.find(eqClassID);
+            if (learnLevelIter == learnLevelByEQClassID.end() || requiredLevel < learnLevelIter->second)
+                learnLevelByEQClassID[eqClassID] = requiredLevel;
+        }
+    } while (scrollResult->NextRow());
 }
 
 // EQ's resist types, 1 through 5, as the schools the converter gives them
@@ -3269,9 +3294,11 @@ static SpellSchoolMask GetSchoolMaskForEQResistType(uint32 resistType)
     }
 }
 
-static bool DoesItemFocusCoverSpell(EverQuestItemFocus const& itemFocus, SpellInfo const* spellInfo, EverQuestSpell const& spellData)
+// The spell level and the duration at the caster's level are worked out once per lookup, by GetItemFocusPercentForPlayer
+static bool DoesItemFocusCoverSpell(EverQuestItemFocus const& itemFocus, SpellInfo const* spellInfo, EverQuestSpell const& spellData, uint32 spellLevel, int32 durationAtCasterLevel)
 {
-    uint32 spellLevel = spellData.LearnLevel != 0 ? spellData.LearnLevel : std::max(spellInfo->SpellLevel, spellInfo->BaseLevel);
+    // TAKP's level limit also takes some limits past it as a smaller focus (a base2 percent off for each level over), which the data has no field for, so a
+    // spell over the limit gets nothing
     if (spellLevel > itemFocus.MaxSpellLevel)
         return false;
     if ((spellData.FocusTraits & itemFocus.RequiredTraits) != itemFocus.RequiredTraits || (spellData.FocusTraits & itemFocus.ExcludedTraits) != 0)
@@ -3280,12 +3307,19 @@ static bool DoesItemFocusCoverSpell(EverQuestItemFocus const& itemFocus, SpellIn
         return false;
     if ((itemFocus.SpellType == 1 && spellInfo->IsPositive() == true) || (itemFocus.SpellType == 2 && spellInfo->IsPositive() == false))
         return false;
-    if (itemFocus.ResistType != 0 && (spellInfo->GetSchoolMask() & GetSchoolMaskForEQResistType(itemFocus.ResistType)) == 0)
-        return false;
+    // EQ's limit asks about the resist type, which a school override can move a spell's school away from.  The school only stands in for a spell with no EQ resist type
+    if (itemFocus.ResistType != 0)
+    {
+        if (spellData.EQResistType != 0 && spellData.EQResistType != itemFocus.ResistType)
+            return false;
+        if (spellData.EQResistType == 0 && (spellInfo->GetSchoolMask() & GetSchoolMaskForEQResistType(itemFocus.ResistType)) == 0)
+            return false;
+    }
 
-    // A timed EQ spell holds an infinite placeholder in its SpellInfo, and its real duration in the EQ data
+    // A timed EQ spell holds an infinite placeholder in its SpellInfo, and its real duration in the EQ data.  TAKP's minimum duration limit asks about the
+    // duration at the caster's level, and whether the spell is instant doesn't change with level
     int32 maxDuration = spellData.AuraDurationMaxInMS != 0 ? int32(spellData.AuraDurationMaxInMS) : spellInfo->GetMaxDuration();
-    if (itemFocus.MinDurationInMS != 0 && (maxDuration >= 0 && uint32(maxDuration) < itemFocus.MinDurationInMS))
+    if (itemFocus.MinDurationInMS != 0 && (durationAtCasterLevel >= 0 && uint32(durationAtCasterLevel) < itemFocus.MinDurationInMS))
         return false;
     if ((itemFocus.InstantType == 1 && maxDuration != 0) || (itemFocus.InstantType == 2 && maxDuration == 0))
         return false;
@@ -3298,8 +3332,20 @@ uint32 EverQuestMod::GetItemFocusPercentForPlayer(Player* player, uint32 focusTy
 {
     if (ItemFocusByItemTemplateID.empty() == true || player == nullptr || spellInfo == nullptr || IsSpellAnEQSpell(spellInfo->Id) == false)
         return 0;
+
+    // TAKP's Client::GetFocusEffect gives a bard song no focus of any kind.  Here that is the song and what each of its pulses casts (read only after startup)
+    if (IsSpellAnEQBardSong(spellInfo->Id) == true || BardSongEffectSpellIDs.find(spellInfo->Id) != BardSongEffectSpellIDs.end())
+        return 0;
     const EverQuestSpell& spellData = GetSpellDataForSpellID(spellInfo->Id);
+
+    // The converter writes a row for the tradeskill and quest combine spells too, with no EQ spell behind them (EQ spell ID 0).  A focus never works on those, as
+    // a reagent focus would keep the combine's components and a cast time focus would shorten the combine
+    if (spellData.EQSpellID == 0)
+        return 0;
     uint32 bestPercent = 0;
+    bool hasSpellLimitValues = false;
+    uint32 spellLevel = 0;
+    int32 durationAtCasterLevel = 0;
     for (uint8 equipSlot = EQUIPMENT_SLOT_START; equipSlot < EQUIPMENT_SLOT_END; ++equipSlot)
     {
         Item* item = player->GetItemByPos(INVENTORY_SLOT_BAG_0, equipSlot);
@@ -3308,10 +3354,68 @@ uint32 EverQuestMod::GetItemFocusPercentForPlayer(Player* player, uint32 focusTy
         auto focusIter = ItemFocusByItemTemplateID.find(item->GetEntry());
         if (focusIter == ItemFocusByItemTemplateID.end() || focusIter->second.FocusType != focusType || focusIter->second.Percent <= bestPercent)
             continue;
-        if (DoesItemFocusCoverSpell(focusIter->second, spellInfo, spellData) == true)
+
+        // Only worked out once a worn focus of the type is found, as most lookups find none
+        if (hasSpellLimitValues == false)
+        {
+            spellLevel = GetSpellLevelForPlayerEQClasses(player, spellInfo, spellData);
+            if (spellData.AuraDurationMaxInMS != 0)
+                durationAtCasterLevel = GetEQSpellAuraDurationInMSForLevel(spellData, GetLevelForEQRules(player));
+            else
+                durationAtCasterLevel = spellInfo->GetMaxDuration();
+            hasSpellLimitValues = true;
+        }
+        if (DoesItemFocusCoverSpell(focusIter->second, spellInfo, spellData, spellLevel, durationAtCasterLevel) == true)
             bestPercent = focusIter->second.Percent;
     }
     return bestPercent;
+}
+
+// TAKP's focus level limits use the level the caster's class gets the spell at.  A character here has two EQ classes, so it is the lower of the two that learn
+// it from a scroll.  A spell neither class has a scroll for (a recourse, proc or song tick, or one given another way) keeps the level the converter gave it
+uint32 EverQuestMod::GetSpellLevelForPlayerEQClasses(Player* player, SpellInfo const* spellInfo, EverQuestSpell const& spellData)
+{
+    uint32 spellLevel = 0;
+    auto learnLevelsIter = ScrollLearnLevelByEQClassIDBySpellID.find(spellInfo->Id);
+    if (learnLevelsIter != ScrollLearnLevelByEQClassIDBySpellID.end())
+    {
+        const EverQuestClassMap classMap = GetClassMapForWOWClassID(player->getClass());
+        for (uint8 eqClassID : { classMap.EQClassIDBase, GetCurrentSecondEQClassForPlayer(player) })
+        {
+            auto classLevelIter = learnLevelsIter->second.find(eqClassID);
+            if (classLevelIter != learnLevelsIter->second.end() && (spellLevel == 0 || classLevelIter->second < spellLevel))
+                spellLevel = classLevelIter->second;
+        }
+    }
+    if (spellLevel != 0)
+        return spellLevel;
+    return spellData.LearnLevel != 0 ? spellData.LearnLevel : std::max(spellInfo->SpellLevel, spellInfo->BaseLevel);
+}
+
+// The EQ duration of a timed EQ spell cast at a level.  Must stay the same as the aura's own (CalculateEQSpellMaxDuration in the spell script)
+int32 EverQuestMod::GetEQSpellAuraDurationInMSForLevel(EverQuestSpell const& spellData, uint8 level)
+{
+    if (spellData.AuraDurationBaseInMS == spellData.AuraDurationMaxInMS)
+        return int32(spellData.AuraDurationMaxInMS);
+    if (level < spellData.AuraDurationCalcMinLevel)
+        return int32(spellData.AuraDurationBaseInMS);
+    if (level > spellData.AuraDurationCalcMaxLevel || spellData.AuraDurationAddPerLevelInMS == 0)
+        return int32(spellData.AuraDurationMaxInMS);
+    uint32 levelDiff = uint32(level) - spellData.AuraDurationCalcMinLevel;
+    return int32(spellData.AuraDurationBaseInMS + (spellData.AuraDurationAddPerLevelInMS * levelDiff));
+}
+
+bool EverQuestMod::IsReagentExemptFromConservation(uint32 itemTemplateID)
+{
+    switch (itemTemplateID)
+    {
+        case EQ_REAGENT_CONSERVATION_EXEMPT_ITEM_ID_ESSENCE_EMERALD:
+        case EQ_REAGENT_CONSERVATION_EXEMPT_ITEM_ID_FULIGAN_SOULSTONE:
+        case EQ_REAGENT_CONSERVATION_EXEMPT_ITEM_ID_CLOUDY_STONE:
+            return true;
+        default:
+            return false;
+    }
 }
 
 void EverQuestMod::RefreshItemFocusRangeAuraForPlayer(Player* player)
@@ -3374,7 +3478,7 @@ void EverQuestMod::UpdateTrapsForPlayer(Player* player, uint32 diffInMS)
     auto trapsIter = TrapsByMapID.find(player->GetMapId());
     if (trapsIter == TrapsByMapID.end() || player->IsAlive() == false || player->IsGameMaster() == true || player->IsInFlight() == true)
         return;
-    EverQuestPlayerTrapState* trapState = player->CustomData.GetDefault<EverQuestPlayerTrapState>("EQTrap");
+    EverQuestPlayerTrapState* trapState = player->CustomData.GetDefault<EverQuestPlayerTrapState>(EQ_PLAYER_CUSTOMDATA_TRAP);
     trapState->MSSinceCheck += diffInMS;
     if (trapState->MSSinceCheck < EQ_TRAP_CHECK_INTERVAL_IN_MS)
         return;
@@ -3392,14 +3496,29 @@ void EverQuestMod::UpdateTrapsForPlayer(Player* player, uint32 diffInMS)
         uint64 rearmKey = (uint64(player->GetInstanceId()) << 32) | trap.ID;
         {
             std::lock_guard<std::mutex> lock(TrapRearmTimesMutex);
+
+            // An instance copy's traps would otherwise stay in here after the copy is gone.  A time that has run out reads the same as no entry
+            if (now >= TrapRearmTimesNextPruneTime)
+            {
+                for (auto rearmIter = TrapRearmTimesByMapInstanceAndTrapKey.begin(); rearmIter != TrapRearmTimesByMapInstanceAndTrapKey.end();)
+                {
+                    if (rearmIter->second <= now)
+                        rearmIter = TrapRearmTimesByMapInstanceAndTrapKey.erase(rearmIter);
+                    else
+                        ++rearmIter;
+                }
+                TrapRearmTimesNextPruneTime = now + EQ_TRAP_REARM_PRUNE_INTERVAL_IN_SECONDS;
+            }
+
             time_t& rearmTime = TrapRearmTimesByMapInstanceAndTrapKey[rearmKey];
             if (rearmTime > now)
                 continue;
             rearmTime = now + trap.RespawnInSeconds + (trap.RespawnVarianceInSeconds != 0 ? urand(0, trap.RespawnVarianceInSeconds) : 0);
         }
 
-        // Unseen, as EQ's is, and hostile so that the spell treats the player as its enemy
-        Creature* trigger = player->SummonTrigger(trap.X, trap.Y, trap.Z, 0.0f, EQ_TRAP_TRIGGER_LIFETIME_IN_MS);
+        // Unseen, as EQ's is, and hostile so that the spell treats the player as its enemy.  The data holds no level for a trap, so it casts at the level of whoever
+        // walked in, rather than the trigger's own level 1 that every resist roll would see
+        Creature* trigger = player->SummonTrigger(trap.X, trap.Y, trap.Z, 0.0f, EQ_TRAP_TRIGGER_LIFETIME_IN_MS, true);
         if (trigger == nullptr)
             continue;
         trigger->SetFaction(EQ_TRAP_TRIGGER_FACTION);
@@ -3408,35 +3527,59 @@ void EverQuestMod::UpdateTrapsForPlayer(Player* player, uint32 diffInMS)
     }
 }
 
-void EverQuestMod::HandleDeathSaveOnDamage(Unit* victim, uint32& damage)
+void EverQuestMod::HandleDeathSaveOnDamage(Unit* attacker, Unit* victim, uint32& damage)
 {
-    if (victim == nullptr || victim->IsPlayer() == false || damage < victim->GetHealth())
+    // TAKP rolls after a hit that leaves its target alive below 16% health.  A killing blow is never saved by these (that is Divine Save, an AA)
+    if (victim == nullptr || victim->IsPlayer() == false || damage == 0 || damage >= victim->GetHealth())
         return;
+    uint32 maxHealth = victim->GetMaxHealth();
+    uint32 healthAfterHit = victim->GetHealth() - damage;
+    if (uint64(healthAfterHit) * 100 >= uint64(maxHealth) * EQ_DEATH_SAVE_TRIGGER_HEALTH_PERCENT)
+        return;
+
+    // The core takes nothing from a player in god mode, and stops a duel opponent's hits at 1 health, so neither is a brush with death
+    Player* victimPlayer = victim->ToPlayer();
+    if (victimPlayer->GetCommandStatus(CHEAT_GOD) == true)
+        return;
+    if (victimPlayer->duel != nullptr && victimPlayer->duel->Opponent != nullptr && attacker != nullptr
+        && (victimPlayer->duel->Opponent == attacker || victimPlayer->duel->Opponent->GetGUID() == attacker->GetOwnerGUID()))
+        return;
+
     for (AuraEffect const* dummyEffect : victim->GetAuraEffectsByType(SPELL_AURA_DUMMY))
     {
         if (dummyEffect->GetMiscValue() != EQ_SPELLDUMMYTYPE_DEATHSAVE || dummyEffect->GetId() < ConfigSystemSpellDBCIDMin || dummyEffect->GetId() > ConfigSystemSpellDBCIDMax)
             continue;
 
-        // It goes either way, as EQ's does
+        // As TAKP's: a failed roll keeps the buff for the next hit, and only a save uses it up
+        if (roll_chance_i(EQ_DEATH_SAVE_CHANCE_PERCENT) == false)
+            return;
+
+        // The heal is added to what the hit leaves, and never past full health
         uint32 spellID = dummyEffect->GetId();
-        uint32 healPercent = dummyEffect->GetMiscValueB() == 2 ? 100 : EQ_DEATH_SAVE_PARTIAL_HEAL_PERCENT;
-        bool isSaved = roll_chance_i(EQ_DEATH_SAVE_CHANCE_PERCENT);
-        victim->RemoveAurasDueToSpell(spellID);
-        if (isSaved == true)
+        uint32 healAmount = dummyEffect->GetMiscValueB() == 2 ? maxHealth : victim->CountPctFromMaxHealth(EQ_DEATH_SAVE_PARTIAL_HEAL_PERCENT);
+        uint32 healthAfterSave = healthAfterHit + std::min(healAmount, maxHealth - healthAfterHit);
+
+        // The hit still comes off after this hook, so the health is raised to what it must be before it.  Where that would pass full health, the hit shrinks instead
+        if (uint64(healthAfterSave) + damage <= maxHealth)
+            victim->SetHealth(healthAfterSave + damage);
+        else
         {
-            damage = 0;
-            victim->SetHealth(victim->CountPctFromMaxHealth(int32(healPercent)));
-            ChatHandler(victim->ToPlayer()->GetSession()).PSendSysMessage("You feel the touch of your god, and are healed.");
+            victim->SetHealth(maxHealth);
+            damage = maxHealth - healthAfterSave;
         }
+        victim->RemoveAurasDueToSpell(spellID);
+        ChatHandler(victimPlayer->GetSession()).PSendSysMessage("You feel the touch of your god, and are healed.");
         return;
     }
 }
 
 bool EverQuestMod::IsDestroySpellBlockedByLevel(SpellInfo const* spellInfo, Unit* target)
 {
-    if (target == nullptr)
+    if (target == nullptr || spellInfo == nullptr)
         return false;
-    if (spellInfo->Id != EQ_SPELL_ID_BANISHMENT_OF_SHADOWS && spellInfo->Id != EQ_SPELL_ID_BANISHMENT && spellInfo->Id != EQ_SPELL_ID_DISINTEGRATE)
+
+    // EQ's Destroy is the only EQ effect the converter makes an instant kill, and only from Luclin on, so a spell without one (any spell before Luclin) is never held back
+    if (spellInfo->HasEffect(SPELL_EFFECT_INSTAKILL) == false || IsSpellAnEQSpell(spellInfo->Id) == false)
         return false;
     return GetLevelForEQRules(target) > EQ_DESTROY_MAX_TARGET_LEVEL;
 }
@@ -3474,19 +3617,6 @@ void EverQuestMod::ReclaimPetForPlayer(Player* player)
         player->ModifyPower(POWER_MANA, summonSpellInfo->CalcPowerCost(player, summonSpellInfo->GetSchoolMask()) * int32(returnPercent) / 100);
     }
     player->RemovePet(pet, PET_SAVE_AS_DELETED);
-}
-
-void EverQuestMod::SendPlayerToBindPoint(Player* player)
-{
-    // EQ binds are held apart from the core's, which is only the start town or an inn
-    uint32 mapID = 0;
-    float x = 0;
-    float y = 0;
-    float z = 0;
-    if (TryGetEQBindHomePosition(player, mapID, x, y, z) == true)
-        player->TeleportTo(mapID, x, y, z, player->GetOrientation());
-    else
-        player->TeleportTo(player->m_homebindMapId, player->m_homebindX, player->m_homebindY, player->m_homebindZ, player->GetOrientation());
 }
 
 void EverQuestMod::LoadDisciplineData()
@@ -3564,15 +3694,22 @@ void EverQuestMod::HandleDisciplineCast(Player* player, SpellInfo const* spellIn
             player->RemoveAurasDueToSpell(disciplineEntry.first);
     }
 
-    // A character who can't parry gets the same cover as a dodge from the front, from a second class's discipline
+    // A character who can't parry gets the same cover as a dodge from the front, from a second class's discipline.  It lasts as the discipline does, and goes
+    // with it if the discipline ends early (see RemoveDisciplineStandInsOnAuraRemove)
     if (spellInfo->HasAura(SPELL_AURA_MOD_PARRY_PERCENT) == true && CanPlayerParry(player) == false)
     {
         Aura* dodgeAura = player->AddAura(EQ_DISCIPLINE_NIMBLE_SPELL_ID, player);
         if (dodgeAura != nullptr)
         {
+            // A timed EQ spell keeps its real duration in the EQ data, and anything else has its own
             int32 durationInMS = int32(GetSpellDataForSpellID(spellInfo->Id).AuraDurationMaxInMS);
-            dodgeAura->SetMaxDuration(durationInMS);
-            dodgeAura->SetDuration(durationInMS);
+            if (durationInMS == 0)
+                durationInMS = spellInfo->GetMaxDuration();
+            if (durationInMS != 0)
+            {
+                dodgeAura->SetMaxDuration(durationInMS);
+                dodgeAura->SetDuration(durationInMS);
+            }
         }
     }
 
@@ -3612,6 +3749,19 @@ void EverQuestMod::RemoveActiveDisciplines(Player* player)
 {
     for (auto const& disciplineEntry : DisciplinesBySpellID)
         player->RemoveAurasDueToSpell(disciplineEntry.first);
+}
+
+// The dodge that stands in for a parry discipline ends with it, however the discipline ends.  The two only ever run together as the stand-in, since a discipline
+// starting takes every other one off first
+void EverQuestMod::RemoveDisciplineStandInsOnAuraRemove(Player* player, Aura const* aura)
+{
+    if (player == nullptr || aura == nullptr || DisciplinesBySpellID.empty() == true)
+        return;
+    uint32 spellID = aura->GetId();
+    if (spellID == EQ_DISCIPLINE_NIMBLE_SPELL_ID || IsDisciplineSpell(spellID) == false || aura->GetSpellInfo()->HasAura(SPELL_AURA_MOD_PARRY_PERCENT) == false)
+        return;
+    if (player->HasAura(EQ_DISCIPLINE_NIMBLE_SPELL_ID) == true)
+        player->RemoveAurasDueToSpell(EQ_DISCIPLINE_NIMBLE_SPELL_ID);
 }
 
 void EverQuestMod::ApplyItemFocusToSpellAmount(Unit* caster, uint32 focusType, SpellInfo const* spellInfo, int32& amount)
@@ -6368,10 +6518,11 @@ bool EverQuestMod::IsLevitationBlockedByZone(SpellInfo const* spellInfo, Unit* t
     return zoneIter != ZoneByMapID.end() && zoneIter->second.AllowEQLevitate == false;
 }
 
-void EverQuestMod::RemoveEQLevitationBeforeEnteringMap(Player* player, uint32 mapID)
+void EverQuestMod::RemoveEQLevitationWhereNotAllowed(Player* player)
 {
-    // This has to run on the map being left: fading hover reads the ground under the player, and the new map's has no height data yet
-    auto zoneIter = ZoneByMapID.find(mapID);
+    // Runs once the player is on the map (at login, and after every map change), so a teleport the core turns back never costs the levitation.  The map's grids
+    // around the player are loaded by then, which fading hover needs, since it reads the ground under the player
+    auto zoneIter = ZoneByMapID.find(player->GetMapId());
     if (zoneIter == ZoneByMapID.end() || zoneIter->second.AllowEQLevitate == true)
         return;
     player->RemoveAurasByType(SPELL_AURA_HOVER);
@@ -7184,7 +7335,8 @@ bool EverQuestMod::RollEQResist(Unit* caster, Unit* target, SpellInfo const* spe
     int32 partialModifier = (150 * (resistChance - roll)) / resistChance;
     if (caster->IsPlayer() == false)
     {
-        int32 levelDiff = int32(GetLevelForEQRules(target)) - int32(GetLevelForEQRules(caster));
+        // A gap between two units goes by their WOW levels, which share one scale.  A stretched Luclin creature's EQ level only means something against EQ's own thresholds
+        int32 levelDiff = int32(target->GetLevel()) - int32(caster->GetLevel());
         if (levelDiff >= 20)
             partialModifier += int32(float(levelDiff) * 1.5f);
     }
@@ -7961,8 +8113,8 @@ void EverQuestMod::EnforceEQHastePercentCapOnUnit(Unit* unit, vector<EverQuestUn
     float capPercent = GetEQHasteCapPercentForUnit(unit);
     uint8 unitLevel = unit->GetLevel();
 
-    // EQ haste never stacks within a category (worn/item, spell/song/clicky, v2) - only the strongest effect of each category applies and
-    // the categories then add together additively, matching TAKP Mob::GetHaste.  WoW stacks haste auras multiplicatively, so the capped additive
+    // EQ haste never stacks within a category (worn/item, spell/song/clicky, v2, v3) - only the strongest effect of each category applies and
+    // the categories then add together additively, matching TAKP Mob::GetHaste, with v3 added on after the cap.  WoW stacks haste auras multiplicatively, so the capped additive
     // total is handed to a single carrier effect and every other tracked effect is clamped to zero.  Losing and zeroed effects stay on the unit as
     // visible buffs and go back into the running the moment the enforcement runs again.  Melee and ranged process independently
     uint32 auraTypesToProcess[2] = { SPELL_AURA_MOD_MELEE_HASTE, SPELL_AURA_MOD_RANGED_HASTE };
@@ -8011,9 +8163,9 @@ void EverQuestMod::EnforceEQHastePercentCapOnUnit(Unit* unit, vector<EverQuestUn
         if ((float)cappedTotalAmount > capPercent)
             cappedTotalAmount = (int32)std::floor(capPercent);
 
-        // v3 is the one category that goes on top of the cap
+        // v3 is the one category that goes on top of the cap.  Its ceiling takes the same scaling and can land on a fraction too (25 halves to 12.5), so it rounds down the same way
         if (winnerIndexByHasteType[EQ_HASTE_TYPE_SPELL_V3] >= 0)
-            cappedTotalAmount += (int32)std::lround(std::min((float)trackedHasteAuraEffects[winnerIndexByHasteType[EQ_HASTE_TYPE_SPELL_V3]].NaturalAmount, spellV3MaxContributionPercent));
+            cappedTotalAmount += (int32)std::floor(std::min((float)trackedHasteAuraEffects[winnerIndexByHasteType[EQ_HASTE_TYPE_SPELL_V3]].NaturalAmount, spellV3MaxContributionPercent));
 
         // The whole total rides on the strongest category winner and everything else is zeroed, because the unit multiplies its haste effects together and each
         // applied amount is a whole percent.  Splitting the total across the effects has to round every factor, and the rounded factors multiply out short of the
@@ -9302,7 +9454,8 @@ bool EverQuestMod::HandleGossipSelect(Player* player, Creature* creature, uint32
         } break;
         case EQ_QUEST_REACTION_GIVEITEM:
         {
-            if (gossipReaction.ItemTemplateID != 0)
+            // One each, so asking again can't hand out another.  The bank counts, as a stored one is still theirs
+            if (gossipReaction.ItemTemplateID != 0 && player->HasItemCount(gossipReaction.ItemTemplateID, 1, true) == false)
                 player->AddItem(gossipReaction.ItemTemplateID, 1);
         } break;
         case EQ_QUEST_REACTION_ATTACKPLAYER:
@@ -9435,6 +9588,7 @@ void EverQuestMod::LoadPetSilentDisplayData()
 void EverQuestMod::LoadEQRaceStartData()
 {
     EQRaceStartsByKey.clear();
+    EQRaceIDsByGuiseItemID.clear();
     QueryResult queryResult = WorldDatabase.Query("SELECT eqrace, eqclass, startchoice, alignment, map, zone, position_x, position_y, position_z, orientation, illusionitem, startachievement, extrastartitem FROM mod_everquest_eqrace_start;");
     if (!queryResult)
         return;
@@ -9457,7 +9611,10 @@ void EverQuestMod::LoadEQRaceStartData()
         eqRaceStart.ExtraStartItemID = fields[12].Get<uint32>();
         eqRaceStart.StartOption = (eqRaceID == EQ_RACE_VAH_SHIR) ? EQ_START_OPTION_SHAR_VAHL : 0;
         EQRaceStartsByKey[GetEQRaceStartKey(eqRaceID, eqClassID, startChoice)] = eqRaceStart;
-        EQRaceIDsByGuiseItemID[eqRaceStart.IllusionItemID] = eqRaceID;
+
+        // A start with no guise must not make "no guise given" read as its race
+        if (eqRaceStart.IllusionItemID != 0)
+            EQRaceIDsByGuiseItemID[eqRaceStart.IllusionItemID] = eqRaceID;
     } while (queryResult->NextRow());
 }
 
@@ -9499,6 +9656,15 @@ void EverQuestMod::RefreshPetScalingFromOwner(Pet* pet)
         pet->SetFullHealth();
     if (hadFullMana == true)
         pet->SetPower(POWER_MANA, pet->GetMaxPower(POWER_MANA));
+}
+
+// A hovering owner over a spot with no ground reads a far-off height, and the core then drops the pet it's loading.  An EQ pet on a Luclin server comes in at
+// the owner instead.  The core asks from Pet::LoadPetFromDB, on the owner's map thread, and this reads only startup data
+bool EverQuestMod::ShouldPetLoadAtOwnerWhenPositionInvalid(Pet const* pet)
+{
+    if (pet == nullptr || IsLuclinServer() == false)
+        return false;
+    return HasPetDataForCreatureTemplateID(pet->GetEntry()) == true;
 }
 
 void EverQuestMod::ApplyWarderLookToPet(Pet* pet)
@@ -10331,7 +10497,32 @@ void EverQuestMod::GrantLegacyAchievementIfEligible(Player* player)
     player->CompletedAchievement(achievementEntry);
 }
 
-// A Luclin creature keeps its EverQuest level for EverQuest's level rules, as its WOW level was stretched to fill out 60-70.  Anything else just goes by its level
+// The converter's stretch (Tools\SoL\stretch_levels.py map_level): EQ 51 to 58 take two WOW levels each and EQ 59 to 66 share one between two, filling WOW 50 to 70
+static uint32 GetStretchedLevelForEQLevel(uint32 eqLevel)
+{
+    if (eqLevel <= 50)
+        return eqLevel;
+    if (eqLevel <= 58)
+        return 50 + 2 * (eqLevel - 50);
+    if (eqLevel <= 66)
+        return 66 + (eqLevel - 58) / 2;
+    return 70;
+}
+
+// map_level backwards.  A WOW level two EQ levels share goes to the lower one, and one between two doubled levels (51 sits between EQ 50's 50 and EQ 51's 52) to the one below
+static uint32 GetEQLevelForStretchedLevel(uint32 wowLevel)
+{
+    if (wowLevel <= 50)
+        return wowLevel;
+    if (wowLevel < 66)
+        return 50 + (wowLevel - 50) / 2;
+    if (wowLevel < 70)
+        return 58 + 2 * (wowLevel - 66);
+    return 66;
+}
+
+// A Luclin creature keeps its EverQuest level for EverQuest's level rules, as its WOW level was stretched to fill out 60-70.  Anything else just goes by its level.
+// This is for EQ's own thresholds: a gap between two units goes by their WOW levels
 uint8 EverQuestMod::GetLevelForEQRules(Unit const* unit)
 {
     Creature const* creature = unit->ToCreature();
@@ -10341,10 +10532,19 @@ uint8 EverQuestMod::GetLevelForEQRules(Unit const* unit)
     if (creatureIterator == CreaturesByTemplateID.end() || creatureIterator->second.LevelEQ == 0)
         return unit->GetLevel();
 
-    // Where this one sits in its level range carries over to the EverQuest range
     uint8 levelEQ = creatureIterator->second.LevelEQ;
-    uint8 maxLevelEQ = creatureIterator->second.MaxLevelEQ;
+    uint8 maxLevelEQ = std::max(creatureIterator->second.MaxLevelEQ, levelEQ);
     CreatureTemplate const* creatureTemplate = creature->GetCreatureTemplate();
+
+    // A creature the stretch moved has exactly the range map_level_range gives its EQ range, and goes back through the same map.  The range's top is
+    // pushed up to the next EQ level's first WOW level inside the doubled part, so that no WOW level goes missing
+    uint32 stretchedMinLevel = GetStretchedLevelForEQLevel(levelEQ);
+    uint32 stretchedMaxLevel = (maxLevelEQ >= 50 && maxLevelEQ < 58) ? GetStretchedLevelForEQLevel(maxLevelEQ + 1) - 1 : GetStretchedLevelForEQLevel(maxLevelEQ);
+    if (maxLevelEQ > 50 && creatureTemplate->minlevel == stretchedMinLevel && creatureTemplate->maxlevel == stretchedMaxLevel)
+        return uint8(std::clamp<uint32>(GetEQLevelForStretchedLevel(unit->GetLevel()), levelEQ, maxLevelEQ));
+
+    // Anything else (the raid creatures, which the stretch lines up evenly along 70 to 73, and Luclin creatures it left alone) carries where it sits in its
+    // level range over to the EverQuest range
     if (maxLevelEQ <= levelEQ || creatureTemplate->maxlevel <= creatureTemplate->minlevel || unit->GetLevel() <= creatureTemplate->minlevel)
         return levelEQ;
     if (unit->GetLevel() >= creatureTemplate->maxlevel)
@@ -11569,10 +11769,15 @@ EverQuestPlayerStartOptionState EverQuestMod::GetPlayerOriginState(Player* playe
     EverQuestPlayerStartOptionState* state = player->CustomData.Get<EverQuestPlayerStartOptionState>(EQ_PLAYER_CUSTOMDATA_STARTOPTION);
     if (state != nullptr)
         return *state;
+    // A character with no row has nothing to load, which is kept like a loaded one, as nothing in the world adds these columns
     EverQuestPlayerStartOptionState loadedState;
     QueryResult queryResult = CharacterDatabase.Query("SELECT startOption, eqRace, eqStartChoice, eqStartSecondClass, eqHairStyle, eqHairColor, eqFacialHair, eqEyeColor FROM mod_everquest_character_settings WHERE guid = {}", player->GetGUID().GetCounter());
     if (!queryResult)
+    {
+        if (player->IsInWorld() == true)
+            *player->CustomData.GetDefault<EverQuestPlayerStartOptionState>(EQ_PLAYER_CUSTOMDATA_STARTOPTION) = loadedState;
         return loadedState;
+    }
     Field* fields = queryResult->Fetch();
     loadedState.StartOption = fields[0].Get<uint8>();
     loadedState.EQRaceID = fields[1].Get<uint16>();
@@ -13330,6 +13535,7 @@ bool EverQuestMod::RollBashKickStunLands(Unit* attacker, Unit* defender)
     if (attacker == nullptr || defender == nullptr)
         return false;
 
+    // The thresholds are EQ's, so they take a stretched Luclin creature's EQ level
     int attackerLevel = (int)GetLevelForEQRules(attacker);
     int defenderLevel = (int)GetLevelForEQRules(defender);
 
@@ -13343,8 +13549,8 @@ bool EverQuestMod::RollBashKickStunLands(Unit* attacker, Unit* defender)
     if (attackerLevel > 60)
         stunChance = EQ_BASHKICKSTUN_BASE_CHANCE_ABOVE_LEVEL_60;
 
-    // Scale by the level
-    int levelDiff = attackerLevel - defenderLevel;
+    // Scale by the level.  The gap goes by WOW levels, as a player's level and a stretched creature's EQ level aren't on one scale
+    int levelDiff = (int)attacker->GetLevel() - (int)defender->GetLevel();
     if (levelDiff < 0)
         stunChance -= (levelDiff * levelDiff) / 2;
     else
@@ -14002,6 +14208,7 @@ bool EverQuestMod::TryReturnCharacterToNorrathAtLogin(Player* player, uint32 arr
 void EverQuestMod::LoadZoneData()
 {
     ZoneByMapID.clear();
+    HighestZoneExpansionID = -1;
     InstanceRaidLowMapIDs.clear();
     InstanceDungeonMapIDs.clear();
     OpenWorldMapIDByInstanceMapID.clear();
@@ -14023,6 +14230,7 @@ void EverQuestMod::LoadZoneData()
             zone.AllowEQMount = fields[7].Get<uint8>() != 0;
             zone.AllowEQLevitate = fields[8].Get<uint8>() != 0;
             ZoneByMapID[zone.MapID] = zone;
+            HighestZoneExpansionID = std::max(HighestZoneExpansionID, zone.ExpansionID);
             if (zone.InstanceRaidLowMapID != 0)
             {
                 InstanceRaidLowMapIDs.insert(zone.InstanceRaidLowMapID);
@@ -14248,6 +14456,8 @@ std::string EverQuestMod::GetZoneNameForMap(uint32 mapID)
 
 static bool IsEQHorseSpell(SpellInfo const* spellInfo)
 {
+    if (spellInfo->HasAura(SPELL_AURA_MOUNTED) == false)
+        return false;
     for (uint8 effectIndex = 0; effectIndex < MAX_SPELL_EFFECTS; ++effectIndex)
         if (spellInfo->Effects[effectIndex].ApplyAuraName == SPELL_AURA_DUMMY && spellInfo->Effects[effectIndex].MiscValue == EQMount::DUMMY_MISC_VALUE)
             return true;
@@ -14267,21 +14477,22 @@ bool EverQuestMod::HandleEQMountOnCheckCast(Player* player, Spell* spell, SpellC
     return false;
 }
 
+// Reads the marker itself, as a horse carried off an EQ map no longer counts as riding one.  It has to be on the horse's own spell, as EQMount::IsRidingEQHorse asks
+static bool HasEQHorseMountAura(Player* player)
+{
+    for (AuraEffect const* dummyEffect : player->GetAuraEffectsByType(SPELL_AURA_DUMMY))
+        if (dummyEffect->GetMiscValue() == EQMount::DUMMY_MISC_VALUE && dummyEffect->GetSpellInfo()->HasAura(SPELL_AURA_MOUNTED) == true)
+            return true;
+    return false;
+}
+
 void EverQuestMod::RemoveEQMountWhereNotAllowed(Player* player)
 {
     auto zoneIter = ZoneByMapID.find(player->GetMapId());
     if (zoneIter != ZoneByMapID.end() && zoneIter->second.AllowEQMount == true)
         return;
-
-    // Reads the marker itself, as a horse carried off an EQ map no longer counts as riding one
-    for (AuraEffect const* dummyEffect : player->GetAuraEffectsByType(SPELL_AURA_DUMMY))
-    {
-        if (dummyEffect->GetMiscValue() == EQMount::DUMMY_MISC_VALUE)
-        {
-            player->RemoveAurasByType(SPELL_AURA_MOUNTED);
-            return;
-        }
-    }
+    if (HasEQHorseMountAura(player) == true)
+        player->RemoveAurasByType(SPELL_AURA_MOUNTED);
 }
 
 void EverQuestMod::UpdateEQMountRulesForPlayer(Player* player)
@@ -14312,7 +14523,8 @@ void EverQuestMod::UpdateEQMountRulesForPlayer(Player* player)
 
 void EverQuestMod::RemoveEQMountAtLogin(Player* player)
 {
-    if (EQMount::IsRidingEQHorse(player) == true)
+    // Wherever the character was saved (a horse saved on, then logged in on a WoW map, isn't "riding" by EQMount's reckoning, but its aura is still there)
+    if (HasEQHorseMountAura(player) == true)
         player->RemoveAurasByType(SPELL_AURA_MOUNTED);
 }
 
@@ -14914,6 +15126,13 @@ bool EverQuestMod::IsMapRestrictedByExpansion(uint32 mapID)
     return zoneIt->second.ExpansionID > ConfigMapMaxExpansionID;
 }
 
+// For a Luclin change that an expansion 2 server's own data can't keep out.  The converter writes no expansion setting, but it leaves out every zone past the
+// expansion it ran at, so only a Luclin or later conversion has a Luclin zone.  This is what was converted, not what EverQuest.Map.MaxExpansionID lets players into
+bool EverQuestMod::IsLuclinServer() const
+{
+    return HighestZoneExpansionID >= EQ_EXPANSION_ID_SHADOWS_OF_LUCLIN;
+}
+
 bool EverQuestMod::IsMapRestrictedForPlayers(uint32 mapID)
 {
     if (ConfigMapRestrictPlayersToNorrath == true && (mapID < ConfigSystemMapDBCIDMin || mapID > ConfigSystemMapDBCIDMax))
@@ -15069,11 +15288,78 @@ void EverQuestMod::ApplyTimedPortToPlayer(Player* player, const EverQuestTimedPo
         return;
     }
 
-    if (player->TeleportTo({ timedPort.DestinationMapID, {timedPort.DestinationX, timedPort.DestinationY, timedPort.DestinationZ, timedPort.DestinationOrientation} }) == false)
-        return;
-
+    // The token is taken before the player leaves, while they are still in the world, so that a disconnect during a far port's load (which saves the character
+    // at the destination) can't keep both the token and the port
     if (timedPort.RequiredItemTemplateID != 0)
         player->DestroyItemCount(timedPort.RequiredItemTemplateID, 1, true);
+    bool isPorting = player->TeleportTo({ timedPort.DestinationMapID, {timedPort.DestinationX, timedPort.DestinationY, timedPort.DestinationZ, timedPort.DestinationOrientation} });
+    uint32 arrivalMapID = timedPort.DestinationMapID;
+
+    // A port into a zone the character has a private copy of is sent on to the copy (OnPlayerBeforeTeleport), which reports this teleport as refused while the
+    // player is already on the way.  The sweep never ports a player who was already being teleported, so a far teleport now is that one
+    if (isPorting == false && player->IsBeingTeleportedFar() == true)
+    {
+        isPorting = true;
+        arrivalMapID = player->GetTeleportDest().GetMapId();
+    }
+    if (isPorting == false)
+    {
+        if (timedPort.RequiredItemTemplateID != 0)
+            GiveBackTimedPortToken(player, timedPort.RequiredItemTemplateID);
+        return;
+    }
+
+    // A port within the map is done.  One to another map can still be turned back when the player arrives (the core sends them home then), so the token is
+    // given back if they land anywhere else
+    if (timedPort.RequiredItemTemplateID == 0 || arrivalMapID == timedPort.MapID)
+        return;
+    EverQuestPlayerTimedPortTokenState* tokenState = player->CustomData.GetDefault<EverQuestPlayerTimedPortTokenState>(EQ_PLAYER_CUSTOMDATA_TIMEDPORTTOKEN);
+    tokenState->ItemTemplateID = timedPort.RequiredItemTemplateID;
+    tokenState->DestinationMapID = arrivalMapID;
+}
+
+// Runs as the player is added to their new map, from the world update's session handling like the port itself
+void EverQuestMod::SettleTimedPortTokenOnMapChange(Player* player)
+{
+    EverQuestPlayerTimedPortTokenState* tokenState = player->CustomData.Get<EverQuestPlayerTimedPortTokenState>(EQ_PLAYER_CUSTOMDATA_TIMEDPORTTOKEN);
+    if (tokenState == nullptr || tokenState->ItemTemplateID == 0)
+        return;
+    uint32 itemTemplateID = tokenState->ItemTemplateID;
+    uint32 destinationMapID = tokenState->DestinationMapID;
+    tokenState->ItemTemplateID = 0;
+    tokenState->DestinationMapID = 0;
+    if (player->GetMapId() != destinationMapID)
+        GiveBackTimedPortToken(player, itemTemplateID);
+}
+
+// The slot the token left is normally still free, and the mail is for when it isn't
+void EverQuestMod::GiveBackTimedPortToken(Player* player, uint32 itemTemplateID)
+{
+    ItemPosCountVec destinationPosition;
+    if (player->CanStoreNewItem(NULL_BAG, NULL_SLOT, destinationPosition, itemTemplateID, 1) == EQUIP_ERR_OK)
+    {
+        Item* returnedItem = player->StoreNewItem(destinationPosition, itemTemplateID, true);
+        if (returnedItem != nullptr)
+        {
+            player->SendNewItem(returnedItem, 1, true, false);
+            return;
+        }
+    }
+
+    Item* mailedItem = Item::CreateItem(itemTemplateID, 1, player);
+    if (mailedItem == nullptr)
+    {
+        LOG_ERROR("module.EverQuest", "Could not hand timed port token {} back to player {} after the port was turned back", itemTemplateID, player->GetGUID().ToString());
+        return;
+    }
+    CharacterDatabaseTransaction transaction = CharacterDatabase.BeginTransaction();
+    mailedItem->SaveToDB(transaction);
+    MailDraft mailDraft("Returned token", "Your passage was turned back, so the token it took has been sent back to you.");
+    mailDraft.AddItem(mailedItem);
+    mailDraft.SendMailTo(transaction, MailReceiver(player), MailSender(MAIL_NORMAL, player->GetGUID().GetCounter(), MAIL_STATIONERY_DEFAULT), MAIL_CHECK_MASK_COPIED);
+    CharacterDatabase.CommitTransaction(transaction);
+    if (player->GetSession() != nullptr)
+        ChatHandler(player->GetSession()).SendSysMessage("Your bags were full, so the token your turned back passage took has been mailed to you.");
 }
 
 void EverQuestMod::UpdateRequiredClientDataVersion()
@@ -17624,26 +17910,25 @@ void EverQuestMod::SetInitialEQClassesForPlayer(Player* player)
     uint8 pickedSecondClass = GetPlayerOriginState(player).EQStartSecondClass;
     if (pickedSecondClass != 0)
         defaultSecondClass = pickedSecondClass;
-    EverQuestPlayerControllerData controllerData;
-    controllerData.GUID = player->GetGUID().GetCounter();
+
+    // Only the class and pool fields change.  The rest of the settings row can already be there before the first login (the EQ creation page writes the face
+    // and look into it), so the cached entry is loaded from it rather than replaced.  The entry itself is only touched by this player's thread
+    EverQuestPlayerControllerData& controllerData = *GetOrLoadActivePlayerClassControllerData(player);
     controllerData.CurrentSecondClass = defaultSecondClass;
     controllerData.NextSecondClass = defaultSecondClass;
     controllerData.SecondaryExpPool = 0;
-    {
-        std::lock_guard<std::mutex> lock(RuntimeStateMutex);
-        ActivePlayerClassControllerDataByGUID[player->GetGUID()] = controllerData;
-    }
 
     // Persist the controller columns immediately, without disturbing any home-bind / last-gate data already in this row
+    uint32 guid = player->GetGUID().GetCounter();
     CharacterDatabase.Execute("INSERT INTO `mod_everquest_character_settings` (`guid`, `nextSecondaryClass`, `currentSecondaryClass`, `secondaryExpPool`) VALUES ({}, {}, {}, {}) "
         "ON DUPLICATE KEY UPDATE `nextSecondaryClass` = {}, `currentSecondaryClass` = {}, `secondaryExpPool` = {}",
-        controllerData.GUID,
-        controllerData.NextSecondClass,
-        controllerData.CurrentSecondClass,
-        controllerData.SecondaryExpPool,
-        controllerData.NextSecondClass,
-        controllerData.CurrentSecondClass,
-        controllerData.SecondaryExpPool);
+        guid,
+        defaultSecondClass,
+        defaultSecondClass,
+        0,
+        defaultSecondClass,
+        defaultSecondClass,
+        0);
 }
 
 // The data comes from the client, so nothing in it is trusted until it has been checked
@@ -17694,8 +17979,11 @@ bool EverQuestMod::SetEQRaceStartForNewPlayer(Player* player, EverQuestPlayerCre
         secondClass = classMap.EQClassIDDefaultSecond;
     ValidatePlayerCreateLook(createData.EQRaceID, player->getGender(), createData);
 
+    // The client asks for the character list as soon as it hears the character was made, and that list carries this row and the start zone, so these two are written
+    // before the success goes out rather than queued (with more than one character database worker, a queued write can land after the list's read).  The
+    // character's own rows are already committed by the time this runs, and it happens once per character
     uint32 guid = player->GetGUID().GetCounter();
-    CharacterDatabase.Execute("INSERT INTO `mod_everquest_character_settings` (`guid`, `currentSecondaryClass`, `nextSecondaryClass`, `secondaryExpPool`, `startOption`, `illusionFaceId`, `eqRace`, `eqStartChoice`, `eqStartSecondClass`, `eqHairStyle`, `eqHairColor`, `eqFacialHair`, `eqEyeColor`) "
+    CharacterDatabase.DirectExecute("INSERT INTO `mod_everquest_character_settings` (`guid`, `currentSecondaryClass`, `nextSecondaryClass`, `secondaryExpPool`, `startOption`, `illusionFaceId`, `eqRace`, `eqStartChoice`, `eqStartSecondClass`, `eqHairStyle`, `eqHairColor`, `eqFacialHair`, `eqEyeColor`) "
         "VALUES ({0}, {1}, {1}, 0, {2}, {3}, {4}, {5}, {1}, {6}, {7}, {8}, {9}) ON DUPLICATE KEY UPDATE `currentSecondaryClass` = {1}, `nextSecondaryClass` = {1}, `startOption` = {2}, `illusionFaceId` = {3}, `eqRace` = {4}, `eqStartChoice` = {5}, "
         "`eqStartSecondClass` = {1}, `eqHairStyle` = {6}, `eqHairColor` = {7}, `eqFacialHair` = {8}, `eqEyeColor` = {9}",
         guid, secondClass, createInfo.StartOption, createData.Face, createData.EQRaceID, createData.StartChoice, createData.HairStyle, createData.HairColor, createData.FacialHair, createData.EyeColor);
@@ -17703,7 +17991,7 @@ bool EverQuestMod::SetEQRaceStartForNewPlayer(Player* player, EverQuestPlayerCre
     // The bind is the hall, as it is for a town picked in the Origins box
     CharacterDatabase.Execute("REPLACE INTO `character_homebind` (`guid`, `mapId`, `zoneId`, `posX`, `posY`, `posZ`) VALUES ({}, {}, {}, {}, {}, {})",
         guid, createInfo.MapID, createInfo.ZoneID, createInfo.PositionX, createInfo.PositionY, createInfo.PositionZ);
-    CharacterDatabase.Execute("UPDATE `characters` SET `map` = {}, `zone` = {}, `position_x` = {}, `position_y` = {}, `position_z` = {}, `orientation` = {} WHERE `guid` = {}",
+    CharacterDatabase.DirectExecute("UPDATE `characters` SET `map` = {}, `zone` = {}, `position_x` = {}, `position_y` = {}, `position_z` = {}, `orientation` = {} WHERE `guid` = {}",
         createInfo.MapID, createInfo.ZoneID, createInfo.PositionX, createInfo.PositionY, createInfo.PositionZ, createInfo.Orientation, guid);
     return true;
 }
@@ -17725,15 +18013,23 @@ void EverQuestMod::HandleCharacterFactionOrRaceChange(ObjectGuid guid, bool fact
         return;
     const EverQuestClassMap classMap = GetClassMapForWOWClassID(characterEntry->Class);
     uint32 lowGuid = guid.GetCounter();
+    // This runs on the world thread, from the character screen.  The client asks for the character list as soon as it hears of the change, and that list reads
+    // this row straight away, so these writes are made before the success goes out rather than queued (as character creation does)
     if (factionChange == true)
     {
-        QueryResult queryResult = CharacterDatabase.Query("SELECT eqRace FROM mod_everquest_character_settings WHERE guid = {}", lowGuid);
-        uint32 eqRaceID = queryResult ? queryResult->Fetch()[0].Get<uint16>() : 0;
+        QueryResult queryResult = CharacterDatabase.Query("SELECT eqRace, issuedIllusionItemId FROM mod_everquest_character_settings WHERE guid = {}", lowGuid);
+        if (!queryResult)
+            return;
+        uint32 eqRaceID = queryResult->Fetch()[0].Get<uint16>();
+
+        // A character from before the EverQuest page goes by the guise it was given, as the character list shows it, and from now on it keeps that race
+        if (eqRaceID == 0)
+            eqRaceID = GetEQRaceIDForGuiseItem(queryResult->Fetch()[1].Get<uint32>());
         if (eqRaceID == 0)
             return;
         ValidatePlayerCreateLook(eqRaceID, characterEntry->Sex, createData);
-        CharacterDatabase.Execute("UPDATE `mod_everquest_character_settings` SET `illusionFaceId` = {}, `eqHairStyle` = {}, `eqHairColor` = {}, `eqFacialHair` = {}, `eqEyeColor` = {} WHERE `guid` = {}",
-            createData.Face, createData.HairStyle, createData.HairColor, createData.FacialHair, createData.EyeColor, lowGuid);
+        CharacterDatabase.DirectExecute("UPDATE `mod_everquest_character_settings` SET `eqRace` = {}, `illusionFaceId` = {}, `eqHairStyle` = {}, `eqHairColor` = {}, `eqFacialHair` = {}, `eqEyeColor` = {} WHERE `guid` = {}",
+            eqRaceID, createData.Face, createData.HairStyle, createData.HairColor, createData.FacialHair, createData.EyeColor, lowGuid);
         return;
     }
 
@@ -17747,11 +18043,43 @@ void EverQuestMod::HandleCharacterFactionOrRaceChange(ObjectGuid guid, bool fact
 
     // A guise goes out for the new race the next time the character logs in, unless it's the one they were given, and the old one stays with them.  The row can be missing
     // for a character that has never been in the world
-    CharacterDatabase.Execute("INSERT INTO `mod_everquest_character_settings` (`guid`, `currentSecondaryClass`, `nextSecondaryClass`, `secondaryExpPool`, `startOption`, `illusionFaceId`, `issuedIllusionItemId`, `eqRace`, `eqStartChoice`, `eqHairStyle`, `eqHairColor`, `eqFacialHair`, `eqEyeColor`) "
+    CharacterDatabase.DirectExecute("INSERT INTO `mod_everquest_character_settings` (`guid`, `currentSecondaryClass`, `nextSecondaryClass`, `secondaryExpPool`, `startOption`, `illusionFaceId`, `issuedIllusionItemId`, `eqRace`, `eqStartChoice`, `eqHairStyle`, `eqHairColor`, `eqFacialHair`, `eqEyeColor`) "
         "VALUES ({0}, {1}, {1}, 0, {2}, {3}, 0, {4}, {5}, {6}, {7}, {8}, {10}) ON DUPLICATE KEY UPDATE `startOption` = {2}, `illusionFaceId` = {3}, "
         "`issuedIllusionItemId` = IF(`issuedIllusionItemId` = {9}, `issuedIllusionItemId`, 0), `eqRace` = {4}, `eqStartChoice` = {5}, `eqHairStyle` = {6}, `eqHairColor` = {7}, `eqFacialHair` = {8}, `eqEyeColor` = {10}",
         lowGuid, classMap.EQClassIDDefaultSecond, eqRaceStartItr->second.StartOption, createData.Face, createData.EQRaceID, createData.StartChoice, createData.HairStyle, createData.HairColor, createData.FacialHair,
         eqRaceStartItr->second.IllusionItemID, createData.EyeColor);
+}
+
+// Runs for a character that isn't in the world, on the world thread from the character screen, once a paid appearance change is committed.  The EQ look was
+// picked for the old gender: beards are only on some males, and the head variants and hair styles differ between the sexes, while the faces and eye colors
+// are the same for both.  So a gender change drops the beard, the head variant and the hair style (0 is right for every race and sex), and keeps the face
+// when the new gender's model has it
+void EverQuestMod::HandleCharacterCustomize(ObjectGuid guid, uint8 oldGender, uint8 newGender)
+{
+    if (oldGender == newGender)
+        return;
+
+    // The settings row is cached from the character's last time in the world, and this changes it underneath
+    {
+        std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+        ActivePlayerClassControllerDataByGUID.erase(guid);
+    }
+    uint32 lowGuid = guid.GetCounter();
+    QueryResult queryResult = CharacterDatabase.Query("SELECT eqRace, issuedIllusionItemId, illusionFaceId FROM mod_everquest_character_settings WHERE guid = {}", lowGuid);
+    if (!queryResult)
+        return;
+    Field* fields = queryResult->Fetch();
+    uint32 eqRaceID = fields[0].Get<uint16>();
+    if (eqRaceID == 0)
+        eqRaceID = GetEQRaceIDForGuiseItem(fields[1].Get<uint32>());
+    uint32 faceID = uint32(std::max(0, fields[2].Get<int32>())) % EQ_ILLUSION_FACE_HEAD_VARIANT_STEP;
+    EverQuestIllusionCharacter const* illusionCharacter = eqRaceID != 0 ? GetIllusionCharacterForRaceAndGender(eqRaceID, newGender) : nullptr;
+    if (illusionCharacter != nullptr && IsIllusionFaceValid(illusionCharacter, faceID) == false)
+        faceID = 0;
+
+    // The client asks for the character list as soon as it hears of the change, and that list reads this row straight away, so this is written before the
+    // success goes out rather than queued (as the race change does)
+    CharacterDatabase.DirectExecute("UPDATE `mod_everquest_character_settings` SET `illusionFaceId` = {}, `eqHairStyle` = 0, `eqFacialHair` = 0 WHERE `guid` = {}", faceID, lowGuid);
 }
 
 // A quest combiner (the Long Wooden Box) carries each of its combines as a use spell with the components as reagents.  The core would cast every one
@@ -19152,9 +19480,10 @@ void EverQuestMod::SendPlayerOptionsToPlayer(Player* player)
         controllerData = controllerDataIt->second;
     }
 
-    // Newer settings go on the end (move while casting, then the mesmerize break message), so an options page from before them still reads every field ahead
+    // Newer settings go on the end (move while casting, then the mesmerize break message), so an options page from before them still reads every field ahead.
+    // The face goes out without its head variant (stored as variant * 10 + face): the page edits only the face against IllusionMaxFaceIndex, and .eqface keeps the variant
     std::string addonMessage = fmt::format("EQOPTIONS\t{}\t{}\t{}\t{}\t{}\t{}\t{:06X}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
-        controllerData.IllusionFaceID,
+        controllerData.IllusionFaceID % EQ_ILLUSION_FACE_HEAD_VARIANT_STEP,
         IllusionMaxFaceIndex,
         controllerData.ShowBardPulse == true ? 1 : 0,
         controllerData.HideWoWGear == true ? 1 : 0,

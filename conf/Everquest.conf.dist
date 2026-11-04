@@ -206,12 +206,12 @@ EverQuest.AlternateGroupExperienceFormula.AddPercentPerMember = 20
 # 	EverQuest.Experience.BurningCrusadeBaseCreatureLevel
 #		EverQuest creatures this level or higher pay the Burning Crusade base kill experience
 #       instead of the classic one that every Norrath map has.  0 turns this off
-#	Default: 0 (the Shadows of Luclin expansion and later use 58)
+#	Default: 0 (nothing sets it for you: a Shadows of Luclin or later server should set 58 here)
 #
 # 	EverQuest.Experience.NorthrendBaseCreatureLevel
 #		EverQuest creatures this level or higher pay the Northrend base kill experience instead,
 #       which wins over the setting above.  0 turns this off
-#	Default: 0 (the Shadows of Luclin expansion and later use 68)
+#	Default: 0 (nothing sets it for you: a Shadows of Luclin or later server should set 68 here)
 #
 ###################################################################################################
 

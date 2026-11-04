@@ -25,45 +25,80 @@ static int32 ModifyEverQuestSpellPowerCost(Spell const* spell, int32 powerCost)
 {
     if (powerCost <= 0 || EverQuest->IsEnabled == false || spell->GetCaster() == nullptr || spell->GetCaster()->IsPlayer() == false)
         return powerCost;
-    uint32 focusPercent = EverQuest->GetItemFocusPercentForPlayer(spell->GetCaster()->ToPlayer(), EQ_ITEM_FOCUS_TYPE_MANA_COST, spell->GetSpellInfo());
-    return powerCost - int32(float(powerCost) * float(focusPercent) / 100.0f);
+    // TAKP gives an item's cast no mana cost focus
+    if (spell->m_CastItem != nullptr)
+        return powerCost;
+    // A focus past 100% in the data can't make the spell pay the caster
+    uint32 focusPercent = std::min<uint32>(EverQuest->GetItemFocusPercentForPlayer(spell->GetCaster()->ToPlayer(), EQ_ITEM_FOCUS_TYPE_MANA_COST, spell->GetSpellInfo()), 100);
+    return std::max<int32>(0, powerCost - int32(float(powerCost) * float(focusPercent) / 100.0f));
 }
 
-// Worn reagent focuses roll to keep a spell's reagents
-static bool SaveEverQuestSpellReagents(Spell const* spell)
+// Worn reagent focuses roll to keep a spell's reagents.  As TAKP's Mob::HasSpellReagent, each unit of a reagent rolls on its own, and the few reagents EQ's
+// client never lets a focus keep are always taken.  The core asks once for each reagent a spell names, on the caster's map thread
+static uint32 SaveEverQuestSpellReagents(Spell const* spell, uint32 itemID, uint32 itemCount)
 {
-    if (EverQuest->IsEnabled == false || spell->GetCaster() == nullptr || spell->GetCaster()->IsPlayer() == false)
-        return false;
+    if (EverQuest->IsEnabled == false || itemCount == 0 || spell->GetCaster() == nullptr || spell->GetCaster()->IsPlayer() == false)
+        return 0;
+    if (EverQuest->IsReagentExemptFromConservation(itemID) == true)
+        return 0;
     uint32 focusPercent = EverQuest->GetItemFocusPercentForPlayer(spell->GetCaster()->ToPlayer(), EQ_ITEM_FOCUS_TYPE_REAGENT, spell->GetSpellInfo());
-    return focusPercent != 0 && roll_chance_i(int32(focusPercent));
+    if (focusPercent == 0)
+        return 0;
+    uint32 savedCount = 0;
+    for (uint32 unitIndex = 0; unitIndex < itemCount; ++unitIndex)
+    {
+        if (roll_chance_i(int32(focusPercent)) == true)
+            ++savedCount;
+    }
+    return savedCount;
 }
 
-// A worn range focus reaches the client as one spell mod for every spell, so what the focus doesn't cover comes back off here
+// A worn range focus reaches the client as one spell mod for every spell, so what the focus doesn't cover comes back off here.  The core gives that mod to
+// every spell that takes spell mods, and so not to one that ignores caster modifiers (every fixed damage EQ spell), and it gives the owner's to a pet's or a
+// totem's spells.  The core asks this everywhere it applies the range mod (the range check, the channel range, and SpellInfo::GetMaxRange with a caster,
+// which picks nearby targets), always on the caster's map thread
 static float ModifyEverQuestSpellRange(Unit const* caster, SpellInfo const* spellInfo, float range)
 {
-    if (EverQuest->IsEnabled == false || caster->IsPlayer() == false)
+    // No worn focus data (any server before Luclin) means no range focus aura to correct for
+    if (EverQuest->IsEnabled == false || caster == nullptr || spellInfo == nullptr || EverQuest->ItemFocusByItemTemplateID.empty() == true)
         return range;
-    Player* player = const_cast<Player*>(caster->ToPlayer());
+    Player* modOwner = caster->GetSpellModOwner();
+    if (modOwner == nullptr)
+        return range;
     uint32 appliedPercent = 0;
-    if (player->HasAura(EQ_ITEM_FOCUS_RANGE_SPELL_ID_LONG) == true)
-        appliedPercent = EQ_ITEM_FOCUS_RANGE_PERCENT_LONG;
-    else if (player->HasAura(EQ_ITEM_FOCUS_RANGE_SPELL_ID_SHORT) == true)
-        appliedPercent = EQ_ITEM_FOCUS_RANGE_PERCENT_SHORT;
-    if (appliedPercent == 0)
+    if (spellInfo->IsAffectedBySpellMods() == true)
+    {
+        if (modOwner->HasAura(EQ_ITEM_FOCUS_RANGE_SPELL_ID_LONG) == true)
+            appliedPercent = EQ_ITEM_FOCUS_RANGE_PERCENT_LONG;
+        else if (modOwner->HasAura(EQ_ITEM_FOCUS_RANGE_SPELL_ID_SHORT) == true)
+            appliedPercent = EQ_ITEM_FOCUS_RANGE_PERCENT_SHORT;
+    }
+
+    // A focus is for its wearer's own spells, never a pet's
+    uint32 coveredPercent = caster->IsPlayer() == true ? EverQuest->GetItemFocusPercentForPlayer(modOwner, EQ_ITEM_FOCUS_TYPE_RANGE, spellInfo) : 0;
+    if (appliedPercent == coveredPercent)
         return range;
-    uint32 coveredPercent = EverQuest->GetItemFocusPercentForPlayer(player, EQ_ITEM_FOCUS_TYPE_RANGE, spellInfo);
     return range * float(100 + coveredPercent) / float(100 + appliedPercent);
 }
 
-// Worn hate focuses raise or lower the threat the wearer's spells make
+// Worn hate focuses raise or lower the threat the wearer's spells make.  Only real threat is changed, as a focus scaling a spell's threat reduction would make it
+// reduce more, and a decrease of 100% or more stops at none rather than turning to a reduction
 static float ModifyEverQuestSpellThreat(Unit const* caster, SpellInfo const* spellInfo, float threat)
 {
-    if (EverQuest->IsEnabled == false || caster == nullptr || caster->IsPlayer() == false)
+    if (EverQuest->IsEnabled == false || caster == nullptr || caster->IsPlayer() == false || threat <= 0.0f)
         return threat;
     Player* player = const_cast<Player*>(caster->ToPlayer());
     int32 percent = int32(EverQuest->GetItemFocusPercentForPlayer(player, EQ_ITEM_FOCUS_TYPE_HATE_INCREASE, spellInfo));
     percent -= int32(EverQuest->GetItemFocusPercentForPlayer(player, EQ_ITEM_FOCUS_TYPE_HATE_DECREASE, spellInfo));
-    return threat * float(100 + percent) / 100.0f;
+    return threat * std::max(0.0f, float(100 + percent) / 100.0f);
+}
+
+// An EQ pet whose owner hovers over a spot with no ground comes in at its owner, on a Luclin server
+static bool ShouldEverQuestPetLoadAtOwner(Pet const* pet)
+{
+    if (EverQuest->IsEnabled == false)
+        return false;
+    return EverQuest->ShouldPetLoadAtOwnerWhenPositionInvalid(pet);
 }
 
 void AddEverQuestPlayerScripts();
@@ -149,6 +184,7 @@ void Addmod_everquestScripts()
     EverQuestMovementHooks::SpellReagentSaver = SaveEverQuestSpellReagents;
     EverQuestMovementHooks::SpellRangeModifier = ModifyEverQuestSpellRange;
     EverQuestMovementHooks::SpellThreatModifier = ModifyEverQuestSpellThreat;
+    EverQuestMovementHooks::PetLoadAtOwnerSelector = ShouldEverQuestPetLoadAtOwner;
 
     // Game masters skip area trigger scripts, so the core hands their EverQuest zone lines over through this
     EverQuestAreaTriggerHooks::GameMasterZoneLineHandler = &HandleEverQuestZoneLineAreaTriggerForGameMaster;

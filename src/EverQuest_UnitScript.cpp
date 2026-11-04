@@ -30,6 +30,15 @@
 
 using namespace std;
 
+// A heal over time can never take a worn heal focus, as TAKP never focuses a heal over time tick.  The core ticks both of these auras through
+// ModifyHealReceived, so a spell with either is never focused, its direct part included (a worn heal focus only covers instant spells in any case)
+static bool CanHealSpellTakeItemFocus(SpellInfo const* spellInfo)
+{
+    if (spellInfo == nullptr)
+        return false;
+    return spellInfo->HasAura(SPELL_AURA_PERIODIC_HEAL) == false && spellInfo->HasAura(SPELL_AURA_OBS_MOD_HEALTH) == false;
+}
+
 class EverQuest_UnitScript : public UnitScript
 {
 public:
@@ -97,7 +106,7 @@ public:
         EverQuest->HandleClassAuraShadowKnightBloodDebtOnDamage(attacker, victim, damage);
 
         // Divine Intervention and Death Pact
-        EverQuest->HandleDeathSaveOnDamage(victim, damage);
+        EverQuest->HandleDeathSaveOnDamage(attacker, victim, damage);
     }
 
     void OnUnitUpdate(Unit* unit, uint32 /*diff*/) override
@@ -395,6 +404,9 @@ public:
 
             EverQuest->HandleIllusionFormAuraRemove(unit->ToPlayer(), aurApp->GetBase()->GetId());
 
+            // A parry discipline's stand-in dodge goes with it
+            EverQuest->RemoveDisciplineStandInsOnAuraRemove(unit->ToPlayer(), aurApp->GetBase());
+
             // Tell the player which spell a dispel just took off of them, if they asked to be told
             if (mode == AURA_REMOVE_BY_ENEMY_SPELL)
                 EverQuest->NotifyPlayerOfDispelledAura(unit->ToPlayer(), aurApp);
@@ -417,10 +429,10 @@ public:
             if (aurApp->GetBase()->GetEffect(0)->GetAuraType() != SPELL_AURA_DUMMY && aurApp->GetBase()->GetEffect(0)->GetAuraType() != SPELL_AURA_PERIODIC_DUMMY)
                 return;
 
-            // A translocate waits for its aura to run out
+            // A translocate waits for its aura to run out, then goes where a gate does (and fails as a gate does with no bind in Norrath)
             if (mode == AURA_REMOVE_BY_EXPIRE && aurApp->GetBase()->GetEffect(0)->GetMiscValue() == EQ_SPELLDUMMYTYPE_TRANSLOCATETOBIND)
             {
-                EverQuest->SendPlayerToBindPoint(unit->ToPlayer());
+                EverQuest->SendPlayerToEQBindHome(unit->ToPlayer());
                 return;
             }
 
@@ -474,8 +486,10 @@ public:
 
         uint32 spellID = spellInfo->Id;
 
-        // A worn focus adds to the caster's periodic damage.  The same hook carries periodic heals
-        if (EverQuestSpellTalentAlignment::DoesSpellInfoDealPeriodicDamage(spellInfo) == true && EverQuest->IsSpellDamageFixed(spellID) == false)
+        // A worn focus adds to the caster's periodic damage.  The same hook carries periodic heals, so a spell that does both only counts as damage on a non-friendly target,
+        // as with the creature multiplier below
+        if (target != nullptr && EverQuestSpellTalentAlignment::DoesSpellInfoDealPeriodicDamage(spellInfo) == true && attacker->IsFriendlyTo(target) == false
+            && EverQuest->IsSpellDamageFixed(spellID) == false)
         {
             int32 focusedDamage = int32(damage);
             EverQuest->ApplyItemFocusToSpellAmount(attacker, EQ_ITEM_FOCUS_TYPE_DAMAGE, spellInfo, focusedDamage);
@@ -568,12 +582,13 @@ public:
             return;
         ApplyTalentHealingMods(target, healer, heal, spellInfo);
 
-        // A worn focus adds to the healer's own spells.  The core passes the caster as 'target' on a direct heal and as 'healer' on a periodic tick, and only a tick has
-        // an aura on 'target' from the other unit
-        bool isPeriodicTick = healer != nullptr && spellInfo != nullptr && target->HasAura(spellInfo->Id, healer->GetGUID()) == true;
-        int32 focusedHeal = int32(heal);
-        EverQuest->ApplyItemFocusToSpellAmount(isPeriodicTick == true ? healer : target, EQ_ITEM_FOCUS_TYPE_HEALING, spellInfo, focusedHeal);
-        heal = uint32(focusedHeal);
+        // A worn focus adds to the healer's own direct heals.  The core passes the caster as 'target' on a direct heal (Unit::HealBySpell)
+        if (CanHealSpellTakeItemFocus(spellInfo) == true)
+        {
+            int32 focusedHeal = int32(heal);
+            EverQuest->ApplyItemFocusToSpellAmount(target, EQ_ITEM_FOCUS_TYPE_HEALING, spellInfo, focusedHeal);
+            heal = uint32(focusedHeal);
+        }
 
         // A buff that raises maximum health never heals for more than it raised it, so this comes after everything that grows the heal.  The core hands over the
         // unit doing the healing as 'target'

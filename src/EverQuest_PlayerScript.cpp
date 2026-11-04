@@ -793,11 +793,9 @@ public:
         for (uint8 effectIndex = EFFECT_0; effectIndex < MAX_SPELL_EFFECTS; effectIndex++)
         {
             auto const& succorEffect = spell->m_spellInfo->Effects[effectIndex];
+            // Shadow Step moves the caster once the cast has passed its last checks and paid its cost, in the spell script's OnSpellCast.  This hook runs before those
             if (succorEffect.Effect == SPELL_EFFECT_DUMMY && succorEffect.MiscValue == EQ_SPELLDUMMYTYPE_SHADOWSTEP)
-            {
-                EverQuest->ShadowStepPlayer(player);
                 return;
-            }
             if ((succorEffect.Effect == SPELL_EFFECT_DUMMY ||
                 (succorEffect.Effect == SPELL_EFFECT_APPLY_AURA && succorEffect.ApplyAuraName == SPELL_AURA_DUMMY)) &&
                 succorEffect.MiscValue == EQ_SPELLDUMMYTYPE_SUCCOR)
@@ -898,10 +896,7 @@ public:
             {
                 EverQuest->TurnPlayerToFaceNorth(player);
             }
-            else if (spell->m_spellInfo->Effects[EFFECT_0].MiscValue == EQ_SPELLDUMMYTYPE_RECLAIMPET) // Reclaim Energy
-            {
-                EverQuest->ReclaimPetForPlayer(player);
-            }
+            // Reclaim Energy is in the spell script's OnSpellCast, as it must wait for the cast's last checks and its cost
         }
     }
 
@@ -928,6 +923,14 @@ public:
             return;
 
         EverQuest->HandleCharacterFactionOrRaceChange(guid, factionChange, modData);
+    }
+
+    void OnPlayerCharCustomize(ObjectGuid guid, uint8 oldGender, uint8 newGender) override
+    {
+        if (EverQuest->IsEnabled == false)
+            return;
+
+        EverQuest->HandleCharacterCustomize(guid, oldGender, newGender);
     }
 
     void OnPlayerCharEnum(std::vector<ObjectGuid> const& guids, WorldPacket& data) override
@@ -1298,10 +1301,6 @@ public:
             return false;
         }
 
-        // Some zones hold everyone to the ground
-        if (player != nullptr && mapid != player->GetMapId())
-            EverQuest->RemoveEQLevitationBeforeEnteringMap(player, mapid);
-
         // Heading into a dungeon instance the character already has a copy of, so put back the bind the core dropped when their group went away
         EverQuest->TryRestoreInstanceDungeonBindForPlayer(player, mapid);
 
@@ -1321,8 +1320,14 @@ public:
         // A horse can't follow into an indoor zone, and fades on a map that doesn't take one
         EverQuest->RemoveEQMountWhereNotAllowed(player);
 
+        // Some zones hold everyone to the ground.  This is also the login into one, since logging in adds the player to the map
+        EverQuest->RemoveEQLevitationWhereNotAllowed(player);
+
         // A discipline ends at a zone line, as a camp does
         EverQuest->RemoveActiveDisciplines(player);
+
+        // A timed port's token, taken as the player left, comes back if the port didn't land where it was going
+        EverQuest->SettleTimedPortTokenOnMapChange(player);
 
         // Catch map switches that bypass TeleportTo
         EverQuest->ClearTempFactionBonusForPlayer(player);

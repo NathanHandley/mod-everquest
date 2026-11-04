@@ -313,8 +313,9 @@ public:
             return true;
         }
 
-        // Store the setting
-        EverQuest->SetIllusionFaceIDForPlayer(player, faceID);
+        // Store the setting.  The stored value is head variant * 10 + face, and the variant (picked on the EverQuest character page) stays as it was
+        uint32 headVariantPart = (EverQuest->GetIllusionFaceIDForPlayer(player) / EQ_ILLUSION_FACE_HEAD_VARIANT_STEP) * EQ_ILLUSION_FACE_HEAD_VARIANT_STEP;
+        EverQuest->SetIllusionFaceIDForPlayer(player, headVariantPart + faceID);
         EverQuest->SendPlayerOptionsToPlayer(player);
         handler->PSendSysMessage("Your illusion face is now |cff4CFF00{}|r.", faceID);
 
@@ -886,7 +887,7 @@ public:
 
         handler->PSendSysMessage("=== EverQuest Options ===");
         handler->PSendSysMessage("Move while casting (.eqmovecast): |cff4CFF00{}|r", EverQuest->GetMoveWhileCastingForPlayer(player) == true ? "on" : "off");
-        handler->PSendSysMessage("Illusion face (.eqface): |cff4CFF00{}|r (0 - {})", EverQuest->GetIllusionFaceIDForPlayer(player), EverQuest->IllusionMaxFaceIndex);
+        handler->PSendSysMessage("Illusion face (.eqface): |cff4CFF00{}|r (0 - {})", EverQuest->GetIllusionFaceIDForPlayer(player) % EQ_ILLUSION_FACE_HEAD_VARIANT_STEP, EverQuest->IllusionMaxFaceIndex);
         handler->PSendSysMessage("Bard song pulse graphics (.eqshowbardpulse): |cff4CFF00{}|r", EverQuest->GetShowBardPulseForPlayer(player) == true ? "shown" : "hidden");
         handler->PSendSysMessage("Hide WoW gear on other players (.eqhidewowgear): |cff4CFF00{}|r", EverQuest->GetHideWoWGearForPlayer(player) == true ? "on" : "off");
         handler->PSendSysMessage("Open hail replies on right click (.eqhailwindow): |cff4CFF00{}|r", EverQuest->GetHailWindowOnRightClickForPlayer(player) == true ? "on" : "off");

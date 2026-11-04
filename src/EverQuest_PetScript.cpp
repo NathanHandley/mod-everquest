@@ -88,8 +88,10 @@ public:
         if (EverQuest->HasPetDataForCreatureTemplateID(pet->GetCreatureTemplate()->Entry) == false)
             return;
 
-        // The scaling auras went on before the pet could find its owner, so they hold nothing from the owner's stats yet
-        EverQuest->RefreshPetScalingFromOwner(pet);
+        // The scaling auras went on before the pet could find its owner, so they hold nothing from the owner's stats yet.  Luclin on only, as an expansion 2 server
+        // stays as it is
+        if (EverQuest->IsLuclinServer() == true)
+            EverQuest->RefreshPetScalingFromOwner(pet);
 
         // Random pet names
         EverQuestPet petData = EverQuest->GetPetDataForCreatureTemplateID(pet->GetCreatureTemplate()->Entry);

@@ -970,8 +970,16 @@ void EverQuestMod::ApplyClassPetAurasToPet(Pet* pet)
     for (size_t i = 0; i < sizeof(ownerAuraTypes) / sizeof(ownerAuraTypes[0]); ++i)
     {
         uint32 petPassiveSpellID = GetClassAuraSpellID(petPassiveTypes[i]);
-        if (petPassiveSpellID == 0 || PlayerHasClassAura(owner, ownerAuraTypes[i]) == false)
+        if (petPassiveSpellID == 0)
             continue;
+
+        // An owner who no longer has the class aura (a class switch or toggle) takes the pet's passive with it.  Before Luclin the Magician's stays, as it always has
+        if (PlayerHasClassAura(owner, ownerAuraTypes[i]) == false)
+        {
+            if (IsLuclinServer() == true && pet->HasAura(petPassiveSpellID) == true)
+                pet->RemoveAurasDueToSpell(petPassiveSpellID);
+            continue;
+        }
         if (pet->HasAura(petPassiveSpellID) == false)
             pet->AddAura(petPassiveSpellID, pet);
     }
@@ -1825,8 +1833,8 @@ void EverQuestMod::ApplyClassAuraCastAdjustmentsOnCheckCast(Player* player, Spel
         player->RemoveAurasDueToSpell(helperSpellID);
     if (IsClassAuraSystemEnabled() == false)
     {
-        // A worn focus isn't a class aura
-        if (IsSpellAnEQBardSong(spellInfo->Id) == false && spellInfo->CalcCastTime() > 0)
+        // A worn focus isn't a class aura.  TAKP gives an item's cast no cast time focus
+        if (spell->m_CastItem == nullptr && IsSpellAnEQBardSong(spellInfo->Id) == false && spellInfo->CalcCastTime() > 0)
         {
             uint32 focusPercent = GetItemFocusPercentForPlayer(player, EQ_ITEM_FOCUS_TYPE_CAST_TIME, spellInfo);
             if (focusPercent > 0)
@@ -1857,8 +1865,8 @@ void EverQuestMod::ApplyClassAuraCastAdjustmentsOnCheckCast(Player* player, Spel
     uint32 castTimeReductionPercent = 0;
     bool isBardSong = IsSpellAnEQBardSong(spellInfo->Id);
 
-    // A worn focus shortens the cast
-    if (isBardSong == false && baseCastTimeInMS > 0)
+    // A worn focus shortens the cast, though not an item's (TAKP gives those no cast time focus)
+    if (isBardSong == false && baseCastTimeInMS > 0 && spell->m_CastItem == nullptr)
         castTimeReductionPercent += GetItemFocusPercentForPlayer(player, EQ_ITEM_FOCUS_TYPE_CAST_TIME, spellInfo);
 
     // Bard, a song's cast time never changes

@@ -65,6 +65,22 @@ struct BuildValuesCachePosPointers;
 #define EQ_ITEM_FOCUS_TYPE_CAST_TIME                3
 #define EQ_ITEM_FOCUS_TYPE_DURATION                 4
 #define EQ_ITEM_FOCUS_TYPE_MANA_COST                5
+#define EQ_ITEM_FOCUS_TYPE_RANGE                    6
+#define EQ_ITEM_FOCUS_TYPE_REAGENT                  7
+#define EQ_ITEM_FOCUS_TYPE_HATE_INCREASE            8
+#define EQ_ITEM_FOCUS_TYPE_HATE_DECREASE            9
+#define EQ_ITEM_FOCUS_RANGE_SPELL_ID_SHORT          97693   // A worn range focus keeps one of these on the wearer: the client only reads range from a spell mod
+#define EQ_ITEM_FOCUS_RANGE_SPELL_ID_LONG           97694
+#define EQ_ITEM_FOCUS_RANGE_PERCENT_SHORT           8
+#define EQ_ITEM_FOCUS_RANGE_PERCENT_LONG            10
+
+// The reagents a reagent focus never keeps (TAKP's Mob::HasSpellReagent, from EQ's client).  These are the WoW item IDs the converter's WorldData
+// ItemTemplates.csv gives EQ items 9963 (Essence Emerald), 10092 (Fuligan Soulstone of Innoruuk) and 10094 (Cloudy Stone of Veeshan).  The mod's item
+// table holds no EQ item ID to find them by, so a change to their wowid there must be made here too
+#define EQ_REAGENT_CONSERVATION_EXEMPT_ITEM_ID_ESSENCE_EMERALD      92435
+#define EQ_REAGENT_CONSERVATION_EXEMPT_ITEM_ID_FULIGAN_SOULSTONE    92537
+#define EQ_REAGENT_CONSERVATION_EXEMPT_ITEM_ID_CLOUDY_STONE         92538
+
 #define EQ_DISCIPLINE_REUSE_SECONDS_PER_LEVEL       54
 #define EQ_DISCIPLINE_UNHOLY_AURA_SPELL_ID          97687
 #define EQ_DISCIPLINE_UNHOLY_AURA_DAMAGE_PERCENT    150
@@ -75,14 +91,9 @@ struct BuildValuesCachePosPointers;
 #define EQ_DISCIPLINE_MIN_REUSE_SECONDS             234
 #define EQ_DISCIPLINE_REUSE_LEVEL_CAP               60      // Short reuses stop shortening at this level
 #define EQ_DISCIPLINE_REUSE_LEVEL_CAP_BELOW_SECONDS 1620
-#define EQ_ITEM_FOCUS_TYPE_RANGE                    6
-#define EQ_ITEM_FOCUS_TYPE_REAGENT                  7
-#define EQ_ITEM_FOCUS_TYPE_HATE_INCREASE            8
-#define EQ_ITEM_FOCUS_TYPE_HATE_DECREASE            9
-#define EQ_ITEM_FOCUS_RANGE_SPELL_ID_SHORT          97693   // A worn range focus keeps one of these on the wearer: the client only reads range from a spell mod
-#define EQ_ITEM_FOCUS_RANGE_SPELL_ID_LONG           97694
-#define EQ_ITEM_FOCUS_RANGE_PERCENT_SHORT           8
-#define EQ_ITEM_FOCUS_RANGE_PERCENT_LONG            10
+
+// The converter writes no expansion setting, so a Shadows of Luclin server is told apart by its zones: the converter leaves out every zone past its expansion
+#define EQ_EXPANSION_ID_SHADOWS_OF_LUCLIN           3
 
 #define EQ_MOVEMENT_CAST_SNARE_DURATION_BUFFER_IN_MS 2000 // How much longer than the remaining cast time the casting slow is given, so a pushed-back cast keeps it
 
@@ -254,20 +265,18 @@ struct BuildValuesCachePosPointers;
 #define EQ_SPELLDUMMYTYPE_WIPEHATELIST              24  // Amount is the percent chance, MiscValueB of 1 on an aura rolls again each tick
 #define EQ_SPELLDUMMYTYPE_HARMONY                   25  // Amount is the assist radius in hundredths of a yard
 #define EQ_SPELLDUMMYTYPE_TRUENORTH                 26
-#define EQ_SPELLDUMMYTYPE_TRANSLOCATETOBIND         29
+#define EQ_SPELLDUMMYTYPE_EYEOFZOMM                 27  // The channeled aura that controls a possessed eye of zomm
+#define EQ_SPELLDUMMYTYPE_TELESCOPE                 28  // The channeled caster aura that carries a telescope far sight
+#define EQ_SPELLDUMMYTYPE_TRANSLOCATETOBIND         29  // 29 to 32 only exist from Luclin on: the converter leaves these EQ effects out before it
 #define EQ_SPELLDUMMYTYPE_DEATHSAVE                 30      // MiscValueB 1 is a partial heal, 2 a full one
 #define EQ_SPELLDUMMYTYPE_SHADOWSTEP                31
 #define EQ_SPELLDUMMYTYPE_RECLAIMPET                32
 #define EQ_RECLAIM_PET_MAX_MANA_RETURN_PERCENT      75
 #define EQ_SHADOW_STEP_DISTANCE_IN_YARDS            10.0f
 #define EQ_DEATH_SAVE_CHANCE_PERCENT                48      // TAKP's formula at 150 Charisma, which WoW has no stat for
-#define EQ_DEATH_SAVE_PARTIAL_HEAL_PERCENT          15      // Death Pact's 300 of a level 60's health in EQ
+#define EQ_DEATH_SAVE_PARTIAL_HEAL_PERCENT          15      // Death Pact's 300 of a level 60's health in EQ.  Divine Intervention's 8000 is more than any player has, so it fills
+#define EQ_DEATH_SAVE_TRIGGER_HEALTH_PERCENT        16      // TAKP rolls on a hit that leaves its target alive below 16% health, never on the killing blow
 #define EQ_DESTROY_MAX_TARGET_LEVEL                 52
-#define EQ_SPELL_ID_BANISHMENT_OF_SHADOWS           93470
-#define EQ_SPELL_ID_BANISHMENT                      93471
-#define EQ_SPELL_ID_DISINTEGRATE                    93664
-#define EQ_SPELLDUMMYTYPE_EYEOFZOMM                 27  // The channeled aura that controls a possessed eye of zomm
-#define EQ_SPELLDUMMYTYPE_TELESCOPE                 28  // The channeled caster aura that carries a telescope far sight
 #define EQ_EYE_OF_ZOMM_LIFETIME_SLACK_IN_MS         2000
 #define EQ_LULL_CORE_AGGRO_LEVEL_TERM_MAX_IN_YARDS   25.0f   // How far Creature::GetAggroRange can widen a radius for a lower level target
 
@@ -546,6 +555,8 @@ enum EverQuestLossOfControlCategory
 #define EQ_PLAYER_CUSTOMDATA_MOVEWHILECASTING       "EQMoveWhileCasting"
 #define EQ_PLAYER_CUSTOMDATA_ITEMENCHANTMEMORY      "EQItemEnchantMemory"
 #define EQ_PLAYER_CUSTOMDATA_CLIENTMOVESTATE        "EQClientMoveState"
+#define EQ_PLAYER_CUSTOMDATA_TRAP                   "EQTrap"
+#define EQ_PLAYER_CUSTOMDATA_TIMEDPORTTOKEN         "EQTimedPortToken"
 #define EQ_ITEM_ENCHANT_MEMORY_MAX_PER_CHARACTER    100     // Ceiling on enchantments one character can have owed back to them
 #define EQ_SLOTSHIFT_MAX_RING_SIZE                  16      // More versions than any slotshift ring has, so a bad ring in the data can't loop forever
 #define EQ_QUEST_FACTION_RECHECK_INTERVAL_IN_MS     1000
@@ -1594,6 +1605,7 @@ public:
 #define EQ_TRAP_CHECK_INTERVAL_IN_MS                1000
 #define EQ_TRAP_TRIGGER_LIFETIME_IN_MS              10000
 #define EQ_TRAP_TRIGGER_FACTION                     14      // Monster: it needs to count as an enemy of whoever walked in
+#define EQ_TRAP_REARM_PRUNE_INTERVAL_IN_SECONDS     600     // How often re-arm times that have run out are dropped, as instance copies come and go
 
 class EverQuestTrap
 {
@@ -1614,6 +1626,14 @@ class EverQuestPlayerTrapState : public DataMap::Base
 {
 public:
     uint32 MSSinceCheck = 0;
+};
+
+// A timed port's token, taken as the player leaves and given back unless they land on the far side, since a far teleport can still be turned back on arrival
+class EverQuestPlayerTimedPortTokenState : public DataMap::Base
+{
+public:
+    uint32 ItemTemplateID = 0;
+    uint32 DestinationMapID = 0;
 };
 
 class EverQuestDiscipline
@@ -2226,10 +2246,12 @@ public:
     unordered_map<uint64, vector<EverQuestTriggeredQuestKillSpawn>> TriggeredQuestKillSpawnsByMapInstanceKey;
     unordered_map<uint32, EverQuestItemTemplate> ItemTemplatesByEntryID;
     unordered_map<uint32, EverQuestItemFocus> ItemFocusByItemTemplateID;
+    unordered_map<uint32, unordered_map<uint8, uint32>> ScrollLearnLevelByEQClassIDBySpellID; // Filled at startup with the item focus data, and only read after
     unordered_map<uint32, EverQuestDiscipline> DisciplinesBySpellID;    // Filled at startup, and only read after
     unordered_map<uint32, vector<EverQuestTrap>> TrapsByMapID;          // Filled at startup, and only read after
     std::mutex TrapRearmTimesMutex;
-    unordered_map<uint64, time_t> TrapRearmTimesByMapInstanceAndTrapKey;
+    unordered_map<uint64, time_t> TrapRearmTimesByMapInstanceAndTrapKey;    // Under TrapRearmTimesMutex, as is the prune time
+    time_t TrapRearmTimesNextPruneTime = 0;
     unordered_map<uint32, uint32> WarderLookCreatureTemplateIDsByKey; // (owner race, start option), filled at startup and only read after
     unordered_map<uint64, vector<EverQuestGearSwapCandidate>> GearSwapCandidatesByLookupKey;
     unordered_set<uint32> WornEffectSpellIDs;
@@ -2309,6 +2331,7 @@ public:
     unordered_map<uint32, EverQuestZoneLineKeepFlags> ZoneLineKeepFlagsByAreaTriggerID;
     unordered_map<uint32, vector<EverQuestZoneLineBox>> ZoneLineBoxesByMapID;
     unordered_map<uint32, EverQuestZone> ZoneByMapID;
+    int32 HighestZoneExpansionID = -1; // The newest expansion any converted zone is from, set with ZoneByMapID at startup and only read after
     unordered_map<uint32, vector<EverQuestZoneTeleportDestination>> ZoneTeleportDestinationsByMapID;
     unordered_set<uint32> InstanceRaidLowMapIDs;
     unordered_set<uint32> InstanceDungeonMapIDs;
@@ -2499,7 +2522,7 @@ public:
     bool DoesSpellApplyLevitation(SpellInfo const* spellInfo);
     bool IsLevitationBlockedByIllusionObjectForm(SpellInfo const* spellInfo, Unit* target);
     bool IsLevitationBlockedByZone(SpellInfo const* spellInfo, Unit* target);
-    void RemoveEQLevitationBeforeEnteringMap(Player* player, uint32 mapID);
+    void RemoveEQLevitationWhereNotAllowed(Player* player);
     bool IsIllusionObjectFormBlockedByLevitation(uint32 spellID, Unit* target);
     void ClearStaleMirrorImageFlagForPlayer(Player* player);
     bool IsSpellBlockedByMinTargetLevel(uint32 spellID, Unit* target, Unit* caster, bool isCastFromItem);
@@ -2714,6 +2737,8 @@ public:
     void LoadEQRaceStartData();
     void ApplyWarderLookToPet(Pet* pet);
     void RefreshPetScalingFromOwner(Pet* pet);
+    bool ShouldPetLoadAtOwnerWhenPositionInvalid(Pet const* pet);
+    void RemoveDisciplineStandInsOnAuraRemove(Player* player, Aura const* aura);
     void RemoveInvalidPetSilentDisplays();
     void LoadDruidFormDisplayData();
     void RemoveInvalidDruidFormDisplays();
@@ -2740,6 +2765,7 @@ public:
     void ValidatePlayerCreateLook(uint32 eqRaceID, uint8 gender, EverQuestPlayerCreateData& createData);
     bool SetEQRaceStartForNewPlayer(Player* player, EverQuestPlayerCreateData createData);
     void HandleCharacterFactionOrRaceChange(ObjectGuid guid, bool factionChange, std::vector<uint8> const& modData);
+    void HandleCharacterCustomize(ObjectGuid guid, uint8 oldGender, uint8 newGender);
     bool HandleCombinerItemUse(Player* player, Item* item, SpellCastTargets const& targets, uint8 castCount, uint32 glyphIndex);
     void AddCharacterOriginsToEnumPacket(std::vector<ObjectGuid> const& guids, WorldPacket& data);
     uint32 GetEQRaceIDForGuiseItem(uint32 guiseItemID) const;
@@ -2875,11 +2901,13 @@ public:
     // Worn item focus effects: the best worn focus of a type that covers the spell, as a percent.  Only the strongest counts, as in EQ
     void LoadItemFocusDataFromDB();
     uint32 GetItemFocusPercentForPlayer(Player* player, uint32 focusType, SpellInfo const* spellInfo);
+    bool IsReagentExemptFromConservation(uint32 itemTemplateID);
+    uint32 GetSpellLevelForPlayerEQClasses(Player* player, SpellInfo const* spellInfo, EverQuestSpell const& spellData);
+    int32 GetEQSpellAuraDurationInMSForLevel(EverQuestSpell const& spellData, uint8 level);
     void RefreshItemFocusRangeAuraForPlayer(Player* player);
     void LoadDisciplineData();
-    void HandleDeathSaveOnDamage(Unit* victim, uint32& damage);
+    void HandleDeathSaveOnDamage(Unit* attacker, Unit* victim, uint32& damage);
     bool IsDestroySpellBlockedByLevel(SpellInfo const* spellInfo, Unit* target);
-    void SendPlayerToBindPoint(Player* player);
     void ShadowStepPlayer(Player* player);
     void ReclaimPetForPlayer(Player* player);
     void UpdateEQMountRulesForPlayer(Player* player);
@@ -2962,11 +2990,14 @@ public:
     std::string GetRequiredKeyItemName(uint32 requiredKeyItemID);
     std::string GetZoneNameForMap(uint32 mapID);
     bool IsMapRestrictedByExpansion(uint32 mapID);
+    bool IsLuclinServer() const;
     bool IsMapRestrictedForPlayers(uint32 mapID);
     bool RelocatePlayerOutOfRestrictedMap(Player* player);
     void UpdateRestrictedMapPlayerCheck(uint32 diff);
     void UpdateTimedPorts(uint32 diff);
     void ApplyTimedPortToPlayer(Player* player, const EverQuestTimedPort& timedPort);
+    void SettleTimedPortTokenOnMapChange(Player* player);
+    void GiveBackTimedPortToken(Player* player, uint32 itemTemplateID);
     void UpdateRequiredClientDataVersion();
     bool IsClientDataVersionAllowed(AccountTypes security, uint32 clientDataVersion, uint32& expectedClientDataVersion) const;
     void LoadFactionData();

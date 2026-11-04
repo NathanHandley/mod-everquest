@@ -377,8 +377,9 @@ public:
 
         CalculateEQSpellMaxDuration(aura, maxDuration);
 
-        // A worn focus lengthens the caster's spells
-        if (maxDuration > 0 && aura->GetCaster() != nullptr && aura->GetCaster()->IsPlayer() == true)
+        // A worn focus lengthens the caster's spells, except an intensifying ("Splurt") one, as TAKP's ApplyDurationFocus skips those: their ramp is worked out over
+        // the EQ duration
+        if (maxDuration > 0 && aura->GetCaster() != nullptr && aura->GetCaster()->IsPlayer() == true && IsIntensifyingSpell(aura->GetId()) == false)
         {
             uint32 focusPercent = EverQuest->GetItemFocusPercentForPlayer(aura->GetCaster()->ToPlayer(), EQ_ITEM_FOCUS_TYPE_DURATION, aura->GetSpellInfo());
             if (focusPercent != 0)
@@ -387,6 +388,17 @@ public:
 
         // Crowd control between players is capped
         EverQuest->ApplyPvPCrowdControlRulesToAuraMaxDuration(aura, maxDuration);
+    }
+
+    // The converter marks an EQ intensifying formula effect with the ramp it starts at
+    static bool IsIntensifyingSpell(uint32 spellID)
+    {
+        for (uint8 effectIndex = EFFECT_0; effectIndex < MAX_SPELL_EFFECTS; effectIndex++)
+        {
+            if (EverQuest->GetSpellIntensifyingRampStartMultiplier(spellID, effectIndex) != 0.0f)
+                return true;
+        }
+        return false;
     }
 
     void CalculateEQSpellMaxDuration(Aura const* aura, int32& maxDuration)
@@ -488,10 +500,6 @@ public:
         // the AzerothCore code specifically Player::UpdateWeaponSkill which was referencing an invalid pointer.
         spell->m_weaponItem = nullptr;
 
-        // A discipline sets its own reuse by level
-        if (caster != nullptr && caster->IsPlayer() == true)
-            EverQuest->HandleDisciplineCast(caster->ToPlayer(), spellInfo);
-
         // Class auras: settle the ammo for shots the Ranger's Endless Quiver spared, and for the channeled ranged spells whose ammo was handed to the mod at load.
         // Ahead of the enabled check, since those channeled spells no longer take ammo on their own
         if (caster != nullptr && caster->IsPlayer() == true)
@@ -499,6 +507,10 @@ public:
 
         if (EverQuest->IsEnabled == false)
             return;
+
+        // A discipline sets its own reuse by level
+        if (caster != nullptr && caster->IsPlayer() == true && spellInfo != nullptr)
+            EverQuest->HandleDisciplineCast(caster->ToPlayer(), spellInfo);
 
         // Give back the swing time the core just reset away.  This runs before the EverQuest spell checks below, since WoW spells can be configured for it too
         EverQuest->RestoreSwingTimersAfterSpellCast(caster, spell);
@@ -523,6 +535,25 @@ public:
             return;
         if (spellInfo->Id < EverQuest->ConfigSystemSpellDBCIDMin || spellInfo->Id > EverQuest->ConfigSystemSpellDBCIDMax)
             return;
+
+        // Shadow Step and Reclaim Energy act here rather than in OnPlayerSpellCast, which the core calls before the cast's last check and before it takes the
+        // mana and reagents, so a cast that fails there would still have moved the caster or taken the pet
+        if (caster != nullptr && caster->IsPlayer() == true)
+        {
+            Player* player = caster->ToPlayer();
+            for (uint8 effectIndex = EFFECT_0; effectIndex < MAX_SPELL_EFFECTS; effectIndex++)
+            {
+                if (spellInfo->Effects[effectIndex].Effect == SPELL_EFFECT_DUMMY && spellInfo->Effects[effectIndex].MiscValue == EQ_SPELLDUMMYTYPE_SHADOWSTEP)
+                {
+                    EverQuest->ShadowStepPlayer(player);
+                    break;
+                }
+            }
+            if ((spellInfo->Effects[EFFECT_0].Effect == SPELL_EFFECT_DUMMY || (spellInfo->Effects[EFFECT_0].Effect == SPELL_EFFECT_APPLY_AURA && spellInfo->Effects[EFFECT_0].ApplyAuraName == SPELL_AURA_DUMMY))
+                && spellInfo->Effects[EFFECT_0].MiscValue == EQ_SPELLDUMMYTYPE_RECLAIMPET)
+                EverQuest->ReclaimPetForPlayer(player);
+        }
+
         if (EverQuest->IsSpellAnEQSpell(spellInfo->Id) == false)
             return;
         EverQuestSpell curSpell = EverQuest->GetSpellDataForSpellID(spellInfo->Id);
