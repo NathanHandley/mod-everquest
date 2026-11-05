@@ -3449,7 +3449,7 @@ void EverQuestMod::RefreshItemFocusRangeAuraForPlayer(Player* player)
 void EverQuestMod::LoadTrapData()
 {
     TrapsByMapID.clear();
-    QueryResult queryResult = WorldDatabase.Query("SELECT ID, MapID, X, Y, Z, Radius, MaxZDifference, ChancePercent, SpellID, RespawnInSeconds, RespawnVarianceInSeconds FROM mod_everquest_trap;");
+    QueryResult queryResult = WorldDatabase.Query("SELECT ID, MapID, X, Y, Z, Radius, MaxZDifference, ChancePercent, SpellID, LevelEQ, RespawnInSeconds, RespawnVarianceInSeconds FROM mod_everquest_trap;");
     if (queryResult)
     {
         do
@@ -3464,12 +3464,15 @@ void EverQuestMod::LoadTrapData()
             trap.MaxZDifference = fields[6].Get<float>();
             trap.ChancePercent = fields[7].Get<uint32>();
             trap.SpellID = fields[8].Get<uint32>();
-            trap.RespawnInSeconds = fields[9].Get<uint32>();
-            trap.RespawnVarianceInSeconds = fields[10].Get<uint32>();
+            trap.LevelEQ = fields[9].Get<uint32>();
+            trap.RespawnInSeconds = fields[10].Get<uint32>();
+            trap.RespawnVarianceInSeconds = fields[11].Get<uint32>();
             TrapsByMapID[fields[1].Get<uint32>()].push_back(trap);
         } while (queryResult->NextRow());
     }
 }
+
+static uint32 GetStretchedLevelForEQLevel(uint32 eqLevel);
 
 void EverQuestMod::UpdateTrapsForPlayer(Player* player, uint32 diffInMS)
 {
@@ -3489,7 +3492,8 @@ void EverQuestMod::UpdateTrapsForPlayer(Player* player, uint32 diffInMS)
     {
         if (std::fabs(player->GetPositionZ() - trap.Z) > trap.MaxZDifference || player->GetExactDist2d(trap.X, trap.Y) > trap.Radius)
             continue;
-        if (roll_chance_i(int32(trap.ChancePercent)) == false)
+        // TAKP's Trap::CheckTraps treats a chance of 0 as always
+        if (trap.ChancePercent != 0 && roll_chance_i(int32(trap.ChancePercent)) == false)
             continue;
 
         // The re-arm time is shared with everyone in this copy of the map, and a map can update apart from a player leaving it
@@ -3516,14 +3520,20 @@ void EverQuestMod::UpdateTrapsForPlayer(Player* player, uint32 diffInMS)
             rearmTime = now + trap.RespawnInSeconds + (trap.RespawnVarianceInSeconds != 0 ? urand(0, trap.RespawnVarianceInSeconds) : 0);
         }
 
-        // Unseen, as EQ's is, and hostile so that the spell treats the player as its enemy.  The data holds no level for a trap, so it casts at the level of whoever
-        // walked in, rather than the trigger's own level 1 that every resist roll would see
+        // Unseen, as EQ's is, and hostile so that the spell treats the player as its enemy.  It casts at the trap's own level, as TAKP's does, stretched as
+        // a creature's EQ level is, rather than the trigger's own level 1 that every resist roll would see.  A trap with no level casts at the walker's
         Creature* trigger = player->SummonTrigger(trap.X, trap.Y, trap.Z, 0.0f, EQ_TRAP_TRIGGER_LIFETIME_IN_MS, true);
         if (trigger == nullptr)
             continue;
+        if (trap.LevelEQ != 0)
+            trigger->SetLevel(GetStretchedLevelForEQLevel(trap.LevelEQ));
         trigger->SetFaction(EQ_TRAP_TRIGGER_FACTION);
         trigger->CastSpell(player, trap.SpellID, true);
-        ChatHandler(player->GetSession()).PSendSysMessage("{} triggers a trap!", player->GetName());
+
+        // As TAKP's Trap::Trigger, everyone close by hears it, the one who set it off included
+        WorldPacket trapMessagePacket;
+        ChatHandler::BuildChatPacket(trapMessagePacket, CHAT_MSG_SYSTEM, LANG_UNIVERSAL, nullptr, nullptr, Acore::StringFormat("{} triggers a trap!", player->GetName()));
+        player->SendMessageToSetInRange(&trapMessagePacket, EQ_TRAP_MESSAGE_RANGE_IN_EQ_UNITS * ConfigWorldScale, true);
     }
 }
 
@@ -3573,15 +3583,45 @@ void EverQuestMod::HandleDeathSaveOnDamage(Unit* attacker, Unit* victim, uint32&
     }
 }
 
-bool EverQuestMod::IsDestroySpellBlockedByLevel(SpellInfo const* spellInfo, Unit* target)
+// EQ's Destroy is the only EQ effect the converter makes an instant kill, and only from Luclin on, so no spell before Luclin is one
+bool EverQuestMod::IsEQDestroySpell(SpellInfo const* spellInfo)
 {
-    if (target == nullptr || spellInfo == nullptr)
+    if (spellInfo == nullptr || spellInfo->Id < ConfigSystemSpellDBCIDMin || spellInfo->Id > ConfigSystemSpellDBCIDMax)
         return false;
+    return spellInfo->HasEffect(SPELL_EFFECT_INSTAKILL) == true && IsSpellAnEQSpell(spellInfo->Id) == true;
+}
 
-    // EQ's Destroy is the only EQ effect the converter makes an instant kill, and only from Luclin on, so a spell without one (any spell before Luclin) is never held back
-    if (spellInfo->HasEffect(SPELL_EFFECT_INSTAKILL) == false || IsSpellAnEQSpell(spellInfo->Id) == false)
+// TAKP's Destroy only ever works on an NPC, so a player is refused up front.  A target too high in level is not refused here: as in TAKP the cast goes
+// through, the mana is spent, and the hit says why nothing happened (HandleDestroySpellHit)
+bool EverQuestMod::IsDestroySpellBlockedByTarget(SpellInfo const* spellInfo, Unit* target)
+{
+    if (target == nullptr || IsEQDestroySpell(spellInfo) == false)
         return false;
-    return GetLevelForEQRules(target) > EQ_DESTROY_MAX_TARGET_LEVEL;
+    return target->IsPlayer() == true;
+}
+
+// TAKP's SE_Destroy: an NPC up to level 52 is depopped, with its respawn timer started, and leaves no corpse, loot or experience.  A player's pet or charmed
+// creature is an NPC in TAKP, so it goes too.  Anything that isn't a creature is left alone.  The module's own rule on top of TAKP's: a WoW dungeon or world boss
+// is never removed, as that could leave its instance unable to finish (no EQ boss is low enough for Destroy to reach)
+bool EverQuestMod::HandleDestroySpellHit(Spell* spell, Unit* target)
+{
+    if (IsEQDestroySpell(spell->GetSpellInfo()) == false)
+        return false;
+    Creature* creature = target->ToCreature();
+    if (creature == nullptr)
+        return true;
+
+    Unit* caster = spell->GetCaster() != nullptr ? spell->GetCaster()->ToUnit() : nullptr;
+    if (GetLevelForEQRules(creature) > EQ_DESTROY_MAX_TARGET_LEVEL || creature->IsDungeonBoss() == true || creature->isWorldBoss() == true)
+    {
+        if (caster != nullptr && caster->IsPlayer() == true)
+            ChatHandler(caster->ToPlayer()->GetSession()).PSendSysMessage("Your target is too high level to be affected by this spell.");
+        return true;
+    }
+
+    // A pet goes the way a dismissed one does, and anything else despawns now (a spawn keeps its respawn timer, like TAKP's Depop)
+    creature->DespawnOrUnsummon();
+    return true;
 }
 
 void EverQuestMod::ShadowStepPlayer(Player* player)
@@ -3609,9 +3649,14 @@ void EverQuestMod::ReclaimPetForPlayer(Player* player)
     if (pet == nullptr || pet->IsAlive() == false || pet->getPetType() != SUMMON_PET)
         return;
 
-    // TAKP: the summon's mana cost, scaled by the pet's health and never more than 75%
+    // TAKP's SE_ReclaimPet only takes back a pet its caster made
+    if (pet->GetCreatorGUID() != player->GetGUID())
+        return;
+
+    // TAKP: the summon's mana cost, scaled by the pet's health and never more than 75%.  A familiar gives nothing back, though it still goes
+    bool isFamiliar = GetPetDataForCreatureTemplateID(pet->GetEntry()).NamingType == EQ_PET_NAMING_TYPE_FAMILIAR;
     SpellInfo const* summonSpellInfo = sSpellMgr->GetSpellInfo(pet->GetUInt32Value(UNIT_CREATED_BY_SPELL));
-    if (summonSpellInfo != nullptr)
+    if (summonSpellInfo != nullptr && isFamiliar == false)
     {
         uint32 returnPercent = std::min<uint32>(uint32(pet->GetHealthPct()), EQ_RECLAIM_PET_MAX_MANA_RETURN_PERCENT);
         player->ModifyPower(POWER_MANA, summonSpellInfo->CalcPowerCost(player, summonSpellInfo->GetSchoolMask()) * int32(returnPercent) / 100);
@@ -3724,11 +3769,18 @@ void EverQuestMod::HandleDisciplineCast(Player* player, SpellInfo const* spellIn
     }
     if (useLevel == 0)
         return;
-    uint32 level = player->GetLevel();
-    if (discipline.ReuseInSeconds < EQ_DISCIPLINE_REUSE_LEVEL_CAP_BELOW_SECONDS && level > EQ_DISCIPLINE_REUSE_LEVEL_CAP)
+    // The use levels are EQ's own, and on a Luclin server a player's level past EQ's cap of 60 there (WoW's go to 70) shortens nothing more, as TAKP's Luclin
+    // characters stopped at 60
+    uint32 level = GetLevelForEQRules(player);
+    bool isLuclinServer = IsLuclinServer();
+    if ((discipline.ReuseInSeconds < EQ_DISCIPLINE_REUSE_LEVEL_CAP_BELOW_SECONDS || isLuclinServer == true) && level > EQ_DISCIPLINE_REUSE_LEVEL_CAP)
         level = EQ_DISCIPLINE_REUSE_LEVEL_CAP;
     int32 reduction = int32(level > useLevel ? level - useLevel : 0) * EQ_DISCIPLINE_REUSE_SECONDS_PER_LEVEL;
     reduction = std::min(reduction, int32(discipline.ReuseInSeconds) - EQ_DISCIPLINE_MIN_REUSE_SECONDS);
+
+    // TAKP never lets a reuse run past 72 minutes.  The spell's own cooldown comes from its data, so one longer than that is cut back too
+    if (isLuclinServer == true && int32(discipline.ReuseInSeconds) - std::max(reduction, 0) > EQ_DISCIPLINE_MAX_REUSE_SECONDS)
+        reduction = int32(discipline.ReuseInSeconds) - EQ_DISCIPLINE_MAX_REUSE_SECONDS;
     if (reduction > 0)
         player->ModifySpellCooldown(spellInfo->Id, -reduction * int32(IN_MILLISECONDS));
 
@@ -3766,11 +3818,18 @@ void EverQuestMod::RemoveDisciplineStandInsOnAuraRemove(Player* player, Aura con
 
 void EverQuestMod::ApplyItemFocusToSpellAmount(Unit* caster, uint32 focusType, SpellInfo const* spellInfo, int32& amount)
 {
-    if (caster == nullptr || caster->IsPlayer() == false || amount <= 0)
+    if (caster == nullptr || caster->IsPlayer() == false || amount <= 0 || spellInfo == nullptr)
         return;
+
+    // TAKP's Client::GetActSpellDamage gives a self only spell (ST_Self) no damage focus
+    if (focusType == EQ_ITEM_FOCUS_TYPE_DAMAGE && IsSpellAnEQSpell(spellInfo->Id) == true
+        && (GetSpellDataForSpellID(spellInfo->Id).FocusTraits & EQ_SPELL_FOCUS_TRAIT_SELF_TARGET) != 0)
+        return;
+
+    // As TAKP's damage and heal focus, the added amount is cut down to a whole number
     uint32 percent = GetItemFocusPercentForPlayer(caster->ToPlayer(), focusType, spellInfo);
     if (percent != 0)
-        amount += int32(std::ceil(float(amount) * float(percent) / 100.0f));
+        amount += int32((int64(amount) * int64(percent)) / 100);
 }
 
 bool EverQuestMod::IsWornEffectSpell(uint32 spellID)
@@ -15294,6 +15353,7 @@ void EverQuestMod::ApplyTimedPortToPlayer(Player* player, const EverQuestTimedPo
         player->DestroyItemCount(timedPort.RequiredItemTemplateID, 1, true);
     bool isPorting = player->TeleportTo({ timedPort.DestinationMapID, {timedPort.DestinationX, timedPort.DestinationY, timedPort.DestinationZ, timedPort.DestinationOrientation} });
     uint32 arrivalMapID = timedPort.DestinationMapID;
+    Position arrivalPosition(timedPort.DestinationX, timedPort.DestinationY, timedPort.DestinationZ);
 
     // A port into a zone the character has a private copy of is sent on to the copy (OnPlayerBeforeTeleport), which reports this teleport as refused while the
     // player is already on the way.  The sweep never ports a player who was already being teleported, so a far teleport now is that one
@@ -15301,6 +15361,7 @@ void EverQuestMod::ApplyTimedPortToPlayer(Player* player, const EverQuestTimedPo
     {
         isPorting = true;
         arrivalMapID = player->GetTeleportDest().GetMapId();
+        arrivalPosition.Relocate(player->GetTeleportDest().GetPositionX(), player->GetTeleportDest().GetPositionY(), player->GetTeleportDest().GetPositionZ());
     }
     if (isPorting == false)
     {
@@ -15316,9 +15377,13 @@ void EverQuestMod::ApplyTimedPortToPlayer(Player* player, const EverQuestTimedPo
     EverQuestPlayerTimedPortTokenState* tokenState = player->CustomData.GetDefault<EverQuestPlayerTimedPortTokenState>(EQ_PLAYER_CUSTOMDATA_TIMEDPORTTOKEN);
     tokenState->ItemTemplateID = timedPort.RequiredItemTemplateID;
     tokenState->DestinationMapID = arrivalMapID;
+    tokenState->DestinationX = arrivalPosition.GetPositionX();
+    tokenState->DestinationY = arrivalPosition.GetPositionY();
+    tokenState->DestinationZ = arrivalPosition.GetPositionZ();
 }
 
-// Runs as the player is added to their new map, from the world update's session handling like the port itself
+// Runs as the player is added to their new map, from the world update's session handling like the port itself.  The map alone can't tell a landed port from
+// one the core turned back to a bind point on that same map, so the arrival also has to be near where the port was going
 void EverQuestMod::SettleTimedPortTokenOnMapChange(Player* player)
 {
     EverQuestPlayerTimedPortTokenState* tokenState = player->CustomData.Get<EverQuestPlayerTimedPortTokenState>(EQ_PLAYER_CUSTOMDATA_TIMEDPORTTOKEN);
@@ -15326,9 +15391,12 @@ void EverQuestMod::SettleTimedPortTokenOnMapChange(Player* player)
         return;
     uint32 itemTemplateID = tokenState->ItemTemplateID;
     uint32 destinationMapID = tokenState->DestinationMapID;
+    float destinationX = tokenState->DestinationX;
+    float destinationY = tokenState->DestinationY;
+    float destinationZ = tokenState->DestinationZ;
     tokenState->ItemTemplateID = 0;
     tokenState->DestinationMapID = 0;
-    if (player->GetMapId() != destinationMapID)
+    if (player->GetMapId() != destinationMapID || player->GetExactDist(destinationX, destinationY, destinationZ) > EQ_TIMED_PORT_ARRIVAL_TOLERANCE_IN_YARDS)
         GiveBackTimedPortToken(player, itemTemplateID);
 }
 

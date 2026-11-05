@@ -30,7 +30,22 @@ static int32 ModifyEverQuestSpellPowerCost(Spell const* spell, int32 powerCost)
         return powerCost;
     // A focus past 100% in the data can't make the spell pay the caster
     uint32 focusPercent = std::min<uint32>(EverQuest->GetItemFocusPercentForPlayer(spell->GetCaster()->ToPlayer(), EQ_ITEM_FOCUS_TYPE_MANA_COST, spell->GetSpellInfo()), 100);
-    return std::max<int32>(0, powerCost - int32(float(powerCost) * float(focusPercent) / 100.0f));
+    if (focusPercent == 0)
+        return powerCost;
+
+    // As TAKP's Mob::SpellFinished: the saving is cut down to whole mana, and a focus that applies always saves at least one
+    int32 savedMana = int32((int64(powerCost) * int64(focusPercent)) / 100);
+    if (savedMana == 0)
+        savedMana = 1;
+    return std::max<int32>(0, powerCost - savedMana);
+}
+
+// EverQuest's Destroy is the only EQ effect the converter makes an instant kill.  The core asks this on the map thread the spell hits on
+static bool HandleEverQuestSpellInstaKill(Spell* spell, Unit* target)
+{
+    if (EverQuest->IsEnabled == false || spell == nullptr || target == nullptr)
+        return false;
+    return EverQuest->HandleDestroySpellHit(spell, target);
 }
 
 // Worn reagent focuses roll to keep a spell's reagents.  As TAKP's Mob::HasSpellReagent, each unit of a reagent rolls on its own, and the few reagents EQ's
@@ -185,6 +200,7 @@ void Addmod_everquestScripts()
     EverQuestMovementHooks::SpellRangeModifier = ModifyEverQuestSpellRange;
     EverQuestMovementHooks::SpellThreatModifier = ModifyEverQuestSpellThreat;
     EverQuestMovementHooks::PetLoadAtOwnerSelector = ShouldEverQuestPetLoadAtOwner;
+    EverQuestMovementHooks::SpellInstaKillHandler = HandleEverQuestSpellInstaKill;
 
     // Game masters skip area trigger scripts, so the core hands their EverQuest zone lines over through this
     EverQuestAreaTriggerHooks::GameMasterZoneLineHandler = &HandleEverQuestZoneLineAreaTriggerForGameMaster;

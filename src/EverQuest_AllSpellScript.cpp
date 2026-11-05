@@ -131,10 +131,10 @@ public:
         if (spell->GetCaster()->IsPlayer() == true && EverQuest->HandleDisciplineOnCheckCast(spell->GetCaster()->ToPlayer(), spell, res) == true)
             return;
 
-        // EQ's destroy spells stop working on anything past level 52
-        if (EverQuest->IsDestroySpellBlockedByLevel(spell->GetSpellInfo(), target) == true)
+        // EQ's destroy spells only work on creatures.  The level limit is applied as the spell hits, as TAKP's is
+        if (EverQuest->IsDestroySpellBlockedByTarget(spell->GetSpellInfo(), target) == true)
         {
-            res = SPELL_FAILED_HIGHLEVEL;
+            res = SPELL_FAILED_BAD_TARGETS;
             return;
         }
 

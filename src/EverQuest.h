@@ -55,7 +55,7 @@ class EQZoneMap;
 struct AreaTrigger;
 struct BuildValuesCachePosPointers;
 
-#define EQ_MOD_VERSION                              144
+#define EQ_MOD_VERSION                              145
 
 #define EQ_VENDOR_PRICE_MOD_SCALE                   10000 // A greedy vendor's price changes are in ten-thousandths (converter EQMerchantPricing)
 
@@ -73,6 +73,7 @@ struct BuildValuesCachePosPointers;
 #define EQ_ITEM_FOCUS_RANGE_SPELL_ID_LONG           97694
 #define EQ_ITEM_FOCUS_RANGE_PERCENT_SHORT           8
 #define EQ_ITEM_FOCUS_RANGE_PERCENT_LONG            10
+#define EQ_SPELL_FOCUS_TRAIT_SELF_TARGET            2       // EverQuestSpell::FocusTraits: an EQ self only spell.  Must match SpellFocusTraits.SelfTarget in the converter's ItemFocusEffect.cs
 
 // The reagents a reagent focus never keeps (TAKP's Mob::HasSpellReagent, from EQ's client).  These are the WoW item IDs the converter's WorldData
 // ItemTemplates.csv gives EQ items 9963 (Essence Emerald), 10092 (Fuligan Soulstone of Innoruuk) and 10094 (Cloudy Stone of Veeshan).  The mod's item
@@ -89,7 +90,8 @@ struct BuildValuesCachePosPointers;
 #define EQ_DISCIPLINE_PURETONE_BOOST_PERCENT        180
 #define EQ_INSTRUMENT_MAX_BOOST_PERCENT             260     // EQ stops instrument mods at 3.6 times
 #define EQ_DISCIPLINE_MIN_REUSE_SECONDS             234
-#define EQ_DISCIPLINE_REUSE_LEVEL_CAP               60      // Short reuses stop shortening at this level
+#define EQ_DISCIPLINE_MAX_REUSE_SECONDS             4320    // TAKP's 72:00 most
+#define EQ_DISCIPLINE_REUSE_LEVEL_CAP               60      // Short reuses stop shortening at this level, and on a Luclin server (EQ's level cap then) every reuse does
 #define EQ_DISCIPLINE_REUSE_LEVEL_CAP_BELOW_SECONDS 1620
 
 // The converter writes no expansion setting, so a Shadows of Luclin server is told apart by its zones: the converter leaves out every zone past its expansion
@@ -557,6 +559,7 @@ enum EverQuestLossOfControlCategory
 #define EQ_PLAYER_CUSTOMDATA_CLIENTMOVESTATE        "EQClientMoveState"
 #define EQ_PLAYER_CUSTOMDATA_TRAP                   "EQTrap"
 #define EQ_PLAYER_CUSTOMDATA_TIMEDPORTTOKEN         "EQTimedPortToken"
+#define EQ_TIMED_PORT_ARRIVAL_TOLERANCE_IN_YARDS    10.0f   // How far from a timed port's destination an arrival still counts as the port landing
 #define EQ_ITEM_ENCHANT_MEMORY_MAX_PER_CHARACTER    100     // Ceiling on enchantments one character can have owed back to them
 #define EQ_SLOTSHIFT_MAX_RING_SIZE                  16      // More versions than any slotshift ring has, so a bad ring in the data can't loop forever
 #define EQ_QUEST_FACTION_RECHECK_INTERVAL_IN_MS     1000
@@ -1606,6 +1609,7 @@ public:
 #define EQ_TRAP_TRIGGER_LIFETIME_IN_MS              10000
 #define EQ_TRAP_TRIGGER_FACTION                     14      // Monster: it needs to count as an enemy of whoever walked in
 #define EQ_TRAP_REARM_PRUNE_INTERVAL_IN_SECONDS     600     // How often re-arm times that have run out are dropped, as instance copies come and go
+#define EQ_TRAP_MESSAGE_RANGE_IN_EQ_UNITS           100.0f  // TAKP's Trap::Trigger tells everyone this close to whoever set it off (times the world scale for yards)
 
 class EverQuestTrap
 {
@@ -1618,6 +1622,7 @@ public:
     float MaxZDifference = 0;
     uint32 ChancePercent = 0;
     uint32 SpellID = 0;
+    uint32 LevelEQ = 0;     // TAKP's trap level, which it casts at (stretched like a creature's)
     uint32 RespawnInSeconds = 0;
     uint32 RespawnVarianceInSeconds = 0;
 };
@@ -1634,6 +1639,9 @@ class EverQuestPlayerTimedPortTokenState : public DataMap::Base
 public:
     uint32 ItemTemplateID = 0;
     uint32 DestinationMapID = 0;
+    float DestinationX = 0.0f;
+    float DestinationY = 0.0f;
+    float DestinationZ = 0.0f;
 };
 
 class EverQuestDiscipline
@@ -2907,7 +2915,9 @@ public:
     void RefreshItemFocusRangeAuraForPlayer(Player* player);
     void LoadDisciplineData();
     void HandleDeathSaveOnDamage(Unit* attacker, Unit* victim, uint32& damage);
-    bool IsDestroySpellBlockedByLevel(SpellInfo const* spellInfo, Unit* target);
+    bool IsEQDestroySpell(SpellInfo const* spellInfo);
+    bool IsDestroySpellBlockedByTarget(SpellInfo const* spellInfo, Unit* target);
+    bool HandleDestroySpellHit(Spell* spell, Unit* target);
     void ShadowStepPlayer(Player* player);
     void ReclaimPetForPlayer(Player* player);
     void UpdateEQMountRulesForPlayer(Player* player);
