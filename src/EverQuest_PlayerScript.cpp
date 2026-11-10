@@ -587,6 +587,9 @@ public:
         uint8 currentForm = player->GetShapeshiftForm();
         if (currentForm == FORM_BEAR || currentForm == FORM_DIREBEAR)
             EverQuest->RefreshBearFormArmorShiftForPlayer(player);
+
+        // A secondary class change whose cast has finished is carried out here, last, so nothing above runs half way through it
+        EverQuest->UpdateSecondaryClassChangeForPlayer(player);
     }
 
     void OnPlayerReputationRankChange(Player* player, uint32 factionID, ReputationRank /*newRank*/, ReputationRank /*oldRank*/, bool /*increased*/) override
@@ -1194,14 +1197,8 @@ public:
         EverQuest->ClearAuctionRealmFilterForPlayer(player);
         EverQuest->ClearAuctionSearchScanForPlayer(player);
 
-        // Class switch
-        if (EverQuest->GetCurrentSecondEQClassForPlayer(player) != EverQuest->GetNextSecondEQClassForPlayer(player))
-        {
-            if (!EverQuest->PerformClassSwitch(player))
-            {
-                LOG_ERROR("module.EverQuest", "EverQuestMod Could not successfully complete the class switch on logout for player {} with GUID {}", player->GetName(), player->GetGUID().GetCounter());
-            }
-        }
+        // A secondary class change that was still being cast goes no further (the controller data it is held in outlives the logout)
+        EverQuest->AbandonSecondaryClassChangeForPlayer(player, false);
     }
 
     bool OnPlayerBeforeTeleport(Player* player, uint32 mapid, float x, float y, float z, float orientation, uint32 options, Unit* /*target*/) override
@@ -1406,25 +1403,8 @@ public:
         // This runs before the logout save, which is the only window where a borrowed level can be handed back without the character ever being written to the database standing at it
         EverQuest->EndMentorshipForPlayer(player, "you logged out", true);
 
-        // Any pending equipment storage commit must have executed before the logout save and class switch are queued
+        // Any pending equipment storage commit must have executed before the logout save is queued
         EverQuest->WaitForPendingEquipmentStorageCommitForPlayer(player->GetGUID());
-
-        // If a class change is in progress, update the item visuals
-        if (EverQuest->GetCurrentSecondEQClassForPlayer(player) != EverQuest->GetNextSecondEQClassForPlayer(player))
-        {
-            map<uint8, EverQuestPlayerEquipedItemData> visibleItemsBySlot = EverQuest->GetVisibleItemsBySlotForPlayerClass(player, EverQuest->GetNextSecondEQClassForPlayer(player));
-            for (uint8 i = 0; i < 18; ++i)
-            {
-                if (visibleItemsBySlot[i].ItemID == 0)
-                    player->SetVisibleItemSlot(i, NULL);
-                else
-                {
-                    player->SetUInt32Value(PLAYER_VISIBLE_ITEM_1_ENTRYID + (i * 2), visibleItemsBySlot[i].ItemID);
-                    player->SetUInt16Value(PLAYER_VISIBLE_ITEM_1_ENCHANTMENT + (i * 2), 0, visibleItemsBySlot[i].PermEnchant);
-                    player->SetUInt16Value(PLAYER_VISIBLE_ITEM_1_ENCHANTMENT + (i * 2), 1, visibleItemsBySlot[i].TempEnchant);
-                }
-            }
-        }
     }
 };
 
