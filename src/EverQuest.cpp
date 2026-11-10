@@ -19244,20 +19244,28 @@ void EverQuestMod::RestorePetLevelAfterMentorshipForPlayer(Player* player, uint3
         targetLevel);
 }
 
-void EverQuestMod::SaveMentorshipStateForPlayer(Player* player, uint8 role, uint8 realLevel, uint32 realExperience, float bankedProgress, uint32 petNumber, uint8 petRealLevel)
+bool EverQuestMod::SetMentorshipStateInControllerDataForPlayer(Player* player, uint8 role, uint8 realLevel, uint32 realExperience, float bankedProgress, uint32 petNumber, uint8 petRealLevel)
 {
     if (player == nullptr)
-        return;
+        return false;
 
     EverQuestPlayerControllerData* liveControllerData = GetOrLoadActivePlayerClassControllerData(player);
     if (liveControllerData == nullptr)
-        return;
+        return false;
     liveControllerData->MentorshipRole = role;
     liveControllerData->MentorshipRealLevel = realLevel;
     liveControllerData->MentorshipRealExperience = realExperience;
     liveControllerData->MentorshipBankedProgress = bankedProgress;
     liveControllerData->MentorshipPetNumber = petNumber;
     liveControllerData->MentorshipPetRealLevel = petRealLevel;
+    return true;
+}
+
+// Written on its own when no transaction is given, and as part of that transaction when one is
+void EverQuestMod::SaveMentorshipStateForPlayer(Player* player, uint8 role, uint8 realLevel, uint32 realExperience, float bankedProgress, uint32 petNumber, uint8 petRealLevel, CharacterDatabaseTransaction transaction)
+{
+    if (SetMentorshipStateInControllerDataForPlayer(player, role, realLevel, realExperience, bankedProgress, petNumber, petRealLevel) == false)
+        return;
 
     EverQuestPlayerControllerData controllerData;
     {
@@ -19268,7 +19276,7 @@ void EverQuestMod::SaveMentorshipStateForPlayer(Player* player, uint8 role, uint
         controllerData = controllerDataIterator->second;
     }
 
-    CharacterDatabase.Execute("INSERT INTO `mod_everquest_character_settings` (`guid`, `currentSecondaryClass`, `nextSecondaryClass`, `secondaryExpPool`, `mentorshipRole`, `mentorshipRealLevel`, `mentorshipRealExp`, `mentorshipBankedProgress`, `mentorshipPetNumber`, `mentorshipPetLevel`) VALUES ({}, {}, {}, {}, {}, {}, {}, {}, {}, {}) ON DUPLICATE KEY UPDATE `mentorshipRole` = {}, `mentorshipRealLevel` = {}, `mentorshipRealExp` = {}, `mentorshipBankedProgress` = {}, `mentorshipPetNumber` = {}, `mentorshipPetLevel` = {}",
+    std::string statement = Acore::StringFormat("INSERT INTO `mod_everquest_character_settings` (`guid`, `currentSecondaryClass`, `nextSecondaryClass`, `secondaryExpPool`, `mentorshipRole`, `mentorshipRealLevel`, `mentorshipRealExp`, `mentorshipBankedProgress`, `mentorshipPetNumber`, `mentorshipPetLevel`) VALUES ({}, {}, {}, {}, {}, {}, {}, {}, {}, {}) ON DUPLICATE KEY UPDATE `mentorshipRole` = {}, `mentorshipRealLevel` = {}, `mentorshipRealExp` = {}, `mentorshipBankedProgress` = {}, `mentorshipPetNumber` = {}, `mentorshipPetLevel` = {}",
         player->GetGUID().GetCounter(),
         controllerData.CurrentSecondClass,
         controllerData.NextSecondClass,
@@ -19285,6 +19293,37 @@ void EverQuestMod::SaveMentorshipStateForPlayer(Player* player, uint8 role, uint
         controllerData.MentorshipBankedProgress,
         controllerData.MentorshipPetNumber,
         controllerData.MentorshipPetRealLevel);
+    if (transaction)
+        transaction->Append(statement);
+    else
+        CharacterDatabase.Execute(statement);
+}
+
+// Takes what is on record about a borrowed level off, once the character is standing at its own level again
+void EverQuestMod::SaveCharacterAfterMentorshipForPlayer(Player* player)
+{
+    if (player == nullptr)
+        return;
+
+    // That record and the character row holding the level have to change together.  Taken off by itself, it left the row saying the borrowed level until the
+    // next save, with nothing on record to put the real one back if the server went down before then.  So the character is saved here, in one transaction
+    // with the record.  A character in the middle of a far teleport cannot be saved (Player::SaveToDB puts it off until the teleport is done), so that one
+    // only has the record taken off, as does one that is not in the world
+    if (player->IsInWorld() == true && player->IsBeingTeleportedFar() == false)
+    {
+        // As before a logout save, an equipment change still on its way to the database has to have landed before the character is saved
+        WaitForPendingEquipmentStorageCommitForPlayer(player->GetGUID());
+
+        CharacterDatabaseTransaction transaction = CharacterDatabase.BeginTransaction();
+        AppendCharacterRowLockAnchor(transaction, player->GetGUID().GetCounter());
+        player->SaveToDB(transaction, false, false);
+        SaveMentorshipStateForPlayer(player, EQ_MENTORSHIP_ROLE_NONE, 0, 0, 0.0f, 0, 0, transaction);
+        CharacterDatabase.CommitTransaction(transaction);
+    }
+
+    // Also written by itself, after that transaction.  It changes nothing when the transaction went in.  When it did not, the record must still come off, since
+    // a later save would otherwise write the real level next to a record that says to put an older one back at the next login
+    SaveMentorshipStateForPlayer(player, EQ_MENTORSHIP_ROLE_NONE, 0, 0, 0.0f, 0, 0);
 }
 
 void EverQuestMod::AwardBankedMentorshipProgressToPlayer(Player* player, float bankedProgress)
@@ -19794,7 +19833,9 @@ void EverQuestMod::EndMentorshipForPlayer(Player* player, const string& reason, 
         // The owner is back, so the pet that came down with them has to be put back too
         RestorePetLevelAfterMentorshipForPlayer(player, state.PetNumber, state.PetRealLevel);
     }
-    SaveMentorshipStateForPlayer(player, EQ_MENTORSHIP_ROLE_NONE, 0, 0, 0.0f, 0, 0);
+
+    // Nothing from here on may take this character for one still standing at a borrowed level.  What the database has on record comes off further down, with the save
+    SetMentorshipStateInControllerDataForPlayer(player, EQ_MENTORSHIP_ROLE_NONE, 0, 0, 0.0f, 0, 0);
 
     if (player->GetSession() != nullptr)
         ChatHandler(player->GetSession()).PSendSysMessage("Your mentorship with |cff00FF00{}|r has ended{} You are back to level |cff00FF00{}|r.", state.PartnerName, reasonSuffix, player->GetLevel());
@@ -19802,6 +19843,9 @@ void EverQuestMod::EndMentorshipForPlayer(Player* player, const string& reason, 
     // Only ever paid onto the real level.  Skipped when there was no real level to go back to, so a damaged row cannot hand out levels while the character is still set at a borrowed one
     if (state.Role == EQ_MENTORSHIP_ROLE_APPRENTICE && state.RealLevel != 0)
         AwardBankedMentorshipProgressToPlayer(player, state.BankedProgress);
+
+    // Saved with what was just paid out, so the record is never off while the character row still says the borrowed level
+    SaveCharacterAfterMentorshipForPlayer(player);
 
     SendMentorshipStateToPlayer(player);
 }
@@ -20159,7 +20203,7 @@ void EverQuestMod::RestoreMentorshipStateOnLoginForPlayer(Player* player)
         // Player::LoadPet runs before this, so a pet that was out is already loaded and standing at the borrowed level it was saved at.  One that is not out is put back in the stable entry and the row instead
         RestorePetLevelAfterMentorshipForPlayer(player, petNumber, petRealLevel);
     }
-    SaveMentorshipStateForPlayer(player, EQ_MENTORSHIP_ROLE_NONE, 0, 0, 0.0f, 0, 0);
+    SetMentorshipStateInControllerDataForPlayer(player, EQ_MENTORSHIP_ROLE_NONE, 0, 0, 0.0f, 0, 0);
 
     if (player->GetSession() != nullptr)
         ChatHandler(player->GetSession()).PSendSysMessage("Your mentorship did not end cleanly, so you have been put back to level |cff00FF00{}|r.", realLevel);
@@ -20167,6 +20211,9 @@ void EverQuestMod::RestoreMentorshipStateOnLoginForPlayer(Player* player)
     // Same rule as the clean end: the bank is only ever paid onto the real level
     if (role == EQ_MENTORSHIP_ROLE_APPRENTICE && realLevel != 0)
         AwardBankedMentorshipProgressToPlayer(player, bankedProgress);
+
+    // And the same save as the clean end, so going down a second time before the next save does not leave the borrowed level with nothing on record to undo it
+    SaveCharacterAfterMentorshipForPlayer(player);
 }
 
 map<string, EverQuestPlayerClassInfoItem> EverQuestMod::GetPlayerClassInfoByClassNameForPlayer(Player* player)

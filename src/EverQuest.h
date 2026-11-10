@@ -2953,7 +2953,9 @@ public:
     void ApplyMentorshipAuraForPlayer(Player* player, uint8 role);
     void RemoveMentorshipAurasFromPlayer(Player* player);
     void AwardBankedMentorshipProgressToPlayer(Player* player, float bankedProgress);
-    void SaveMentorshipStateForPlayer(Player* player, uint8 role, uint8 realLevel, uint32 realExperience, float bankedProgress, uint32 petNumber, uint8 petRealLevel);
+    bool SetMentorshipStateInControllerDataForPlayer(Player* player, uint8 role, uint8 realLevel, uint32 realExperience, float bankedProgress, uint32 petNumber, uint8 petRealLevel);
+    void SaveMentorshipStateForPlayer(Player* player, uint8 role, uint8 realLevel, uint32 realExperience, float bankedProgress, uint32 petNumber, uint8 petRealLevel, CharacterDatabaseTransaction transaction = nullptr);
+    void SaveCharacterAfterMentorshipForPlayer(Player* player);
 
     void SendExpPoolAddonMessageToPlayer(Player* player, uint32 gainedExp);
     void SetInitialEQClassesForPlayer(Player* player);
