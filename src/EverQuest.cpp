@@ -14368,6 +14368,9 @@ void EverQuestMod::RecalculateTemporaryFactionReactionsForPlayer(Player* player)
         AuraApplication const* appliedAurApp = appliedAuraItr.second;
         if (appliedAurApp == nullptr || appliedAurApp->GetBase() == nullptr)
             continue;
+        // A client hidden form is a look alone (another module's: the character's identity for the world), not an illusion cast on the character
+        if (appliedAurApp->GetBase()->IsClientHidden() == true)
+            continue;
         const EverQuestSpell& appliedSpell = GetSpellDataForSpellID(appliedAurApp->GetBase()->GetId());
         if (appliedSpell.IllusionFormEQRaceID != 0)
         {
