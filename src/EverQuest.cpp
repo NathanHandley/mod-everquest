@@ -9734,6 +9734,12 @@ void EverQuestMod::ApplyAdventurerAuraStateOnLogin(Player* player)
         return;
     }
 
+    // A game identity form (MergedWorlds' Ragnarok Online form, in the RO world) took it off with the character's buffs, and it means nothing
+    // there, so it isn't put on (a login in the RO world came here after the form was entered); UpdateAdventurerAuraAfterGameIdentityForm puts
+    // it back once the form is off.  The tracked setting is untouched, so nothing is lost by it
+    if (IsInGameIdentityForm(player) == true)
+        return;
+
     if (hasAura == false)
         player->CastSpell(player, ConfigSystemAdventurerAuraSpellID, true);
 }
@@ -10805,8 +10811,7 @@ bool EverQuestMod::RestoreAdventurerForPlayer(Player* targetPlayer, Player* gmPl
     EverQuestPlayerControllerData& controllerData = *GetOrLoadActivePlayerClassControllerData(targetPlayer);
     controllerData.AdventurerDisqualified = false;
     SaveAdventurerDisqualifiedForPlayer(targetPlayer);
-    if (targetPlayer->HasAura(ConfigSystemAdventurerAuraSpellID) == false)
-        targetPlayer->CastSpell(targetPlayer, ConfigSystemAdventurerAuraSpellID, true);
+    ApplyAdventurerAuraStateOnLogin(targetPlayer); // On now, or once a game identity form is off
 
     LOG_INFO("module.EverQuest", "EverQuestMod restored the EverQuest Adventurer buff on player {} (guid {}) for game master {} (guid {}): {} items mailed across {} mails, {} class levels reset, level snapshot {}",
         targetPlayer->GetName(), targetGUIDCounter, gmPlayer->GetName(), gmPlayer->GetGUID().GetCounter(),
