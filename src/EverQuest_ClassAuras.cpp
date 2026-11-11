@@ -196,7 +196,11 @@ void EverQuestMod::ReapplyClassAurasForPlayer(Player* player)
     // Toggles (Endless Quiver, Warspirit) are the player's own, so they stay through a relog, unless the character can no longer have them
     RefreshClassAuraTogglesForPlayer(player);
     if (IsClassAuraSystemEnabled() == false)
+    {
+        // The pet side of the Magician bond goes with the owner's auras
+        RefreshMagicianPetAuraForPlayer(player);
         return;
+    }
     RefreshClassAurasForPlayer(player);
 }
 
@@ -958,32 +962,30 @@ void EverQuestMod::UpdateWizardFocusMovementForPlayer(Player* player, uint32 dif
 
 void EverQuestMod::RefreshMagicianPetAuraForPlayer(Player* player)
 {
-    uint32 petPassiveSpellID = GetClassAuraSpellID(EQ_CLASSAURA_SPELL_MAGICIAN_PET_PASSIVE);
-    if (petPassiveSpellID == 0)
-        return;
-    if (PlayerHasClassAura(player, EQ_CLASSAURA_SPELL_MAGICIAN_AURA) == false)
+    if (player == nullptr)
         return;
     Pet* pet = player->GetPet();
-    if (pet == nullptr || pet->IsInWorld() == false || pet->IsAlive() == false)
+    if (pet == nullptr || pet->IsInWorld() == false)
         return;
-    if (pet->HasAura(petPassiveSpellID) == false)
-        pet->AddAura(petPassiveSpellID, pet);
+    ApplyMagicianPetAuraToPet(pet);
 }
 
 void EverQuestMod::ApplyMagicianPetAuraToPet(Pet* pet)
 {
-    if (pet == nullptr || IsClassAuraSystemEnabled() == false)
+    // The pet side of the bond follows the owner's Bound Conjurer both ways.  It persists with the pet, so a pet that comes back to an owner
+    // who no longer holds the aura (the passive unlearned, the class aura system turned off) would otherwise keep it for good
+    if (pet == nullptr || IsEnabled == false)
         return;
     uint32 petPassiveSpellID = GetClassAuraSpellID(EQ_CLASSAURA_SPELL_MAGICIAN_PET_PASSIVE);
     if (petPassiveSpellID == 0)
         return;
     Player* owner = pet->GetOwner();
-    if (owner == nullptr)
-        return;
-    if (PlayerHasClassAura(owner, EQ_CLASSAURA_SPELL_MAGICIAN_AURA) == false)
-        return;
-    if (pet->HasAura(petPassiveSpellID) == false)
+    bool shouldHaveAura = IsClassAuraSystemEnabled() == true && owner != nullptr && PlayerHasClassAura(owner, EQ_CLASSAURA_SPELL_MAGICIAN_AURA) == true;
+    bool hasAura = pet->HasAura(petPassiveSpellID);
+    if (shouldHaveAura == true && hasAura == false && pet->IsAlive() == true)
         pet->AddAura(petPassiveSpellID, pet);
+    else if (shouldHaveAura == false && hasAura == true)
+        pet->RemoveAurasDueToSpell(petPassiveSpellID);
 }
 
 void EverQuestMod::HandleClassAuraPetStrike(Unit* attacker, Unit* victim)
