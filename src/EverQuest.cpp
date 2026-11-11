@@ -14194,10 +14194,12 @@ void EverQuestMod::UpdateRequiredClientDataVersion()
     RequiredClientDataVersion.store(isCheckActive == true ? ConfigSystemClientDataVersion : 0);
 }
 
-// Called on a network thread, so it touches nothing but its arguments and the atomic
+// Called on a network thread, so it touches nothing but its arguments and the atomic.  The high byte of what the client sends is the optional
+// content it has (MergedWorlds optional content: the client's MWContent::GetContentFlags, read by mod-rowow), not part of the version
 bool EverQuestMod::IsClientDataVersionAllowed(AccountTypes security, uint32 clientDataVersion, uint32& expectedClientDataVersion) const
 {
-    uint32 requiredVersion = RequiredClientDataVersion.load();
+    clientDataVersion &= EQ_CLIENT_DATA_VERSION_MASK;
+    uint32 requiredVersion = RequiredClientDataVersion.load() & EQ_CLIENT_DATA_VERSION_MASK;
     if (requiredVersion == 0 || clientDataVersion == requiredVersion)
         return true;
 
