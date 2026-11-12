@@ -26,6 +26,7 @@
 #include "Spell.h"
 #include "SpellMgr.h"
 #include "QuestDef.h"
+#include "WhoListCacheMgr.h"
 #include "World.h"
 #include "WorldSession.h"
 
@@ -1413,6 +1414,24 @@ public:
 
         // Any pending equipment storage commit must have executed before the logout save is queued
         EverQuest->WaitForPendingEquipmentStorageCommitForPlayer(player->GetGUID());
+    }
+
+    // The who list: EQ maps are the world Norrath, and the secondary class is the EQ one ("None" without one).  Not in a game identity form (the
+    // Ragnarok Online form), whose game names the classes; the two never both apply, so the modules' order doesn't matter
+    void OnPlayerWhoListInfo(Player* player, WhoListWorldInfo& info) override
+    {
+        if (EverQuest->IsEnabled == false)
+            return;
+        if (EverQuest->IsMapIDAnEverQuestMap(player->GetMapId()) == true)
+            info.World = "Norrath";
+        if (EverQuest->IsInGameIdentityForm(player) == true)
+            return;
+        std::string className = GetEQClassStringFromID(EverQuest->GetCurrentSecondEQClassForPlayer(player));
+        std::string::size_type abbreviationStart = className.find(" (");
+        if (abbreviationStart != std::string::npos)
+            className.erase(abbreviationStart); // "Shadow Knight (SHD)" as Shadow Knight
+        info.IsSecondaryClassTheClass = false;
+        info.SecondaryClass = className;
     }
 };
 
