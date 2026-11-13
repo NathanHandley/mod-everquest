@@ -38,6 +38,7 @@
 #include "Pet.h"
 #include "ScriptMgr.h"
 #include "ObjectMgr.h"
+#include "QueryHolder.h"
 #include "ReputationMgr.h"
 #include "Spell.h"
 #include "SpellAuraDefines.h"
@@ -46,6 +47,7 @@
 #include "SpellMgr.h"
 #include "Timer.h"
 #include "Tokenize.h"
+#include "Transaction.h"
 #include "Map.h"
 #include "MapMgr.h"
 #include "MotionMaster.h"
@@ -278,6 +280,8 @@ bool EverQuestMod::LoadConfigurationSystemDataFromDB()
                 ConfigSystemHearthstoneTetherSpellID = (uint32)atoi(value.c_str());
             else if (key == "PriestOfDiscordPortalCooldownSpellID")
                 ConfigSystemPriestOfDiscordPortalCooldownSpellID = (uint32)atoi(value.c_str());
+            else if (key == "ClassChangeSpellID")
+                ConfigSystemClassChangeSpellID = (uint32)atoi(value.c_str());
             else if (key == "ClassAuraEnabled")
                 ConfigSystemClassAuraEnabled = atoi(value.c_str()) != 0;
             else if (key.rfind("ClassAuraSpellID", 0) == 0)
@@ -10684,8 +10688,30 @@ void EverQuestMod::ApplyAdventurerAuraStateOnLogin(Player* player)
         return;
     }
 
+    // A game identity form (MergedWorlds' Ragnarok Online form, in the RO world) took it off with the character's buffs, and it means nothing
+    // there, so it isn't put on (a login in the RO world came here after the form was entered); UpdateAdventurerAuraAfterGameIdentityForm puts
+    // it back once the form is off.  The tracked setting is untouched, so nothing is lost by it
+    if (IsInGameIdentityForm(player) == true)
+        return;
+
     if (hasAura == false)
         player->CastSpell(player, ConfigSystemAdventurerAuraSpellID, true);
+}
+
+bool EverQuestMod::IsInGameIdentityForm(Player* player)
+{
+    // A game identity form (MergedWorlds' Ragnarok Online form) is another game's character, which puts this one's class away
+    return sScriptMgr->OnPlayerCanUseClassAbilities(player) == false;
+}
+
+void EverQuestMod::UpdateAdventurerAuraAfterGameIdentityForm(Player* player)
+{
+    // Turning into a game identity form takes the character's buffs off, the adventurer aura with them, so it comes back once the form is off
+    EverQuestPlayerClassAuraState* state = GetClassAuraStateForPlayer(player);
+    bool isInForm = IsInGameIdentityForm(player);
+    if (state->WasInGameIdentityForm == true && isInForm == false)
+        ApplyAdventurerAuraStateOnLogin(player);
+    state->WasInGameIdentityForm = isInForm;
 }
 
 bool EverQuestMod::IsMapIDAnEverQuestMap(uint32 mapID)
@@ -11255,8 +11281,9 @@ bool EverQuestMod::IsCreatureKillDisqualifyingForAdventurer(Player* player, Unit
     if (ConfigSystemCreatureTemplateIDMin == 0 || ConfigSystemCreatureTemplateIDMax == 0)
         return false;
 
-    // Only a kill made outside of an EverQuest map can ever count against the player
-    if (IsMapIDAnEverQuestMap(player->GetMapId()) == true)
+    // Only a kill made outside of an EverQuest map can ever count against the player, and not one made in another game's identity form
+    // (the Ragnarok Online form's kills are that game's)
+    if (IsMapIDAnEverQuestMap(player->GetMapId()) == true || IsInGameIdentityForm(player) == true)
         return false;
 
     // Pets, guardians, totems, vehicles and other summons should be ignored since their parent is what matters
@@ -11319,8 +11346,8 @@ bool EverQuestMod::IsQuestDisqualifyingForAdventurer(Player* player, uint32 ques
     if (ConfigSystemQuestSQLIDMin == 0 || ConfigSystemQuestSQLIDMax == 0)
         return false;
 
-    // Only a quest completed outside of an EverQuest map can ever count against the player
-    if (IsMapIDAnEverQuestMap(player->GetMapId()) == true)
+    // Only a quest completed outside of an EverQuest map can ever count against the player, and not one done in another game's identity form
+    if (IsMapIDAnEverQuestMap(player->GetMapId()) == true || IsInGameIdentityForm(player) == true)
         return false;
     if (questID >= ConfigSystemQuestSQLIDMin && questID <= ConfigSystemQuestSQLIDMax)
         return false;
@@ -11738,8 +11765,7 @@ bool EverQuestMod::RestoreAdventurerForPlayer(Player* targetPlayer, Player* gmPl
     EverQuestPlayerControllerData& controllerData = *GetOrLoadActivePlayerClassControllerData(targetPlayer);
     controllerData.AdventurerDisqualified = false;
     SaveAdventurerDisqualifiedForPlayer(targetPlayer);
-    if (targetPlayer->HasAura(ConfigSystemAdventurerAuraSpellID) == false)
-        targetPlayer->CastSpell(targetPlayer, ConfigSystemAdventurerAuraSpellID, true);
+    ApplyAdventurerAuraStateOnLogin(targetPlayer); // On now, or once a game identity form is off
 
     LOG_INFO("module.EverQuest", "EverQuestMod restored the EverQuest Adventurer buff on player {} (guid {}) for game master {} (guid {}): {} items mailed across {} mails, {} class levels reset, level snapshot {}",
         targetPlayer->GetName(), targetGUIDCounter, gmPlayer->GetName(), gmPlayer->GetGUID().GetCounter(),
@@ -11775,7 +11801,8 @@ void EverQuestMod::ProcessAdventurerStateOnLevelChange(Player* player)
 {
     if (ConfigSystemAdventurerAchievementID == 0 || ConfigSystemAdventurerAuraSpellID == 0 || ConfigAchievementAdventurerLevel == 0)
         return;
-    if (player->GetLevel() < ConfigAchievementAdventurerLevel)
+    // A game identity form's level is that game's character's, not this one's
+    if (player->GetLevel() < ConfigAchievementAdventurerLevel || IsInGameIdentityForm(player) == true)
         return;
 
     // The tracked setting decides this, not the aura, since the aura can be missing for reasons the player did not cause
@@ -15436,10 +15463,12 @@ void EverQuestMod::UpdateRequiredClientDataVersion()
     RequiredClientDataVersion.store(isCheckActive == true ? ConfigSystemClientDataVersion : 0);
 }
 
-// Called on a network thread, so it touches nothing but its arguments and the atomic
+// Called on a network thread, so it touches nothing but its arguments and the atomic.  The high byte of what the client sends is the optional
+// content it has (MergedWorlds optional content: the client's MWContent::GetContentFlags, read by mod-rowow), not part of the version
 bool EverQuestMod::IsClientDataVersionAllowed(AccountTypes security, uint32 clientDataVersion, uint32& expectedClientDataVersion) const
 {
-    uint32 requiredVersion = RequiredClientDataVersion.load();
+    clientDataVersion &= EQ_CLIENT_DATA_VERSION_MASK;
+    uint32 requiredVersion = RequiredClientDataVersion.load() & EQ_CLIENT_DATA_VERSION_MASK;
     if (requiredVersion == 0 || clientDataVersion == requiredVersion)
         return true;
 
@@ -15614,6 +15643,9 @@ void EverQuestMod::RecalculateTemporaryFactionReactionsForPlayer(Player* player)
     {
         AuraApplication const* appliedAurApp = appliedAuraItr.second;
         if (appliedAurApp == nullptr || appliedAurApp->GetBase() == nullptr)
+            continue;
+        // A client hidden form is a look alone (another module's: the character's identity for the world), not an illusion cast on the character
+        if (appliedAurApp->GetBase()->IsClientHidden() == true)
             continue;
         const EverQuestSpell& appliedSpell = GetSpellDataForSpellID(appliedAurApp->GetBase()->GetId());
         if (appliedSpell.IllusionFormEQRaceID != 0)
@@ -17964,9 +17996,167 @@ uint8 EverQuestMod::GetNextSecondEQClassForPlayer(Player* player)
     return GetOrLoadActivePlayerClassControllerData(player)->NextSecondClass;
 }
 
-void EverQuestMod::SetNextSecondEQClassForPlayer(Player* player, uint8 nextEQClass)
+// A secondary class change is a cast the player sits through, and the change itself happens the moment the cast finishes, with no relog.  While
+// the cast runs the class being changed to is held as the "next" class, which is otherwise always the same as the current one
+
+// Whether a secondary class change can start, or (asked again once its cast has finished) go through
+bool EverQuestMod::CanPlayerChangeSecondaryClassNow(Player* player, std::string& reasonOut)
 {
-    GetOrLoadActivePlayerClassControllerData(player)->NextSecondClass = nextEQClass;
+    if (player->IsInWorld() == false || player->IsBeingTeleported() == true || player->GetSession() == nullptr || player->GetSession()->PlayerLogout() == true)
+        reasonOut = "You cannot change your secondary EQ class right now.";
+    else if (player->IsAlive() == false)
+        reasonOut = "You cannot change your secondary EQ class while dead.";
+    else if (player->IsInCombat() == true)
+        reasonOut = "You cannot change your secondary EQ class while in combat.";
+    else if (player->IsInFlight() == true)
+        reasonOut = "You cannot change your secondary EQ class while on a flight path.";
+    else if (player->IsCharmed() == true || player->GetVehicle() != nullptr)
+        reasonOut = "You cannot change your secondary EQ class while something else has control of your character.";
+    else if (player->duel != nullptr)
+        reasonOut = "You cannot change your secondary EQ class during a duel.";
+    else if (player->InBattleground() == true || player->InBattlegroundQueue() == true)
+        reasonOut = "You cannot change your secondary EQ class while in a battleground or in the queue for one.";
+    else if (IsInGameIdentityForm(player) == true) // A game identity form (the Ragnarok Online form) wears the other game's gear, which the switch would store as EQ class gear
+        reasonOut = "Your secondary EverQuest class can't be changed while you are in another world's form.";
+    else
+    {
+        // Queues are matched on level, which changes with the class.  A group already made by the dungeon finder is left alone
+        lfg::LfgState lfgState = sLFGMgr->GetState(player->GetGUID());
+        if (lfgState == lfg::LFG_STATE_ROLECHECK || lfgState == lfg::LFG_STATE_QUEUED || lfgState == lfg::LFG_STATE_PROPOSAL)
+            reasonOut = "You cannot change your secondary EQ class while in the dungeon finder queue.";
+        else
+            return true;
+    }
+    return false;
+}
+
+Spell* EverQuestMod::GetActiveSecondaryClassChangeCastForPlayer(Player* player)
+{
+    if (ConfigSystemClassChangeSpellID == 0)
+        return nullptr;
+    Spell* spell = player->GetCurrentSpell(CURRENT_GENERIC_SPELL);
+    if (spell == nullptr || spell->m_spellInfo->Id != ConfigSystemClassChangeSpellID || spell->getState() == SPELL_STATE_FINISHED)
+        return nullptr;
+    return spell;
+}
+
+void EverQuestMod::ClearSecondaryClassChangeForPlayerGUID(ObjectGuid playerGUID)
+{
+    std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+    SecondaryClassChangeCastCompleteByPlayerGUID.erase(playerGUID);
+    SecondaryClassChangeCount.store(static_cast<uint32>(SecondaryClassChangeCastCompleteByPlayerGUID.size()));
+}
+
+// The player picked a secondary class (already checked as one their character can have)
+void EverQuestMod::BeginSecondaryClassChangeForPlayer(Player* player, uint8 eqClassID)
+{
+    ChatHandler handler(player->GetSession());
+    EverQuestPlayerControllerData* controllerData = GetOrLoadActivePlayerClassControllerData(player);
+
+    // Picking the class already held calls off a change that is under way
+    if (eqClassID == controllerData->CurrentSecondClass)
+    {
+        if (controllerData->NextSecondClass != controllerData->CurrentSecondClass)
+        {
+            AbandonSecondaryClassChangeForPlayer(player, true);
+            handler.PSendSysMessage("You stop changing your secondary EQ class, and remain |cff4CFF00{}|r.", GetEQClassStringFromID(eqClassID));
+        }
+        else
+        {
+            handler.PSendSysMessage("Your secondary EQ class is already |cff4CFF00{}|r.", GetEQClassStringFromID(eqClassID));
+            SendClassInfoAddonMessageToPlayer(player);
+        }
+        return;
+    }
+
+    if (ConfigSystemClassChangeSpellID == 0 || sSpellMgr->GetSpellInfo(ConfigSystemClassChangeSpellID) == nullptr)
+    {
+        LOG_ERROR("module.EverQuest", "EverQuestMod Secondary class changes need the class change spell (ClassChangeSpellID in mod_everquest_systemconfigs, spell {}), which is missing", ConfigSystemClassChangeSpellID);
+        handler.SendSysMessage("Secondary EQ class changes are not available right now.");
+        SendClassInfoAddonMessageToPlayer(player);
+        return;
+    }
+
+    std::string blockedReason;
+    if (CanPlayerChangeSecondaryClassNow(player, blockedReason) == false)
+    {
+        handler.SendSysMessage(blockedReason);
+        SendClassInfoAddonMessageToPlayer(player);
+        return;
+    }
+
+    // Picking the class that is already being changed to leaves its cast running
+    if (eqClassID == controllerData->NextSecondClass && GetActiveSecondaryClassChangeCastForPlayer(player) != nullptr)
+        return;
+
+    // One change at a time, so a new pick replaces the one being cast
+    if (controllerData->NextSecondClass != controllerData->CurrentSecondClass)
+        AbandonSecondaryClassChangeForPlayer(player, true);
+
+    controllerData->NextSecondClass = eqClassID;
+    {
+        std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+        SecondaryClassChangeCastCompleteByPlayerGUID[player->GetGUID()] = false;
+        SecondaryClassChangeCount.store(static_cast<uint32>(SecondaryClassChangeCastCompleteByPlayerGUID.size()));
+    }
+
+    // The cast is the player's own, so it can be refused, pushed back or interrupted like any other, and the client says why
+    if (player->CastSpell(player, ConfigSystemClassChangeSpellID, false) != SPELL_CAST_OK)
+    {
+        AbandonSecondaryClassChangeForPlayer(player, false);
+        return;
+    }
+
+    // Show the picked class as the one being changed to
+    SendClassInfoAddonMessageToPlayer(player);
+}
+
+// Drops a change that is under way, leaving the character as it is
+void EverQuestMod::AbandonSecondaryClassChangeForPlayer(Player* player, bool interruptCast)
+{
+    EverQuestPlayerControllerData* controllerData = GetOrLoadActivePlayerClassControllerData(player);
+    controllerData->NextSecondClass = controllerData->CurrentSecondClass;
+    ClearSecondaryClassChangeForPlayerGUID(player->GetGUID());
+
+    if (interruptCast == true && GetActiveSecondaryClassChangeCastForPlayer(player) != nullptr)
+        player->InterruptSpell(CURRENT_GENERIC_SPELL, false, false, true);
+
+    if (player->GetSession() != nullptr && player->GetSession()->PlayerLogout() == false)
+        SendClassInfoAddonMessageToPlayer(player);
+}
+
+// The class change cast ran its full time.  The change is left for the character's next update, clear of the spell that is still finishing here
+void EverQuestMod::HandleSecondaryClassChangeCastComplete(Player* player)
+{
+    std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+    auto classChangeItr = SecondaryClassChangeCastCompleteByPlayerGUID.find(player->GetGUID());
+    if (classChangeItr != SecondaryClassChangeCastCompleteByPlayerGUID.end())
+        classChangeItr->second = true;
+}
+
+void EverQuestMod::UpdateSecondaryClassChangeForPlayer(Player* player)
+{
+    if (SecondaryClassChangeCount.load() == 0)
+        return;
+
+    bool castComplete = false;
+    {
+        std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+        auto classChangeItr = SecondaryClassChangeCastCompleteByPlayerGUID.find(player->GetGUID());
+        if (classChangeItr == SecondaryClassChangeCastCompleteByPlayerGUID.end())
+            return;
+        castComplete = classChangeItr->second;
+    }
+
+    if (castComplete == true)
+    {
+        PerformLiveClassSwitch(player);
+        return;
+    }
+
+    // The cast ended some other way (moved, struck, cancelled), so nothing changes
+    if (GetActiveSecondaryClassChangeCastForPlayer(player) == nullptr)
+        AbandonSecondaryClassChangeForPlayer(player, false);
 }
 
 void EverQuestMod::SetInitialEQClassesForPlayer(Player* player)
@@ -18312,8 +18502,10 @@ EverQuestPlayerControllerData EverQuestMod::GetPlayerControllerData(Player* play
     else
     {
         Field* fields = queryResult->Fetch();
-        controllerData.NextSecondClass = fields[0].Get<uint8>();
         controllerData.CurrentSecondClass = fields[1].Get<uint8>();
+
+        // A change only exists while its cast is running, so one on record was never carried out (it used to wait for a logout)
+        controllerData.NextSecondClass = controllerData.CurrentSecondClass;
         controllerData.SecondaryExpPool = fields[2].Get<uint32>();
         controllerData.IllusionFaceID = (uint32)std::max(0, fields[3].Get<int32>());
         controllerData.ShowBardPulse = fields[4].Get<bool>();
@@ -20706,20 +20898,28 @@ void EverQuestMod::RestorePetLevelAfterMentorshipForPlayer(Player* player, uint3
         targetLevel);
 }
 
-void EverQuestMod::SaveMentorshipStateForPlayer(Player* player, uint8 role, uint8 realLevel, uint32 realExperience, float bankedProgress, uint32 petNumber, uint8 petRealLevel)
+bool EverQuestMod::SetMentorshipStateInControllerDataForPlayer(Player* player, uint8 role, uint8 realLevel, uint32 realExperience, float bankedProgress, uint32 petNumber, uint8 petRealLevel)
 {
     if (player == nullptr)
-        return;
+        return false;
 
     EverQuestPlayerControllerData* liveControllerData = GetOrLoadActivePlayerClassControllerData(player);
     if (liveControllerData == nullptr)
-        return;
+        return false;
     liveControllerData->MentorshipRole = role;
     liveControllerData->MentorshipRealLevel = realLevel;
     liveControllerData->MentorshipRealExperience = realExperience;
     liveControllerData->MentorshipBankedProgress = bankedProgress;
     liveControllerData->MentorshipPetNumber = petNumber;
     liveControllerData->MentorshipPetRealLevel = petRealLevel;
+    return true;
+}
+
+// Written on its own when no transaction is given, and as part of that transaction when one is
+void EverQuestMod::SaveMentorshipStateForPlayer(Player* player, uint8 role, uint8 realLevel, uint32 realExperience, float bankedProgress, uint32 petNumber, uint8 petRealLevel, CharacterDatabaseTransaction transaction)
+{
+    if (SetMentorshipStateInControllerDataForPlayer(player, role, realLevel, realExperience, bankedProgress, petNumber, petRealLevel) == false)
+        return;
 
     EverQuestPlayerControllerData controllerData;
     {
@@ -20730,7 +20930,7 @@ void EverQuestMod::SaveMentorshipStateForPlayer(Player* player, uint8 role, uint
         controllerData = controllerDataIterator->second;
     }
 
-    CharacterDatabase.Execute("INSERT INTO `mod_everquest_character_settings` (`guid`, `currentSecondaryClass`, `nextSecondaryClass`, `secondaryExpPool`, `mentorshipRole`, `mentorshipRealLevel`, `mentorshipRealExp`, `mentorshipBankedProgress`, `mentorshipPetNumber`, `mentorshipPetLevel`) VALUES ({}, {}, {}, {}, {}, {}, {}, {}, {}, {}) ON DUPLICATE KEY UPDATE `mentorshipRole` = {}, `mentorshipRealLevel` = {}, `mentorshipRealExp` = {}, `mentorshipBankedProgress` = {}, `mentorshipPetNumber` = {}, `mentorshipPetLevel` = {}",
+    std::string statement = Acore::StringFormat("INSERT INTO `mod_everquest_character_settings` (`guid`, `currentSecondaryClass`, `nextSecondaryClass`, `secondaryExpPool`, `mentorshipRole`, `mentorshipRealLevel`, `mentorshipRealExp`, `mentorshipBankedProgress`, `mentorshipPetNumber`, `mentorshipPetLevel`) VALUES ({}, {}, {}, {}, {}, {}, {}, {}, {}, {}) ON DUPLICATE KEY UPDATE `mentorshipRole` = {}, `mentorshipRealLevel` = {}, `mentorshipRealExp` = {}, `mentorshipBankedProgress` = {}, `mentorshipPetNumber` = {}, `mentorshipPetLevel` = {}",
         player->GetGUID().GetCounter(),
         controllerData.CurrentSecondClass,
         controllerData.NextSecondClass,
@@ -20747,6 +20947,37 @@ void EverQuestMod::SaveMentorshipStateForPlayer(Player* player, uint8 role, uint
         controllerData.MentorshipBankedProgress,
         controllerData.MentorshipPetNumber,
         controllerData.MentorshipPetRealLevel);
+    if (transaction)
+        transaction->Append(statement);
+    else
+        CharacterDatabase.Execute(statement);
+}
+
+// Takes what is on record about a borrowed level off, once the character is standing at its own level again
+void EverQuestMod::SaveCharacterAfterMentorshipForPlayer(Player* player)
+{
+    if (player == nullptr)
+        return;
+
+    // That record and the character row holding the level have to change together.  Taken off by itself, it left the row saying the borrowed level until the
+    // next save, with nothing on record to put the real one back if the server went down before then.  So the character is saved here, in one transaction
+    // with the record.  A character in the middle of a far teleport cannot be saved (Player::SaveToDB puts it off until the teleport is done), so that one
+    // only has the record taken off, as does one that is not in the world
+    if (player->IsInWorld() == true && player->IsBeingTeleportedFar() == false)
+    {
+        // As before a logout save, an equipment change still on its way to the database has to have landed before the character is saved
+        WaitForPendingEquipmentStorageCommitForPlayer(player->GetGUID());
+
+        CharacterDatabaseTransaction transaction = CharacterDatabase.BeginTransaction();
+        AppendCharacterRowLockAnchor(transaction, player->GetGUID().GetCounter());
+        player->SaveToDB(transaction, false, false);
+        SaveMentorshipStateForPlayer(player, EQ_MENTORSHIP_ROLE_NONE, 0, 0, 0.0f, 0, 0, transaction);
+        CharacterDatabase.CommitTransaction(transaction);
+    }
+
+    // Also written by itself, after that transaction.  It changes nothing when the transaction went in.  When it did not, the record must still come off, since
+    // a later save would otherwise write the real level next to a record that says to put an older one back at the next login
+    SaveMentorshipStateForPlayer(player, EQ_MENTORSHIP_ROLE_NONE, 0, 0, 0.0f, 0, 0);
 }
 
 void EverQuestMod::AwardBankedMentorshipProgressToPlayer(Player* player, float bankedProgress)
@@ -21256,7 +21487,9 @@ void EverQuestMod::EndMentorshipForPlayer(Player* player, const string& reason, 
         // The owner is back, so the pet that came down with them has to be put back too
         RestorePetLevelAfterMentorshipForPlayer(player, state.PetNumber, state.PetRealLevel);
     }
-    SaveMentorshipStateForPlayer(player, EQ_MENTORSHIP_ROLE_NONE, 0, 0, 0.0f, 0, 0);
+
+    // Nothing from here on may take this character for one still standing at a borrowed level.  What the database has on record comes off further down, with the save
+    SetMentorshipStateInControllerDataForPlayer(player, EQ_MENTORSHIP_ROLE_NONE, 0, 0, 0.0f, 0, 0);
 
     if (player->GetSession() != nullptr)
         ChatHandler(player->GetSession()).PSendSysMessage("Your mentorship with |cff00FF00{}|r has ended{} You are back to level |cff00FF00{}|r.", state.PartnerName, reasonSuffix, player->GetLevel());
@@ -21264,6 +21497,9 @@ void EverQuestMod::EndMentorshipForPlayer(Player* player, const string& reason, 
     // Only ever paid onto the real level.  Skipped when there was no real level to go back to, so a damaged row cannot hand out levels while the character is still set at a borrowed one
     if (state.Role == EQ_MENTORSHIP_ROLE_APPRENTICE && state.RealLevel != 0)
         AwardBankedMentorshipProgressToPlayer(player, state.BankedProgress);
+
+    // Saved with what was just paid out, so the record is never off while the character row still says the borrowed level
+    SaveCharacterAfterMentorshipForPlayer(player);
 
     SendMentorshipStateToPlayer(player);
 }
@@ -21621,7 +21857,7 @@ void EverQuestMod::RestoreMentorshipStateOnLoginForPlayer(Player* player)
         // Player::LoadPet runs before this, so a pet that was out is already loaded and standing at the borrowed level it was saved at.  One that is not out is put back in the stable entry and the row instead
         RestorePetLevelAfterMentorshipForPlayer(player, petNumber, petRealLevel);
     }
-    SaveMentorshipStateForPlayer(player, EQ_MENTORSHIP_ROLE_NONE, 0, 0, 0.0f, 0, 0);
+    SetMentorshipStateInControllerDataForPlayer(player, EQ_MENTORSHIP_ROLE_NONE, 0, 0, 0.0f, 0, 0);
 
     if (player->GetSession() != nullptr)
         ChatHandler(player->GetSession()).PSendSysMessage("Your mentorship did not end cleanly, so you have been put back to level |cff00FF00{}|r.", realLevel);
@@ -21629,6 +21865,9 @@ void EverQuestMod::RestoreMentorshipStateOnLoginForPlayer(Player* player)
     // Same rule as the clean end: the bank is only ever paid onto the real level
     if (role == EQ_MENTORSHIP_ROLE_APPRENTICE && realLevel != 0)
         AwardBankedMentorshipProgressToPlayer(player, bankedProgress);
+
+    // And the same save as the clean end, so going down a second time before the next save does not leave the borrowed level with nothing on record to undo it
+    SaveCharacterAfterMentorshipForPlayer(player);
 }
 
 map<string, EverQuestPlayerClassInfoItem> EverQuestMod::GetPlayerClassInfoByClassNameForPlayer(Player* player)
@@ -21683,17 +21922,10 @@ bool EverQuestMod::DoesSavedClassDataExistForPlayer(Player* player, uint8 lookup
 void EverQuestMod::CopyCharacterDataIntoModCharacterTable(Player* player, CharacterDatabaseTransaction& transaction)
 {
     uint8 curEQClass = GetCurrentSecondEQClassForPlayer(player);
+
+    // The talent reset cost and timer are not readable from the player, so they are filled in from the character row by the statement after the insert
     uint32 resetTalentsCost = 0;
     uint32 resetTalentsTime = 0;
-    QueryResult queryResult = CharacterDatabase.Query("SELECT resettalents_cost, resettalents_time FROM characters WHERE guid = {}", player->GetGUID().GetCounter());
-    if (!queryResult)
-        LOG_ERROR("module.EverQuest", "EverQuestMod Error pulling character data for guid {}, so the stored talent reset cost and timer for eqclass {} fall back to zero", player->GetGUID().GetCounter(), curEQClass);
-    else
-    {
-        Field* fields = queryResult->Fetch();
-        resetTalentsCost = fields[0].Get<uint32>();
-        resetTalentsTime = fields[1].Get<uint32>();
-    }
 
     auto finiteAlways = [](float f) { return std::isfinite(f) ? f : 0.0f; };
     transaction->Append("DELETE FROM `mod_everquest_characters` WHERE guid = {} and eqclass = {}", player->GetGUID().GetCounter(), curEQClass);
@@ -21718,6 +21950,9 @@ void EverQuestMod::CopyCharacterDataIntoModCharacterTable(Player* player, Charac
         player->GetSpecsCount(),
         player->GetActiveSpec()
     );
+
+    // This runs straight after the save of the character has been committed, so the row holds what the player object does
+    transaction->Append("UPDATE `mod_everquest_characters` parked INNER JOIN `characters` live ON live.`guid` = parked.`guid` SET parked.`resettalents_cost` = live.`resettalents_cost`, parked.`resettalents_time` = live.`resettalents_time` WHERE parked.`guid` = {} AND parked.`eqclass` = {}", player->GetGUID().GetCounter(), curEQClass);
 }
 
 void EverQuestMod::MoveTalentsToModTalentsTable(Player* player, CharacterDatabaseTransaction& transaction)
@@ -22023,31 +22258,33 @@ void EverQuestMod::MoveGlyphsToModGlyhpsTable(Player* player, CharacterDatabaseT
     transaction->Append("DELETE FROM `character_glyphs` WHERE guid = {}", player->GetGUID().GetCounter());
 }
 
+// The auras that stay on a character through a secondary class switch (like gate tether).  The database move and the player object both go by this
+std::unordered_set<uint32> EverQuestMod::GetAuraSpellIDsKeptOnSecondaryClassSwitch()
+{
+    std::unordered_set<uint32> keptSpellIDs;
+    for (auto const& spellPair : SpellDataBySpellID)
+    {
+        if (spellPair.second.AuraStaysOnSecondaryClassSwitch == true)
+            keptSpellIDs.insert(spellPair.second.SpellID);
+    }
+
+    // Make certain that the adventurer aura is never missed in retention
+    if (ConfigSystemAdventurerAuraSpellID != 0)
+        keptSpellIDs.insert(ConfigSystemAdventurerAuraSpellID);
+    return keptSpellIDs;
+}
+
 void EverQuestMod::MoveAuraToModAuraTable(Player* player, CharacterDatabaseTransaction& transaction)
 {
     uint8 curEQClass = GetCurrentSecondEQClassForPlayer(player);
 
     // Build the list of spells that should remain on character_aura across a secondary class switch (like gate tether)
     string keptSpellsList = "";
-    bool adventurerAuraAlreadyKept = false;
-    for (auto const& spellPair : SpellDataBySpellID)
-    {
-        if (spellPair.second.AuraStaysOnSecondaryClassSwitch == true)
-        {
-            if (keptSpellsList.empty() == false)
-                keptSpellsList += ",";
-            keptSpellsList += std::to_string(spellPair.second.SpellID);
-            if (spellPair.second.SpellID == ConfigSystemAdventurerAuraSpellID)
-                adventurerAuraAlreadyKept = true;
-        }
-    }
-
-    // Make certain that the adventurer aura is never missed in retention
-    if (ConfigSystemAdventurerAuraSpellID != 0 && adventurerAuraAlreadyKept == false)
+    for (uint32 keptSpellID : GetAuraSpellIDsKeptOnSecondaryClassSwitch())
     {
         if (keptSpellsList.empty() == false)
             keptSpellsList += ",";
-        keptSpellsList += std::to_string(ConfigSystemAdventurerAuraSpellID);
+        keptSpellsList += std::to_string(keptSpellID);
     }
 
     if (keptSpellsList.empty() == true)
@@ -22081,40 +22318,31 @@ void EverQuestMod::MoveQuestDataToModQuestTables(Player* player, CharacterDataba
     transaction->Append("DELETE FROM `character_queststatus_rewarded` WHERE guid = {}", player->GetGUID().GetCounter());
 }
 
-bool EverQuestMod::UpdateCharacterFromModCharacterTable(Player* player, uint8 pullEQClassID, CharacterDatabaseTransaction& transaction)
+void EverQuestMod::UpdateCharacterFromModCharacterRow(Player* player, QueryResult const& modCharacterRow, CharacterDatabaseTransaction& transaction)
 {
-    QueryResult queryResult = CharacterDatabase.Query("SELECT `level`, `xp`, `leveltime`, `rest_bonus`, `resettalents_cost`, `resettalents_time`, `health`, `power1`, `power2`, `power3`, `power4`, `power5`, `power6`, `power7`, `talentGroupsCount`, `activeTalentGroup` FROM mod_everquest_characters WHERE guid = {} AND eqclass = {}", player->GetGUID().GetCounter(), pullEQClassID);
-    if (!queryResult)
-    {
-        LOG_ERROR("module.EverQuest", "EverQuestMod Error pulling character data for guid {} eqclass {}", player->GetGUID().GetCounter(), pullEQClassID);
-        return false;
-    }
-    else
-    {
-        Field* fields = queryResult->Fetch();
-        auto finiteAlways = [](float f) { return std::isfinite(f) ? f : 0.0f; };
+    // SELECT `level`, `xp`, `leveltime`, `rest_bonus`, `resettalents_cost`, `resettalents_time`, `health`, `power1`, `power2`, `power3`, `power4`, `power5`, `power6`, `power7`, `talentGroupsCount`, `activeTalentGroup` FROM mod_everquest_characters
+    Field* fields = modCharacterRow->Fetch();
+    auto finiteAlways = [](float f) { return std::isfinite(f) ? f : 0.0f; };
 
-        transaction->Append("UPDATE characters SET `level` = {}, `xp` = {}, `leveltime` = {}, `rest_bonus` = {}, `resettalents_cost` = {}, `resettalents_time` = {}, `health` = {}, `power1` = {}, `power2` = {}, `power3` = {}, `power4` = {}, `power5` = {}, `power6` = {}, `power7` = {}, `talentGroupsCount` = {}, `activeTalentGroup` = {} WHERE `guid` = {}",
-            fields[0].Get<uint8>(),                 // level
-            fields[1].Get<uint32>(),                // xp
-            fields[2].Get<uint32>(),                // leveltime
-            finiteAlways(fields[3].Get<float>()),   // rest_bonus
-            fields[4].Get<uint32>(),                // resettalents_cost
-            fields[5].Get<uint32>(),                // resettalents_time
-            fields[6].Get<uint32>(),                // health
-            fields[7].Get<uint32>(),                // power1
-            fields[8].Get<uint32>(),                // power2
-            fields[9].Get<uint32>(),                // power3
-            fields[10].Get<uint32>(),               // power4
-            fields[11].Get<uint32>(),               // power5
-            fields[12].Get<uint32>(),               // power6
-            fields[13].Get<uint32>(),               // power7
-            fields[14].Get<uint8>(),                // talentGroupsCount
-            fields[15].Get<uint8>(),                // activeTalentGroup
-            player->GetGUID().GetCounter()
-        );
-    }
-    return true;
+    transaction->Append("UPDATE characters SET `level` = {}, `xp` = {}, `leveltime` = {}, `rest_bonus` = {}, `resettalents_cost` = {}, `resettalents_time` = {}, `health` = {}, `power1` = {}, `power2` = {}, `power3` = {}, `power4` = {}, `power5` = {}, `power6` = {}, `power7` = {}, `talentGroupsCount` = {}, `activeTalentGroup` = {} WHERE `guid` = {}",
+        fields[0].Get<uint8>(),                 // level
+        fields[1].Get<uint32>(),                // xp
+        fields[2].Get<uint32>(),                // leveltime
+        finiteAlways(fields[3].Get<float>()),   // rest_bonus
+        fields[4].Get<uint32>(),                // resettalents_cost
+        fields[5].Get<uint32>(),                // resettalents_time
+        fields[6].Get<uint32>(),                // health
+        fields[7].Get<uint32>(),                // power1
+        fields[8].Get<uint32>(),                // power2
+        fields[9].Get<uint32>(),                // power3
+        fields[10].Get<uint32>(),               // power4
+        fields[11].Get<uint32>(),               // power5
+        fields[12].Get<uint32>(),               // power6
+        fields[13].Get<uint32>(),               // power7
+        fields[14].Get<uint8>(),                // talentGroupsCount
+        fields[15].Get<uint8>(),                // activeTalentGroup
+        player->GetGUID().GetCounter()
+    );
 }
 
 void EverQuestMod::CopyModSpellTableIntoCharacterSpells(Player* player, uint8 pullEQClassID, CharacterDatabaseTransaction& transaction)
@@ -22222,107 +22450,18 @@ void EverQuestMod::UpdatePlayerControllerForClassChange(Player* player, uint8 ne
         currentExpPool);
 }
 
-map<uint8, EverQuestPlayerEquipedItemData> EverQuestMod::GetVisibleItemsBySlotForPlayerClass(Player* player, uint8 eqClassID)
+// Queues everything that turns the character's rows from the current secondary class into the next one: the current class's level, talents, spells,
+// skills, action bars, glyphs, auras, worn equipment, quests and pets are parked in the mod tables, and the next class's come out of them (or it
+// starts fresh if it has never been played).  It reads the character tables as the statements run, so the save of the character as it stands
+// must already have been committed, and nothing here can fail part way
+void EverQuestMod::AppendClassSwitchToTransaction(Player* player, uint8 nextSecondaryEQClass, bool isNew, uint8 nextClassLevel, QueryResult const& nextClassCharacterRow, CharacterDatabaseTransaction& transaction)
 {
-    // Start with a list of blank inventory display slots
-    map<uint8, EverQuestPlayerEquipedItemData> visibleItems;
-    for (uint8 i = 0; i < 18; ++i)
-    {
-        EverQuestPlayerEquipedItemData curItem;
-        curItem.ItemID = 0;
-        curItem.PermEnchant = 0;
-        curItem.Slot = i;
-        curItem.TempEnchant = 0;
-        curItem.ItemInstanceGUID = 0;
-        visibleItems.insert(pair<uint8, EverQuestPlayerEquipedItemData>(i, curItem));
-    }
-
-    // If current class, grab those items
-    if (GetCurrentSecondEQClassForPlayer(player) == eqClassID)
-    {
-        LOG_ERROR("module.EverQuest", "EverQuestMod Getting visible item list for current player is unimplemented");
-    }
-    // Otherwise, retrieve from the database
-    else
-    {
-        QueryResult queryResult = CharacterDatabase.Query("SELECT CI.`slot`, II.`itemEntry`, II.`enchantments`, II.`guid` FROM `mod_everquest_character_class_inventory` CI INNER JOIN `item_instance` II on II.guid = CI.item WHERE CI.`bag` = 0 AND CI.`slot` <= 18 AND CI.`guid` = {} AND `eqclass` = {}", player->GetGUID().GetCounter(), eqClassID);
-        if (queryResult && queryResult->GetRowCount() > 0)
-        {
-            do
-            {
-                Field* fields = queryResult->Fetch();
-                uint8 slot = fields[0].Get<uint8>();
-                uint32 itemID = fields[1].Get<uint32>();
-                string enchantString = fields[2].Get<string>();
-                uint32 itemInstanceGUID = fields[3].Get<uint32>();
-
-                // Break out enchant values, guarding against short or malformed enchantment strings
-                std::vector<std::string_view> tokens = Acore::Tokenize(enchantString, ' ', false);
-                uint32 permEnchant = 0;
-                uint32 tempEnchant = 0;
-                if (tokens.size() > PERM_ENCHANTMENT_SLOT * MAX_ENCHANTMENT_OFFSET)
-                    permEnchant = Acore::StringTo<uint32>(tokens[PERM_ENCHANTMENT_SLOT * MAX_ENCHANTMENT_OFFSET]).value_or(0);
-                if (tokens.size() > TEMP_ENCHANTMENT_SLOT * MAX_ENCHANTMENT_OFFSET)
-                    tempEnchant = Acore::StringTo<uint32>(tokens[TEMP_ENCHANTMENT_SLOT * MAX_ENCHANTMENT_OFFSET]).value_or(0);
-
-                // Store
-                visibleItems[slot].Slot = slot;
-                visibleItems[slot].ItemID = itemID;
-                visibleItems[slot].PermEnchant = permEnchant;
-                visibleItems[slot].TempEnchant = tempEnchant;
-                visibleItems[slot].ItemInstanceGUID = itemInstanceGUID;
-            } while (queryResult->NextRow());
-        }
-    }
-
-    // If we're using the transmog mod, factor for that by pulling those visuals too (TODO: this is always true right now)
-    //if (ConfigUsingTransmogMod)
-    //{
-        QueryResult queryResult = CharacterDatabase.Query("SELECT `GUID`, `FakeEntry` FROM custom_transmogrification WHERE `Owner` = {}", player->GetGUID().GetCounter());
-        if (queryResult && queryResult->GetRowCount() > 0)
-        {
-            do
-            {
-                Field* fields = queryResult->Fetch();
-                uint32 itemInstanceGUID = fields[0].Get<uint32>();
-                uint32 fakeItemID = fields[1].Get<uint32>();
-
-                // Replace any matches
-                for (auto& visibleItem : visibleItems)
-                {
-                    if (visibleItem.second.ItemInstanceGUID == itemInstanceGUID)
-                        visibleItem.second.ItemID = fakeItemID;
-                }
-            } while (queryResult->NextRow());
-        }
-    //}
-
-    return visibleItems;
-}
-
-bool EverQuestMod::PerformClassSwitch(Player* player)
-{
-    uint8 nextSecondaryEQClass = GetNextSecondEQClassForPlayer(player);
-    bool isNew = !DoesSavedClassDataExistForPlayer(player, nextSecondaryEQClass);
-
     // A brand new secondary class starts at the configured start level, and one that has been played before comes back at the
-    // level it was parked at.  Anything that carries across the switch has to be measured against that level, and not against
-    // the level of the class being left behind
+    // level it was parked at.  Anything that carries across the switch has to be measured against that level (nextClassLevel), and not
+    // against the level of the class being left behind
     uint32 startLevel = player->getClass() != CLASS_DEATH_KNIGHT
         ? sWorld->getIntConfig(CONFIG_START_PLAYER_LEVEL)
         : sWorld->getIntConfig(CONFIG_START_HEROIC_PLAYER_LEVEL);
-    uint8 nextClassLevel = (uint8)startLevel;
-    if (isNew == false)
-    {
-        map<uint8, uint8> levelsByEQClass = GetClassLevelsByClassForPlayer(player);
-        auto nextClassLevelItr = levelsByEQClass.find(nextSecondaryEQClass);
-        if (nextClassLevelItr != levelsByEQClass.end())
-            nextClassLevel = nextClassLevelItr->second;
-    }
-
-    // Set up the transaction
-    CharacterDatabaseTransaction transaction = CharacterDatabase.BeginTransaction();
-    AppendCharacterRowLockAnchor(transaction, player->GetGUID().GetCounter());
 
     // Perform moves into the mod tables to reflect this character's class
     CopyCharacterDataIntoModCharacterTable(player, transaction);
@@ -22362,9 +22501,8 @@ bool EverQuestMod::PerformClassSwitch(Player* player)
     // Existing
     else
     {
-        // Copy in the stored version for existing.  Nothing has been committed yet, so a failed read here can still abandon the whole transaction
-        if (UpdateCharacterFromModCharacterTable(player, nextSecondaryEQClass, transaction) == false)
-            return false;
+        // Copy in the stored version for existing
+        UpdateCharacterFromModCharacterRow(player, nextClassCharacterRow, transaction);
         CopyModSpellTableIntoCharacterSpells(player, nextSecondaryEQClass, transaction);
         CopyModActionTableIntoCharacterAction(player, nextSecondaryEQClass, transaction);
         CopyModSkillTableIntoCharacterSkills(player, nextSecondaryEQClass, transaction);
@@ -22385,22 +22523,230 @@ bool EverQuestMod::PerformClassSwitch(Player* player)
 
     // Update current class
     UpdatePlayerControllerForClassChange(player, nextSecondaryEQClass, transaction);
-    GetOrLoadActivePlayerClassControllerData(player)->CurrentSecondClass = nextSecondaryEQClass;
 
-    // The controller data outlives the logout, so the talent level held through deaths has to follow the profile that is now the live one
-    GetOrLoadActivePlayerClassControllerData(player)->DeathTalentLevel = isNew == true ? 0 : LoadDeathTalentLevelForPlayerGUIDAndEQClass(player->GetGUID().GetCounter(), nextSecondaryEQClass);
-
-    // A class taken on for the first time is owed its start items, but this runs at logout where nothing can reach the character's bags
+    // A class taken on for the first time is owed its start items, which are handed over once the switch is through
     if (isNew == true && PlayerClassStartItemWOWIDsByEQClassID.find(nextSecondaryEQClass) != PlayerClassStartItemWOWIDsByEQClassID.end())
-    {
-        GetOrLoadActivePlayerClassControllerData(player)->PendingStartItemEQClass = nextSecondaryEQClass;
         transaction->Append("UPDATE `mod_everquest_character_settings` SET `pendingStartItemEQClass` = {} WHERE `guid` = {}", nextSecondaryEQClass, player->GetGUID().GetCounter());
+}
+
+// Carries out the secondary class change a finished cast asked for, on a character who stays in the world throughout.  The database is switched
+// first, exactly as it always was, and then the player object takes on what the database now holds the way a login would
+bool EverQuestMod::PerformLiveClassSwitch(Player* player)
+{
+    EverQuestPlayerControllerData* controllerData = GetOrLoadActivePlayerClassControllerData(player);
+    uint8 previousSecondaryEQClass = controllerData->CurrentSecondClass;
+    uint8 nextSecondaryEQClass = controllerData->NextSecondClass;
+    uint32 playerGUIDCounter = player->GetGUID().GetCounter();
+    ChatHandler handler(player->GetSession());
+
+    // Whatever happens below, the change stops being under way here
+    ClearSecondaryClassChangeForPlayerGUID(player->GetGUID());
+    controllerData->NextSecondClass = previousSecondaryEQClass;
+    if (nextSecondaryEQClass == previousSecondaryEQClass)
+        return false;
+
+    // Things can have changed in the moment since the cast finished
+    std::string blockedReason;
+    if (CanPlayerChangeSecondaryClassNow(player, blockedReason) == false)
+    {
+        handler.SendSysMessage(blockedReason);
+        SendClassInfoAddonMessageToPlayer(player);
+        return false;
     }
 
-    // Commit the transaction
-    CharacterDatabase.CommitTransaction(transaction);
+    // The parked class is read straight from the database below, so everything already queued for writing has to have been written first: an
+    // equipment change, or exp pool levels spent on the class being changed to
+    uint32 switchStartMS = getMSTime();
+    WaitForPendingEquipmentStorageCommitForPlayer(player->GetGUID());
+    {
+        CharacterDatabaseTransaction flushTransaction = CharacterDatabase.BeginTransaction();
+        AppendCharacterRowLockAnchor(flushTransaction, playerGUIDCounter);
+        TransactionCallback flushCallback = CharacterDatabase.AsyncCommitTransaction(flushTransaction);
+        flushCallback.m_future.wait();
+    }
 
+    // Everything that could fail is read before anything is changed
+    bool isNew = !DoesSavedClassDataExistForPlayer(player, nextSecondaryEQClass);
+    uint32 startLevel = player->getClass() != CLASS_DEATH_KNIGHT
+        ? sWorld->getIntConfig(CONFIG_START_PLAYER_LEVEL)
+        : sWorld->getIntConfig(CONFIG_START_HEROIC_PLAYER_LEVEL);
+    uint8 nextClassLevel = (uint8)startLevel;
+    QueryResult nextClassCharacterRow;
+    if (isNew == false)
+    {
+        nextClassCharacterRow = CharacterDatabase.Query("SELECT `level`, `xp`, `leveltime`, `rest_bonus`, `resettalents_cost`, `resettalents_time`, `health`, `power1`, `power2`, `power3`, `power4`, `power5`, `power6`, `power7`, `talentGroupsCount`, `activeTalentGroup` FROM mod_everquest_characters WHERE guid = {} AND eqclass = {}", playerGUIDCounter, nextSecondaryEQClass);
+        if (!nextClassCharacterRow)
+        {
+            LOG_ERROR("module.EverQuest", "EverQuestMod Error pulling character data for guid {} eqclass {}, so the secondary class change was not made", playerGUIDCounter, nextSecondaryEQClass);
+            handler.SendSysMessage("Your secondary EQ class could not be changed right now.");
+            SendClassInfoAddonMessageToPlayer(player);
+            return false;
+        }
+        nextClassLevel = nextClassCharacterRow->Fetch()[0].Get<uint8>();
+    }
+
+    // What the outgoing class was doing ends here, as it would at a logout.  A borrowed level is handed back before the character is saved
+    EndMentorshipForPlayer(player, "you changed class", true);
+    if (ConfigPlayerLevelCap != 0)
+        ProcessLevelCapStateForPlayer(player);
+    StopTrackingForPlayer(player, false);
+    ClearClassAuraStateForPlayer(player);
+    player->PrepareForProfileSwap();
+
+    // The character as it stands is saved first, in a transaction of its own, as the logout save always was: a switch that then fails takes
+    // nothing the character had earned with it.  It is saved as a logout saves, leaving out no aura or cooldown for being short.  Waiting on
+    // the switch also waits out everything queued ahead of it (the pet's own save among them), so what is read back afterwards is what a
+    // login would read
+    bool committed = false;
+    if (player->IsBeingTeleported() == false)
+    {
+        CharacterDatabaseTransaction saveTransaction = CharacterDatabase.BeginTransaction();
+        AppendCharacterRowLockAnchor(saveTransaction, playerGUIDCounter);
+        player->SaveToDB(saveTransaction, false, true);
+        TransactionCallback saveCallback = CharacterDatabase.AsyncCommitTransaction(saveTransaction);
+        if (saveCallback.m_future.get() == true)
+        {
+            // The switch reads the character tables as its statements run, which now hold the save
+            CharacterDatabaseTransaction switchTransaction = CharacterDatabase.BeginTransaction();
+            AppendCharacterRowLockAnchor(switchTransaction, playerGUIDCounter);
+            AppendClassSwitchToTransaction(player, nextSecondaryEQClass, isNew, nextClassLevel, nextClassCharacterRow, switchTransaction);
+            TransactionCallback switchCallback = CharacterDatabase.AsyncCommitTransaction(switchTransaction);
+            committed = switchCallback.m_future.get();
+        }
+    }
+    if (committed == false)
+    {
+        // The switch did not reach the database, so the character carries on as the class it was, with what was ended for the change started again
+        LOG_ERROR("module.EverQuest", "EverQuestMod Could not commit the secondary class change from eqclass {} to {} for player {} with GUID {}", previousSecondaryEQClass, nextSecondaryEQClass, player->GetName(), playerGUIDCounter);
+        ReapplyClassAurasForPlayer(player);
+        player->LoadPet();
+        handler.SendSysMessage("Your secondary EQ class could not be changed right now.");
+        SendClassInfoAddonMessageToPlayer(player);
+        return false;
+    }
+
+    // The database holds the new class from here on, and so does everything that asks which class the character is
+    uint32 switchCommittedMS = getMSTime();
+    controllerData->CurrentSecondClass = nextSecondaryEQClass;
+    controllerData->NextSecondClass = nextSecondaryEQClass;
+
+    // The talent level held through deaths follows the profile that is now the live one
+    controllerData->DeathTalentLevel = isNew == true ? 0 : LoadDeathTalentLevelForPlayerGUIDAndEQClass(playerGUIDCounter, nextSecondaryEQClass);
+    if (isNew == true && PlayerClassStartItemWOWIDsByEQClassID.find(nextSecondaryEQClass) != PlayerClassStartItemWOWIDsByEQClassID.end())
+        controllerData->PendingStartItemEQClass = nextSecondaryEQClass;
+
+    // Read back what a login would read
+    std::shared_ptr<CharacterDatabaseQueryHolder> holder = Player::CreateProfileSwapQueryHolder(player->GetGUID());
+    SQLQueryHolderCallback holderCallback = CharacterDatabase.DelayQueryHolder(holder);
+    holderCallback.m_future.wait();
+
+    // The auras that stayed are the ones on the kept list that the save really wrote, since one that cannot be saved would not survive a relog either
+    std::unordered_set<uint32> keptAuraSpellIDs;
+    {
+        std::unordered_set<uint32> keepableAuraSpellIDs = GetAuraSpellIDsKeptOnSecondaryClassSwitch();
+        QueryResult savedAuraQueryResult = CharacterDatabase.Query("SELECT DISTINCT `spell` FROM `character_aura` WHERE `guid` = {}", playerGUIDCounter);
+        if (savedAuraQueryResult)
+        {
+            do
+            {
+                uint32 savedAuraSpellID = savedAuraQueryResult->Fetch()[0].Get<uint32>();
+                if (keepableAuraSpellIDs.find(savedAuraSpellID) != keepableAuraSpellIDs.end())
+                    keptAuraSpellIDs.insert(savedAuraSpellID);
+            } while (savedAuraQueryResult->NextRow());
+        }
+    }
+
+    if (player->ReloadProfileFromDB(*holder, keptAuraSpellIDs) == false)
+    {
+        // The player object still holds the old class while the database holds the new one.  The core has stopped it saving, and a relog loads the new class
+        LOG_ERROR("module.EverQuest", "EverQuestMod Could not load the secondary class change from eqclass {} to {} for player {} with GUID {}, so they were disconnected to pick it up at login", previousSecondaryEQClass, nextSecondaryEQClass, player->GetName(), playerGUIDCounter);
+        player->GetSession()->KickPlayer("EverQuest secondary class change could not be loaded");
+        return false;
+    }
+
+    // The module's own share of a login, then the client is told
+    RefreshPlayerAfterSecondaryClassChange(player);
+    player->FinishProfileSwap();
+
+    handler.PSendSysMessage("Your secondary EQ class is now |cff4CFF00{}|r.", GetEQClassStringFromID(nextSecondaryEQClass));
+    SendClassInfoAddonMessageToPlayer(player);
+
+    // The map this character is on waits while this runs, so how long it took is worth having on record
+    LOG_INFO("module.EverQuest", "EverQuestMod Secondary class change for player {} with GUID {} from eqclass {} to {} took {} ms ({} ms of it saving and switching in the database)",
+        player->GetName(), playerGUIDCounter, previousSecondaryEQClass, nextSecondaryEQClass, getMSTimeDiff(switchStartMS, getMSTime()), getMSTimeDiff(switchStartMS, switchCommittedMS));
     return true;
+}
+
+// What OnPlayerLogin does for the parts of a character that come and go with the secondary class, for one who has just changed class in the world
+void EverQuestMod::RefreshPlayerAfterSecondaryClassChange(Player* player)
+{
+    // The equipment is the new class's, so clean up auras, and put the right light source aura on
+    RemoveOrphanedItemEquipAurasForPlayer(player);
+    RefreshCarriedLightForPlayer(player);
+
+    // Give players the ability to see invis vs undead
+    if (ConfigSystemInvisVsUndeadDetectSpellID != 0 && player->HasAura(ConfigSystemInvisVsUndeadDetectSpellID) == false)
+        player->CastSpell(player, ConfigSystemInvisVsUndeadDetectSpellID, true);
+
+    // Catch any level that was reached without Player::GiveLevel, which is the only thing that updates the criteria behind the "Level 10" through "Level 60" achievements
+    player->UpdateAchievementCriteria(ACHIEVEMENT_CRITERIA_TYPE_REACH_LEVEL);
+
+    ApplyAdventurerAuraStateOnLogin(player);
+
+    // Songs that came in with the class end here if the instrument now in the ranged slot does not allow them
+    CancelBardSongsBlockedByRangedSlotInstrumentForPlayer(player);
+    if (ConfigBardMaxConcurrentSongs != 0)
+    {
+        deque<uint32>* queue = nullptr;
+        {
+            std::lock_guard<std::mutex> lock(RuntimeStateMutex);
+            queue = &PlayerCasterConcurrentBardSongs[player->GetGUID()];
+        }
+        queue->clear();
+        for (auto const& itr : player->GetAppliedAuras())
+        {
+            uint32 spellID = itr.second->GetBase()->GetId();
+            if (IsSpellAnEQBardSong(spellID) == true)
+                queue->push_back(spellID);
+        }
+    }
+
+    // Death knights that skip the Ebon Hold chain still need its final quest for the dungeon finder, and each class has its own quests
+    GrantDeathKnightDungeonFinderQuestIfNeeded(player);
+
+    // Autolearning is based on EQ classes (primary and secondary)
+    ApplyAutoLearnedClassSkillsAndSpells(player);
+    AddMasterTotemForShaman(player);
+
+    // A secondary class taken on for the first time has its start items waiting
+    GrantPendingClassStartItemsForPlayer(player);
+
+    // An illusion left with the old class's auras
+    ClearStaleMirrorImageFlagForPlayer(player);
+
+    // Auras and quests changed, and both feed the temporary faction reactions and the faction gated quests
+    RecalculateTemporaryFactionReactionsForPlayer(player);
+    QueueFactionGatedQuestRefreshForPlayer(player->GetGUID());
+
+    // The bear form and the armor it was holding back are both gone
+    RefreshBearFormArmorShiftForPlayer(player);
+
+    // Rebuild the EQ class auras from what the character knows and wears
+    ReapplyClassAurasForPlayer(player);
+
+    // Track range goes by class and level
+    HandleTrackingRangeChangeForPlayer(player);
+
+    // An auction search answered for the old class would be repeated from its results
+    ClearAuctionSearchScanForPlayer(player);
+
+    // What a group works out from its members as they come online
+    if (Group* group = player->GetGroup())
+        group->ResetMaxEnchantingLevel();
+
+    // Players who see stand-in gear for this character are shown it by class, slot by slot as each is sent, so send them all
+    for (uint8 equipSlot = EQUIPMENT_SLOT_START; equipSlot < EQUIPMENT_SLOT_END; ++equipSlot)
+        player->ForceValuesUpdateAtIndex(PLAYER_VISIBLE_ITEM_1_ENTRYID + (equipSlot * 2));
 }
 
 bool EverQuestMod::PerformPlayerDelete(ObjectGuid guid)
@@ -22691,7 +23037,7 @@ uint8 EverQuestMod::GetLevelForPlayerSecondaryEQClass(Player* player, uint8 eqCl
     if (queryResult)
         return queryResult->Fetch()[0].Get<uint8>();
 
-    // A class that has never been played starts at the configured start level, matching what PerformClassSwitch does for a new class
+    // A class that has never been played starts at the configured start level, matching what AppendClassSwitchToTransaction does for a new class
     uint32 startLevel = player->getClass() != CLASS_DEATH_KNIGHT
         ? sWorld->getIntConfig(CONFIG_START_PLAYER_LEVEL)
         : sWorld->getIntConfig(CONFIG_START_HEROIC_PLAYER_LEVEL);

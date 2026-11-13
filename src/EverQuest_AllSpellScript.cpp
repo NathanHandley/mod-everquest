@@ -512,6 +512,11 @@ public:
         if (caster != nullptr && caster->IsPlayer() == true && spellInfo != nullptr)
             EverQuest->HandleDisciplineCast(caster->ToPlayer(), spellInfo);
 
+        // The secondary class change cast ran its full time (this is only reached by a cast that went through)
+        if (spellInfo != nullptr && EverQuest->ConfigSystemClassChangeSpellID != 0 && spellInfo->Id == EverQuest->ConfigSystemClassChangeSpellID
+            && caster != nullptr && caster->IsPlayer() == true && spell->IsTriggered() == false)
+            EverQuest->HandleSecondaryClassChangeCastComplete(caster->ToPlayer());
+
         // Give back the swing time the core just reset away.  This runs before the EverQuest spell checks below, since WoW spells can be configured for it too
         EverQuest->RestoreSwingTimersAfterSpellCast(caster, spell);
 

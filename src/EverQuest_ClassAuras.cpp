@@ -24,6 +24,7 @@
 #include "Pet.h"
 #include "Player.h"
 #include "Random.h"
+#include "ScriptMgr.h"
 #include "Spell.h"
 #include "SpellAuras.h"
 #include "SpellAuraEffects.h"
@@ -196,13 +197,21 @@ void EverQuestMod::ReapplyClassAurasForPlayer(Player* player)
     // Toggles (Endless Quiver, Warspirit) are the player's own, so they stay through a relog, unless the character can no longer have them
     RefreshClassAuraTogglesForPlayer(player);
     if (IsClassAuraSystemEnabled() == false)
+    {
+        // The pet side of the Magician bond goes with the owner's auras
+        RefreshClassPetAurasForPlayer(player);
         return;
+    }
     RefreshClassAurasForPlayer(player);
 }
 
 void EverQuestMod::RefreshClassAurasForPlayer(Player* player)
 {
     if (player == nullptr || IsClassAuraSystemEnabled() == false)
+        return;
+
+    // A game identity form (MergedWorlds' Ragnarok Online form) puts the character's class away, auras included
+    if (sScriptMgr->OnPlayerCanUseClassAbilities(player) == false)
         return;
     for (size_t i = 0; i < EQ_CLASSAURA_CLASS_COUNT; ++i)
     {
@@ -237,6 +246,8 @@ void EverQuestMod::UpdateClassAurasForPlayer(Player* player, uint32 diffInMS)
         return;
 
     if (IsClassAuraSystemEnabled() == false)
+        return;
+    if (sScriptMgr->OnPlayerCanUseClassAbilities(player) == false)
         return;
     EverQuestPlayerClassAuraState* state = GetClassAuraStateForPlayer(player);
     state->GearRefreshTimerMS += diffInMS;
@@ -952,19 +963,21 @@ void EverQuestMod::UpdateWizardFocusMovementForPlayer(Player* player, uint32 dif
 
 void EverQuestMod::RefreshClassPetAurasForPlayer(Player* player)
 {
+    if (player == nullptr)
+        return;
     Pet* pet = player->GetPet();
-    if (pet == nullptr || pet->IsInWorld() == false || pet->IsAlive() == false)
+    if (pet == nullptr || pet->IsInWorld() == false)
         return;
     ApplyClassPetAurasToPet(pet);
 }
 
 void EverQuestMod::ApplyClassPetAurasToPet(Pet* pet)
 {
-    if (pet == nullptr || IsClassAuraSystemEnabled() == false)
+    // The pet side of the bond follows the owner's class aura (Bound Conjurer, the Beastlord's warder bond) both ways.  It persists with the pet, so a pet that comes back to an owner
+    // who no longer holds the aura (the passive unlearned, the class aura system turned off) would otherwise keep it for good
+    if (pet == nullptr || IsEnabled == false)
         return;
     Player* owner = pet->GetOwner();
-    if (owner == nullptr)
-        return;
     static const EverQuestClassAuraSpellType ownerAuraTypes[] = { EQ_CLASSAURA_SPELL_MAGICIAN_AURA, EQ_CLASSAURA_SPELL_BEASTLORD_AURA };
     static const EverQuestClassAuraSpellType petPassiveTypes[] = { EQ_CLASSAURA_SPELL_MAGICIAN_PET_PASSIVE, EQ_CLASSAURA_SPELL_BEASTLORD_PET_PASSIVE };
     for (size_t i = 0; i < sizeof(ownerAuraTypes) / sizeof(ownerAuraTypes[0]); ++i)
@@ -972,16 +985,12 @@ void EverQuestMod::ApplyClassPetAurasToPet(Pet* pet)
         uint32 petPassiveSpellID = GetClassAuraSpellID(petPassiveTypes[i]);
         if (petPassiveSpellID == 0)
             continue;
-
-        // An owner who no longer has the class aura (a class switch or toggle) takes the pet's passive with it.  Before Luclin the Magician's stays, as it always has
-        if (PlayerHasClassAura(owner, ownerAuraTypes[i]) == false)
-        {
-            if (IsLuclinServer() == true && pet->HasAura(petPassiveSpellID) == true)
-                pet->RemoveAurasDueToSpell(petPassiveSpellID);
-            continue;
-        }
-        if (pet->HasAura(petPassiveSpellID) == false)
+        bool shouldHaveAura = IsClassAuraSystemEnabled() == true && owner != nullptr && PlayerHasClassAura(owner, ownerAuraTypes[i]) == true;
+        bool hasAura = pet->HasAura(petPassiveSpellID);
+        if (shouldHaveAura == true && hasAura == false && pet->IsAlive() == true)
             pet->AddAura(petPassiveSpellID, pet);
+        else if (shouldHaveAura == false && hasAura == true)
+            pet->RemoveAurasDueToSpell(petPassiveSpellID);
     }
 }
 
@@ -1831,7 +1840,7 @@ void EverQuestMod::ApplyClassAuraCastAdjustmentsOnCheckCast(Player* player, Spel
     uint32 helperSpellID = GetClassAuraSpellID(EQ_CLASSAURA_SPELL_CAST_SPEED_HELPER);
     if (helperSpellID != 0 && player->HasAura(helperSpellID) == true)
         player->RemoveAurasDueToSpell(helperSpellID);
-    if (IsClassAuraSystemEnabled() == false)
+    if (IsClassAuraSystemEnabled() == false || sScriptMgr->OnPlayerCanUseClassAbilities(player) == false)
     {
         // A worn focus isn't a class aura.  TAKP gives an item's cast no cast time focus
         if (spell->m_CastItem == nullptr && IsSpellAnEQBardSong(spellInfo->Id) == false && spellInfo->CalcCastTime() > 0)

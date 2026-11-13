@@ -1068,12 +1068,17 @@ public:
             return true;
 
         Player* player = handler->GetPlayer();
+        if (EverQuest->IsInGameIdentityForm(player) == true)
+        {
+            handler->PSendSysMessage("Your secondary EverQuest class can't be changed while you are in another world's form.");
+            return true;
+        }
         std::string eligibleClassList = GetEligibleSecondClassListForPlayer(player);
 
         if (!*args)
         {
             handler->PSendSysMessage(".class change 'class'");
-            handler->PSendSysMessage("Changes the player EverQuest class on next logout.  Example: '.class change warrior'");
+            handler->PSendSysMessage("Changes the player secondary EverQuest class, after a short cast.  Example: '.class change warrior'");
             handler->PSendSysMessage("Valid Class Values: {}", eligibleClassList);
             return true;
         }
@@ -1136,20 +1141,8 @@ public:
             }
         }
 
-        uint8 currentSecondClass = EverQuest->GetCurrentSecondEQClassForPlayer(player);
-        EverQuest->SetNextSecondEQClassForPlayer(player, classInt);
-
-        string text;
-        if (classInt == currentSecondClass)
-            text = fmt::format("Your secondary EQ class will no longer change at next login, and will remain |cff4CFF00{}|r", GetEQClassStringFromID(classInt));
-        else
-            text = fmt::format("Your secondary EQ class will change to |cff4CFF00{}|r on the next login", GetEQClassStringFromID(classInt));
-        ChatHandler(player->GetSession()).SendSysMessage(text);
-
-        // Refresh the EQ Class UI tab so the chosen class shows as pending
-        EverQuest->SendClassInfoAddonMessageToPlayer(player);
-
-        // Class change accepted
+        // Starts the cast that the change waits out (or, for the class already held, calls off one that is under way)
+        EverQuest->BeginSecondaryClassChangeForPlayer(player, classInt);
         return true;
     }
 
@@ -1334,6 +1327,11 @@ public:
             return true;
 
         Player* player = handler->GetPlayer();
+        if (EverQuest->IsInGameIdentityForm(player) == true)
+        {
+            handler->PSendSysMessage("Your secondary bonus experience pool can't be used while you are in another world's form.");
+            return true;
+        }
         uint32 spent = EverQuest->SpendSecondaryExpPoolForPlayer(player);
         if (spent > 0)
             handler->PSendSysMessage("Applied |cff4CFF00{}|r experience from your secondary bonus experience pool.", spent);

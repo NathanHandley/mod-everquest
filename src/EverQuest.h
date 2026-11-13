@@ -55,7 +55,9 @@ class EQZoneMap;
 struct AreaTrigger;
 struct BuildValuesCachePosPointers;
 
-#define EQ_MOD_VERSION                              145
+#define EQ_MOD_VERSION                              146
+
+#define EQ_CLIENT_DATA_VERSION_MASK                 0x00FFFFFF // The client data version CMSG_AUTH_SESSION carries; its high byte is the client's optional content (mod-rowow)
 
 #define EQ_VENDOR_PRICE_MOD_SCALE                   10000 // A greedy vendor's price changes are in ten-thousandths (converter EQMerchantPricing)
 
@@ -269,10 +271,11 @@ struct BuildValuesCachePosPointers;
 #define EQ_SPELLDUMMYTYPE_TRUENORTH                 26
 #define EQ_SPELLDUMMYTYPE_EYEOFZOMM                 27  // The channeled aura that controls a possessed eye of zomm
 #define EQ_SPELLDUMMYTYPE_TELESCOPE                 28  // The channeled caster aura that carries a telescope far sight
-#define EQ_SPELLDUMMYTYPE_TRANSLOCATETOBIND         29  // 29 to 32 only exist from Luclin on: the converter leaves these EQ effects out before it
-#define EQ_SPELLDUMMYTYPE_DEATHSAVE                 30      // MiscValueB 1 is a partial heal, 2 a full one
-#define EQ_SPELLDUMMYTYPE_SHADOWSTEP                31
-#define EQ_SPELLDUMMYTYPE_RECLAIMPET                32
+#define EQ_SPELLDUMMYTYPE_CLASSCHANGE               29  // The cast a secondary class change waits out
+#define EQ_SPELLDUMMYTYPE_TRANSLOCATETOBIND         30  // 30 to 33 only exist from Luclin on: the converter leaves these EQ effects out before it
+#define EQ_SPELLDUMMYTYPE_DEATHSAVE                 31      // MiscValueB 1 is a partial heal, 2 a full one
+#define EQ_SPELLDUMMYTYPE_SHADOWSTEP                32
+#define EQ_SPELLDUMMYTYPE_RECLAIMPET                33
 #define EQ_RECLAIM_PET_MAX_MANA_RETURN_PERCENT      75
 #define EQ_SHADOW_STEP_DISTANCE_IN_YARDS            10.0f
 #define EQ_DEATH_SAVE_CHANCE_PERCENT                48      // TAKP's formula at 150 Charisma, which WoW has no stat for
@@ -1319,6 +1322,7 @@ class EverQuestPlayerClassAuraState : public DataMap::Base
 public:
     uint32 GearRefreshTimerMS = 0;
     uint32 ManaCheckTimerMS = 0;
+    bool WasInGameIdentityForm = false;         // In a game identity form (MergedWorlds' Ragnarok Online form) at the last update
     bool WasMoving = false;
     uint32 MovingAccumulatedMS = 0;
     uint32 StillAccumulatedMS = 0;
@@ -1923,15 +1927,6 @@ public:
     uint8 Level = 1;
 };
 
-struct EverQuestPlayerEquipedItemData
-{
-    uint8 Slot;
-    uint32 ItemID;
-    uint32 TempEnchant;
-    uint32 PermEnchant;
-    uint32 ItemInstanceGUID;
-};
-
 struct EverQuestUnitHasteAuraEffect
 {
     uint32 SpellID;
@@ -2023,6 +2018,7 @@ public:
     uint32 ConfigSystemMentorshipApprenticeAuraSpellID;
     uint32 ConfigSystemHearthstoneTetherSpellID;
     uint32 ConfigSystemPriestOfDiscordPortalCooldownSpellID;
+    uint32 ConfigSystemClassChangeSpellID = 0;
     bool ConfigSystemClassAuraEnabled = false;
     uint32 ConfigSystemClassAuraSpellIDs[EQ_CLASSAURA_SPELL_TYPE_COUNT] = { 0 };
     uint32 ConfigSystemClassAuraSpellIDMin = 0;
@@ -2316,6 +2312,8 @@ public:
     unordered_set<ObjectGuid> PlayersLastDeathWasNotPlayerKill;
     unordered_map<uint32, uint8> DeathPetTalentLevelsByPetNumber;
     unordered_set<ObjectGuid> PlayersPendingLevelCapExperiencePark;
+    unordered_map<ObjectGuid, bool> SecondaryClassChangeCastCompleteByPlayerGUID; // Characters with a secondary class change under way, and whether its cast has finished
+    std::atomic<uint32> SecondaryClassChangeCount{ 0 }; // So the per-update check costs nothing while there are none
     unordered_map<ObjectGuid, EverQuestMentorshipState> MentorshipStatesByPlayerGUID;
     unordered_map<ObjectGuid, EverQuestMentorshipRequest> MentorshipRequestsByTargetGUID;
     std::atomic<uint32> MentorshipStateCount{ 0 };
@@ -2808,6 +2806,8 @@ public:
     uint8 GetContentLevelsForEQCreatureKill(Unit const* victim, uint8 contentLevels);
     void GrantCreatureGossipHelloAchievement(Player* player, Creature* creature);
     void ApplyAdventurerAuraStateOnLogin(Player* player);
+    void UpdateAdventurerAuraAfterGameIdentityForm(Player* player);
+    bool IsInGameIdentityForm(Player* player);
     bool IsMapIDAnEverQuestMap(uint32 mapID);
     bool IsZoneWideGroupRewardEnabledForMap(uint32 mapID);
     bool IsInZoneWideGroupRewardRange(Player* member, WorldObject* rewardSource);
@@ -3119,7 +3119,13 @@ public:
 
     uint8 GetCurrentSecondEQClassForPlayer(Player* player);
     uint8 GetNextSecondEQClassForPlayer(Player* player);
-    void SetNextSecondEQClassForPlayer(Player* player, uint8 nextEQClass);
+    bool CanPlayerChangeSecondaryClassNow(Player* player, std::string& reasonOut);
+    Spell* GetActiveSecondaryClassChangeCastForPlayer(Player* player);
+    void BeginSecondaryClassChangeForPlayer(Player* player, uint8 eqClassID);
+    void AbandonSecondaryClassChangeForPlayer(Player* player, bool interruptCast);
+    void HandleSecondaryClassChangeCastComplete(Player* player);
+    void UpdateSecondaryClassChangeForPlayer(Player* player);
+    void ClearSecondaryClassChangeForPlayerGUID(ObjectGuid playerGUID);
     void SendClassInfoAddonMessageToPlayer(Player* player);
     uint32 GetSecondaryExpPoolForPlayer(Player* player);
     uint32 AddToSecondaryExpPoolForPlayer(Player* player, uint32 grantedExp);
@@ -3248,7 +3254,9 @@ public:
     void ApplyMentorshipAuraForPlayer(Player* player, uint8 role);
     void RemoveMentorshipAurasFromPlayer(Player* player);
     void AwardBankedMentorshipProgressToPlayer(Player* player, float bankedProgress);
-    void SaveMentorshipStateForPlayer(Player* player, uint8 role, uint8 realLevel, uint32 realExperience, float bankedProgress, uint32 petNumber, uint8 petRealLevel);
+    bool SetMentorshipStateInControllerDataForPlayer(Player* player, uint8 role, uint8 realLevel, uint32 realExperience, float bankedProgress, uint32 petNumber, uint8 petRealLevel);
+    void SaveMentorshipStateForPlayer(Player* player, uint8 role, uint8 realLevel, uint32 realExperience, float bankedProgress, uint32 petNumber, uint8 petRealLevel, CharacterDatabaseTransaction transaction = nullptr);
+    void SaveCharacterAfterMentorshipForPlayer(Player* player);
 
     void SendExpPoolAddonMessageToPlayer(Player* player, uint32 gainedExp);
     void SetInitialEQClassesForPlayer(Player* player);
@@ -3275,14 +3283,14 @@ public:
     void MoveEquipToModInventoryTable(Player* player, CharacterDatabaseTransaction& transaction);
     void MoveQuestDataToModQuestTables(Player* player, CharacterDatabaseTransaction& transaction);
 
-    bool UpdateCharacterFromModCharacterTable(Player* player, uint8 pullEQClassID, CharacterDatabaseTransaction& transaction);
+    void UpdateCharacterFromModCharacterRow(Player* player, QueryResult const& modCharacterRow, CharacterDatabaseTransaction& transaction);
     void CopyModSpellTableIntoCharacterSpells(Player* player, uint8 pullEQClassID, CharacterDatabaseTransaction& transaction);
     void CopyModActionTableIntoCharacterAction(Player* player, uint8 pullEQClassID, CharacterDatabaseTransaction& transaction);
     void CopyModSkillTableIntoCharacterSkills(Player* player, uint8 pullEQClassID, CharacterDatabaseTransaction& transaction);
     void CopyModQuestTablesIntoCharacterQuests(Player* player, uint8 pullEQClassID, CharacterDatabaseTransaction& transaction);
     void UpdatePlayerControllerForClassChange(Player* player, uint8 newEQClassID, CharacterDatabaseTransaction& transaction);
+    std::unordered_set<uint32> GetAuraSpellIDsKeptOnSecondaryClassSwitch();
 
-    std::map<uint8, EverQuestPlayerEquipedItemData> GetVisibleItemsBySlotForPlayerClass(Player* player, uint8 classID);
     bool IsEQClassValidEquipmentStorageTargetForPlayer(Player* player, uint8 eqClassID);
     bool IsEquipmentStorageCommitPendingForPlayer(Player* player);
     void SetEquipmentStorageCommitPendingForPlayerGUID(ObjectGuid playerGUID, bool pending);
@@ -3299,7 +3307,9 @@ public:
     bool MoveItemWithinSecondaryClassStorage(Player* player, uint8 eqClassID, uint8 fromEquipSlot, uint8 toEquipSlot, std::string& errorTextOut);
     bool SwapSecondaryClassStorageItemWithLiveEquipment(Player* player, uint8 eqClassID, uint8 storageEquipSlot, uint8 liveEquipSlot, std::string& errorTextOut);
     void SendClassEquipmentAddonMessageToPlayer(Player* player, uint8 eqClassID);
-    bool PerformClassSwitch(Player* player);
+    void AppendClassSwitchToTransaction(Player* player, uint8 nextSecondaryEQClass, bool isNew, uint8 nextClassLevel, QueryResult const& nextClassCharacterRow, CharacterDatabaseTransaction& transaction);
+    bool PerformLiveClassSwitch(Player* player);
+    void RefreshPlayerAfterSecondaryClassChange(Player* player);
     bool PerformPlayerDelete(ObjectGuid guid);
 };
 
