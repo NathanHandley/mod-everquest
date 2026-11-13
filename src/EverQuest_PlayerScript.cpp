@@ -26,6 +26,7 @@
 #include "Spell.h"
 #include "SpellMgr.h"
 #include "QuestDef.h"
+#include "WhoListCacheMgr.h"
 #include "World.h"
 #include "WorldSession.h"
 
@@ -454,6 +455,10 @@ public:
         if (EverQuest->IsPlayerMentorshipLevelAdjusted(player) == true)
             return;
 
+        // Nor does another game's character (the Ragnarok Online form), whose kills aren't the EQ classes'
+        if (EverQuest->IsInGameIdentityForm(player) == true)
+            return;
+
         uint32 added = EverQuest->AddToSecondaryExpPoolForPlayer(player, amount);
         if (added > 0)
             EverQuest->SendExpPoolAddonMessageToPlayer(player, added);
@@ -591,6 +596,9 @@ public:
         uint8 currentForm = player->GetShapeshiftForm();
         if (currentForm == FORM_BEAR || currentForm == FORM_DIREBEAR)
             EverQuest->RefreshBearFormArmorShiftForPlayer(player);
+
+        // A secondary class change whose cast has finished is carried out here, last, so nothing above runs half way through it
+        EverQuest->UpdateSecondaryClassChangeForPlayer(player);
     }
 
     void OnPlayerReputationRankChange(Player* player, uint32 factionID, ReputationRank /*newRank*/, ReputationRank /*oldRank*/, bool /*increased*/) override
@@ -1198,14 +1206,8 @@ public:
         EverQuest->ClearAuctionRealmFilterForPlayer(player);
         EverQuest->ClearAuctionSearchScanForPlayer(player);
 
-        // Class switch
-        if (EverQuest->GetCurrentSecondEQClassForPlayer(player) != EverQuest->GetNextSecondEQClassForPlayer(player))
-        {
-            if (!EverQuest->PerformClassSwitch(player))
-            {
-                LOG_ERROR("module.EverQuest", "EverQuestMod Could not successfully complete the class switch on logout for player {} with GUID {}", player->GetName(), player->GetGUID().GetCounter());
-            }
-        }
+        // A secondary class change that was still being cast goes no further (the controller data it is held in outlives the logout)
+        EverQuest->AbandonSecondaryClassChangeForPlayer(player, false);
     }
 
     bool OnPlayerBeforeTeleport(Player* player, uint32 mapid, float x, float y, float z, float orientation, uint32 options, Unit* /*target*/) override
@@ -1387,6 +1389,21 @@ public:
         EverQuest->ApplyZoneWideGroupMoneyShare(player, loot);
     }
 
+    // EQ prices: no reputation discount on EQ items or at EQ vendors, and greedy EQ vendors charge more and pay less
+    void OnPlayerGetVendorItemBuyPrice(Player const* /*player*/, Creature const* vendor, ItemTemplate const* itemTemplate, uint32 count, uint32& price) override
+    {
+        if (EverQuest->IsEnabled == false)
+            return;
+        EverQuest->UpdateVendorItemBuyPrice(vendor, itemTemplate, count, price);
+    }
+
+    void OnPlayerGetVendorItemSellPrice(Player const* /*player*/, Creature const* vendor, Item const* /*item*/, uint32& unitPrice) override
+    {
+        if (EverQuest->IsEnabled == false)
+            return;
+        EverQuest->UpdateVendorItemSellPrice(vendor, unitPrice);
+    }
+
     void OnPlayerBeforeLogout(Player* player) override
     {
         if (EverQuest->IsEnabled == false)
@@ -1395,25 +1412,26 @@ public:
         // This runs before the logout save, which is the only window where a borrowed level can be handed back without the character ever being written to the database standing at it
         EverQuest->EndMentorshipForPlayer(player, "you logged out", true);
 
-        // Any pending equipment storage commit must have executed before the logout save and class switch are queued
+        // Any pending equipment storage commit must have executed before the logout save is queued
         EverQuest->WaitForPendingEquipmentStorageCommitForPlayer(player->GetGUID());
+    }
 
-        // If a class change is in progress, update the item visuals
-        if (EverQuest->GetCurrentSecondEQClassForPlayer(player) != EverQuest->GetNextSecondEQClassForPlayer(player))
-        {
-            map<uint8, EverQuestPlayerEquipedItemData> visibleItemsBySlot = EverQuest->GetVisibleItemsBySlotForPlayerClass(player, EverQuest->GetNextSecondEQClassForPlayer(player));
-            for (uint8 i = 0; i < 18; ++i)
-            {
-                if (visibleItemsBySlot[i].ItemID == 0)
-                    player->SetVisibleItemSlot(i, NULL);
-                else
-                {
-                    player->SetUInt32Value(PLAYER_VISIBLE_ITEM_1_ENTRYID + (i * 2), visibleItemsBySlot[i].ItemID);
-                    player->SetUInt16Value(PLAYER_VISIBLE_ITEM_1_ENCHANTMENT + (i * 2), 0, visibleItemsBySlot[i].PermEnchant);
-                    player->SetUInt16Value(PLAYER_VISIBLE_ITEM_1_ENCHANTMENT + (i * 2), 1, visibleItemsBySlot[i].TempEnchant);
-                }
-            }
-        }
+    // The who list: EQ maps are the world Norrath, and the secondary class is the EQ one ("None" without one).  Not in a game identity form (the
+    // Ragnarok Online form), whose game names the classes; the two never both apply, so the modules' order doesn't matter
+    void OnPlayerWhoListInfo(Player* player, WhoListWorldInfo& info) override
+    {
+        if (EverQuest->IsEnabled == false)
+            return;
+        if (EverQuest->IsMapIDAnEverQuestMap(player->GetMapId()) == true)
+            info.World = "Norrath";
+        if (EverQuest->IsInGameIdentityForm(player) == true)
+            return;
+        std::string className = GetEQClassStringFromID(EverQuest->GetCurrentSecondEQClassForPlayer(player));
+        std::string::size_type abbreviationStart = className.find(" (");
+        if (abbreviationStart != std::string::npos)
+            className.erase(abbreviationStart); // "Shadow Knight (SHD)" as Shadow Knight
+        info.IsSecondaryClassTheClass = false;
+        info.SecondaryClass = className;
     }
 };
 

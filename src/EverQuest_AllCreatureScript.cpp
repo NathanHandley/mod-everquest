@@ -104,7 +104,6 @@ public:
         EverQuest->RemoveCreatureUnstickState(creature);
         EverQuest->RemoveCreatureSocialAggroState(creature);
         EverQuest->RemoveCreatureEmoteState(creature);
-        EverQuest->RemoveCreatureMovementSoundState(creature);
         EverQuest->RemoveCreatureKillSpawnCombatWatchState(creature);
         EverQuest->RemoveVulakLockState(creature);
         EverQuest->RemoveCreatureDefendPlayerWatchState(creature);
@@ -130,7 +129,6 @@ public:
         EverQuest->UpdateCreatureScaledSocialAggro(creature, diff);
         EverQuest->UpdateCreatureAgroZBlock(creature, diff);
         EverQuest->UpdateCreatureEmotes(creature, diff);
-        EverQuest->UpdateCreatureMovementSound(creature, diff);
         EverQuest->UpdateCreatureKillSpawnCombatWatch(creature, diff);
         EverQuest->UpdateVulakLock(creature, diff);
         EverQuest->UpdateCreatureDefendFriendlyPlayers(creature, diff);
