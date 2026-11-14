@@ -89,7 +89,8 @@ class EverQuest_HealMeleeAttackersAuraScript : public AuraScript
         if (healShareEffect == nullptr)
             return;
 
-        int32 healAmount = int32(attacker->CountPctFromMaxHealth(healShareEffect->GetAmount()));
+        // A share of the attacker's unbuffed maximum health, so HP buffs (EQ's included) don't grow the heal
+        int32 healAmount = int32(attacker->CountPctFromUnbuffedMaxHealth(healShareEffect->GetAmount()));
         if (healAmount <= 0)
             return;
         attacker->CastCustomSpell(attacker, healSpellID, &healAmount, nullptr, nullptr, true, nullptr, healShareEffect, GetCasterGUID());

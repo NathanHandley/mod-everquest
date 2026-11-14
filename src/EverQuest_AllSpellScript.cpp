@@ -61,6 +61,15 @@ public:
         return EverQuest->GetSpellDataForSpellID(spellInfo->Id).EffectFailChancePercent;
     }
 
+    void OnSpellIgnoreMinRange(Spell* spell, bool& ignoreMinRange) override
+    {
+        if (EverQuest->IsEnabled == false)
+            return;
+
+        // Class auras: the Ranger's Focus lets ranged attacks be made in melee
+        EverQuest->HandleClassAuraRangerFocusIgnoreMinRange(spell, ignoreMinRange);
+    }
+
     void OnSpellCheckCast(Spell* spell, bool strict, SpellCastResult& res) override
     {
         if (EverQuest->IsEnabled == false)
@@ -82,7 +91,7 @@ public:
         if (spell->GetCaster()->IsPlayer() == true && EverQuest->HandleCrouchOnCheckCast(spell->GetCaster()->ToPlayer(), spell, res) == true)
             return;
 
-        // Class auras: the Ranger's Endless Quiver and the Shaman's Warspirit are toggles, so casting one while it is up turns it off
+        // Class auras: the Ranger's Focus and the Shaman's Warspirit are toggles, so casting one while it is up turns it off
         if (spell->GetCaster()->IsPlayer() == true && EverQuest->HandleClassAuraToggleOnCheckCast(spell->GetCaster()->ToPlayer(), spell, res) == true)
             return;
 
@@ -455,11 +464,6 @@ public:
         // This was added to fix a crash associated with consuming the last stack of a throwing weapon when a throwing skillup occurred. The actual issue is upstream in
         // the AzerothCore code specifically Player::UpdateWeaponSkill which was referencing an invalid pointer.
         spell->m_weaponItem = nullptr;
-
-        // Class auras: settle the ammo for shots the Ranger's Endless Quiver spared, and for the channeled ranged spells whose ammo was handed to the mod at load.
-        // Ahead of the enabled check, since those channeled spells no longer take ammo on their own
-        if (caster != nullptr && caster->IsPlayer() == true)
-            EverQuest->HandleClassAuraRangerAmmoOnSpellCast(caster->ToPlayer(), spell);
 
         if (EverQuest->IsEnabled == false)
             return;

@@ -300,8 +300,8 @@ bool EverQuestMod::LoadConfigurationSystemDataFromDB()
                 ConfigSystemClassAuraMonkDoubleToTripleAttackChancePercent = (uint32)atoi(value.c_str());
             else if (key == "ClassAuraRangerCompoundInjuryDamagePercentPerStack")
                 ConfigSystemClassAuraRangerCompoundInjuryDamagePercentPerStack = (uint32)atoi(value.c_str());
-            else if (key == "ClassAuraRangerEndlessQuiverBaseManaCostPercent")
-                ConfigSystemClassAuraRangerEndlessQuiverBaseManaCostPercent = (uint32)atoi(value.c_str());
+            else if (key == "ClassAuraRangerFocusReactivateCooldownInMS")
+                ConfigSystemClassAuraRangerFocusReactivateCooldownInMS = (uint32)atoi(value.c_str());
             else if (key == "ClassAuraPaladinHealSelfPercent")
                 ConfigSystemClassAuraPaladinHealSelfPercent = (uint32)atoi(value.c_str());
             else if (key == "ClassAuraPaladinBlockDeflectionDamagePercent")
@@ -5582,11 +5582,12 @@ void EverQuestMod::ApplyIllusionCharacterDisplayIfChanged(Player* player, EverQu
     // Something else stomping the model (a core transform reapply, a shapeshift ending) just needs the display taken back, and that display change alone makes every client re-request the mirror packet
     uint64 gearSignature = CalculateIllusionCharacterGearSignature(player, illusionCharacter->ChrRaceID, illusionState->CharacterFaceByte);
     uint32 desiredDisplayID = illusionState->CharacterUsingAltDisplay ? illusionCharacter->AltDisplayID : illusionCharacter->DisplayID;
-    bool isObjectScaleOff = std::fabs(player->GetObjectScale() - illusionCharacter->Scale) > 0.001f; // A core re-set of the same display resets the object scale to 1
+    float desiredObjectScale = GetObjectScaleWithSizeAuras(player, illusionCharacter->Scale); // Shrink and Grow scale the illusion's own size
+    bool isObjectScaleOff = std::fabs(player->GetObjectScale() - desiredObjectScale) > 0.001f; // A core re-set of the same display resets the object scale to 1
     if (player->GetDisplayId() != desiredDisplayID || isObjectScaleOff == true)
     {
         illusionState->CharacterGearSignature = gearSignature;
-        player->SetDisplayId(desiredDisplayID, illusionCharacter->Scale); // The size rides the object scale so held items and mounts follow it
+        player->SetDisplayId(desiredDisplayID, desiredObjectScale); // The size rides the object scale so held items and mounts follow it
         SendMirrorImageDataToNearbyPlayers(player, illusionState);
         return;
     }
@@ -5596,8 +5597,22 @@ void EverQuestMod::ApplyIllusionCharacterDisplayIfChanged(Player* player, EverQu
         return;
     illusionState->CharacterGearSignature = gearSignature;
     illusionState->CharacterUsingAltDisplay = !illusionState->CharacterUsingAltDisplay;
-    player->SetDisplayId(illusionState->CharacterUsingAltDisplay ? illusionCharacter->AltDisplayID : illusionCharacter->DisplayID, illusionCharacter->Scale);
+    player->SetDisplayId(illusionState->CharacterUsingAltDisplay ? illusionCharacter->AltDisplayID : illusionCharacter->DisplayID, desiredObjectScale);
     SendMirrorImageDataToNearbyPlayers(player, illusionState);
+}
+
+float EverQuestMod::GetObjectScaleWithSizeAuras(Player* player, float baseScale)
+{
+    // The core's RecalculateObjectScale adds scale auras onto a size of 1, so a display set at its own size has to carry them itself
+    int32 scaleAuraPercent = player->GetTotalAuraModifier(SPELL_AURA_MOD_SCALE) + player->GetTotalAuraModifier(SPELL_AURA_MOD_SCALE_2);
+    return std::max(0.1f, baseScale * (1.0f + float(scaleAuraPercent) / 100.0f));
+}
+
+bool EverQuestMod::IsSpellASizeChangeSpell(SpellInfo const* spellInfo)
+{
+    if (spellInfo == nullptr)
+        return false;
+    return spellInfo->HasAura(SPELL_AURA_MOD_SCALE) == true || spellInfo->HasAura(SPELL_AURA_MOD_SCALE_2) == true;
 }
 
 void EverQuestMod::SendMirrorImageDataToNearbyPlayers(Player* player, EverQuestPlayerIllusionState* illusionState)
@@ -5633,8 +5648,9 @@ void EverQuestMod::ApplyIllusionGearDisplayIfChanged(Player* player, EverQuestPl
             // Lift the mirror flag while the form shows, or the client would compose the shapeshift model as a dressed character
             if (player->HasUnitFlag2(UNIT_FLAG2_MIRROR_IMAGE) == true)
                 player->RemoveUnitFlag2(UNIT_FLAG2_MIRROR_IMAGE);
-            if (player->GetDisplayId() != shapeshiftModelID)
-                player->SetDisplayId(shapeshiftModelID, druidFormDisplayScale);
+            float formObjectScale = GetObjectScaleWithSizeAuras(player, druidFormDisplayScale);
+            if (player->GetDisplayId() != shapeshiftModelID || std::fabs(player->GetObjectScale() - formObjectScale) > 0.001f)
+                player->SetDisplayId(shapeshiftModelID, formObjectScale);
             return;
         }
     }
@@ -17530,6 +17546,14 @@ bool EverQuestMod::TryGetDruidFormDisplayForPlayer(Player* player, uint8 formTyp
         return true;
     }
 
+    // Bear and cat can also go without a graphic, which keeps an illusion showing while its wearer uses the form's abilities
+    if ((formType == EQ_DRUID_FORM_TYPE_BEAR && optionID == EQ_DRUID_FORM_BEAR_NONE) || (formType == EQ_DRUID_FORM_TYPE_CAT && optionID == EQ_DRUID_FORM_CAT_NONE))
+    {
+        displayID = 0;
+        displayScale = 1.0f;
+        return true;
+    }
+
     unordered_map<uint32, EverQuestDruidFormDisplay>::const_iterator displayIter = DruidFormDisplaysByFormTypeAndOptionKey.find((uint32(formType) << 8) | uint32(optionID));
     if (displayIter == DruidFormDisplaysByFormTypeAndOptionKey.end())
         return false;
@@ -17578,7 +17602,7 @@ void EverQuestMod::ApplyDruidFormDisplayForPlayerOnDisplayChange(Unit* unit, uin
         return;
 
     EverQuestDruidFormDisplayApplyScope applyScope;
-    unit->SetDisplayId(wantedDisplayID, wantedDisplayScale);
+    unit->SetDisplayId(wantedDisplayID, GetObjectScaleWithSizeAuras(player, wantedDisplayScale));
 }
 
 void EverQuestMod::RefreshDruidFormDisplayForPlayer(Player* player, uint8 formType)
