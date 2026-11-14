@@ -19578,6 +19578,12 @@ bool EverQuestMod::RequestMentorshipForPlayer(Player* requester, Player* target,
         handler.SendSysMessage("A mentorship cannot be started in a battleground or arena.");
         return false;
     }
+    // Another game's character (MergedWorlds' Ragnarok Online form, in Midgard) has that game's levels, so there's nothing to borrow
+    if (IsInGameIdentityForm(requester) == true || IsInGameIdentityForm(target) == true)
+    {
+        handler.SendSysMessage("A mentorship cannot be started in Midgard.");
+        return false;
+    }
     if (GetMentorshipRoleForPlayerGUID(requester->GetGUID()) != EQ_MENTORSHIP_ROLE_NONE)
     {
         handler.SendSysMessage("You are already in a mentorship. End that one first.");
@@ -19733,6 +19739,12 @@ void EverQuestMod::AcceptMentorshipRequestForPlayer(Player* player)
     if (player->IsInCombat() == true || adjustedPlayer->IsInCombat() == true)
     {
         handler.SendSysMessage("Neither of you can be in combat to start a mentorship.");
+        return;
+    }
+    // Either of them may have gone into another game's character (the Ragnarok Online form, in Midgard) since the offer
+    if (IsInGameIdentityForm(player) == true || IsInGameIdentityForm(adjustedPlayer) == true)
+    {
+        handler.SendSysMessage("A mentorship cannot be started in Midgard.");
         return;
     }
     if (GetMentorshipRoleForPlayerGUID(player->GetGUID()) != EQ_MENTORSHIP_ROLE_NONE || GetMentorshipRoleForPlayerGUID(adjustedPlayer->GetGUID()) != EQ_MENTORSHIP_ROLE_NONE)
