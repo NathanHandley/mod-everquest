@@ -57,6 +57,9 @@ struct BuildValuesCachePosPointers;
 
 #define EQ_MOD_VERSION                              140
 
+// Norrath's world id in the core's map worlds (MapWorlds.h; E:\MW\SHARED.md section 8).  A map world only: its bank and carried set are world 0's
+#define EVERQUEST_MAP_WORLD                         5
+
 #define EQ_CLIENT_DATA_VERSION_MASK                 0x00FFFFFF // The client data version CMSG_AUTH_SESSION carries; its high byte is the client's optional content (mod-rowow)
 
 #define EQ_VENDOR_PRICE_MOD_SCALE                   10000 // A greedy vendor's price changes are in ten-thousandths (converter EQMerchantPricing)
