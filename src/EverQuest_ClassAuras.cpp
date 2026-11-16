@@ -45,7 +45,7 @@ static const char* EQ_CLASSAURA_SPELL_TYPE_NAMES[EQ_CLASSAURA_SPELL_TYPE_COUNT] 
     "EnchanterPassive", "EnchanterAura", "EnchanterFocus",
     "BardPassive", "BardAura", "BardInstrument",
     "MonkPassive", "MonkAura", "MonkLightArmor", "MonkHeavyArmor",
-    "RangerPassive", "RangerAura", "RangerEndlessQuiver", "RangerCompoundInjury",
+    "RangerPassive", "RangerAura", "RangerFocus", "RangerCompoundInjury",
     "RoguePassive", "RogueAura", "RogueExploit",
     "PaladinPassive", "PaladinAura", "PaladinHeal",
     "ShadowKnightPassive", "ShadowKnightAura", "ShadowKnightEdge",
@@ -57,7 +57,7 @@ static const char* EQ_CLASSAURA_SPELL_TYPE_NAMES[EQ_CLASSAURA_SPELL_TYPE_COUNT] 
     "DruidPassive", "DruidAura", "DruidRegrowth",
     "ShamanPassive", "ShamanAura", "ShamanWarspirit", "ShamanVigor",
     "CastSpeedHelper",
-    "DruidNaturesBalanceFire", "WarriorUnrelentingAssault", "WarriorRiposte", "Unused51", "MonkChiSurge", "PaladinDeflection", "RogueLuckyStrike", "RogueLuckyStrikeHelper",
+    "DruidNaturesBalanceFire", "WarriorUnrelentingAssault", "WarriorRiposte", "RangerReflex", "MonkChiSurge", "PaladinDeflection", "RogueLuckyStrike", "RogueLuckyStrikeHelper",
     "DruidNaturesBalanceCold", "DruidNaturesBalanceNature", "DruidEntangleStrike", "ShamanWarspiritVigor",
     "ShadowKnightBloodDebt", "ShadowKnightBloodDebtCharge", "ShadowKnightBloodDebtHeal",
     "NecromancerShadowExchange", "RangerCompoundInjuryMoving",
@@ -78,7 +78,7 @@ struct EverQuestClassAuraToggle
 };
 static const EverQuestClassAuraToggle EQ_CLASSAURA_TOGGLES[] =
 {
-    { EQ_CLASSAURA_SPELL_RANGER_ENDLESS_QUIVER, EQ_CLASSAURA_SPELL_RANGER_PASSIVE, false },
+    { EQ_CLASSAURA_SPELL_RANGER_FOCUS, EQ_CLASSAURA_SPELL_RANGER_PASSIVE, false },
     { EQ_CLASSAURA_SPELL_SHAMAN_WARSPIRIT, EQ_CLASSAURA_SPELL_SHAMAN_PASSIVE, false },
     { EQ_CLASSAURA_SPELL_WIZARD_INTENSIFIED_SKYFALL, EQ_CLASSAURA_SPELL_WIZARD_PASSIVE, false },
     { EQ_CLASSAURA_SPELL_SHADOWKNIGHT_FOCUS, EQ_CLASSAURA_SPELL_SHADOWKNIGHT_PASSIVE, true }
@@ -194,7 +194,7 @@ void EverQuestMod::ReapplyClassAurasForPlayer(Player* player)
     }
     player->SetInstantCast(false);
 
-    // Toggles (Endless Quiver, Warspirit) are the player's own, so they stay through a relog, unless the character can no longer have them
+    // Toggles (Ranger's Focus, Warspirit) are the player's own, so they stay through a relog, unless the character can no longer have them
     RefreshClassAuraTogglesForPlayer(player);
     if (IsClassAuraSystemEnabled() == false)
     {
@@ -2216,6 +2216,8 @@ bool EverQuestMod::HandleClassAuraToggleOnCheckCast(Player* player, Spell* spell
                 return false;
             }
             player->RemoveAurasDueToSpell(toggleSpellID);
+            if (EQ_CLASSAURA_TOGGLES[i].ToggleType == EQ_CLASSAURA_SPELL_RANGER_FOCUS)
+                HandleClassAuraRangerFocusDeactivate(player);
             result = SPELL_FAILED_DONT_REPORT;
             return true;
         }
@@ -2372,127 +2374,38 @@ void EverQuestMod::ApplyClassAuraShadowKnightFocusCooldown(Player* player, Spell
     player->SendDirectMessage(&cooldownPacket);
 }
 
-static bool IsClassAuraRangerAmmoAttackSpell(SpellInfo const* spellInfo)
+void EverQuestMod::HandleClassAuraRangerFocusIgnoreMinRange(Spell* spell, bool& ignoreMinRange)
 {
-    if (spellInfo->DmgClass == SPELL_DAMAGE_CLASS_RANGED)
-        return spellInfo->IsRangedWeaponSpell();
-    if (spellInfo->DmgClass == SPELL_DAMAGE_CLASS_MELEE)
-        return false;
-    return spellInfo->HasAttribute(SPELL_ATTR2_AUTO_REPEAT);
-}
-
-void EverQuestMod::RegisterClassAuraRangerChannelAmmoSpell(SpellInfo* spellInfo)
-{
-    // Spell::handle_immediate takes a channeled ranged spell's ammo after every script hook and without looking at the no-ammo aura, so the core is told not to
-    // and the mod takes it instead.  The attribute also keeps that one cast from spending proc charges, which Volley never relies on
-    if (spellInfo == nullptr || spellInfo->IsChanneled() == false || spellInfo->IsRangedWeaponSpell() == false || IsClassAuraRangerAmmoAttackSpell(spellInfo) == false)
-        return;
-    if (spellInfo->HasAttribute(SPELL_ATTR6_DO_NOT_CONSUME_RESOURCES) == true)
-        return;
-    spellInfo->AttributesEx6 |= SPELL_ATTR6_DO_NOT_CONSUME_RESOURCES;
-    ClassAuraRangerChannelAmmoSpellIDs.insert(spellInfo->Id);
-}
-
-static uint32 CountClassAuraRangerLaunchAmmoShots(Player* player, Spell* spell, SpellInfo const* spellInfo, uint32 quiverSpellID)
-{
-    if (spellInfo->HasAttribute(SPELL_ATTR0_CU_DIRECT_DAMAGE) == false)
-        return 0;
-    if (spell->IsTriggered() == true && spellInfo->SpellFamilyName == SPELLFAMILY_HUNTER && spellInfo->IsTargetingArea() == true)
-        return 0;
-
-    // Any other no-ammo effect would have spared the shot anyway
-    Unit::AuraEffectList const& noAmmoEffects = player->GetAuraEffectsByType(SPELL_AURA_ABILITY_CONSUME_NO_AMMO);
-    for (AuraEffect* noAmmoEffect : noAmmoEffects)
-        if (noAmmoEffect != nullptr && noAmmoEffect->GetId() != quiverSpellID && noAmmoEffect->IsAffectedOnSpell(spellInfo) == true)
-            return 0;
-
-    // One per unique target with a damaging effect.  Only aura effect bits leave a target's mask after launch, so the count matches what launch saw
-    uint32 shotCount = 0;
-    std::list<TargetInfo>* targetInfos = spell->GetUniqueTargetInfo();
-    for (TargetInfo const& targetInfo : *targetInfos)
-    {
-        uint32 effectMask = targetInfo.effectMask;
-        for (uint8 i = 0; i < MAX_SPELL_EFFECTS; ++i)
-        {
-            if ((effectMask & (1 << i)) == 0)
-                continue;
-            uint32 effectType = spellInfo->Effects[i].Effect;
-            if (effectType == SPELL_EFFECT_SCHOOL_DAMAGE || effectType == SPELL_EFFECT_WEAPON_DAMAGE || effectType == SPELL_EFFECT_WEAPON_DAMAGE_NOSCHOOL
-                || effectType == SPELL_EFFECT_NORMALIZED_WEAPON_DMG || effectType == SPELL_EFFECT_WEAPON_PERCENT_DAMAGE)
-            {
-                shotCount++;
-                break;
-            }
-        }
-    }
-    return shotCount;
-}
-
-static bool TakeClassAuraRangerAmmoForShot(Player* player, bool isQuiverActive)
-{
-    Item* rangedItem = player->GetWeaponForAttack(RANGED_ATTACK);
-    if (rangedItem == nullptr || rangedItem->IsBroken() == true || rangedItem->GetTemplate()->SubClass == ITEM_SUBCLASS_WEAPON_WAND)
-        return false;
-
-    // A throwing weapon is not an arrow or a bullet, so the quiver never covers it
-    if (rangedItem->GetTemplate()->InventoryType == INVTYPE_THROWN)
-    {
-        if (rangedItem->GetMaxStackCount() == 1)
-            player->DurabilityPointLossForEquipSlot(EQUIPMENT_SLOT_RANGED);
-        else if (sWorld->getBoolConfig(CONFIG_ENABLE_INFINITEAMMO) == false)
-        {
-            uint32 count = 1;
-            player->DestroyItemCount(rangedItem, count, true);
-        }
-        return false;
-    }
-
-    if (sWorld->getBoolConfig(CONFIG_ENABLE_INFINITEAMMO) == true)
-        return false;
-    uint32 ammoItemID = player->GetUInt32Value(PLAYER_AMMO_ID);
-    if (ammoItemID == 0)
-        return false;
-    if (isQuiverActive == true)
-        return true;
-    player->DestroyItemCount(ammoItemID, 1, true);
-    return false;
-}
-
-void EverQuestMod::HandleClassAuraRangerAmmoOnSpellCast(Player* player, Spell* spell)
-{
-    if (player == nullptr || spell == nullptr)
+    // Ranger's Focus lets ranged attacks (the ranged slot's shots and anything of the ranged damage class) be made in melee.  The client drops the same minimum
+    // range while the aura is up (it carries the EQ_SPELLDUMMYTYPE_RANGERFOCUS marker), so both sides agree
+    if (ignoreMinRange == true || spell == nullptr || spell->GetCaster() == nullptr || spell->GetCaster()->IsPlayer() == false)
         return;
     SpellInfo const* spellInfo = spell->GetSpellInfo();
-    if (spellInfo == nullptr || IsClassAuraRangerAmmoAttackSpell(spellInfo) == false)
+    if (spellInfo == nullptr)
         return;
-    uint32 quiverSpellID = GetClassAuraSpellID(EQ_CLASSAURA_SPELL_RANGER_ENDLESS_QUIVER);
-    bool isQuiverActive = quiverSpellID != 0 && player->HasAura(quiverSpellID) == true;
-    bool isChannelAmmoSpell = ClassAuraRangerChannelAmmoSpellIDs.find(spellInfo->Id) != ClassAuraRangerChannelAmmoSpellIDs.end();
-    if (isQuiverActive == false && isChannelAmmoSpell == false)
+    if (spellInfo->HasAttribute(SPELL_ATTR0_USES_RANGED_SLOT) == false && spellInfo->DmgClass != SPELL_DAMAGE_CLASS_RANGED)
         return;
-
-    // The core took nothing for these shots: launch ammo was held back by the quiver (or, for a handed-over channeled spell, by the attribute), and a handed-over
-    // channeled spell adds its own one.  A spell that already never takes ammo stays that way
-    uint32 shotCount = 0;
-    if (isChannelAmmoSpell == true || spellInfo->HasAttribute(SPELL_ATTR6_DO_NOT_CONSUME_RESOURCES) == false)
-        shotCount += CountClassAuraRangerLaunchAmmoShots(player, spell, spellInfo, quiverSpellID);
-    if (isChannelAmmoSpell == true)
-        shotCount++;
-
-    uint32 coveredShotCount = 0;
-    for (uint32 i = 0; i < shotCount; ++i)
-        if (TakeClassAuraRangerAmmoForShot(player, isQuiverActive) == true)
-            coveredShotCount++;
-    if (coveredShotCount == 0)
+    uint32 focusSpellID = GetClassAuraSpellID(EQ_CLASSAURA_SPELL_RANGER_FOCUS);
+    if (focusSpellID == 0 || spell->GetCaster()->ToPlayer()->HasAura(focusSpellID) == false)
         return;
+    ignoreMinRange = true;
+}
 
-    uint32 baseMana = player->GetCreateMana();
-    if (baseMana == 0 || ConfigSystemClassAuraRangerEndlessQuiverBaseManaCostPercent == 0)
+void EverQuestMod::HandleClassAuraRangerFocusDeactivate(Player* player)
+{
+    // Turning Ranger's Focus off gives the ranger Ranger's Reflex (parry and melee haste for the switch to melee), and Ranger's Focus can't come back on for a while
+    if (player == nullptr || player->IsInWorld() == false)
         return;
-
-    // Rounded to the nearest point and never free.  Taken straight off the pool, so it never starts the five second rule, and a pool already at zero just stays there
-    uint32 manaPerShot = (baseMana * ConfigSystemClassAuraRangerEndlessQuiverBaseManaCostPercent + 50) / 100;
-    if (manaPerShot == 0)
-        manaPerShot = 1;
-    player->ModifyPower(POWER_MANA, -(int32)(manaPerShot * coveredShotCount));
+    uint32 focusSpellID = GetClassAuraSpellID(EQ_CLASSAURA_SPELL_RANGER_FOCUS);
+    if (focusSpellID == 0)
+        return;
+    uint32 reflexSpellID = GetClassAuraSpellID(EQ_CLASSAURA_SPELL_RANGER_REFLEX);
+    if (reflexSpellID != 0 && player->IsAlive() == true)
+        player->CastSpell(player, reflexSpellID, true);
+    if (ConfigSystemClassAuraRangerFocusReactivateCooldownInMS == 0)
+        return;
+    player->AddSpellCooldown(focusSpellID, 0, ConfigSystemClassAuraRangerFocusReactivateCooldownInMS);
+    WorldPacket cooldownPacket;
+    player->BuildCooldownPacket(cooldownPacket, SPELL_COOLDOWN_FLAG_NONE, focusSpellID, ConfigSystemClassAuraRangerFocusReactivateCooldownInMS);
+    player->SendDirectMessage(&cooldownPacket);
 }

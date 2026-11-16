@@ -15,6 +15,7 @@
 //  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #include "Configuration/Config.h"
+#include "MapWorlds.h"
 #include "ScriptMgr.h"
 
 #include "EverQuest.h"
@@ -57,6 +58,9 @@ public:
             EverQuest->IsEnabled = false;
             return;
         }
+        // Norrath's maps, in the core's map worlds (SHARED.md section 8), so every world module knows them
+        if (EverQuest->ConfigSystemMapDBCIDMin != 0 && EverQuest->ConfigSystemMapDBCIDMax != 0)
+            MapWorlds::SetMapRangeWorld(EverQuest->ConfigSystemMapDBCIDMin, EverQuest->ConfigSystemMapDBCIDMax, EVERQUEST_MAP_WORLD);
         EverQuest->LoadClassMapData();
         EverQuest->LoadCreatureData();
         EverQuest->LoadCreatureSpawnPoints();

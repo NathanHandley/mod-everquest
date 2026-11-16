@@ -57,6 +57,9 @@ struct BuildValuesCachePosPointers;
 
 #define EQ_MOD_VERSION                              146
 
+// Norrath's world id in the core's map worlds (MapWorlds.h; E:\MW\SHARED.md section 8).  A map world only: its bank and carried set are world 0's
+#define EVERQUEST_MAP_WORLD                         5
+
 #define EQ_CLIENT_DATA_VERSION_MASK                 0x00FFFFFF // The client data version CMSG_AUTH_SESSION carries; its high byte is the client's optional content (mod-rowow)
 
 #define EQ_VENDOR_PRICE_MOD_SCALE                   10000 // A greedy vendor's price changes are in ten-thousandths (converter EQMerchantPricing)
@@ -117,14 +120,16 @@ struct BuildValuesCachePosPointers;
 #define EQ_DRUID_FORM_BEAR_ALLIANCE                 1
 #define EQ_DRUID_FORM_BEAR_HORDE                    2
 #define EQ_DRUID_FORM_BEAR_NORRATH_GRIZZLY          3
-#define EQ_DRUID_FORM_BEAR_MAX                      3
+#define EQ_DRUID_FORM_BEAR_NONE                     4 // No form graphic, so the character (or the illusion they wear) keeps its look
+#define EQ_DRUID_FORM_BEAR_MAX                      4
 
 #define EQ_DRUID_FORM_CAT_FACTION_DEFAULT           0
 #define EQ_DRUID_FORM_CAT_ALLIANCE                  1
 #define EQ_DRUID_FORM_CAT_HORDE                     2
 #define EQ_DRUID_FORM_CAT_NORRATH_PANTHER           3
 #define EQ_DRUID_FORM_CAT_NORRATH_SABERTOOTH        4
-#define EQ_DRUID_FORM_CAT_MAX                       4
+#define EQ_DRUID_FORM_CAT_NONE                      5 // No form graphic, so the character (or the illusion they wear) keeps its look
+#define EQ_DRUID_FORM_CAT_MAX                       5
 
 #define EQ_DRUID_FORM_TRAVEL_AZEROTH_CHEETAH        0
 #define EQ_DRUID_FORM_TRAVEL_NORRATH_LEOPARD        1
@@ -272,10 +277,11 @@ struct BuildValuesCachePosPointers;
 #define EQ_SPELLDUMMYTYPE_EYEOFZOMM                 27  // The channeled aura that controls a possessed eye of zomm
 #define EQ_SPELLDUMMYTYPE_TELESCOPE                 28  // The channeled caster aura that carries a telescope far sight
 #define EQ_SPELLDUMMYTYPE_CLASSCHANGE               29  // The cast a secondary class change waits out
-#define EQ_SPELLDUMMYTYPE_TRANSLOCATETOBIND         30  // 30 to 33 only exist from Luclin on: the converter leaves these EQ effects out before it
-#define EQ_SPELLDUMMYTYPE_DEATHSAVE                 31      // MiscValueB 1 is a partial heal, 2 a full one
-#define EQ_SPELLDUMMYTYPE_SHADOWSTEP                32
-#define EQ_SPELLDUMMYTYPE_RECLAIMPET                33
+#define EQ_SPELLDUMMYTYPE_RANGERFOCUS               30  // Ranger's Focus is up: the client (EQRangerFocus.h) drops ranged attacks' minimum range
+#define EQ_SPELLDUMMYTYPE_TRANSLOCATETOBIND         31  // 31 to 34 only exist from Luclin on: the converter leaves these EQ effects out before it
+#define EQ_SPELLDUMMYTYPE_DEATHSAVE                 32      // MiscValueB 1 is a partial heal, 2 a full one
+#define EQ_SPELLDUMMYTYPE_SHADOWSTEP                33
+#define EQ_SPELLDUMMYTYPE_RECLAIMPET                34
 #define EQ_RECLAIM_PET_MAX_MANA_RETURN_PERCENT      75
 #define EQ_SHADOW_STEP_DISTANCE_IN_YARDS            10.0f
 #define EQ_DEATH_SAVE_CHANCE_PERCENT                48      // TAKP's formula at 150 Charisma, which WoW has no stat for
@@ -1180,7 +1186,7 @@ enum EverQuestClassAuraSpellType : uint32
     EQ_CLASSAURA_SPELL_MONK_HEAVY_ARMOR = 9,
     EQ_CLASSAURA_SPELL_RANGER_PASSIVE = 10,
     EQ_CLASSAURA_SPELL_RANGER_AURA = 11,
-    EQ_CLASSAURA_SPELL_RANGER_ENDLESS_QUIVER = 12,
+    EQ_CLASSAURA_SPELL_RANGER_FOCUS = 12,
     EQ_CLASSAURA_SPELL_RANGER_COMPOUND_INJURY = 13,
     EQ_CLASSAURA_SPELL_ROGUE_PASSIVE = 14,
     EQ_CLASSAURA_SPELL_ROGUE_AURA = 15,
@@ -1219,7 +1225,7 @@ enum EverQuestClassAuraSpellType : uint32
     EQ_CLASSAURA_SPELL_DRUID_NATURES_BALANCE_FIRE = 48,
     EQ_CLASSAURA_SPELL_WARRIOR_UNRELENTING_ASSAULT = 49,
     EQ_CLASSAURA_SPELL_WARRIOR_RIPOSTE = 50,
-    EQ_CLASSAURA_SPELL_UNUSED_51 = 51, // Was the Bard's Virtuoso Vigor.  Kept so every later spell keeps its ID, and free for the next new spell
+    EQ_CLASSAURA_SPELL_RANGER_REFLEX = 51, // Was the Bard's Virtuoso Vigor until the slot was reused
     EQ_CLASSAURA_SPELL_MONK_CHI_SURGE = 52,
     EQ_CLASSAURA_SPELL_PALADIN_DEFLECTION = 53,
     EQ_CLASSAURA_SPELL_ROGUE_LUCKY_STRIKE = 54,
@@ -2033,8 +2039,7 @@ public:
     uint32 ConfigSystemClassAuraRogueLuckyStrikeCooldownInMS = 8000;
     uint32 ConfigSystemClassAuraMonkDoubleToTripleAttackChancePercent = 50;
     uint32 ConfigSystemClassAuraRangerCompoundInjuryDamagePercentPerStack = 1;
-    uint32 ConfigSystemClassAuraRangerEndlessQuiverBaseManaCostPercent = 1;
-    std::unordered_set<uint32> ClassAuraRangerChannelAmmoSpellIDs; // Need to track these because channeled attacks (like Volley) didn't have a good hook to stop the ammo consumption
+    uint32 ConfigSystemClassAuraRangerFocusReactivateCooldownInMS = 20000;
     uint32 ConfigSystemClassAuraPaladinHealSelfPercent = 15;
     uint32 ConfigSystemClassAuraPaladinBlockDeflectionDamagePercent = 15;
     uint32 ConfigSystemClassAuraPaladinFullBlockPercent = 10;
@@ -2509,6 +2514,8 @@ public:
     void SendMirrorImageDataToNearbyPlayers(Player* player, EverQuestPlayerIllusionState* illusionState);
     bool TryGetIllusionCharacterMirrorDataForPlayer(Player* subject, uint8& chrRaceIDOut, uint8& eqFaceByteOut);
     void ApplyIllusionCharacterDisplayIfChanged(Player* player, EverQuestPlayerIllusionState* illusionState);
+    float GetObjectScaleWithSizeAuras(Player* player, float baseScale);
+    bool IsSpellASizeChangeSpell(SpellInfo const* spellInfo);
     void ApplyIllusionGearDisplayIfChanged(Player* player, EverQuestPlayerIllusionState* illusionState);
     void ApplyIllusionGearDisplayOnFormAuraApply(Player* player, uint32 formSpellID);
     void HandleIllusionFormAuraRemove(Player* player, uint32 spellID);
@@ -2718,8 +2725,8 @@ public:
     bool HandleClassAuraShadowKnightFocusRangeOnCheckCast(Player* player, Spell* spell, bool strict, SpellCastResult& result);
     void HandleClassAuraShadowKnightFocusApply(Player* player, Aura* aura);
     void ApplyClassAuraShadowKnightFocusCooldown(Player* player, Spell* spell, SpellInfo const* spellInfo);
-    void RegisterClassAuraRangerChannelAmmoSpell(SpellInfo* spellInfo);
-    void HandleClassAuraRangerAmmoOnSpellCast(Player* player, Spell* spell);
+    void HandleClassAuraRangerFocusIgnoreMinRange(Spell* spell, bool& ignoreMinRange);
+    void HandleClassAuraRangerFocusDeactivate(Player* player);
 
     void LoadQuestCompletionReputations();
     const list<EverQuestQuestCompletionReputation>& GetQuestCompletionReputationsForQuestTemplate(uint32 questTemplateID);

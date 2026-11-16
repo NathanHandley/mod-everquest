@@ -328,6 +328,10 @@ public:
         // Object based illusion forms (Minor Illusion, Illusion: Tree) copy a real object out of the zone instead of wearing the form's own fallback model
         EverQuest->ApplyIllusionObjectDisplayOnFormAuraApply(player, spellID);
 
+        // Shrink and Grow resize from 1 in the core, so an illusion worn at its own size takes them on right away
+        if (EverQuest->IsSpellASizeChangeSpell(aura->GetSpellInfo()) == true)
+            EverQuest->RefreshIllusionGearDisplayForPlayer(player);
+
         // Illusion forms change how factions perceive the player
         if (EverQuest->GetSpellDataForSpellID(spellID).IllusionFormEQRaceID != 0)
             EverQuest->RecalculateTemporaryFactionReactionsForPlayer(player);
@@ -384,6 +388,10 @@ public:
             // A Shaman turning Warspirit off loses the vigor it built
             EverQuest->HandleClassAuraShamanWarspiritRemove(unit, aurApp->GetBase());
 
+            // A Ranger clicking Ranger's Focus off (rather than casting it off, which the toggle check handles) gets the same Ranger's Reflex and cooldown
+            if (mode == AURA_REMOVE_BY_CANCEL && unit->IsPlayer() == true && aurApp->GetBase()->GetId() == EverQuest->GetClassAuraSpellID(EQ_CLASSAURA_SPELL_RANGER_FOCUS))
+                EverQuest->HandleClassAuraRangerFocusDeactivate(unit->ToPlayer());
+
             // Standing up from a crouch lets the player attack and cast again, and a crouched player stays unable to when a real pacify or silence ends
             EverQuest->HandleCrouchAuraRemove(unit, aurApp->GetBase());
 
@@ -412,6 +420,10 @@ public:
                 EverQuest->NotifyPlayerOfDispelledAura(unit->ToPlayer(), aurApp);
 
             // Leaving a shapeshift form uncovers the illusion, so put the gear-matched illusion display back (the core has already restored the base transform model by this point)
+            // Losing Shrink or Grow puts an illusion back at its own size (with any size auras still on)
+            if (aurApp->GetBase()->GetSpellInfo() != nullptr && EverQuest->IsSpellASizeChangeSpell(aurApp->GetBase()->GetSpellInfo()) == true)
+                EverQuest->RefreshIllusionGearDisplayForPlayer(unit->ToPlayer());
+
             if (aurApp->GetBase()->GetSpellInfo() != nullptr && aurApp->GetBase()->GetSpellInfo()->HasAura(SPELL_AURA_MOD_SHAPESHIFT) == true)
             {
                 EverQuest->RefreshIllusionGearDisplayForPlayer(unit->ToPlayer());
