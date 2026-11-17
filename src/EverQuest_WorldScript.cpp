@@ -16,6 +16,7 @@
 
 #include "Configuration/Config.h"
 #include "MapWorlds.h"
+#include "MWStandby.h"      // MergedWorlds devops
 #include "ScriptMgr.h"
 
 #include "EverQuest.h"
@@ -101,7 +102,8 @@ public:
         EverQuest->LoadZoneSafePointData();
         EverQuest->LoadZoneLineData();
         EverQuest->LoadZoneData();
-        EverQuest->AlignRaidInstanceResetTimes();
+        // MergedWorlds devops: it writes instance reset times to the characters database, so a standby process does it at takeover
+        MW_STANDBY_DEFER("mod-everquest: AlignRaidInstanceResetTimes", EverQuest->AlignRaidInstanceResetTimes());
         EverQuest->LoadZoneTeleportDestinationData();
         EverQuest->LoadFactionData();
     }
