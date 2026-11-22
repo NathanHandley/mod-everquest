@@ -853,6 +853,9 @@ public:
             return;
         }
 
+        // A discipline's crit chance against this kind of victim
+        crit_chance += EverQuest->GetDisciplineMeleeCritChanceBonus(attacker, victim);
+
         if (victim->IsPlayer() == false)
             return;
 

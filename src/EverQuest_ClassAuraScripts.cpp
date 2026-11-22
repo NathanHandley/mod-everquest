@@ -144,6 +144,50 @@ class EverQuest_DisciplineLeechAuraScript : public AuraScript
     }
 };
 
+// Holyforge: a share of melee crits are crippling blows, which hit harder and stagger the target out of its cast (TAKP attack.cpp, CrippBlowChance).  The
+// crit has already landed when this fires, so the rest of the blow's damage follows it under the discipline's name
+class EverQuest_DisciplineCripplingBlowAuraScript : public AuraScript
+{
+    PrepareAuraScript(EverQuest_DisciplineCripplingBlowAuraScript);
+
+    void HandleProc(ProcEventInfo& eventInfo)
+    {
+        PreventDefaultAction();
+        DamageInfo* damageInfo = eventInfo.GetDamageInfo();
+        Unit* attacker = GetTarget();
+        Unit* victim = eventInfo.GetActionTarget();
+        if (damageInfo == nullptr || damageInfo->GetDamage() == 0 || attacker == nullptr || victim == nullptr || victim->IsAlive() == false)
+            return;
+        int32 chancePercent = 0;
+        for (uint8 i = 0; i < MAX_SPELL_EFFECTS; ++i)
+        {
+            if (GetSpellInfo()->Effects[i].ApplyAuraName == SPELL_AURA_DUMMY && GetEffect(i) != nullptr)
+                chancePercent = GetEffect(i)->GetAmount();
+        }
+        if (chancePercent <= 0 || roll_chance_i(chancePercent) == false)
+            return;
+
+        // The stagger first, as the damage can kill
+        if (victim->IsCreature() == true && victim->GetLevel() <= EQ_DISCIPLINE_CRIPPLING_BLOW_STAGGER_MAX_LEVEL
+            && victim->ToCreature()->HasMechanicTemplateImmunity(1ULL << MECHANIC_STUN) == false && roll_chance_i(EQ_DISCIPLINE_CRIPPLING_BLOW_STAGGER_PERCENT) == true)
+        {
+            victim->InterruptNonMeleeSpells(false);
+            victim->TextEmote(victim->GetName() + " staggers.", nullptr);
+        }
+
+        uint32 extraDamage = damageInfo->GetDamage() * EQ_DISCIPLINE_CRIPPLING_BLOW_EXTRA_NUMERATOR / EQ_DISCIPLINE_CRIPPLING_BLOW_EXTRA_DENOMINATOR;
+        if (extraDamage == 0)
+            return;
+        attacker->SendSpellNonMeleeDamageLog(victim, GetSpellInfo(), extraDamage, SPELL_SCHOOL_MASK_NORMAL, 0, 0, true, 0, true);
+        Unit::DealDamage(attacker, victim, extraDamage, nullptr, SPELL_DIRECT_DAMAGE, SPELL_SCHOOL_MASK_NORMAL, GetSpellInfo(), false);
+    }
+
+    void Register() override
+    {
+        OnProc += AuraProcFn(EverQuest_DisciplineCripplingBlowAuraScript::HandleProc);
+    }
+};
+
 class EverQuest_ClassAuraPaladinAuraScript : public AuraScript
 {
     PrepareAuraScript(EverQuest_ClassAuraPaladinAuraScript);
@@ -765,6 +809,7 @@ void AddEverQuestClassAuraScripts()
     RegisterSpellScript(EverQuest_ClassAuraPaladinAuraScript);
     RegisterSpellScript(EverQuest_DisciplineNextStrikeAuraScript);
     RegisterSpellScript(EverQuest_DisciplineLeechAuraScript);
+    RegisterSpellScript(EverQuest_DisciplineCripplingBlowAuraScript);
     RegisterSpellScript(EverQuest_ClassAuraWarriorAuraScript);
     RegisterSpellScript(EverQuest_ClassAuraShadowKnightAuraScript);
     RegisterSpellScript(EverQuest_ClassAuraShadowKnightFocusAuraScript);
