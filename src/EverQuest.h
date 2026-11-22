@@ -93,6 +93,12 @@ struct BuildValuesCachePosPointers;
 #define EQ_DISCIPLINE_NIMBLE_SPELL_ID               97680
 #define EQ_DISCIPLINE_PURETONE_SPELL_ID             97690
 #define EQ_DISCIPLINE_PURETONE_BOOST_PERCENT        180
+#define EQ_DISCIPLINE_HOLYFORGE_SPELL_ID            97683
+#define EQ_DISCIPLINE_HOLYFORGE_UNDEAD_CRIT_PERCENT 2       // Melee crit chance against undead
+#define EQ_DISCIPLINE_CRIPPLING_BLOW_EXTRA_NUMERATOR   12   // TAKP: a crippling blow is 2.9 times damage where a crit is 1.7, so 12/17 more than the crit
+#define EQ_DISCIPLINE_CRIPPLING_BLOW_EXTRA_DENOMINATOR 17
+#define EQ_DISCIPLINE_CRIPPLING_BLOW_STAGGER_MAX_LEVEL 55   // TAKP staggers nothing past this level
+#define EQ_DISCIPLINE_CRIPPLING_BLOW_STAGGER_PERCENT   85
 #define EQ_INSTRUMENT_MAX_BOOST_PERCENT             260     // EQ stops instrument mods at 3.6 times
 #define EQ_DISCIPLINE_MIN_REUSE_SECONDS             234
 #define EQ_DISCIPLINE_MAX_REUSE_SECONDS             4320    // TAKP's 72:00 most
@@ -2934,6 +2940,8 @@ public:
     bool HandleDisciplineOnCheckCast(Player* player, Spell* spell, SpellCastResult& res);
     void HandleDisciplineCast(Player* player, SpellInfo const* spellInfo);
     void RemoveActiveDisciplines(Player* player);
+    void SendDisciplineCooldownOnLearn(Player* player, uint32 spellID);
+    int32 GetDisciplineMeleeCritChanceBonus(Unit const* attacker, Unit const* victim);
     void ApplyItemFocusToSpellAmount(Unit* caster, uint32 focusType, SpellInfo const* spellInfo, int32& amount);
     void RemoveEQMountWhereNotAllowed(Player* player);
     void RemoveEQMountAtLogin(Player* player);

@@ -1178,6 +1178,13 @@ public:
         EverQuest->ReapplyClassAurasForPlayer(player);
     }
 
+    void OnPlayerLearnSpell(Player* player, uint32 spellID) override
+    {
+        if (EverQuest->IsEnabled == false)
+            return;
+        EverQuest->SendDisciplineCooldownOnLearn(player, spellID);
+    }
+
     void OnPlayerLevelChanged(Player* player, uint8 /*oldlevel*/) override
     {
         if (EverQuest->IsEnabled == false)

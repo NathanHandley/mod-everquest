@@ -3788,17 +3788,43 @@ void EverQuestMod::HandleDisciplineCast(Player* player, SpellInfo const* spellIn
     if (reduction > 0)
         player->ModifySpellCooldown(spellInfo->Id, -reduction * int32(IN_MILLISECONDS));
 
-    // EQ of this era has one reuse timer for every discipline
+    // EQ of this era has one reuse timer for every discipline.  It's set on the ones the player doesn't know as well, so one learned while it runs (a level
+    // gained, a second class taken) isn't ready early, and it's flagged for the client so a login shows it
     uint32 reuseInMS = uint32(int32(discipline.ReuseInSeconds) - std::max(reduction, 0)) * IN_MILLISECONDS;
     for (auto const& disciplineEntry : DisciplinesBySpellID)
     {
-        if (disciplineEntry.first == spellInfo->Id || player->HasSpell(disciplineEntry.first) == false)
+        if (disciplineEntry.first == spellInfo->Id)
             continue;
-        player->AddSpellCooldown(disciplineEntry.first, 0, reuseInMS);
+        player->AddSpellCooldown(disciplineEntry.first, 0, reuseInMS, true);
+        if (player->HasSpell(disciplineEntry.first) == false)
+            continue;
         WorldPacket cooldownPacket;
         player->BuildCooldownPacket(cooldownPacket, SPELL_COOLDOWN_FLAG_NONE, disciplineEntry.first, reuseInMS);
         player->SendDirectMessage(&cooldownPacket);
     }
+}
+
+// A discipline learned while the shared reuse runs shows the time it has left
+void EverQuestMod::SendDisciplineCooldownOnLearn(Player* player, uint32 spellID)
+{
+    if (player == nullptr || IsDisciplineSpell(spellID) == false)
+        return;
+    uint32 remainingInMS = player->GetSpellCooldownDelay(spellID);
+    if (remainingInMS == 0)
+        return;
+    WorldPacket cooldownPacket;
+    player->BuildCooldownPacket(cooldownPacket, SPELL_COOLDOWN_FLAG_NONE, spellID, remainingInMS);
+    player->SendDirectMessage(&cooldownPacket);
+}
+
+// Holyforge's crit chance against undead, in the hundredths of a percent the melee roll counts in.  No aura gives crit chance by creature type, so it's added here
+int32 EverQuestMod::GetDisciplineMeleeCritChanceBonus(Unit const* attacker, Unit const* victim)
+{
+    if (attacker == nullptr || victim == nullptr || attacker->IsPlayer() == false)
+        return 0;
+    if (attacker->HasAura(EQ_DISCIPLINE_HOLYFORGE_SPELL_ID) == false || (victim->GetCreatureTypeMask() & (1 << (CREATURE_TYPE_UNDEAD - 1))) == 0)
+        return 0;
+    return EQ_DISCIPLINE_HOLYFORGE_UNDEAD_CRIT_PERCENT * 100;
 }
 
 void EverQuestMod::RemoveActiveDisciplines(Player* player)
