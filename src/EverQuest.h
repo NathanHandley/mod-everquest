@@ -1666,6 +1666,7 @@ public:
     uint32 SpellID = 0;
     uint32 ReuseInSeconds = 0;
     bool IsTimed = true;                                    // One at a time: a running timed discipline holds the next one back, a waiting one is replaced
+    uint8 TimerGroup = 0;                                   // Disciplines in one group share a reuse timer (TAKP's discipline timer groups)
     unordered_map<uint8, uint8> UseLevelsByEQClassID;
 };
 

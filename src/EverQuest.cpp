@@ -3671,7 +3671,7 @@ void EverQuestMod::ReclaimPetForPlayer(Player* player)
 void EverQuestMod::LoadDisciplineData()
 {
     DisciplinesBySpellID.clear();
-    QueryResult queryResult = WorldDatabase.Query("SELECT SpellID, ReuseInSeconds, IsTimed, EQClassID, UseLevel FROM mod_everquest_discipline;");
+    QueryResult queryResult = WorldDatabase.Query("SELECT SpellID, ReuseInSeconds, IsTimed, EQClassID, UseLevel, TimerGroup FROM mod_everquest_discipline;");
     if (queryResult)
     {
         do
@@ -3682,6 +3682,7 @@ void EverQuestMod::LoadDisciplineData()
             discipline.ReuseInSeconds = fields[1].Get<uint32>();
             discipline.IsTimed = fields[2].Get<uint8>() != 0;
             discipline.UseLevelsByEQClassID[fields[3].Get<uint8>()] = fields[4].Get<uint8>();
+            discipline.TimerGroup = fields[5].Get<uint8>();
         } while (queryResult->NextRow());
     }
 }
@@ -3788,12 +3789,13 @@ void EverQuestMod::HandleDisciplineCast(Player* player, SpellInfo const* spellIn
     if (reduction > 0)
         player->ModifySpellCooldown(spellInfo->Id, -reduction * int32(IN_MILLISECONDS));
 
-    // EQ of this era has one reuse timer for every discipline.  It's set on the ones the player doesn't know as well, so one learned while it runs (a level
-    // gained, a second class taken) isn't ready early, and it's flagged for the client so a login shows it
+    // The disciplines in its timer group share its reuse (TAKP's discipline timer groups: a Warrior, Monk or Rogue has three).  It's set on the ones the
+    // player doesn't know as well, so one learned while it runs (a level gained, a second class taken) isn't ready early, and it's flagged for the client
+    // so a login shows it
     uint32 reuseInMS = uint32(int32(discipline.ReuseInSeconds) - std::max(reduction, 0)) * IN_MILLISECONDS;
     for (auto const& disciplineEntry : DisciplinesBySpellID)
     {
-        if (disciplineEntry.first == spellInfo->Id)
+        if (disciplineEntry.first == spellInfo->Id || disciplineEntry.second.TimerGroup != discipline.TimerGroup)
             continue;
         player->AddSpellCooldown(disciplineEntry.first, 0, reuseInMS, true);
         if (player->HasSpell(disciplineEntry.first) == false)
