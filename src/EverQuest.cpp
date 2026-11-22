@@ -3671,7 +3671,7 @@ void EverQuestMod::ReclaimPetForPlayer(Player* player)
 void EverQuestMod::LoadDisciplineData()
 {
     DisciplinesBySpellID.clear();
-    QueryResult queryResult = WorldDatabase.Query("SELECT SpellID, ReuseInSeconds, IsTimed, EQClassID, UseLevel, TimerGroup FROM mod_everquest_discipline;");
+    QueryResult queryResult = WorldDatabase.Query("SELECT SpellID, ReuseInSeconds, IsTimed, EQClassID, UseLevel FROM mod_everquest_discipline;");
     if (queryResult)
     {
         do
@@ -3682,7 +3682,6 @@ void EverQuestMod::LoadDisciplineData()
             discipline.ReuseInSeconds = fields[1].Get<uint32>();
             discipline.IsTimed = fields[2].Get<uint8>() != 0;
             discipline.UseLevelsByEQClassID[fields[3].Get<uint8>()] = fields[4].Get<uint8>();
-            discipline.TimerGroup = fields[5].Get<uint8>();
         } while (queryResult->NextRow());
     }
 }
@@ -3788,35 +3787,6 @@ void EverQuestMod::HandleDisciplineCast(Player* player, SpellInfo const* spellIn
         reduction = int32(discipline.ReuseInSeconds) - EQ_DISCIPLINE_MAX_REUSE_SECONDS;
     if (reduction > 0)
         player->ModifySpellCooldown(spellInfo->Id, -reduction * int32(IN_MILLISECONDS));
-
-    // The disciplines in its timer group share its reuse (TAKP's discipline timer groups: a Warrior, Monk or Rogue has three).  It's set on the ones the
-    // player doesn't know as well, so one learned while it runs (a level gained, a second class taken) isn't ready early, and it's flagged for the client
-    // so a login shows it
-    uint32 reuseInMS = uint32(int32(discipline.ReuseInSeconds) - std::max(reduction, 0)) * IN_MILLISECONDS;
-    for (auto const& disciplineEntry : DisciplinesBySpellID)
-    {
-        if (disciplineEntry.first == spellInfo->Id || disciplineEntry.second.TimerGroup != discipline.TimerGroup)
-            continue;
-        player->AddSpellCooldown(disciplineEntry.first, 0, reuseInMS, true);
-        if (player->HasSpell(disciplineEntry.first) == false)
-            continue;
-        WorldPacket cooldownPacket;
-        player->BuildCooldownPacket(cooldownPacket, SPELL_COOLDOWN_FLAG_NONE, disciplineEntry.first, reuseInMS);
-        player->SendDirectMessage(&cooldownPacket);
-    }
-}
-
-// A discipline learned while the shared reuse runs shows the time it has left
-void EverQuestMod::SendDisciplineCooldownOnLearn(Player* player, uint32 spellID)
-{
-    if (player == nullptr || IsDisciplineSpell(spellID) == false)
-        return;
-    uint32 remainingInMS = player->GetSpellCooldownDelay(spellID);
-    if (remainingInMS == 0)
-        return;
-    WorldPacket cooldownPacket;
-    player->BuildCooldownPacket(cooldownPacket, SPELL_COOLDOWN_FLAG_NONE, spellID, remainingInMS);
-    player->SendDirectMessage(&cooldownPacket);
 }
 
 // Holyforge's crit chance against undead, in the hundredths of a percent the melee roll counts in.  No aura gives crit chance by creature type, so it's added here
