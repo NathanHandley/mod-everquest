@@ -87,7 +87,9 @@ class EverQuest_IllusionSpellScript: public SpellScript
         Unit* caster = GetCaster();
         if (caster == nullptr)
             return;
-        uint32 illusionSpellID = (hitUnit->getGender() == GENDER_MALE) ? eqSpellData.MaleFormSpellID : eqSpellData.FemaleFormSpellID;
+        // MergedWorlds (Nathan 2026-11-22): the character's own sex, not a shown look's (a druid form or another illusion tagged the other sex)
+        uint8 ownGender = hitUnit->IsPlayer() ? hitUnit->ToPlayer()->GetNativeGender() : hitUnit->getGender();
+        uint32 illusionSpellID = (ownGender == GENDER_MALE) ? eqSpellData.MaleFormSpellID : eqSpellData.FemaleFormSpellID;
         caster->CastSpell(hitUnit, illusionSpellID, true);
     }
 

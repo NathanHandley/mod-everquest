@@ -5672,7 +5672,9 @@ void EverQuestMod::ApplyIllusionGearDisplayOnFormAuraApply(Player* player, uint3
     illusionState->RefreshTimerMS = 0;
 
     // Forms whose EQ race has a character model version render dressed through the mirror image packet
-    illusionState->CharacterEntry = GetIllusionCharacterForRaceAndGender(GetSpellDataForSpellID(formSpellID).IllusionFormEQRaceID, player->getGender());
+    // MergedWorlds (Nathan 2026-11-22): the character's own sex: a male tagged druid form loaded ahead of the guise on login dressed a female
+    // character's guise as the male model
+    illusionState->CharacterEntry = GetIllusionCharacterForRaceAndGender(GetSpellDataForSpellID(formSpellID).IllusionFormEQRaceID, player->GetNativeGender());
     illusionState->CharacterUsingAltDisplay = false;
     illusionState->CharacterGearSignature = 0;
 
