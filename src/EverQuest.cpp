@@ -9753,15 +9753,23 @@ void EverQuestMod::ApplyWarderLookToPet(Pet* pet)
     if (owner == nullptr)
         return;
 
-    // A start option is a people, so it comes ahead of the owner's own race.  An EQ race beats both, and the table's WoW races stand in for those it has a look for
+    // The owner's EQ race (their EverQuest identity) picks it, as TAKP's pet code does: a Vah Shir's tiger, an Ogre's bear, a Troll's alligator, and a wolf for
+    // the rest (Barbarian and Iksar too).  The table's rows stand in for those races: the Shar Vahl start for the tiger, and the WoW races for the bear and
+    // alligator.  An owner from before the EverQuest creation page has no EQ race, so its start option (a people) goes ahead of its own WoW race
     EverQuestPlayerStartOptionState originState = GetPlayerOriginState(owner);
-    auto lookIter = WarderLookCreatureTemplateIDsByKey.find(originState.StartOption);
-    if (lookIter == WarderLookCreatureTemplateIDsByKey.end() && originState.EQRaceID == EQ_RACE_OGRE)
+    auto lookIter = WarderLookCreatureTemplateIDsByKey.end();
+    if (originState.EQRaceID == EQ_RACE_VAH_SHIR)
+        lookIter = WarderLookCreatureTemplateIDsByKey.find(EQ_START_OPTION_SHAR_VAHL);
+    else if (originState.EQRaceID == EQ_RACE_OGRE)
         lookIter = WarderLookCreatureTemplateIDsByKey.find(uint32(RACE_ORC) << 8);
-    else if (lookIter == WarderLookCreatureTemplateIDsByKey.end() && originState.EQRaceID == EQ_RACE_TROLL)
+    else if (originState.EQRaceID == EQ_RACE_TROLL)
         lookIter = WarderLookCreatureTemplateIDsByKey.find(uint32(RACE_TROLL) << 8);
-    else if (lookIter == WarderLookCreatureTemplateIDsByKey.end() && originState.EQRaceID == 0)
-        lookIter = WarderLookCreatureTemplateIDsByKey.find(uint32(owner->getRace()) << 8);
+    else if (originState.EQRaceID == 0)
+    {
+        lookIter = WarderLookCreatureTemplateIDsByKey.find(originState.StartOption);
+        if (lookIter == WarderLookCreatureTemplateIDsByKey.end())
+            lookIter = WarderLookCreatureTemplateIDsByKey.find(uint32(owner->getRace()) << 8);
+    }
     if (lookIter == WarderLookCreatureTemplateIDsByKey.end())
         return;
 
