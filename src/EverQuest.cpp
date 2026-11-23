@@ -6653,6 +6653,18 @@ void EverQuestMod::RemoveEQLevitationWhereNotAllowed(Player* player)
     player->RemoveAurasByType(SPELL_AURA_FEATHER_FALL);
 }
 
+void EverQuestMod::UpdateAirlessZoneForPlayer(Player* player)
+{
+    // EQ's The Grey has no air.  The breath bar runs everywhere in such a zone, as under water, and water breathing is what keeps the player
+    // alive.  An instance of the zone looks up its open world row
+    uint32 mapID = player->GetMapId();
+    auto openWorldIter = OpenWorldMapIDByInstanceMapID.find(mapID);
+    if (openWorldIter != OpenWorldMapIDByInstanceMapID.end())
+        mapID = openWorldIter->second;
+    auto zoneIter = ZoneByMapID.find(mapID);
+    player->SetInAirlessZone(zoneIter != ZoneByMapID.end() && zoneIter->second.IsAirless == true);
+}
+
 bool EverQuestMod::IsIllusionObjectFormBlockedByLevitation(uint32 spellID, Unit* target)
 {
     // The two can never overlap even for an instant, so a levitating target simply does not get the form.  Only the form is refused here
@@ -14372,7 +14384,7 @@ void EverQuestMod::LoadZoneData()
     InstanceDungeonMapIDs.clear();
     OpenWorldMapIDByInstanceMapID.clear();
 
-    QueryResult queryResult = WorldDatabase.Query("SELECT MapID, AllowBind, ExpansionID, MaxAgroZDistance, InstanceRaidLowMapID, InstanceDungeonMapID, RequiredKeyItemID, AllowEQMount, AllowEQLevitate FROM mod_everquest_zone;");
+    QueryResult queryResult = WorldDatabase.Query("SELECT MapID, AllowBind, ExpansionID, MaxAgroZDistance, InstanceRaidLowMapID, InstanceDungeonMapID, RequiredKeyItemID, AllowEQMount, AllowEQLevitate, IsAirless FROM mod_everquest_zone;");
     if (queryResult)
     {
         do
@@ -14388,6 +14400,7 @@ void EverQuestMod::LoadZoneData()
             zone.RequiredKeyItemID = fields[6].Get<uint32>();
             zone.AllowEQMount = fields[7].Get<uint8>() != 0;
             zone.AllowEQLevitate = fields[8].Get<uint8>() != 0;
+            zone.IsAirless = fields[9].Get<uint8>() != 0;
             ZoneByMapID[zone.MapID] = zone;
             HighestZoneExpansionID = std::max(HighestZoneExpansionID, zone.ExpansionID);
             if (zone.InstanceRaidLowMapID != 0)

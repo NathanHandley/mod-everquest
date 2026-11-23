@@ -1340,6 +1340,9 @@ public:
         // Some zones hold everyone to the ground.  This is also the login into one, since logging in adds the player to the map
         EverQuest->RemoveEQLevitationWhereNotAllowed(player);
 
+        // Some zones have no air, so the breath bar runs everywhere in them
+        EverQuest->UpdateAirlessZoneForPlayer(player);
+
         // A discipline ends at a zone line, as a camp does
         EverQuest->RemoveActiveDisciplines(player);
 
