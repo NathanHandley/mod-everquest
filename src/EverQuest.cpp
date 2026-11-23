@@ -6199,7 +6199,7 @@ void EverQuestMod::GetIllusionLookBytesForPlayer(Player* player, uint8 chrRaceID
     EverQuestPlayerStartOptionState originState = GetPlayerOriginState(player);
     if (originState.EQRaceID == 0)
         return;
-    EverQuestIllusionCharacter const* illusionCharacter = GetIllusionCharacterForRaceAndGender(originState.EQRaceID, player->getGender());
+    EverQuestIllusionCharacter const* illusionCharacter = GetIllusionCharacterForRaceAndGender(originState.EQRaceID, player->GetNativeGender());
     if (illusionCharacter == nullptr || illusionCharacter->ChrRaceID != chrRaceID)
         return;
     // A helm hides the hair, but the beard and the eyes stay
@@ -6373,7 +6373,9 @@ void EverQuestMod::ApplyIllusionGearDisplayOnFormAuraApply(Player* player, uint3
     illusionState->RefreshTimerMS = 0;
 
     // Forms whose EQ race has a character model version render dressed through the mirror image packet
-    illusionState->CharacterEntry = GetIllusionCharacterForRaceAndGender(GetSpellDataForSpellID(formSpellID).IllusionFormEQRaceID, player->getGender());
+    // MergedWorlds (Nathan 2026-11-22): the character's own sex: a male tagged druid form loaded ahead of the guise on login dressed a female
+    // character's guise as the male model
+    illusionState->CharacterEntry = GetIllusionCharacterForRaceAndGender(GetSpellDataForSpellID(formSpellID).IllusionFormEQRaceID, player->GetNativeGender());
     illusionState->CharacterUsingAltDisplay = false;
     illusionState->CharacterGearSignature = 0;
 
@@ -18321,7 +18323,7 @@ bool EverQuestMod::SetEQRaceStartForNewPlayer(Player* player, EverQuestPlayerCre
     uint8 secondClass = createData.SecondClass;
     if (secondClass == 0 || secondClass > 32 || (classMap.EQClassIDEligibleSecondMask & (uint32(1) << (secondClass - 1))) == 0)
         secondClass = classMap.EQClassIDDefaultSecond;
-    ValidatePlayerCreateLook(createData.EQRaceID, player->getGender(), createData);
+    ValidatePlayerCreateLook(createData.EQRaceID, player->GetNativeGender(), createData);
 
     // The client asks for the character list as soon as it hears the character was made, and that list carries this row and the start zone, so these two are written
     // before the success goes out rather than queued (with more than one character database worker, a queued write can land after the list's read).  The
