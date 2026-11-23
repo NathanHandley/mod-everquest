@@ -1178,6 +1178,14 @@ public:
         EverQuest->ReapplyClassAurasForPlayer(player);
     }
 
+    void OnPlayerLearnSpell(Player* player, uint32 spellID) override
+    {
+        if (EverQuest->IsEnabled == false || EverQuest->IsDisciplineSpell(spellID) == false)
+            return;
+        // A discipline learned in the world joins the tooltips' reuse list
+        EverQuest->SendDisciplineReusesToPlayer(player);
+    }
+
     void OnPlayerLevelChanged(Player* player, uint8 /*oldlevel*/) override
     {
         if (EverQuest->IsEnabled == false)
@@ -1191,6 +1199,9 @@ public:
 
         // Track range scales with level, so push the new range to any active tracking and the client addon
         EverQuest->HandleTrackingRangeChangeForPlayer(player);
+
+        // Discipline reuse shortens with level, and the spell tooltips show it
+        EverQuest->SendDisciplineReusesToPlayer(player);
 
         // Autolearn may have just granted a class aura passive
         EverQuest->RefreshClassAurasForPlayer(player);

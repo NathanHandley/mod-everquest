@@ -2939,6 +2939,8 @@ public:
     bool IsDisciplineSpell(uint32 spellID);
     bool HandleDisciplineOnCheckCast(Player* player, Spell* spell, SpellCastResult& res);
     void HandleDisciplineCast(Player* player, SpellInfo const* spellInfo);
+    uint32 GetDisciplineReuseInSecondsForPlayer(Player* player, uint32 spellID);
+    void SendDisciplineReusesToPlayer(Player* player);
     void RemoveActiveDisciplines(Player* player);
     int32 GetDisciplineMeleeCritChanceBonus(Unit const* attacker, Unit const* victim);
     void ApplyItemFocusToSpellAmount(Unit* caster, uint32 focusType, SpellInfo const* spellInfo, int32& amount);

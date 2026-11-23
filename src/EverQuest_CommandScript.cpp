@@ -143,6 +143,7 @@ public:
             { "eqauctionfilter", HandleEQAuctionFilterCommand,  SEC_PLAYER, Console::No },
             { "eqmentorship", HandleEQMentorshipCommand,        SEC_PLAYER, Console::No },
             { "eqtether", HandleEQTetherCommand,                SEC_PLAYER, Console::No },
+            { "eqdiscipline", HandleEQDisciplineCommand,        SEC_PLAYER, Console::No },
             { "class",  classCommandTable                                               },
             { "track",  trackCommandTable                                               },
             { "eqadventurer", adventurerCommandTable                                    },
@@ -902,6 +903,15 @@ public:
             PrintDruidFormSettingsToPlayer(handler, player);
         }
         handler->PSendSysMessage("These can also be set in the Interface Options window, under the EverQuest category.");
+        return true;
+    }
+
+    // "sync" is what the EQ_SpellTooltips addon sends on entering the world, to learn each known discipline's reuse for the tooltips.  It prints nothing
+    static bool HandleEQDisciplineCommand(ChatHandler* handler, const char* /*args*/)
+    {
+        if (EverQuest->IsEnabled == false)
+            return true;
+        EverQuest->SendDisciplineReusesToPlayer(handler->GetPlayer());
         return true;
     }
 

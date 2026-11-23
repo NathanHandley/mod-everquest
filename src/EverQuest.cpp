@@ -3762,6 +3762,20 @@ void EverQuestMod::HandleDisciplineCast(Player* player, SpellInfo const* spellIn
         }
     }
 
+    // The spell's own cooldown comes from its data, which is the discipline's full reuse, so the player's shortening comes off it
+    uint32 reuseInSeconds = GetDisciplineReuseInSecondsForPlayer(player, spellInfo->Id);
+    if (reuseInSeconds < discipline.ReuseInSeconds)
+        player->ModifySpellCooldown(spellInfo->Id, -int32(discipline.ReuseInSeconds - reuseInSeconds) * int32(IN_MILLISECONDS));
+}
+
+// The reuse of a discipline for this player, in seconds.  It's the cast's (HandleDisciplineCast) and the tooltip's (SendDisciplineReusesToPlayer), so the two can't differ
+uint32 EverQuestMod::GetDisciplineReuseInSecondsForPlayer(Player* player, uint32 spellID)
+{
+    auto disciplineIter = DisciplinesBySpellID.find(spellID);
+    if (player == nullptr || disciplineIter == DisciplinesBySpellID.end())
+        return 0;
+    EverQuestDiscipline const& discipline = disciplineIter->second;
+
     // Reuse shortens by 54 seconds for every level past the one the discipline comes at.  It's the lowest of the player's two classes
     const EverQuestClassMap classMap = GetClassMapForWOWClassID(player->getClass());
     uint8 useLevel = 0;
@@ -3772,7 +3786,7 @@ void EverQuestMod::HandleDisciplineCast(Player* player, SpellInfo const* spellIn
             useLevel = useLevelIter->second;
     }
     if (useLevel == 0)
-        return;
+        return discipline.ReuseInSeconds;
     // The use levels are EQ's own, and on a Luclin server a player's level past EQ's cap of 60 there (WoW's go to 70) shortens nothing more, as TAKP's Luclin
     // characters stopped at 60
     uint32 level = GetLevelForEQRules(player);
@@ -3782,11 +3796,44 @@ void EverQuestMod::HandleDisciplineCast(Player* player, SpellInfo const* spellIn
     int32 reduction = int32(level > useLevel ? level - useLevel : 0) * EQ_DISCIPLINE_REUSE_SECONDS_PER_LEVEL;
     reduction = std::min(reduction, int32(discipline.ReuseInSeconds) - EQ_DISCIPLINE_MIN_REUSE_SECONDS);
 
-    // TAKP never lets a reuse run past 72 minutes.  The spell's own cooldown comes from its data, so one longer than that is cut back too
+    // TAKP never lets a reuse run past 72 minutes, so one longer than that in the data is cut back too
     if (isLuclinServer == true && int32(discipline.ReuseInSeconds) - std::max(reduction, 0) > EQ_DISCIPLINE_MAX_REUSE_SECONDS)
         reduction = int32(discipline.ReuseInSeconds) - EQ_DISCIPLINE_MAX_REUSE_SECONDS;
-    if (reduction > 0)
-        player->ModifySpellCooldown(spellInfo->Id, -reduction * int32(IN_MILLISECONDS));
+    return uint32(int32(discipline.ReuseInSeconds) - std::max(reduction, 0));
+}
+
+// The spell tooltip shows the cooldown from the spell's data, which is the full reuse, so the EQ_SpellTooltips addon is told each known discipline's reuse
+// for this player and shows that instead.  A bare prefix first tells it to forget the old list.  It's sent when the addon asks (".eqdiscipline sync", on
+// entering the world), and again whenever a level, a class or a learned discipline changes it
+void EverQuestMod::SendDisciplineReusesToPlayer(Player* player)
+{
+    if (player == nullptr || player->GetSession() == nullptr || player->IsInWorld() == false)
+        return;
+    WorldPacket clearData;
+    ChatHandler::BuildChatPacket(clearData, CHAT_MSG_SYSTEM, LANG_ADDON, nullptr, nullptr, "EQDISCREUSE");
+    player->GetSession()->SendPacket(&clearData);
+
+    // In comma separated pieces that stay well under the client's addon message length
+    std::string reuseList;
+    auto sendReuseList = [player, &reuseList]()
+    {
+        WorldPacket data;
+        ChatHandler::BuildChatPacket(data, CHAT_MSG_SYSTEM, LANG_ADDON, nullptr, nullptr, "EQDISCREUSE\t" + reuseList);
+        player->GetSession()->SendPacket(&data);
+        reuseList.clear();
+    };
+    for (auto const& disciplineEntry : DisciplinesBySpellID)
+    {
+        if (player->HasSpell(disciplineEntry.first) == false)
+            continue;
+        if (reuseList.empty() == false)
+            reuseList += ",";
+        reuseList += fmt::format("{}:{}", disciplineEntry.first, GetDisciplineReuseInSecondsForPlayer(player, disciplineEntry.first));
+        if (reuseList.length() >= 200)
+            sendReuseList();
+    }
+    if (reuseList.empty() == false)
+        sendReuseList();
 }
 
 // Holyforge's crit chance against undead, in the hundredths of a percent the melee roll counts in.  No aura gives crit chance by creature type, so it's added here
@@ -19944,6 +19991,7 @@ void EverQuestMod::LowerPlayerLevelWithFullRefreshForPlayer(Player* player, uint
 
     player->_ApplyAllLevelScaleItemMods(false);
     player->SetLevel(newLevel, true);
+    SendDisciplineReusesToPlayer(player); // Discipline reuse goes by level, and the spell tooltips show it
     player->UpdateSkillsForLevel();
 
     for (uint8 statIndex = STAT_STRENGTH; statIndex < MAX_STATS; ++statIndex)
@@ -20807,6 +20855,7 @@ void EverQuestMod::ApplyMentorshipLevelForPlayer(Player* player, uint8 newLevel)
 
     player->_ApplyAllLevelScaleItemMods(false);
     player->SetLevel(newLevel, true);
+    SendDisciplineReusesToPlayer(player); // Discipline reuse goes by level, and the spell tooltips show it
     player->SetUInt32Value(PLAYER_NEXT_LEVEL_XP, sObjectMgr->GetXPForLevel(newLevel));
 
     for (uint8 statIndex = STAT_STRENGTH; statIndex < MAX_STATS; ++statIndex)
