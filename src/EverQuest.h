@@ -1761,6 +1761,7 @@ public:
     float MaxAgroZDistance = -1.0f;
     bool AllowEQMount = true;
     bool AllowEQLevitate = true;
+    bool IsAirless = false;
     uint32 InstanceRaidLowMapID = 0;
     uint32 InstanceDungeonMapID = 0;
     uint32 RequiredKeyItemID = 0;
@@ -2542,6 +2543,7 @@ public:
     bool IsLevitationBlockedByIllusionObjectForm(SpellInfo const* spellInfo, Unit* target);
     bool IsLevitationBlockedByZone(SpellInfo const* spellInfo, Unit* target);
     void RemoveEQLevitationWhereNotAllowed(Player* player);
+    void UpdateAirlessZoneForPlayer(Player* player);
     bool IsIllusionObjectFormBlockedByLevitation(uint32 spellID, Unit* target);
     void ClearStaleMirrorImageFlagForPlayer(Player* player);
     bool IsSpellBlockedByMinTargetLevel(uint32 spellID, Unit* target, Unit* caster, bool isCastFromItem);
@@ -2939,8 +2941,9 @@ public:
     bool IsDisciplineSpell(uint32 spellID);
     bool HandleDisciplineOnCheckCast(Player* player, Spell* spell, SpellCastResult& res);
     void HandleDisciplineCast(Player* player, SpellInfo const* spellInfo);
+    uint32 GetDisciplineReuseInSecondsForPlayer(Player* player, uint32 spellID);
+    void SendDisciplineReusesToPlayer(Player* player);
     void RemoveActiveDisciplines(Player* player);
-    void SendDisciplineCooldownOnLearn(Player* player, uint32 spellID);
     int32 GetDisciplineMeleeCritChanceBonus(Unit const* attacker, Unit const* victim);
     void ApplyItemFocusToSpellAmount(Unit* caster, uint32 focusType, SpellInfo const* spellInfo, int32& amount);
     void RemoveEQMountWhereNotAllowed(Player* player);

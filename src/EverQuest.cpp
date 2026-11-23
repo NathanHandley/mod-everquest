@@ -3762,6 +3762,20 @@ void EverQuestMod::HandleDisciplineCast(Player* player, SpellInfo const* spellIn
         }
     }
 
+    // The spell's own cooldown comes from its data, which is the discipline's full reuse, so the player's shortening comes off it
+    uint32 reuseInSeconds = GetDisciplineReuseInSecondsForPlayer(player, spellInfo->Id);
+    if (reuseInSeconds < discipline.ReuseInSeconds)
+        player->ModifySpellCooldown(spellInfo->Id, -int32(discipline.ReuseInSeconds - reuseInSeconds) * int32(IN_MILLISECONDS));
+}
+
+// The reuse of a discipline for this player, in seconds.  It's the cast's (HandleDisciplineCast) and the tooltip's (SendDisciplineReusesToPlayer), so the two can't differ
+uint32 EverQuestMod::GetDisciplineReuseInSecondsForPlayer(Player* player, uint32 spellID)
+{
+    auto disciplineIter = DisciplinesBySpellID.find(spellID);
+    if (player == nullptr || disciplineIter == DisciplinesBySpellID.end())
+        return 0;
+    EverQuestDiscipline const& discipline = disciplineIter->second;
+
     // Reuse shortens by 54 seconds for every level past the one the discipline comes at.  It's the lowest of the player's two classes
     const EverQuestClassMap classMap = GetClassMapForWOWClassID(player->getClass());
     uint8 useLevel = 0;
@@ -3772,7 +3786,7 @@ void EverQuestMod::HandleDisciplineCast(Player* player, SpellInfo const* spellIn
             useLevel = useLevelIter->second;
     }
     if (useLevel == 0)
-        return;
+        return discipline.ReuseInSeconds;
     // The use levels are EQ's own, and on a Luclin server a player's level past EQ's cap of 60 there (WoW's go to 70) shortens nothing more, as TAKP's Luclin
     // characters stopped at 60
     uint32 level = GetLevelForEQRules(player);
@@ -3782,39 +3796,44 @@ void EverQuestMod::HandleDisciplineCast(Player* player, SpellInfo const* spellIn
     int32 reduction = int32(level > useLevel ? level - useLevel : 0) * EQ_DISCIPLINE_REUSE_SECONDS_PER_LEVEL;
     reduction = std::min(reduction, int32(discipline.ReuseInSeconds) - EQ_DISCIPLINE_MIN_REUSE_SECONDS);
 
-    // TAKP never lets a reuse run past 72 minutes.  The spell's own cooldown comes from its data, so one longer than that is cut back too
+    // TAKP never lets a reuse run past 72 minutes, so one longer than that in the data is cut back too
     if (isLuclinServer == true && int32(discipline.ReuseInSeconds) - std::max(reduction, 0) > EQ_DISCIPLINE_MAX_REUSE_SECONDS)
         reduction = int32(discipline.ReuseInSeconds) - EQ_DISCIPLINE_MAX_REUSE_SECONDS;
-    if (reduction > 0)
-        player->ModifySpellCooldown(spellInfo->Id, -reduction * int32(IN_MILLISECONDS));
-
-    // EQ of this era has one reuse timer for every discipline.  It's set on the ones the player doesn't know as well, so one learned while it runs (a level
-    // gained, a second class taken) isn't ready early, and it's flagged for the client so a login shows it
-    uint32 reuseInMS = uint32(int32(discipline.ReuseInSeconds) - std::max(reduction, 0)) * IN_MILLISECONDS;
-    for (auto const& disciplineEntry : DisciplinesBySpellID)
-    {
-        if (disciplineEntry.first == spellInfo->Id)
-            continue;
-        player->AddSpellCooldown(disciplineEntry.first, 0, reuseInMS, true);
-        if (player->HasSpell(disciplineEntry.first) == false)
-            continue;
-        WorldPacket cooldownPacket;
-        player->BuildCooldownPacket(cooldownPacket, SPELL_COOLDOWN_FLAG_NONE, disciplineEntry.first, reuseInMS);
-        player->SendDirectMessage(&cooldownPacket);
-    }
+    return uint32(int32(discipline.ReuseInSeconds) - std::max(reduction, 0));
 }
 
-// A discipline learned while the shared reuse runs shows the time it has left
-void EverQuestMod::SendDisciplineCooldownOnLearn(Player* player, uint32 spellID)
+// The spell tooltip shows the cooldown from the spell's data, which is the full reuse, so the EQ_SpellTooltips addon is told each known discipline's reuse
+// for this player and shows that instead.  A bare prefix first tells it to forget the old list.  It's sent when the addon asks (".eqdiscipline sync", on
+// entering the world), and again whenever a level, a class or a learned discipline changes it
+void EverQuestMod::SendDisciplineReusesToPlayer(Player* player)
 {
-    if (player == nullptr || IsDisciplineSpell(spellID) == false)
+    if (player == nullptr || player->GetSession() == nullptr || player->IsInWorld() == false)
         return;
-    uint32 remainingInMS = player->GetSpellCooldownDelay(spellID);
-    if (remainingInMS == 0)
-        return;
-    WorldPacket cooldownPacket;
-    player->BuildCooldownPacket(cooldownPacket, SPELL_COOLDOWN_FLAG_NONE, spellID, remainingInMS);
-    player->SendDirectMessage(&cooldownPacket);
+    WorldPacket clearData;
+    ChatHandler::BuildChatPacket(clearData, CHAT_MSG_SYSTEM, LANG_ADDON, nullptr, nullptr, "EQDISCREUSE");
+    player->GetSession()->SendPacket(&clearData);
+
+    // In comma separated pieces that stay well under the client's addon message length
+    std::string reuseList;
+    auto sendReuseList = [player, &reuseList]()
+    {
+        WorldPacket data;
+        ChatHandler::BuildChatPacket(data, CHAT_MSG_SYSTEM, LANG_ADDON, nullptr, nullptr, "EQDISCREUSE\t" + reuseList);
+        player->GetSession()->SendPacket(&data);
+        reuseList.clear();
+    };
+    for (auto const& disciplineEntry : DisciplinesBySpellID)
+    {
+        if (player->HasSpell(disciplineEntry.first) == false)
+            continue;
+        if (reuseList.empty() == false)
+            reuseList += ",";
+        reuseList += fmt::format("{}:{}", disciplineEntry.first, GetDisciplineReuseInSecondsForPlayer(player, disciplineEntry.first));
+        if (reuseList.length() >= 200)
+            sendReuseList();
+    }
+    if (reuseList.empty() == false)
+        sendReuseList();
 }
 
 // Holyforge's crit chance against undead, in the hundredths of a percent the melee roll counts in.  No aura gives crit chance by creature type, so it's added here
@@ -6180,7 +6199,7 @@ void EverQuestMod::GetIllusionLookBytesForPlayer(Player* player, uint8 chrRaceID
     EverQuestPlayerStartOptionState originState = GetPlayerOriginState(player);
     if (originState.EQRaceID == 0)
         return;
-    EverQuestIllusionCharacter const* illusionCharacter = GetIllusionCharacterForRaceAndGender(originState.EQRaceID, player->getGender());
+    EverQuestIllusionCharacter const* illusionCharacter = GetIllusionCharacterForRaceAndGender(originState.EQRaceID, player->GetNativeGender());
     if (illusionCharacter == nullptr || illusionCharacter->ChrRaceID != chrRaceID)
         return;
     // A helm hides the hair, but the beard and the eyes stay
@@ -6354,7 +6373,9 @@ void EverQuestMod::ApplyIllusionGearDisplayOnFormAuraApply(Player* player, uint3
     illusionState->RefreshTimerMS = 0;
 
     // Forms whose EQ race has a character model version render dressed through the mirror image packet
-    illusionState->CharacterEntry = GetIllusionCharacterForRaceAndGender(GetSpellDataForSpellID(formSpellID).IllusionFormEQRaceID, player->getGender());
+    // MergedWorlds (Nathan 2026-11-22): the character's own sex: a male tagged druid form loaded ahead of the guise on login dressed a female
+    // character's guise as the male model
+    illusionState->CharacterEntry = GetIllusionCharacterForRaceAndGender(GetSpellDataForSpellID(formSpellID).IllusionFormEQRaceID, player->GetNativeGender());
     illusionState->CharacterUsingAltDisplay = false;
     illusionState->CharacterGearSignature = 0;
 
@@ -6632,6 +6653,18 @@ void EverQuestMod::RemoveEQLevitationWhereNotAllowed(Player* player)
         return;
     player->RemoveAurasByType(SPELL_AURA_HOVER);
     player->RemoveAurasByType(SPELL_AURA_FEATHER_FALL);
+}
+
+void EverQuestMod::UpdateAirlessZoneForPlayer(Player* player)
+{
+    // EQ's The Grey has no air.  The breath bar runs everywhere in such a zone, as under water, and water breathing is what keeps the player
+    // alive.  An instance of the zone looks up its open world row
+    uint32 mapID = player->GetMapId();
+    auto openWorldIter = OpenWorldMapIDByInstanceMapID.find(mapID);
+    if (openWorldIter != OpenWorldMapIDByInstanceMapID.end())
+        mapID = openWorldIter->second;
+    auto zoneIter = ZoneByMapID.find(mapID);
+    player->SetInAirlessZone(zoneIter != ZoneByMapID.end() && zoneIter->second.IsAirless == true);
 }
 
 bool EverQuestMod::IsIllusionObjectFormBlockedByLevitation(uint32 spellID, Unit* target)
@@ -9781,15 +9814,23 @@ void EverQuestMod::ApplyWarderLookToPet(Pet* pet)
     if (owner == nullptr)
         return;
 
-    // A start option is a people, so it comes ahead of the owner's own race.  An EQ race beats both, and the table's WoW races stand in for those it has a look for
+    // The owner's EQ race (their EverQuest identity) picks it, as TAKP's pet code does: a Vah Shir's tiger, an Ogre's bear, a Troll's alligator, and a wolf for
+    // the rest (Barbarian and Iksar too).  The table's rows stand in for those races: the Shar Vahl start for the tiger, and the WoW races for the bear and
+    // alligator.  An owner from before the EverQuest creation page has no EQ race, so its start option (a people) goes ahead of its own WoW race
     EverQuestPlayerStartOptionState originState = GetPlayerOriginState(owner);
-    auto lookIter = WarderLookCreatureTemplateIDsByKey.find(originState.StartOption);
-    if (lookIter == WarderLookCreatureTemplateIDsByKey.end() && originState.EQRaceID == EQ_RACE_OGRE)
+    auto lookIter = WarderLookCreatureTemplateIDsByKey.end();
+    if (originState.EQRaceID == EQ_RACE_VAH_SHIR)
+        lookIter = WarderLookCreatureTemplateIDsByKey.find(EQ_START_OPTION_SHAR_VAHL);
+    else if (originState.EQRaceID == EQ_RACE_OGRE)
         lookIter = WarderLookCreatureTemplateIDsByKey.find(uint32(RACE_ORC) << 8);
-    else if (lookIter == WarderLookCreatureTemplateIDsByKey.end() && originState.EQRaceID == EQ_RACE_TROLL)
+    else if (originState.EQRaceID == EQ_RACE_TROLL)
         lookIter = WarderLookCreatureTemplateIDsByKey.find(uint32(RACE_TROLL) << 8);
-    else if (lookIter == WarderLookCreatureTemplateIDsByKey.end() && originState.EQRaceID == 0)
-        lookIter = WarderLookCreatureTemplateIDsByKey.find(uint32(owner->getRace()) << 8);
+    else if (originState.EQRaceID == 0)
+    {
+        lookIter = WarderLookCreatureTemplateIDsByKey.find(originState.StartOption);
+        if (lookIter == WarderLookCreatureTemplateIDsByKey.end())
+            lookIter = WarderLookCreatureTemplateIDsByKey.find(uint32(owner->getRace()) << 8);
+    }
     if (lookIter == WarderLookCreatureTemplateIDsByKey.end())
         return;
 
@@ -10473,6 +10514,10 @@ void EverQuestMod::AddRacialGuiseItemForPlayer(Player* player)
     if (ConfigPlayerAddRacialGuiseItemOnLogin == false)
         return;
     if (HasCreatePlayerData(player->getRace(), player->getClass()) == false)
+        return;
+    // A character given an EverQuest race on the creation page shows it through its EverQuest identity, so it's given no guise (one can still be
+    // bought).  Only a character from before that page has its race's guise handed out
+    if (GetPlayerOriginState(player).EQRaceID != 0)
         return;
     uint32 guiseItemID = GetPlayerCreateInfoForPlayer(player).IllusionItemID;
     if (guiseItemID == 0)
@@ -14341,7 +14386,7 @@ void EverQuestMod::LoadZoneData()
     InstanceDungeonMapIDs.clear();
     OpenWorldMapIDByInstanceMapID.clear();
 
-    QueryResult queryResult = WorldDatabase.Query("SELECT MapID, AllowBind, ExpansionID, MaxAgroZDistance, InstanceRaidLowMapID, InstanceDungeonMapID, RequiredKeyItemID, AllowEQMount, AllowEQLevitate FROM mod_everquest_zone;");
+    QueryResult queryResult = WorldDatabase.Query("SELECT MapID, AllowBind, ExpansionID, MaxAgroZDistance, InstanceRaidLowMapID, InstanceDungeonMapID, RequiredKeyItemID, AllowEQMount, AllowEQLevitate, IsAirless FROM mod_everquest_zone;");
     if (queryResult)
     {
         do
@@ -14357,6 +14402,7 @@ void EverQuestMod::LoadZoneData()
             zone.RequiredKeyItemID = fields[6].Get<uint32>();
             zone.AllowEQMount = fields[7].Get<uint8>() != 0;
             zone.AllowEQLevitate = fields[8].Get<uint8>() != 0;
+            zone.IsAirless = fields[9].Get<uint8>() != 0;
             ZoneByMapID[zone.MapID] = zone;
             HighestZoneExpansionID = std::max(HighestZoneExpansionID, zone.ExpansionID);
             if (zone.InstanceRaidLowMapID != 0)
@@ -18277,7 +18323,7 @@ bool EverQuestMod::SetEQRaceStartForNewPlayer(Player* player, EverQuestPlayerCre
     uint8 secondClass = createData.SecondClass;
     if (secondClass == 0 || secondClass > 32 || (classMap.EQClassIDEligibleSecondMask & (uint32(1) << (secondClass - 1))) == 0)
         secondClass = classMap.EQClassIDDefaultSecond;
-    ValidatePlayerCreateLook(createData.EQRaceID, player->getGender(), createData);
+    ValidatePlayerCreateLook(createData.EQRaceID, player->GetNativeGender(), createData);
 
     // The client asks for the character list as soon as it hears the character was made, and that list carries this row and the start zone, so these two are written
     // before the success goes out rather than queued (with more than one character database worker, a queued write can land after the list's read).  The
@@ -18341,8 +18387,8 @@ void EverQuestMod::HandleCharacterFactionOrRaceChange(ObjectGuid guid, bool fact
     }
     ValidatePlayerCreateLook(createData.EQRaceID, characterEntry->Sex, createData);
 
-    // A guise goes out for the new race the next time the character logs in, unless it's the one they were given, and the old one stays with them.  The row can be missing
-    // for a character that has never been in the world
+    // The EverQuest identity follows the new race, and no guise goes out for it (AddRacialGuiseItemForPlayer); one already given stays with the character.  The row
+    // can be missing for a character that has never been in the world
     CharacterDatabase.DirectExecute("INSERT INTO `mod_everquest_character_settings` (`guid`, `currentSecondaryClass`, `nextSecondaryClass`, `secondaryExpPool`, `startOption`, `illusionFaceId`, `issuedIllusionItemId`, `eqRace`, `eqStartChoice`, `eqHairStyle`, `eqHairColor`, `eqFacialHair`, `eqEyeColor`) "
         "VALUES ({0}, {1}, {1}, 0, {2}, {3}, 0, {4}, {5}, {6}, {7}, {8}, {10}) ON DUPLICATE KEY UPDATE `startOption` = {2}, `illusionFaceId` = {3}, "
         "`issuedIllusionItemId` = IF(`issuedIllusionItemId` = {9}, `issuedIllusionItemId`, 0), `eqRace` = {4}, `eqStartChoice` = {5}, `eqHairStyle` = {6}, `eqHairColor` = {7}, `eqFacialHair` = {8}, `eqEyeColor` = {10}",
@@ -19960,6 +20006,7 @@ void EverQuestMod::LowerPlayerLevelWithFullRefreshForPlayer(Player* player, uint
 
     player->_ApplyAllLevelScaleItemMods(false);
     player->SetLevel(newLevel, true);
+    SendDisciplineReusesToPlayer(player); // Discipline reuse goes by level, and the spell tooltips show it
     player->UpdateSkillsForLevel();
 
     for (uint8 statIndex = STAT_STRENGTH; statIndex < MAX_STATS; ++statIndex)
@@ -20823,6 +20870,7 @@ void EverQuestMod::ApplyMentorshipLevelForPlayer(Player* player, uint8 newLevel)
 
     player->_ApplyAllLevelScaleItemMods(false);
     player->SetLevel(newLevel, true);
+    SendDisciplineReusesToPlayer(player); // Discipline reuse goes by level, and the spell tooltips show it
     player->SetUInt32Value(PLAYER_NEXT_LEVEL_XP, sObjectMgr->GetXPForLevel(newLevel));
 
     for (uint8 statIndex = STAT_STRENGTH; statIndex < MAX_STATS; ++statIndex)
