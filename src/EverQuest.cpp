@@ -10446,6 +10446,10 @@ void EverQuestMod::AddRacialGuiseItemForPlayer(Player* player)
         return;
     if (HasCreatePlayerData(player->getRace(), player->getClass()) == false)
         return;
+    // A character given an EverQuest race on the creation page shows it through its EverQuest identity, so it's given no guise (one can still be
+    // bought).  Only a character from before that page has its race's guise handed out
+    if (GetPlayerOriginState(player).EQRaceID != 0)
+        return;
     uint32 guiseItemID = GetPlayerCreateInfoForPlayer(player).IllusionItemID;
     if (guiseItemID == 0)
         return;
@@ -18313,8 +18317,8 @@ void EverQuestMod::HandleCharacterFactionOrRaceChange(ObjectGuid guid, bool fact
     }
     ValidatePlayerCreateLook(createData.EQRaceID, characterEntry->Sex, createData);
 
-    // A guise goes out for the new race the next time the character logs in, unless it's the one they were given, and the old one stays with them.  The row can be missing
-    // for a character that has never been in the world
+    // The EverQuest identity follows the new race, and no guise goes out for it (AddRacialGuiseItemForPlayer); one already given stays with the character.  The row
+    // can be missing for a character that has never been in the world
     CharacterDatabase.DirectExecute("INSERT INTO `mod_everquest_character_settings` (`guid`, `currentSecondaryClass`, `nextSecondaryClass`, `secondaryExpPool`, `startOption`, `illusionFaceId`, `issuedIllusionItemId`, `eqRace`, `eqStartChoice`, `eqHairStyle`, `eqHairColor`, `eqFacialHair`, `eqEyeColor`) "
         "VALUES ({0}, {1}, {1}, 0, {2}, {3}, 0, {4}, {5}, {6}, {7}, {8}, {10}) ON DUPLICATE KEY UPDATE `startOption` = {2}, `illusionFaceId` = {3}, "
         "`issuedIllusionItemId` = IF(`issuedIllusionItemId` = {9}, `issuedIllusionItemId`, 0), `eqRace` = {4}, `eqStartChoice` = {5}, `eqHairStyle` = {6}, `eqHairColor` = {7}, `eqFacialHair` = {8}, `eqEyeColor` = {10}",
